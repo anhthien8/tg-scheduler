@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TG Scheduler</title>
+  <meta name="description" content="Telegram Userbot Multi-Account Message Scheduler">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toasts"></div>
+
+  <!-- Login Page (no accounts yet) -->
+  <div id="login-page" class="login-page hidden">
+    <div class="login-card">
+      <div class="login-icon">📨</div>
+      <h1 class="login-title">TG Scheduler</h1>
+      <p class="login-subtitle" id="login-subtitle">Thêm tài khoản Telegram đầu tiên</p>
+
+      <!-- Step 0: Add Account -->
+      <div id="login-step-setup">
+        <div class="form-group">
+          <label class="form-label">Tên tài khoản</label>
+          <input type="text" class="form-input" id="setup-name" placeholder="Ví dụ: Main, Bot1...">
+        </div>
+        <div class="form-group">
+          <label class="form-label">API ID</label>
+          <input type="text" class="form-input" id="setup-api-id" placeholder="Ví dụ: 12345678">
+          <p class="form-hint">Số nguyên từ my.telegram.org</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">API Hash</label>
+          <input type="text" class="form-input" id="setup-api-hash" placeholder="Ví dụ: 0123456789abcdef...">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Số điện thoại</label>
+          <input type="tel" class="form-input" id="setup-phone" placeholder="+84912345678">
+        </div>
+        <button class="btn btn-primary" style="width:100%" id="btn-add-account" onclick="App.addFirstAccount()">
+          Thêm tài khoản
+        </button>
+        <p class="form-hint" style="margin-top:12px;text-align:center">
+          <a href="https://my.telegram.org" target="_blank" style="color:var(--accent)">👉 Lấy API ID & Hash tại my.telegram.org</a>
+        </p>
+      </div>
+
+      <!-- Step 1: OTP -->
+      <div id="login-step-otp" class="hidden">
+        <div class="form-group">
+          <label class="form-label">Mã OTP</label>
+          <input type="text" class="form-input" id="login-code" placeholder="12345" maxlength="6">
+          <p class="form-hint">Nhập mã OTP đã gửi đến Telegram</p>
+        </div>
+        <button class="btn btn-primary" style="width:100%" id="btn-verify" onclick="App.verifyFirstAccount()">
+          Xác nhận
+        </button>
+      </div>
+
+      <!-- Step 2: 2FA -->
+      <div id="login-step-2fa" class="hidden">
+        <div class="form-group">
+          <label class="form-label">Mật khẩu 2FA</label>
+          <input type="password" class="form-input" id="login-password" placeholder="Mật khẩu xác thực 2 bước">
+        </div>
+        <button class="btn btn-primary" style="width:100%" onclick="App.verify2FAFirst()">
+          Xác nhận
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashboard-page" class="app hidden">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">📨 TG Scheduler</div>
+      <nav class="sidebar-nav">
+        <div class="nav-item active" data-page="dashboard" onclick="App.navigate('dashboard')">
+          📊 Tổng quan
+        </div>
+        <div class="nav-item" data-page="schedules" onclick="App.navigate('schedules')">
+          📅 Lịch gửi
+        </div>
+        <div class="nav-item" data-page="accounts" onclick="App.navigate('accounts')">
+          👤 Tài khoản
+        </div>
+        <div class="nav-item" data-page="logs" onclick="App.navigate('logs')">
+          📋 Lịch sử
+        </div>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-info" id="user-info">
+          <strong>Loading...</strong>
+          <span>@username</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <!-- Dashboard View -->
+      <div id="view-dashboard">
+        <h2 class="page-title">Tổng quan</h2>
+        <div class="stats-grid" id="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Tài khoản</div>
+            <div class="stat-value accent" id="stat-accounts">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Lịch hoạt động</div>
+            <div class="stat-value accent" id="stat-active">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Tổng lịch</div>
+            <div class="stat-value" id="stat-total">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Gửi hôm nay</div>
+            <div class="stat-value green" id="stat-today">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Thành công</div>
+            <div class="stat-value green" id="stat-success">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Thất bại</div>
+            <div class="stat-value red" id="stat-failed">0</div>
+          </div>
+        </div>
+
+        <h3 style="font-size:15px;font-weight:600;margin-bottom:12px">Lịch gửi sắp tới</h3>
+        <div class="table-wrap" id="upcoming-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Tên</th>
+                <th>Tài khoản</th>
+                <th>Loại</th>
+                <th>Giờ</th>
+                <th>Lần gửi tiếp</th>
+                <th>Đã gửi</th>
+              </tr>
+            </thead>
+            <tbody id="upcoming-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Accounts View -->
+      <div id="view-accounts" class="hidden">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">Tài khoản Telegram</h2>
+          <button class="btn btn-primary" onclick="App.openAddAccountModal()">+ Thêm tài khoản</button>
+        </div>
+        <div class="accounts-grid" id="accounts-grid">
+          <!-- accounts rendered here -->
+        </div>
+      </div>
+
+      <!-- Schedules View -->
+      <div id="view-schedules" class="hidden">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">Lịch gửi</h2>
+          <button class="btn btn-primary" onclick="App.openCreateModal()">+ Tạo lịch mới</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Bật/Tắt</th>
+                <th>Tên</th>
+                <th>Tài khoản</th>
+                <th>Loại</th>
+                <th>Giờ</th>
+                <th>Tin nhắn</th>
+                <th>Đích</th>
+                <th>Đã gửi</th>
+                <th>Lần gửi tiếp</th>
+                <th>Hành động</th>
+              </tr>
+            </thead>
+            <tbody id="schedules-body"></tbody>
+          </table>
+        </div>
+        <div id="schedules-empty" class="empty-state hidden">
+          <div class="empty-state-icon">📅</div>
+          <p class="empty-state-text">Chưa có lịch gửi nào</p>
+          <button class="btn btn-primary" onclick="App.openCreateModal()">Tạo lịch đầu tiên</button>
+        </div>
+      </div>
+
+      <!-- Logs View -->
+      <div id="view-logs" class="hidden">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">Lịch sử gửi</h2>
+          <div class="toolbar-left">
+            <select class="form-select" style="width:150px" id="log-filter-status" onchange="App.loadLogs()">
+              <option value="">Tất cả</option>
+              <option value="success">Thành công</option>
+              <option value="failed">Thất bại</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Thời gian</th>
+                <th>Lịch</th>
+                <th>Đích</th>
+                <th>Trạng thái</th>
+                <th>Lỗi</th>
+              </tr>
+            </thead>
+            <tbody id="logs-body"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="logs-pagination"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ══ Create/Edit Schedule Modal ══ -->
+  <div class="modal-overlay" id="schedule-modal">
+    <div class="modal" style="width:620px">
+      <div class="modal-header">
+        <span class="modal-title" id="modal-title">Tạo lịch gửi</span>
+        <button class="modal-close" onclick="App.closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="edit-schedule-id">
+
+        <!-- Account selector -->
+        <div class="form-group">
+          <label class="form-label">Tài khoản gửi</label>
+          <select class="form-select" id="sch-account"></select>
+        </div>
+
+        <!-- Schedule Info -->
+        <div class="form-group">
+          <label class="form-label">Tên lịch</label>
+          <input type="text" class="form-input" id="sch-name" placeholder="Ví dụ: Daily Report">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Loại lịch</label>
+            <select class="form-select" id="sch-type" onchange="App.onScheduleTypeChange()">
+              <option value="hourly">Hàng giờ</option>
+              <option value="daily">Hàng ngày</option>
+              <option value="weekly">Hàng tuần</option>
+              <option value="monthly">Hàng tháng</option>
+              <option value="once">Một lần</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" id="time-label">Giờ gửi</label>
+            <input type="time" class="form-input" id="sch-time" value="08:00">
+          </div>
+        </div>
+
+        <!-- Max sends -->
+        <div class="form-group">
+          <label class="form-label">Giới hạn số lần gửi</label>
+          <input type="number" class="form-input" id="sch-max-sends" min="1" placeholder="Để trống = không giới hạn">
+          <p class="form-hint">Khi đủ số lần, lịch sẽ tự động tắt</p>
+        </div>
+
+        <!-- Weekly: Day picker -->
+        <div class="form-group hidden" id="weekly-days-group">
+          <label class="form-label">Ngày trong tuần</label>
+          <div class="days-picker" id="days-picker">
+            <button type="button" class="day-btn" data-day="1">T2</button>
+            <button type="button" class="day-btn" data-day="2">T3</button>
+            <button type="button" class="day-btn" data-day="3">T4</button>
+            <button type="button" class="day-btn" data-day="4">T5</button>
+            <button type="button" class="day-btn" data-day="5">T6</button>
+            <button type="button" class="day-btn" data-day="6">T7</button>
+            <button type="button" class="day-btn" data-day="7">CN</button>
+          </div>
+        </div>
+
+        <!-- Monthly: Day number -->
+        <div class="form-group hidden" id="monthly-day-group">
+          <label class="form-label">Ngày trong tháng</label>
+          <input type="number" class="form-input" id="sch-day-of-month" min="1" max="31" value="1">
+        </div>
+
+        <!-- Once: Date picker -->
+        <div class="form-group hidden" id="once-date-group">
+          <label class="form-label">Ngày gửi</label>
+          <input type="date" class="form-input" id="sch-once-date">
+        </div>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+
+        <!-- Targets -->
+        <div class="form-group">
+          <label class="form-label">Chọn nhóm / kênh đích</label>
+          <input type="text" class="search-input" style="width:100%;margin-bottom:8px" placeholder="Tìm kiếm..." id="chat-search" oninput="App.filterChats()">
+          <div class="chat-list" id="chat-list">
+            <div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+
+        <!-- Messages -->
+        <div class="form-group">
+          <label class="form-label">Tin nhắn</label>
+          <div id="messages-list"></div>
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <button class="btn btn-ghost btn-sm" onclick="App.addMessage('text')">+ Text</button>
+            <button class="btn btn-ghost btn-sm" onclick="App.addMessage('photo')">+ Ảnh</button>
+            <button class="btn btn-ghost btn-sm" onclick="App.addMessage('video')">+ Video</button>
+            <button class="btn btn-ghost btn-sm" onclick="App.addMessage('document')">+ File</button>
+            <button class="btn btn-ghost btn-sm" onclick="App.addMessage('poll')">+ Poll</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="App.closeModal()">Hủy</button>
+        <button class="btn btn-primary" id="btn-save-schedule" onclick="App.saveSchedule()">Lưu lịch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Add Account Modal ══ -->
+  <div class="modal-overlay" id="account-modal">
+    <div class="modal" style="width:480px">
+      <div class="modal-header">
+        <span class="modal-title">Thêm tài khoản Telegram</span>
+        <button class="modal-close" onclick="App.closeAccountModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Step 1: Info -->
+        <div id="acc-step-info">
+          <div class="form-group">
+            <label class="form-label">Tên tài khoản</label>
+            <input type="text" class="form-input" id="acc-name" placeholder="Ví dụ: Account 2">
+          </div>
+          <div class="form-group">
+            <label class="form-label">API ID</label>
+            <input type="text" class="form-input" id="acc-api-id" placeholder="12345678">
+          </div>
+          <div class="form-group">
+            <label class="form-label">API Hash</label>
+            <input type="text" class="form-input" id="acc-api-hash" placeholder="0123456789abcdef...">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Số điện thoại</label>
+            <input type="tel" class="form-input" id="acc-phone" placeholder="+84912345678">
+          </div>
+          <button class="btn btn-primary" style="width:100%" id="btn-acc-add" onclick="App.addAccount()">
+            Thêm & Gửi OTP
+          </button>
+        </div>
+        <!-- Step 2: OTP -->
+        <div id="acc-step-otp" class="hidden">
+          <div class="form-group">
+            <label class="form-label">Mã OTP</label>
+            <input type="text" class="form-input" id="acc-code" placeholder="12345" maxlength="6">
+          </div>
+          <button class="btn btn-primary" style="width:100%" onclick="App.verifyAccount()">Xác nhận OTP</button>
+        </div>
+        <!-- Step 3: 2FA -->
+        <div id="acc-step-2fa" class="hidden">
+          <div class="form-group">
+            <label class="form-label">Mật khẩu 2FA</label>
+            <input type="password" class="form-input" id="acc-password">
+          </div>
+          <button class="btn btn-primary" style="width:100%" onclick="App.verify2FAAccount()">Xác nhận</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
