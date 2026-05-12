@@ -2,6 +2,8 @@
 
 Telegram Userbot Message Scheduler — lên lịch gửi tin nhắn tự động đến groups/channels bằng tài khoản cá nhân.
 
+Donate and get more sass : 0xC68cF353119bE63D44f5252B47Da2B4F9152f7B6 ( bep20 )
+
 ## Tính năng
 
 - 🔐 **Multi-Account** — quản lý nhiều tài khoản Telegram (lên đến 10)
