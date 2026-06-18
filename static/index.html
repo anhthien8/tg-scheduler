@@ -86,8 +86,20 @@
         <div class="nav-item" data-page="accounts" onclick="App.navigate('accounts')">
           👤 Tài khoản
         </div>
+        <div class="nav-item" data-page="watchers" onclick="App.navigate('watchers')">
+          🎯 Keyword DM
+        </div>
+        <div class="nav-item" data-page="reactions" onclick="App.navigate('reactions')">
+          ❤️ Tăng Tương Tác
+        </div>
+        <div class="nav-item" data-page="channels" onclick="App.navigate('channels')">
+          📤 Quản lý kênh
+        </div>
         <div class="nav-item" data-page="logs" onclick="App.navigate('logs')">
           📋 Lịch sử
+        </div>
+        <div class="nav-item" data-page="settings" onclick="App.navigate('settings')">
+          ⚙️ Cài đặt AI
         </div>
       </nav>
       <div class="sidebar-footer">
@@ -192,7 +204,70 @@
       </div>
 
       <!-- Logs View -->
-      <div id="view-logs" class="hidden">
+      <!-- ════════════════ VIEW: CHANNEL MANAGER ════════════════ -->
+    <div id="view-channels" class="hidden">
+      <div class="page-header">
+        <h2>📤 Quản lý kênh</h2>
+        <p class="page-subtitle">Xem và rời khỏi các nhóm / kênh đã tham gia theo tài khoản</p>
+      </div>
+
+      <!-- Controls bar -->
+      <div class="card" style="margin-bottom:1rem;">
+        <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+          <select id="ch-account-select" class="form-select" style="max-width:240px;" onchange="App.loadChannels()">
+          </select>
+          <button class="btn btn-primary" onclick="App.loadChannels()">🔄 Tải lại</button>
+
+          <!-- Filter by type -->
+          <select id="ch-type-filter" class="form-select" style="max-width:180px;" onchange="App._filterChannels()">
+            <option value="all">Tất cả loại</option>
+            <option value="channel">📢 Kênh</option>
+            <option value="supergroup">👥 Siêu nhóm</option>
+            <option value="group">💬 Nhóm</option>
+          </select>
+
+          <!-- Search by name -->
+          <input id="ch-search" type="text" class="form-input" placeholder="🔍 Tìm theo tên..." 
+                 style="max-width:220px;" oninput="App._filterChannels()">
+
+          <span id="ch-count" style="color:var(--text-secondary);font-size:.82rem;margin-left:auto;"></span>
+        </div>
+      </div>
+
+      <!-- Action bar for selected -->
+      <div id="ch-action-bar" class="card hidden" style="margin-bottom:1rem;border:1px solid var(--accent);background:rgba(99,102,241,.08);">
+        <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+          <span id="ch-selected-count" style="font-weight:600;color:var(--accent);"></span>
+          <button class="btn btn-danger" onclick="App.leaveSelected()">🗑 Rời các kênh đã chọn</button>
+          <button class="btn btn-secondary" onclick="App._clearSelection()">Bỏ chọn tất cả</button>
+        </div>
+      </div>
+
+      <div id="ch-status-banner" class="hidden" style="margin-bottom:1rem;padding:.75rem 1rem;border-radius:8px;font-size:.9rem;"></div>
+
+      <div class="card">
+        <div id="ch-loading" style="text-align:center;padding:2rem;color:var(--text-secondary);">Chọn tài khoản để xem danh sách kênh...</div>
+        <table id="ch-table" class="hidden" style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="color:var(--text-secondary);font-size:.8rem;border-bottom:1px solid var(--border);">
+              <th style="padding:.6rem .5rem;text-align:center;width:40px;">
+                <input type="checkbox" id="ch-select-all" onchange="App._toggleSelectAll(this.checked)" title="Chọn / bỏ chọn tất cả">
+              </th>
+              <th style="padding:.6rem .75rem;text-align:left;">#</th>
+              <th style="padding:.6rem .75rem;text-align:left;">Tên kênh / nhóm</th>
+              <th style="padding:.6rem .75rem;text-align:left;">Loại</th>
+              <th style="padding:.6rem .75rem;text-align:left;">Thành viên</th>
+              <th style="padding:.6rem .75rem;text-align:left;">Username</th>
+              <th style="padding:.6rem .75rem;text-align:right;">Hành động</th>
+            </tr>
+          </thead>
+          <tbody id="ch-tbody"></tbody>
+        </table>
+        <div id="ch-empty" class="hidden" style="text-align:center;padding:2rem;color:var(--text-secondary);">Không có kênh / nhóm nào.</div>
+      </div>
+    </div>
+
+    <div id="view-logs" class="hidden">
         <div class="toolbar">
           <h2 class="page-title" style="margin-bottom:0">Lịch sử gửi</h2>
           <div class="toolbar-left">
@@ -209,6 +284,7 @@
               <tr>
                 <th>Thời gian</th>
                 <th>Lịch</th>
+                <th>Tài khoản</th>
                 <th>Đích</th>
                 <th>Trạng thái</th>
                 <th>Lỗi</th>
@@ -219,6 +295,329 @@
         </div>
         <div class="pagination" id="logs-pagination"></div>
       </div>
+
+      <!-- Watchers View -->
+      <div id="view-watchers" class="hidden">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">🎯 Keyword DM</h2>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-ghost" onclick="App.navigate('watcher-logs')" style="font-size:13px">📋 Lịch sử DM</button>
+            <button class="btn btn-primary" onclick="App.openWatcherModal()">+ Tạo rule mới</button>
+          </div>
+        </div>
+        <!-- Stats mini -->
+        <div class="stats-grid" id="watcher-stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+          <div class="stat-card"><div class="stat-label">Rule đang bật</div><div class="stat-value accent" id="ws-active">0</div></div>
+          <div class="stat-card"><div class="stat-label">DM thành công</div><div class="stat-value green" id="ws-success">0</div></div>
+          <div class="stat-card"><div class="stat-label">DM hôm nay</div><div class="stat-value accent" id="ws-today">0</div></div>
+          <div class="stat-card"><div class="stat-label">Thất bại</div><div class="stat-value red" id="ws-failed">0</div></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Bật/Tắt</th>
+                <th>Tên Rule</th>
+                <th>Từ khóa</th>
+                <th>Nhóm theo dõi</th>
+                <th>Tài khoản</th>
+                <th>Cooldown</th>
+                <th>Hành động</th>
+              </tr>
+            </thead>
+            <tbody id="watchers-body"></tbody>
+          </table>
+        </div>
+        <div id="watchers-empty" class="empty-state hidden">
+          <div class="empty-state-icon">🎯</div>
+          <p class="empty-state-text">Chưa có rule nào. Tạo rule để tự động DM khi phát hiện từ khóa.</p>
+          <button class="btn btn-primary" onclick="App.openWatcherModal()">Tạo rule đầu tiên</button>
+        </div>
+      </div>
+
+      <!-- Watcher Logs View -->
+      <div id="view-watcher-logs" class="hidden">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">📋 Lịch sử Keyword DM</h2>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select class="form-select" style="width:150px" id="wl-filter-status" onchange="App.loadWatcherLogs()">
+              <option value="">Tất cả</option>
+              <option value="success">Thành công</option>
+              <option value="failed">Thất bại</option>
+              <option value="skipped">Bỏ qua</option>
+            </select>
+            <button class="btn btn-ghost" onclick="App.navigate('watchers')" style="font-size:13px">← Quay lại</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Thời gian</th>
+                <th>Rule</th>
+                <th>User nhận</th>
+                <th>Nhóm phát hiện</th>
+                <th>Từ khóa</th>
+                <th>Tài khoản gửi</th>
+                <th>Trạng thái</th>
+                <th>Lỗi</th>
+              </tr>
+            </thead>
+            <tbody id="watcher-logs-body"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="watcher-logs-pagination"></div>
+      </div>
+
+      <!-- Settings / AI Config View -->
+      <div id="view-settings" class="hidden">
+        <h2 class="page-title">⚙️ Cài đặt AI Remix</h2>
+        <div style="max-width:680px">
+
+          <!-- Provider selector -->
+          <div class="card" style="margin-bottom:20px;padding:20px">
+            <div class="form-group">
+              <label class="form-label" style="font-size:15px;font-weight:600">🤖 Nhà cung cấp AI</label>
+              <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+                Chọn AI model để tự động remix nội dung DM trước khi gửi, giúp mỗi tin nhắn trông tự nhiên và khác biệt — tránh bị Telegram nhận diện là spam.
+              </p>
+              <select class="form-select" id="ai-provider-select" onchange="App.onProviderChange()" style="width:260px">
+                <option value="">🚫 Tắt AI Remix</option>
+                <option value="gemini">✨ Gemini (Google)</option>
+                <option value="deepseek">🔵 DeepSeek</option>
+                <option value="openai">🟢 OpenAI (ChatGPT)</option>
+              <option value="groq">⚡ Groq (Llama 3.3 70B)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Gemini Keys -->
+          <div id="ai-gemini-section" class="card hidden" style="margin-bottom:20px;padding:20px">
+            <div class="form-group">
+              <label class="form-label" style="font-size:15px;font-weight:600">🔑 Gemini API Keys</label>
+              <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+                Thêm nhiều key để hệ thống luân phiên (round-robin) — tránh hết quota một key.
+                Lấy miễn phí tại <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com</a>.
+              </p>
+              <div id="gemini-keys-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+              <button class="btn btn-ghost btn-sm" onclick="App.addAiKeyRow('gemini')">+ Thêm Gemini API Key</button>
+            </div>
+          </div>
+
+          <!-- DeepSeek Keys -->
+          <div id="ai-deepseek-section" class="card hidden" style="margin-bottom:20px;padding:20px">
+            <div class="form-group">
+              <label class="form-label" style="font-size:15px;font-weight:600">🔑 DeepSeek API Keys</label>
+              <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+                Thêm nhiều key để hệ thống luân phiên (round-robin). Đăng ký tại
+                <a href="https://platform.deepseek.com/api_keys" target="_blank" style="color:var(--accent)">platform.deepseek.com</a>.
+              </p>
+              <div id="deepseek-keys-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+              <button class="btn btn-ghost btn-sm" onclick="App.addAiKeyRow('deepseek')">+ Thêm DeepSeek API Key</button>
+            </div>
+          </div>
+
+          <!-- OpenAI Keys -->
+          <div id="ai-openai-section" class="card hidden" style="margin-bottom:20px;padding:20px">
+            <div class="form-group">
+              <label class="form-label" style="font-size:15px;font-weight:600">🔑 OpenAI API Keys (ChatGPT)</label>
+              <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+                Thêm nhiều key để hệ thống luân phiên (round-robin). Model: <strong>gpt-4o-mini</strong>.
+                Lấy key tại <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--accent)">platform.openai.com/api-keys</a>.
+              </p>
+              <div id="openai-keys-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+              <button class="btn btn-ghost btn-sm" onclick="App.addAiKeyRow('openai')">+ Thêm OpenAI API Key</button>
+            </div>
+          </div>
+
+          <!-- Groq Keys -->
+          <div id="ai-groq-section" class="card hidden" style="margin-bottom:20px;padding:20px">
+            <div class="form-group">
+              <label class="form-label" style="font-size:15px;font-weight:600">⚡ Groq API Keys (Llama 3.3 70B)</label>
+              <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+                Thêm nhiều key để hệ thống luân phiên (round-robin). Model: <strong>llama-3.3-70b-versatile</strong>. Groq miễn phí và cực nhanh.
+                Lấy key tại <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent)">console.groq.com/keys</a>.
+              </p>
+              <div id="groq-keys-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+              <button class="btn btn-ghost btn-sm" onclick="App.addAiKeyRow('groq')">+ Thêm Groq API Key</button>
+            </div>
+          </div>
+
+          <!-- Save button -->
+          <div style="display:flex;gap:10px;align-items:center">
+            <button class="btn btn-primary" id="btn-save-settings" onclick="App.saveSettings()">💾 Lưu cài đặt</button>
+            <button class="btn btn-ghost" onclick="App.testAiRemix()" id="btn-test-remix">🧪 Test Remix</button>
+            <span id="settings-status" style="font-size:13px;color:var(--text2)"></span>
+          </div>
+
+          <!-- Test Result -->
+          <div id="test-remix-result" class="hidden" style="margin-top:16px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px">
+            <p style="font-size:12px;color:var(--text2);margin-bottom:6px">Kết quả remix:</p>
+            <p id="test-remix-output" style="font-size:14px;color:var(--text);white-space:pre-wrap"></p>
+          </div>
+
+        <!-- API Key Management -->
+        <div class="card" style="margin-top:28px;padding:20px">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label" style="font-size:15px;font-weight:600">🔐 API Key bảo vệ</label>
+            <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+              Nếu server được expose ra ngoài, hãy đặt API Key để bảo vệ. Key này sẽ được gửi kèm mỗi request dưới header <code>X-API-Key</code>.
+            </p>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="password" class="form-input" id="api-key-input"
+                     placeholder="Để trống = không dùng API Key"
+                     style="flex:1;font-family:monospace;font-size:13px">
+              <button class="btn btn-ghost btn-sm" id="api-key-toggle"
+                      onclick="App.toggleApiKeyVisibility()" title="Hiện/ẩn">👁</button>
+              <button class="btn btn-primary btn-sm" onclick="App.saveApiKey()">💾 Lưu</button>
+              <button class="btn btn-danger btn-sm" onclick="App.clearApiKey()">🗑 Xóa</button>
+            </div>
+            <p id="api-key-status" style="font-size:12px;color:var(--text2);margin-top:6px"></p>
+          </div>
+        </div>
+
+      </div>
+      </div>
+
+
+      <!-- ══ Blacklist Page ══════════════════════════════════════════════ -->
+      <div id="view-blacklist" class="hidden">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">🚫 Blacklist DM</h2>
+          <div class="toolbar-left">
+            <button class="btn btn-primary" onclick="App.showAddBlacklist()">+ Thêm user</button>
+          </div>
+        </div>
+        <p style="color:var(--text2);margin-bottom:1rem;font-size:.9rem">
+          Người dùng trong danh sách này sẽ không bao giờ nhận được DM từ bất kỳ watcher nào.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>User ID</th>
+                <th>Username</th>
+                <th>Lý do</th>
+                <th>Ngày thêm</th>
+                <th>Hành động</th>
+              </tr>
+            </thead>
+            <tbody id="blacklist-body"><tr><td colspan="5" style="text-align:center;color:var(--text2);padding:24px">Đang tải...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+    
+      <!-- ══ Reactions Page ════════════════════════════════════════════════ -->
+      <div id="view-reactions" class="hidden">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">❤️ Tăng Tương Tác</h2>
+        </div>
+        <p style="color:var(--text2);margin-bottom:1.5rem;font-size:.9rem">
+          Tự động join kênh và gửi cảm xúc vào bài viết mới ngay lập tức.
+        </p>
+
+        <!-- Add target form -->
+        <div class="card" style="margin-bottom:1.5rem">
+          <h3 style="margin:0 0 1rem;font-size:1rem;color:var(--accent)">➕ Thêm kênh mới</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+            <div>
+              <label class="form-label">Link kênh / nhóm</label>
+              <input id="rt-link" class="form-input" type="text" placeholder="https://t.me/channelname hoặc @username">
+            </div>
+            <div>
+              <label class="form-label">Delay giữa mỗi account (giây)</label>
+              <div style="display:flex;gap:.5rem;align-items:center">
+                <input id="rt-delay-min" class="form-input" type="number" value="5" min="1" style="width:80px"> 
+                <span style="color:var(--text2)">→</span>
+                <input id="rt-delay-max" class="form-input" type="number" value="30" min="1" style="width:80px">
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:1rem">
+            <label class="form-label">Tài khoản tham gia & react</label>
+            <div id="rt-account-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.4rem">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+          <!-- View boost controls -->
+          <div style="display:flex;align-items:center;gap:1rem;margin-top:.75rem;padding:.6rem 1rem;background:var(--surface);border-radius:.5rem;border:1px solid var(--border);">
+            <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.9rem;">
+              <input type="checkbox" id="rt-view-enabled" style="width:16px;height:16px;accent-color:var(--accent);">
+              <span>&#128065; T&#259;ng view</span>
+            </label>
+            <div style="display:flex;align-items:center;gap:.4rem;font-size:.85rem;color:var(--text-secondary);">
+              <span>T&#7881; l&#7879;:</span>
+              <select id="rt-view-ratio" style="background:var(--bg);border:1px solid var(--border);border-radius:.3rem;padding:.2rem .4rem;color:var(--text);font-size:.85rem;">
+                <option value="1.0">100% acc</option>
+                <option value="0.75">75% acc</option>
+                <option value="0.5">50% acc</option>
+                <option value="0.25">25% acc</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top:1rem">
+            <label class="form-label">Cảm xúc (click để chọn)</label>
+            <div id="rt-emoji-picker" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.4rem">
+              <!-- Populated by JS -->
+            </div>
+            <p style="color:var(--text2);font-size:.8rem;margin-top:.4rem">Đã chọn: <span id="rt-selected-emojis">👍</span></p>
+          </div>
+          <div style="display:flex;gap:.75rem;margin-top:1.2rem">
+            <button class="btn btn-primary" onclick="Reactions.addTarget()">⚡ Thêm & Auto-Join</button>
+          </div>
+        </div>
+
+        <!-- Targets list -->
+        <div class="card" style="margin-bottom:1.5rem">
+          <h3 style="margin:0 0 1rem;font-size:1rem;color:var(--accent)">📋 Danh sách kênh</h3>
+          <div style="overflow-x:auto">
+            <table class="table" id="rt-targets-table">
+              <thead>
+                <tr>
+                  <th>Kênh</th>
+                  <th>Tài khoản</th>
+                  <th>Cảm xúc</th>
+                  <th>Delay</th>
+                  <th>View</th>
+                  <th>Trạng thái</th>
+                  <th>Hành động</th>
+                </tr>
+              </thead>
+              <tbody id="rt-targets-body">
+                <tr><td colspan="7" style="text-align:center;color:var(--text2)">&#272;ang t&#7843;i...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Reaction logs -->
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+            <h3 style="margin:0;font-size:1rem;color:var(--accent)">📊 Lịch sử cảm xúc gần đây</h3>
+            <button class="btn btn-sm" onclick="Reactions.loadLogs()">🔄 Làm mới</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="table" id="rt-logs-table">
+              <thead>
+                <tr>
+                  <th>Thời gian</th>
+                  <th>Kênh ID</th>
+                  <th>Bài viết ID</th>
+                  <th>Tài khoản</th>
+                  <th>Cảm xúc</th>
+                  <th>Trạng thái</th>
+                  <th>Lỗi</th>
+                </tr>
+              </thead>
+              <tbody id="rt-logs-body">
+                <tr><td colspan="7" style="text-align:center;color:var(--text2)">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
     </main>
   </div>
 
@@ -337,25 +736,21 @@
       <div class="modal-body">
         <!-- Step 1: Info -->
         <div id="acc-step-info">
-          <div class="form-group">
-            <label class="form-label">Tên tài khoản</label>
-            <input type="text" class="form-input" id="acc-name" placeholder="Ví dụ: Account 2">
-          </div>
-          <div class="form-group">
-            <label class="form-label">API ID</label>
-            <input type="text" class="form-input" id="acc-api-id" placeholder="12345678">
-          </div>
-          <div class="form-group">
-            <label class="form-label">API Hash</label>
-            <input type="text" class="form-input" id="acc-api-hash" placeholder="0123456789abcdef...">
+          <div style="background:rgba(91,141,239,0.08);border:1px solid rgba(91,141,239,0.2);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:var(--text2)">
+            🔐 Hệ thống tự động cấu hình API — bạn chỉ cần nhập số điện thoại
           </div>
           <div class="form-group">
             <label class="form-label">Số điện thoại</label>
-            <input type="tel" class="form-input" id="acc-phone" placeholder="+84912345678">
+            <input type="tel" class="form-input" id="acc-phone" placeholder="+84912345678" autocomplete="off">
           </div>
-          <button class="btn btn-primary" style="width:100%" id="btn-acc-add" onclick="App.addAccount()">
-            Thêm & Gửi OTP
-          </button>
+          <div class="form-group">
+            <label class="form-label">🔒 Proxy URL <span style="font-size:.8rem;color:var(--text-secondary);font-weight:400">(tuỳ chọn)</span></label>
+            <input type="text" id="acc-proxy" class="form-input" placeholder="socks5://user:pass@host:1080 hoặc để trống">
+            <div style="font-size:.75rem;color:var(--text-secondary);margin-top:.3rem">
+              Hỗ trợ: <code>socks5://</code> · <code>socks4://</code> · <code>http://</code> · <code>mtproto://host:port/secret</code>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-full" onclick="App.addAccount()">📲 Gửi OTP</button>
         </div>
         <!-- Step 2: OTP -->
         <div id="acc-step-otp" class="hidden">
@@ -376,8 +771,165 @@
       </div>
     </div>
   </div>
+  <!-- ══ Confirm Modal ══ -->
+  <div class="modal-overlay" id="confirm-modal">
+    <div class="modal" style="width:360px">
+      <div class="modal-header">
+        <span class="modal-title">Xác nhận</span>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-msg" style="text-align:center;font-size:14px"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="confirm-no">Hủy</button>
+        <button class="btn btn-danger" id="confirm-yes">Xác nhận</button>
+      </div>
+    </div>
+  </div>
 
-  <script src="/static/js/api.js"></script>
-  <script src="/static/js/app.js"></script>
-</body>
+  <!-- ══ Watcher Modal ══ -->
+  <div class="modal-overlay" id="watcher-modal">
+    <div class="modal" style="width:660px;max-height:92vh;overflow-y:auto">
+      <div class="modal-header">
+        <span class="modal-title" id="watcher-modal-title">Tạo Keyword DM Rule</span>
+        <button class="modal-close" onclick="App.closeWatcherModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="edit-watcher-id">
+
+        <div class="form-group">
+          <label class="form-label">Tên Rule</label>
+          <input type="text" class="form-input" id="w-name" placeholder="VD: BD Weex Auto DM">
+        </div>
+
+        <!-- Accounts -->
+        <div class="form-group">
+          <label class="form-label">Tài khoản gửi DM (chọn nhiều – ưu tiên theo thứ tự, fallback nếu lỗi)</label>
+          <div id="w-accounts-list" style="display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:var(--bg-secondary);border-radius:8px;min-height:44px">
+            <!-- rendered by JS -->
+          </div>
+        </div>
+
+        <!-- Keywords -->
+        <div class="form-group">
+          <label class="form-label">Từ khóa kích hoạt</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" class="form-input" id="w-keyword-input" placeholder="VD: BD Weex" style="flex:1"
+              onkeydown="if(event.key==='Enter'){App.addWatcherKeyword();event.preventDefault()}">
+            <button class="btn btn-ghost btn-sm" onclick="App.addWatcherKeyword()">+ Thêm</button>
+          </div>
+          <div id="w-keywords-tags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+          <p class="form-hint">Case-insensitive. Nhấn Enter hoặc click Thêm.</p>
+        </div>
+
+        <!-- Excluded usernames -->
+        <div class="form-group">
+          <label class="form-label">🚫 Loại trừ username (không DM)</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" class="form-input" id="w-exclude-input" placeholder="@username hoặc username" style="flex:1"
+              onkeydown="if(event.key==='Enter'){App.addWatcherExclude();event.preventDefault()}">
+            <button class="btn btn-ghost btn-sm" onclick="App.addWatcherExclude()">+ Thêm</button>
+          </div>
+          <div id="w-exclude-tags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+          <p class="form-hint">Những username/user_id này sẽ không nhận DM dù gõ từ khóa.</p>
+        </div>
+
+        <!-- Groups -->
+        <div class="form-group">
+          <label class="form-label">Nhóm cần theo dõi</label>
+          <input type="text" class="search-input" style="width:100%;margin-bottom:8px" placeholder="Tìm kiếm nhóm..."
+            id="w-chat-search" oninput="App.filterWatcherChats()">
+          <div class="chat-list" id="w-chat-list" style="max-height:180px">
+            <div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>
+          </div>
+        </div>
+
+        <!-- Cooldown -->
+        <div class="form-group">
+          <label class="form-label">Cooldown (giờ)</label>
+          <input type="number" class="form-input" id="w-cooldown" min="1" value="24" style="width:120px">
+          <p class="form-hint">Khoảng thời gian tối thiểu giữa 2 lần DM đến cùng 1 user.</p>
+        </div>
+
+        <!-- DM Once -->
+        <div class="form-group" style="margin-top:-8px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+            <input type="checkbox" id="w-dm-once" style="accent-color:var(--accent);width:16px;height:16px">
+            <span>🔒 Chỉ DM 1 lần/người (mãi mãi – không bao giờ gửi lại)</span>
+          </label>
+          <p class="form-hint" style="margin-left:24px">Khi bật, hệ thống ghi nhớ vĩnh viễn những ai đã nhận DM, bất kể cooldown.</p>
+        </div>
+
+        <!-- Reply in Group -->
+        <div class="form-group" style="margin-top:4px;padding:14px;background:var(--bg2);border-radius:12px;border:1px solid var(--border)">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-bottom:0">
+            <input type="checkbox" id="w-reply-in-group" style="accent-color:var(--accent);width:16px;height:16px"
+                   onchange="document.getElementById('w-group-reply-section').style.display=this.checked?'block':'none'">
+            <span>
+              <strong>💬 Reply trong nhóm</strong> sau khi gửi DM
+              <span style="color:var(--text2);font-size:11px;margin-left:4px">— Tăng tỉ lệ user đọc DM</span>
+            </span>
+          </label>
+          <div id="w-group-reply-section" style="display:none;margin-top:12px">
+            <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:6px">📝 Nội dung reply (hỗ trợ emoji &amp; HTML)</label>
+            <input type="text" id="w-group-reply-text" value="Check my DM 😊"
+                   placeholder="Check my DM 😊"
+                   style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-size:14px;box-sizing:border-box">
+            <p class="form-hint" style="margin-top:8px">
+              💡 Account reply sẽ <strong>khác</strong> account DM — delay ngẫu nhiên 1.5–4s để trông tự nhiên.
+              VD: <em>"Check my DM 😊"</em>, <em>"Tạo đã gửi tin nhắn 📬"</em>
+            </p>
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+
+        <!-- DM Script -->
+        <div class="form-group">
+          <label class="form-label">Kịch bản DM</label>
+          <div id="w-messages-list"></div>
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <button class="btn btn-ghost btn-sm" onclick="App.addWatcherMessage('text')">+ Text</button>
+            <button class="btn btn-ghost btn-sm" onclick="App.addWatcherMessage('photo')">+ Ảnh</button>
+            <button class="btn btn-ghost btn-sm" onclick="App.addWatcherMessage('video')">+ Video</button>
+            <button class="btn btn-ghost btn-sm" onclick="App.addWatcherMessage('document')">+ File</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="App.closeWatcherModal()">Hủy</button>
+        <button class="btn btn-primary" onclick="App.saveWatcher()">Lưu Rule</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Test DM Modal ══ -->
+  <div class="modal-overlay" id="test-dm-modal">
+    <div class="modal" style="width:440px">
+      <div class="modal-header">
+        <span class="modal-title">🧪 Test DM</span>
+        <button class="modal-close" onclick="document.getElementById('test-dm-modal').classList.remove('open')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="test-dm-watcher-id">
+        <p style="font-size:13px;color:var(--text2);margin-bottom:16px">
+          Gửi thử kịch bản DM đến một user cụ thể – bỏ qua từ khóa và cooldown.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Username hoặc User ID</label>
+          <input type="text" class="form-input" id="test-dm-target" placeholder="@username hoặc 123456789">
+          <p class="form-hint">Tài khoản gửi cần đã từng chat với user này hoặc user có public username.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('test-dm-modal').classList.remove('open')">Hủy</button>
+        <button class="btn btn-primary" id="btn-send-test-dm" onclick="App.sendTestDM()">📨 Gửi ngay</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/api.js?v=13"></script>
+  <script src="/static/js/app.js?v=20"></script>
+
+    </body>
 </html>

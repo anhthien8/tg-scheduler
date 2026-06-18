@@ -2,6 +2,7 @@
 Scheduler - APScheduler with hourly, daily, weekly, monthly, once.
 """
 import logging
+import os
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -12,7 +13,7 @@ import database as db
 import message_queue as mq
 
 logger = logging.getLogger("tg-scheduler")
-TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+TZ = pytz.timezone(os.getenv("TIMEZONE", "Asia/Ho_Chi_Minh"))
 _scheduler: AsyncIOScheduler | None = None
 
 
@@ -91,7 +92,7 @@ def add_schedule_job(schedule: dict):
         id=job_id,
         name=schedule["name"],
         replace_existing=True,
-        misfire_grace_time=60
+        misfire_grace_time=60  # MED-07: retry jobs fired up to 60s late
     )
 
     next_run = scheduler.get_job(job_id)

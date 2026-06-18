@@ -56,7 +56,17 @@ async def enqueue_schedule(schedule_id: int):
         return
 
     q = get_queue()
+    skipped_blocked = 0
     for target in targets:
+        chat_id_t = target["chat_id"]
+        # Skip targets that have been blocked due to repeated failures
+        if await db.is_target_blocked(schedule_id, account_id, chat_id_t):
+            logger.info(
+                f"⏭️  Schedule {schedule_id}: skipping BLOCKED target "
+                f"{target.get('chat_title', chat_id_t)} for account {account_id}"
+            )
+            skipped_blocked += 1
+            continue
         for msg in sorted(messages, key=lambda m: m.get("msg_order", 0)):
             await q.put({
                 "schedule_id": schedule_id,
@@ -65,6 +75,8 @@ async def enqueue_schedule(schedule_id: int):
                 "target": target,
                 "retry_count": 0
             })
+    if skipped_blocked:
+        logger.warning(f"⚠️  Schedule {schedule_id}: {skipped_blocked} blocked target(s) skipped")
 
     # Increment send count
     result = await db.increment_send_count(schedule_id)
@@ -99,6 +111,80 @@ async def _send_single_message(account_id: int, msg: dict, chat_id: int) -> bool
         return False
 
 
+def translate_error(error_msg: str) -> str:
+    """Translate Telegram error messages to Vietnamese (for schedule send logs)."""
+    e = (error_msg or "").lower()
+
+    # PeerFlood
+    if "peerflood" in e or "too many dms" in e:
+        return "Tài khoản gửi tin nhắn quá nhiều, bị Telegram hạn chế tạm thời (PeerFlood)."
+
+    # Cannot resolve entity
+    if "cannot resolve entity" in e or "cannot resolve" in e:
+        return "Không tìm thấy nhóm/kênh. Tài khoản chưa tham gia hoặc nhóm đã bị xóa."
+
+    # Plain text / send plain forbidden
+    if "plain results" in e or "chat_send_plain_forbidden" in e:
+        return "Admin nhóm đã tắt quyền gửi tin nhắn văn bản thường trong nhóm này."
+
+    # Chat write forbidden
+    if "chat_write_forbidden" in e:
+        return "Tài khoản bị cấm gửi tin nhắn trong nhóm/kênh này."
+
+    # Privacy premium required
+    if "privacy_premium_required" in e or "privacy premium required" in e:
+        return "Người nhận yêu cầu tài khoản Telegram Premium mới nhắn tin được."
+
+    # User banned
+    if "user_banned_in_channel" in e or "banned" in e:
+        return "Tài khoản đã bị cấm (ban) khỏi nhóm/kênh này."
+
+    # FloodWait
+    if "floodwait" in e or "flood_wait" in e:
+        import re as _re
+        m = _re.search(r'(\d+)', error_msg)
+        secs = m.group(1) if m else "?"
+        return f"Telegram yêu cầu chờ {secs} giây trước khi gửi tiếp (FloodWait)."
+
+    # Chat admin required
+    if "chat_admin_required" in e:
+        return "Cần quyền Admin để thực hiện thao tác này trong nhóm/kênh."
+
+    # Invalid peer
+    if "invalid peer" in e or "invalid_peer" in e:
+        return "Thông tin nhóm/kênh không hợp lệ. Kiểm tra lại ID hoặc tài khoản đã join chưa."
+
+    # User privacy restricted
+    if "userprivacyrestricted" in e or "privacy restrictions" in e:
+        return "User bật chế độ riêng tư, không nhận tin nhắn từ người lạ."
+
+    # Not found / channel invalid
+    if "channel invalid" in e or "not found" in e:
+        return "Không tìm thấy nhóm/kênh. Có thể đã bị xóa hoặc tài khoản chưa join."
+
+    # Slowmode wait
+    if "slowmodewait" in e or "slowmode" in e:
+        import re as _re
+        m = _re.search(r'(\d+)', error_msg)
+        secs = m.group(1) if m else "?"
+        return f"Nhóm đang bật chế độ chậm (Slowmode), chờ {secs}s mới gửi được."
+
+    # Message too long
+    if "message_too_long" in e or "too long" in e:
+        return "Tin nhắn quá dài, vượt quá giới hạn Telegram (4096 ký tự)."
+
+    # Media caption too long
+    if "media_caption_too_long" in e:
+        return "Caption ảnh/video quá dài."
+
+    # Bots cannot start
+    if "bots cannot start" in e:
+        return "Bot không thể tự nhắn tin trước, cần user nhắn bot trước."
+
+    # Generic fallback
+    return error_msg
+
+
 async def queue_worker():
     """Single worker consuming the queue."""
     q = get_queue()
@@ -107,6 +193,11 @@ async def queue_worker():
     while True:
         try:
             item = await q.get()
+        except asyncio.CancelledError:
+            logger.info("Queue worker cancelled")
+            break
+
+        try:
             schedule_id = item["schedule_id"]
             account_id = item["account_id"]
             msg = item["message"]
@@ -123,7 +214,7 @@ async def queue_worker():
                     logger.info(f"✓ [{account_id}] Sent {msg['msg_type']} to {chat_title}")
                 else:
                     await db.add_send_log(schedule_id, account_id, msg.get("id"),
-                                          chat_id, chat_title, "failed", "Send returned False")
+                                          chat_id, chat_title, "failed", "Gửi tin nhắn thất bại (Không rõ lý do)")
 
             except tg_errors.FloodWaitError as e:
                 wait_time = e.seconds + 1
@@ -133,9 +224,9 @@ async def queue_worker():
                     item["retry_count"] = retry_count + 1
                     await q.put(item)
                 else:
+                    friendly_error = translate_error(f"FloodWait after {MAX_RETRIES} retries")
                     await db.add_send_log(schedule_id, account_id, msg.get("id"),
-                                          chat_id, chat_title, "failed",
-                                          f"FloodWait after {MAX_RETRIES} retries")
+                                          chat_id, chat_title, "failed", friendly_error)
 
             except Exception as e:
                 error_msg = str(e)
@@ -145,19 +236,34 @@ async def queue_worker():
                     await q.put(item)
                     await asyncio.sleep(2)
                 else:
+                    friendly_error = translate_error(error_msg)
                     await db.add_send_log(schedule_id, account_id, msg.get("id"),
-                                          chat_id, chat_title, "failed", error_msg)
+                                          chat_id, chat_title, "failed", friendly_error)
+                    # Track consecutive failures — block target if > 3 total fails
+                    block_result = await db.record_target_failure(
+                        schedule_id, account_id, chat_id, chat_title
+                    )
+                    if block_result["just_blocked"]:
+                        logger.warning(
+                            f"🚫 BLOCKED [{account_id}] -> {chat_title} (chat_id={chat_id}): "
+                            f"failed {block_result['fail_count']} times. Stopping sends to this target."
+                        )
+                    # Feature #2: check if account should be flagged
+                    await db.check_and_flag_account(account_id)
 
             delay = random.uniform(MIN_DELAY, MAX_DELAY)
             await asyncio.sleep(delay)
-            q.task_done()
 
         except asyncio.CancelledError:
             logger.info("Queue worker cancelled")
+            q.task_done()
             break
         except Exception as e:
             logger.error(f"Queue worker error: {e}")
             await asyncio.sleep(1)
+        finally:
+            # BUG-04 fix: task_done() always called, even on exception
+            q.task_done()
 
 
 def start_worker():

@@ -25,10 +25,11 @@ class VerifyCodeRequest(BaseModel):
 
 
 class AccountCreate(BaseModel):
-    name: str
     phone: str
-    api_id: str
-    api_hash: str
+    name: Optional[str] = None        # auto-filled from TG profile if not set
+    api_id: Optional[str] = None      # uses TG Desktop default if not set
+    api_hash: Optional[str] = None    # uses TG Desktop default if not set
+    proxy_url: Optional[str] = None   # e.g. socks5://user:pass@host:port
 
 
 class MessageSchema(BaseModel):

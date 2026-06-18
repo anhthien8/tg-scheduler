@@ -126,3 +126,21 @@ async def reset_count(schedule_id: int):
         raise HTTPException(404, "Schedule not found")
     await db.reset_send_count(schedule_id)
     return {"success": True, "message": "Đã reset số lần gửi"}
+
+
+@router.get("/{schedule_id}/blocked-targets")
+async def get_blocked_targets(schedule_id: int):
+    """Get all (account, chat) pairs blocked due to repeated failures."""
+    schedule = await db.get_schedule(schedule_id)
+    if not schedule:
+        raise HTTPException(404, "Schedule not found")
+    blocks = await db.get_blocked_targets(schedule_id)
+    return {"blocked": blocks, "count": len(blocks)}
+
+
+@router.post("/{schedule_id}/unblock-target")
+async def unblock_target(schedule_id: int, account_id: int, chat_id: int):
+    """Manually unblock a (account, chat) target."""
+    await db.unblock_target(schedule_id, account_id, chat_id)
+    return {"success": True, "message": "Đã mở khóa target"}
+
