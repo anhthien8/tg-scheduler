@@ -22,8 +22,9 @@ import telegram_client as tg
 import scheduler as sch
 import message_queue as mq
 import keyword_watcher as kw
-from routes import auth, chats, schedules, messages, logs, watchers, settings, blacklist, reactions
+from routes import auth, chats, schedules, messages, logs, watchers, settings, blacklist, reactions, inbox
 import reaction_watcher as rw
+import dm_reply_tracker as drt
 
 # Logging setup
 logging.basicConfig(
@@ -89,6 +90,9 @@ async def lifespan(app: FastAPI):
     # Start reaction watchers
     await rw.start_all()
 
+    # Start DM reply tracker (inbox)
+    await drt.start_reply_tracker()
+
     logger.info("=" * 50)
     host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8888"))
@@ -102,6 +106,7 @@ async def lifespan(app: FastAPI):
     mq.stop_worker()
     sch.stop_scheduler()
     await rw.stop_all()
+    await drt.stop_reply_tracker()
     await tg.disconnect_all()
     logger.info("Goodbye!")
 
@@ -128,6 +133,7 @@ app.include_router(watchers.router, dependencies=_auth_dep)
 app.include_router(settings.router, dependencies=_auth_dep)
 app.include_router(blacklist.router, dependencies=_auth_dep)
 app.include_router(reactions.router, dependencies=_auth_dep)
+app.include_router(inbox.router, dependencies=_auth_dep)
 
 # Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

@@ -568,57 +568,39 @@ async def _send_group_reply(
 ):
     """
     Reply to the user's original group message with a short text (e.g. "Check my DM 😊").
-    Uses a DIFFERENT account from the one that sent the DM to look more natural.
-    Falls back through available accounts until one succeeds.
+    Uses ONLY the same account that sent the DM — no fallback.
     """
     import random as _rnd, asyncio as _aio
+
+    if not used_dm_acc_id:
+        return
 
     chat_id = event.chat_id
     msg_id  = event.id
 
-    # Build ordered list: dedicated → accounts excluding DM sender → DM sender last
-    candidates = []
-    if dedicated_acc_id:
-        candidates.append(dedicated_acc_id)
-    for aid in account_ids:
-        if aid != used_dm_acc_id and aid not in candidates:
-            candidates.append(aid)
-    if used_dm_acc_id and used_dm_acc_id not in candidates:
-        candidates.append(used_dm_acc_id)
-
     # Small random delay so reply doesn't appear instantaneous
     await _aio.sleep(_rnd.uniform(1.5, 4.0))
 
-    for acc_id in candidates:
-        client = tg.get_client(acc_id)
-        if not client or not client.is_connected():
-            continue
-        if _is_peerflood_blocked(acc_id):
-            continue
-        try:
-            await client.send_message(
-                entity=chat_id,
-                message=reply_text,
-                reply_to=msg_id,
-                parse_mode="html",
-            )
-            logger.info(
-                f"[Watcher {watcher_id}] ✓ Group reply sent via acc={acc_id} "
-                f"(reply_to msg_id={msg_id})"
-            )
-            return
-        except tg_errors.FloodWaitError as e:
-            logger.warning(f"[Watcher {watcher_id}] Group reply acc={acc_id} FloodWait {e.seconds}s, trying next")
-            continue
-        except tg_errors.PeerFloodError:
-            _mark_peerflood(acc_id)
-            logger.warning(f"[Watcher {watcher_id}] Group reply acc={acc_id} PeerFlood, trying next")
-            continue
-        except Exception as e:
-            logger.warning(f"[Watcher {watcher_id}] Group reply acc={acc_id} failed: {e}, trying next")
-            continue
-
-    logger.warning(f"[Watcher {watcher_id}] Group reply failed — all accounts exhausted")
+    client = tg.get_client(used_dm_acc_id)
+    if not client or not client.is_connected():
+        logger.warning(f"[Watcher {watcher_id}] Group reply skipped — acc={used_dm_acc_id} not connected")
+        return
+    if _is_peerflood_blocked(used_dm_acc_id):
+        logger.warning(f"[Watcher {watcher_id}] Group reply skipped — acc={used_dm_acc_id} PeerFlood blocked")
+        return
+    try:
+        await client.send_message(
+            entity=chat_id,
+            message=reply_text,
+            reply_to=msg_id,
+            parse_mode="html",
+        )
+        logger.info(
+            f"[Watcher {watcher_id}] ✓ Group reply sent via acc={used_dm_acc_id} "
+            f"(reply_to msg_id={msg_id})"
+        )
+    except Exception as e:
+        logger.warning(f"[Watcher {watcher_id}] Group reply skipped — acc={used_dm_acc_id} error: {e}")
 
 
 

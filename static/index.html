@@ -92,6 +92,9 @@
         <div class="nav-item" data-page="reactions" onclick="App.navigate('reactions')">
           ❤️ Tăng Tương Tác
         </div>
+        <div class="nav-item" data-page="inbox" onclick="App.navigate('inbox')" id="nav-inbox">
+          📬 Inbox <span id="inbox-badge" class="inbox-badge hidden">0</span>
+        </div>
         <div class="nav-item" data-page="channels" onclick="App.navigate('channels')">
           📤 Quản lý kênh
         </div>
@@ -876,7 +879,7 @@
                    placeholder="Check my DM 😊"
                    style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-size:14px;box-sizing:border-box">
             <p class="form-hint" style="margin-top:8px">
-              💡 Account reply sẽ <strong>khác</strong> account DM — delay ngẫu nhiên 1.5–4s để trông tự nhiên.
+              💡 Account reply sẽ <strong>giống</strong> account DM — delay ngẫu nhiên 1.5–4s để trông tự nhiên.
               VD: <em>"Check my DM 😊"</em>, <em>"Tạo đã gửi tin nhắn 📬"</em>
             </p>
           </div>
@@ -929,7 +932,52 @@
   </div>
 
   <script src="/static/js/api.js?v=13"></script>
-  <script src="/static/js/app.js?v=20"></script>
+  <script src="/static/js/app.js?v=21"></script>
+
+  <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
+  <template id="tpl-inbox-view">
+    <div id="view-inbox">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+        <h2 class="page-title" style="margin:0">📬 Inbox — Tin nhắn phản hồi</h2>
+        <button class="btn btn-ghost" id="btn-inbox-read-all" onclick="App.inboxReadAll()">✅ Đánh dấu tất cả đã đọc</button>
+      </div>
+
+      <!-- Filter tabs -->
+      <div class="tab-bar" style="margin-bottom:16px">
+        <button class="tab-btn active" id="inbox-tab-all"    onclick="App.inboxFilter('all')">Tất cả</button>
+        <button class="tab-btn"        id="inbox-tab-unread" onclick="App.inboxFilter('unread')">Chưa đọc</button>
+        <button class="tab-btn"        id="inbox-tab-read"   onclick="App.inboxFilter('read')">Đã đọc</button>
+      </div>
+
+      <!-- Table -->
+      <div class="table-wrap" id="inbox-table-wrap">
+        <table class="data-table" id="inbox-table">
+          <thead>
+            <tr>
+              <th>Người gửi</th>
+              <th>Tin nhắn</th>
+              <th>Watcher</th>
+              <th>Account nhận</th>
+              <th>Thời gian</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="inbox-tbody"></tbody>
+        </table>
+        <div id="inbox-empty" class="empty-state hidden">
+          <div style="font-size:48px;margin-bottom:12px">📭</div>
+          <p>Chưa có tin nhắn phản hồi nào</p>
+        </div>
+      </div>
+
+      <!-- Load more -->
+      <div style="text-align:center;margin-top:16px">
+        <button class="btn btn-ghost" id="btn-inbox-more" onclick="App.inboxLoadMore()" style="display:none">
+          Tải thêm
+        </button>
+      </div>
+    </div>
+  </template>
 
     </body>
 </html>

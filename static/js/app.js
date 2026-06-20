@@ -45,7 +45,24 @@ if(e.message.includes('2FA')){document.getElementById('login-step-otp').classLis
 
 async verify2FAFirst(){const pw=document.getElementById('login-password').value;try{const r=await API.verify(this.loginPhone,document.getElementById('login-code').value.trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('Đăng nhập thành công!','success');this.showDashboard(r)}catch(e){this.toast(e.message,'error')}},
 
-navigate(page){this.currentPage=page;if(page==='channels'){this._populateChAccountSelect();}document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));document.getElementById(`view-${page}`).classList.remove('hidden');
+navigate(page){this.currentPage=page;if(page==='channels'){this._populateChAccountSelect();}document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
+
+// Inbox uses a <template> — inject it once if not yet present
+if(page==='inbox'){
+  if(!document.getElementById('view-inbox')){
+    const tpl=document.getElementById('tpl-inbox-view');
+    const clone=tpl.content.cloneNode(true);
+    document.querySelector('.main').appendChild(clone);
+  }
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('view-inbox').classList.remove('hidden');
+  this.inboxLoad();
+  return;
+}
+
+document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+const viewEl=document.getElementById(`view-${page}`);
+if(viewEl)viewEl.classList.remove('hidden');
 
 if(page==='dashboard')this.loadDashboard();else if(page==='schedules')this.loadSchedules();else if(page==='accounts')this.loadAccounts();else if(page==='logs')this.loadLogs();else if(page==='watchers')this.loadWatchers();else if(page==='watcher-logs')this.loadWatcherLogs();else if(page==='channels')this.loadChannels();else if(page==='settings')this.loadSettings();else if(page==='reactions')Reactions.init()},
 
@@ -1910,3 +1927,158 @@ const Reactions = (() => {
 
   return { init, addTarget, loadTargets, loadLogs, toggleActive, deleteTarget, manualJoin, fetchViews: _fetchViews };
 })();
+
+// ══════════════════════════════════════════════════════════════════
+// INBOX — DM Reply Tracker UI
+// ══════════════════════════════════════════════════════════════════
+Object.assign(App, {
+  _inboxFilter: 'all',   // 'all' | 'unread' | 'read'
+  _inboxOffset: 0,
+  _inboxLimit: 50,
+  _inboxHasMore: false,
+
+  // ── Badge polling ──────────────────────────────────────────────
+  _inboxBadgeTimer: null,
+
+  startInboxBadgePolling(){
+    if(this._inboxBadgeTimer) return;
+    const poll = async () => {
+      try{
+        const r = await fetch('/api/inbox/unread-count');
+        const d = await r.json();
+        const badge = document.getElementById('inbox-badge');
+        if(!badge) return;
+        if(d.count > 0){
+          badge.textContent = d.count > 99 ? '99+' : d.count;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+      } catch{}
+    };
+    poll();
+    this._inboxBadgeTimer = setInterval(poll, 10000);
+  },
+
+  // ── Load inbox ─────────────────────────────────────────────────
+  async inboxLoad(reset=true){
+    if(reset){ this._inboxOffset = 0; }
+    const isRead = this._inboxFilter === 'unread' ? 0
+                 : this._inboxFilter === 'read'   ? 1
+                 : undefined;
+    let url = `/api/inbox?limit=${this._inboxLimit}&offset=${this._inboxOffset}`;
+    if(isRead !== undefined) url += `&is_read=${isRead}`;
+
+    try{
+      const r = await fetch(url);
+      const d = await r.json();
+      const replies = d.replies || [];
+      this._inboxHasMore = replies.length === this._inboxLimit;
+      if(reset){
+        this._inboxRenderRows(replies, true);
+      } else {
+        this._inboxRenderRows(replies, false);
+      }
+      this._inboxOffset += replies.length;
+    } catch(e){
+      App.toast('Lỗi tải inbox: ' + e.message, 'error');
+    }
+  },
+
+  // ── Filter switch ──────────────────────────────────────────────
+  inboxFilter(f){
+    this._inboxFilter = f;
+    ['all','unread','read'].forEach(k=>{
+      const btn = document.getElementById(`inbox-tab-${k}`);
+      if(btn) btn.classList.toggle('active', k === f);
+    });
+    this.inboxLoad(true);
+  },
+
+  // ── Render rows ────────────────────────────────────────────────
+  _inboxRenderRows(replies, reset){
+    const tbody = document.getElementById('inbox-tbody');
+    const empty = document.getElementById('inbox-empty');
+    const more  = document.getElementById('btn-inbox-more');
+    if(!tbody) return;
+    if(reset) tbody.innerHTML = '';
+
+    if(reset && replies.length === 0){
+      tbody.innerHTML = '';
+      if(empty) empty.classList.remove('hidden');
+      if(more)  more.style.display = 'none';
+      return;
+    }
+    if(empty) empty.classList.add('hidden');
+
+    replies.forEach(rep => {
+      const isUnread = rep.is_read === 0;
+      const name = rep.sender_name || (rep.sender_username ? '@'+rep.sender_username : `ID ${rep.sender_user_id}`);
+      const username = rep.sender_username ? `<br><span style="color:var(--text2);font-size:.78rem">@${rep.sender_username}</span>` : '';
+      const msg  = (rep.message_text||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const short = msg.length > 80 ? msg.slice(0,80)+'…' : msg;
+      const watcher = rep.watcher_name
+        ? `<span style="font-size:.8rem;padding:2px 6px;border-radius:4px;background:var(--bg3);color:var(--text2)">${rep.watcher_name}</span>`
+        : `<span style="color:var(--text2);font-size:.8rem">—</span>`;
+      const acc = rep.account_name || `acc#${rep.account_id}`;
+      const dt  = rep.received_at ? rep.received_at.replace('T',' ').slice(0,16) : '';
+      const rowStyle = isUnread ? 'background:rgba(var(--accent-rgb,99,102,241),.07)' : '';
+
+      const tr = document.createElement('tr');
+      tr.id = `inbox-row-${rep.id}`;
+      tr.style.cssText = rowStyle;
+      tr.innerHTML = `
+        <td style="font-weight:${isUnread?'600':'400'}">${name}${username}</td>
+        <td style="max-width:260px;word-break:break-word;font-size:.85rem">${short}</td>
+        <td>${watcher}</td>
+        <td style="font-size:.82rem;color:var(--text2)">${acc}</td>
+        <td style="font-size:.78rem;color:var(--text2);white-space:nowrap">${dt}</td>
+        <td>${isUnread
+          ? `<button class="btn btn-ghost" style="padding:4px 10px;font-size:.75rem" onclick="App.inboxMarkRead(${rep.id})">✓ Đọc</button>`
+          : `<span style="font-size:.75rem;color:var(--text2)">✓</span>`
+        }</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    if(more) more.style.display = this._inboxHasMore ? 'inline-block' : 'none';
+  },
+
+  // ── Mark single as read ────────────────────────────────────────
+  async inboxMarkRead(id){
+    await fetch(`/api/inbox/${id}/read`, {method:'POST'});
+    const row = document.getElementById(`inbox-row-${id}`);
+    if(row){
+      row.style.background = '';
+      const td = row.querySelector('td:last-child');
+      if(td) td.innerHTML = '<span style="font-size:.75rem;color:var(--text2)">✓</span>';
+      const nameCell = row.querySelector('td:first-child');
+      if(nameCell) nameCell.style.fontWeight = '400';
+    }
+    // Refresh badge
+    this.startInboxBadgePolling && clearInterval(this._inboxBadgeTimer);
+    this._inboxBadgeTimer = null;
+    this.startInboxBadgePolling();
+  },
+
+  // ── Mark all as read ──────────────────────────────────────────
+  async inboxReadAll(){
+    await fetch('/api/inbox/read-all', {method:'POST'});
+    App.toast('Đã đánh dấu tất cả đã đọc', 'success');
+    this.inboxLoad(true);
+    const badge = document.getElementById('inbox-badge');
+    if(badge) badge.classList.add('hidden');
+  },
+
+  // ── Load more (pagination) ────────────────────────────────────
+  async inboxLoadMore(){
+    await this.inboxLoad(false);
+  },
+});
+
+// Start badge polling once dashboard is visible
+const _origShowDashboard = App.showDashboard.bind(App);
+App.showDashboard = function(user){
+  _origShowDashboard(user);
+  App.startInboxBadgePolling();
+};

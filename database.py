@@ -284,6 +284,27 @@ async def init_db():
             except Exception:
                 pass  # column already exists
 
+        # ── DM Reply Tracker ────────────────────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS dm_replies (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                watcher_id      INTEGER,
+                account_id      INTEGER NOT NULL,
+                sender_user_id  INTEGER NOT NULL,
+                sender_username TEXT,
+                sender_name     TEXT,
+                message_text    TEXT,
+                is_read         INTEGER DEFAULT 0,
+                received_at     TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        # Index for fast unread-count lookups
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dm_replies_unread "
+            "ON dm_replies(is_read, received_at DESC)"
+        )
+        await db.commit()
+
 
 # ── Account CRUD ──
 
@@ -1310,4 +1331,117 @@ async def get_accounts_with_peerflood() -> list[tuple[int, float]]:
             "SELECT id, peerflood_until FROM accounts WHERE peerflood_until > ?", (now,)
         )).fetchall()
         return [(r[0], r[1]) for r in rows]
+
+
+# ── DM Reply Tracker CRUD ──────────────────────────────────────────────────────
+
+async def add_dm_reply(data: dict) -> int:
+    """
+    Insert a new DM reply into dm_replies.
+    data keys: account_id, sender_user_id, sender_username, sender_name,
+               message_text, watcher_id (optional)
+    Returns the inserted row id.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """INSERT INTO dm_replies
+               (watcher_id, account_id, sender_user_id, sender_username,
+                sender_name, message_text, is_read)
+               VALUES (?, ?, ?, ?, ?, ?, 0)""",
+            (
+                data.get("watcher_id"),
+                data["account_id"],
+                data["sender_user_id"],
+                data.get("sender_username"),
+                data.get("sender_name"),
+                data.get("message_text"),
+            )
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_dm_replies(
+    limit: int = 50,
+    offset: int = 0,
+    is_read: int | None = None,
+    watcher_id: int | None = None,
+) -> list[dict]:
+    """
+    Fetch DM replies with optional filters.
+    is_read: None=all, 0=unread only, 1=read only
+    watcher_id: filter to a specific watcher
+    """
+    conditions = []
+    params: list = []
+    if is_read is not None:
+        conditions.append("is_read = ?")
+        params.append(is_read)
+    if watcher_id is not None:
+        conditions.append("watcher_id = ?")
+        params.append(watcher_id)
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    params += [limit, offset]
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            f"""SELECT r.*,
+                       kw.name AS watcher_name,
+                       a.name  AS account_name
+                FROM dm_replies r
+                LEFT JOIN keyword_watchers kw ON kw.id = r.watcher_id
+                LEFT JOIN accounts         a  ON a.id  = r.account_id
+                {where}
+                ORDER BY r.received_at DESC
+                LIMIT ? OFFSET ?""",
+            params
+        )).fetchall()
+        return [dict(r) for r in rows]
+
+
+async def mark_reply_read(reply_id: int) -> bool:
+    """Mark a single reply as read. Returns True if a row was updated."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE dm_replies SET is_read = 1 WHERE id = ?", (reply_id,)
+        )
+        await db.commit()
+        return True
+
+
+async def mark_all_replies_read() -> int:
+    """Mark all unread replies as read. Returns number of rows updated."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "UPDATE dm_replies SET is_read = 1 WHERE is_read = 0"
+        )
+        await db.commit()
+        return cursor.rowcount
+
+
+async def count_unread_replies() -> int:
+    """Return the count of unread DM replies (for the inbox badge)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        row = await (await db.execute(
+            "SELECT COUNT(*) FROM dm_replies WHERE is_read = 0"
+        )).fetchone()
+        return row[0] if row else 0
+
+
+async def find_watcher_id_for_user(user_id: int) -> int | None:
+    """
+    Return the watcher_id of the most recent successful DM sent to user_id,
+    or None if the user was never DM'd by any watcher.
+    Used by dm_reply_tracker to link a reply back to the originating watcher.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        row = await (await db.execute(
+            """SELECT watcher_id FROM watcher_dm_logs
+               WHERE target_user_id = ? AND status = 'success'
+               ORDER BY sent_at DESC LIMIT 1""",
+            (user_id,)
+        )).fetchone()
+        return row[0] if row else None
 
