@@ -45,9 +45,49 @@ async def verify_api_key(key: str = Security(api_key_header)):
         raise HTTPException(status_code=403, detail="Unauthorized")
 
 
+_startup_task = None
+
+
+async def connect_accounts_background():
+    """Connect all Telegram clients in the background to avoid blocking server startup."""
+    try:
+        logger.info("Connecting Telegram clients in the background...")
+        accounts = await db.get_all_accounts()
+        logged_count = 0
+        for acc in accounts:
+            try:
+                proxy_url = acc.get("proxy_url")  # Load per-account proxy from DB
+                await tg.create_client(acc["id"], int(acc["api_id"]), acc["api_hash"], acc["session_name"], proxy_url=proxy_url)
+                authorized = await asyncio.wait_for(tg.start_client(acc["id"]), timeout=30)
+                if authorized:
+                    logged_count += 1
+                    await db.update_account_login_status(acc["id"], True)
+                else:
+                    await db.update_account_login_status(acc["id"], False)
+            except asyncio.TimeoutError:
+                logger.warning(f"Account {acc['id']} ({acc['name']}): connect timed out after 30s")
+            except Exception as e:
+                logger.warning(f"Account {acc['id']} ({acc['name']}): connect failed: {e}")
+
+        logger.info(f"Loaded {len(accounts)} accounts, {logged_count} already logged in")
+
+        # Start keyword watchers
+        await kw.start_all_watchers()
+
+        # Start reaction watchers
+        await rw.start_all()
+
+        # Start DM reply tracker (inbox)
+        await drt.start_reply_tracker()
+        logger.info("All background engines started successfully.")
+    except Exception as e:
+        logger.error(f"Error in background account startup: {e}", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
+    global _startup_task
     # ── Startup ──
     logger.info("=" * 50)
     logger.info("TG Scheduler starting up...")
@@ -56,42 +96,15 @@ async def lifespan(app: FastAPI):
     await db.init_db()
     logger.info("Database initialized")
 
-    # Load all accounts and connect their clients
-    accounts = await db.get_all_accounts()
-    logged_count = 0
-    for acc in accounts:
-        try:
-            proxy_url = acc.get("proxy_url")  # Load per-account proxy from DB
-            await tg.create_client(acc["id"], int(acc["api_id"]), acc["api_hash"], acc["session_name"], proxy_url=proxy_url)
-            authorized = await asyncio.wait_for(tg.start_client(acc["id"]), timeout=30)
-            if authorized:
-                logged_count += 1
-                await db.update_account_login_status(acc["id"], True)
-            else:
-                await db.update_account_login_status(acc["id"], False)
-        except asyncio.TimeoutError:
-            logger.warning(f"Account {acc['id']} ({acc['name']}): connect timed out after 30s")
-        except Exception as e:
-            logger.warning(f"Account {acc['id']} ({acc['name']}): connect failed: {e}")
-
-    logger.info(f"Loaded {len(accounts)} accounts, {logged_count} already logged in")
-
     # Start scheduler
     sch.start_scheduler()
-    if logged_count > 0:
-        await sch.load_all_jobs()
+    await sch.load_all_jobs()
 
     # Start message queue worker
     mq.start_worker()
 
-    # Start keyword watchers
-    await kw.start_all_watchers()
-
-    # Start reaction watchers
-    await rw.start_all()
-
-    # Start DM reply tracker (inbox)
-    await drt.start_reply_tracker()
+    # Start background task to connect accounts and load watchers
+    _startup_task = asyncio.create_task(connect_accounts_background())
 
     logger.info("=" * 50)
     host = os.getenv("HOST", "127.0.0.1")
@@ -103,6 +116,8 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──
     logger.info("Shutting down...")
+    if _startup_task and not _startup_task.done():
+        _startup_task.cancel()
     mq.stop_worker()
     sch.stop_scheduler()
     await rw.stop_all()

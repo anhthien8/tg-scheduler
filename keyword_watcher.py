@@ -181,6 +181,53 @@ MIN_DELAY = 2.0
 MAX_DELAY = 5.0
 
 
+async def _get_group_admin_ids(client, group_id: int) -> set:
+    """
+    Fetch and cache the set of admin user IDs for a group.
+    Bots and anonymous admins are included so they are also excluded from DMs.
+    Cache is valid for _ADMIN_CACHE_TTL seconds.
+    """
+    import time
+    now = time.monotonic()
+    cached = _admin_cache.get(group_id)
+    if cached:
+        ids, ts = cached
+        if now - ts < _ADMIN_CACHE_TTL:
+            return ids
+
+    try:
+        from telethon.tl.functions.channels import GetParticipantsRequest
+        from telethon.tl.types import (
+            ChannelParticipantsAdmins,
+            ChannelParticipantAdmin,
+            ChannelParticipantCreator,
+        )
+        # Resolve input peer for the group
+        input_chat = await client.get_input_entity(group_id)
+        result = await client(GetParticipantsRequest(
+            channel=input_chat,
+            filter=ChannelParticipantsAdmins(),
+            offset=0,
+            limit=200,
+            hash=0,
+        ))
+        admin_ids = set()
+        for p in result.participants:
+            if isinstance(p, (ChannelParticipantAdmin, ChannelParticipantCreator)):
+                admin_ids.add(p.user_id)
+        # Also add any bots from the user list
+        for u in result.users:
+            if getattr(u, "bot", False):
+                admin_ids.add(u.id)
+        _admin_cache[group_id] = (admin_ids, now)
+        logger.info(f"[AdminCache] Group {group_id}: cached {len(admin_ids)} admin/bot IDs")
+        return admin_ids
+    except Exception as e:
+        logger.warning(f"[AdminCache] Could not fetch admins for group {group_id}: {e}")
+        # Return cached (even if stale) or empty set
+        return _admin_cache.get(group_id, (set(), 0))[0]
+
+
 # ── Sending ──────────────────────────────────────────────────────────────────
 
 async def _send_dm_with_fallback(
