@@ -14,3 +14,6 @@ venv/
 
 # Runtime / temp
 start_server.bat
+
+# Logs
+*.log

@@ -5,10 +5,11 @@ import os
 import uuid
 import shutil
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
 
 router = APIRouter(prefix="/api", tags=["messages"])
 
-MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "media")
+MEDIA_DIR = os.getenv("MEDIA_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "media"))
 os.makedirs(MEDIA_DIR, exist_ok=True)
 
 # HIGH-02: security limits for file uploads
@@ -57,4 +58,17 @@ async def upload_file(file: UploadFile = File(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/media/{filename}")
+async def serve_media(filename: str):
+    """Serve an uploaded media file for preview."""
+    # Security: prevent path traversal
+    safe_name = os.path.basename(filename)
+    file_path = os.path.join(MEDIA_DIR, safe_name)
+
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(file_path)
 

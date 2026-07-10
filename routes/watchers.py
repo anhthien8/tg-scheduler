@@ -33,7 +33,7 @@ class WatcherPayload(BaseModel):
 
 @router.get("")
 async def list_watchers():
-    return await db.get_all_watchers()
+    return await db.get_all_watchers_by_platform("telegram")
 
 
 @router.post("")
@@ -171,25 +171,66 @@ async def get_watcher(watcher_id: int):
 
 @router.put("/{watcher_id}")
 async def update_watcher(watcher_id: int, payload: WatcherPayload):
+    w = await db.get_watcher(watcher_id)
+    if not w:
+        raise HTTPException(status_code=404, detail="Watcher not found")
+
     ok = await db.update_watcher(watcher_id, payload.model_dump())
     if not ok:
         raise HTTPException(status_code=404, detail="Watcher not found")
-    await kw.reload_watcher(watcher_id)
+
+    platform = w.get("platform", "telegram")
+    if platform == "telegram":
+        await kw.reload_watcher(watcher_id)
+    elif platform == "discord":
+        try:
+            import discord_watcher as dw
+            await dw.reload_watcher(watcher_id)
+        except Exception as e:
+            logger.warning(f"Could not reload Discord watcher {watcher_id}: {e}")
+
     return {"message": "Watcher updated"}
 
 
 @router.post("/{watcher_id}/toggle")
 async def toggle_watcher(watcher_id: int):
+    w = await db.get_watcher(watcher_id)
+    if not w:
+        raise HTTPException(status_code=404, detail="Watcher not found")
+
     result = await db.toggle_watcher(watcher_id)
     if not result:
         raise HTTPException(status_code=404, detail="Watcher not found")
-    await kw.reload_watcher(watcher_id)
+
+    platform = w.get("platform", "telegram")
+    if platform == "telegram":
+        await kw.reload_watcher(watcher_id)
+    elif platform == "discord":
+        try:
+            import discord_watcher as dw
+            await dw.reload_watcher(watcher_id)
+        except Exception as e:
+            logger.warning(f"Could not reload Discord watcher {watcher_id}: {e}")
+
     return result
 
 
 @router.delete("/{watcher_id}")
 async def delete_watcher(watcher_id: int):
-    kw.remove_watcher(watcher_id)
+    w = await db.get_watcher(watcher_id)
+    if not w:
+        raise HTTPException(status_code=404, detail="Watcher not found")
+
+    platform = w.get("platform", "telegram")
+    if platform == "telegram":
+        kw.remove_watcher(watcher_id)
+    elif platform == "discord":
+        try:
+            import discord_watcher as dw
+            dw.remove_watcher(watcher_id)
+        except Exception as e:
+            logger.warning(f"Could not remove Discord watcher {watcher_id}: {e}")
+
     ok = await db.delete_watcher(watcher_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Watcher not found")

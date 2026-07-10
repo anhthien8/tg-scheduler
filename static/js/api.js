@@ -151,3 +151,77 @@ const ReactionsAPI = {
     return apiGet(`/api/reactions/logs?${qs}`);
   },
 };
+
+
+// ── Discord API ──────────────────────────────────────────────────────────────
+const DiscordAPI = {
+  // Bots
+  getBots:          ()           => apiGet('/api/discord/bots'),
+  addBot:           (data)       => apiPost('/api/discord/bots', data),
+  updateBot:        (id, data)   => apiPut(`/api/discord/bots/${id}`, data),
+  deleteBot:        (id)         => apiDelete(`/api/discord/bots/${id}`),
+  connectBot:       (id)         => apiPost(`/api/discord/bots/${id}/connect`, {}),
+  disconnectBot:    (id)         => apiPost(`/api/discord/bots/${id}/disconnect`, {}),
+  getBotGuilds:     (id)         => apiGet(`/api/discord/bots/${id}/guilds`),
+  // Watchers
+  getWatchers:      ()           => apiGet('/api/discord/watchers'),
+  createWatcher:    (data)       => apiPost('/api/discord/watchers', data),
+  getWatcherLogs:   (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiGet('/api/discord/watchers/logs' + (q ? '?' + q : ''));
+  },
+  // Reactions
+  getReactions:     ()           => apiGet('/api/discord/reactions'),
+  // Stats
+  getStats:         ()           => apiGet('/api/discord/stats'),
+};
+
+
+// ── Members / Scraping / DM Campaign API ─────────────────────────────────────
+const MembersAPI = {
+  // Scraping
+  startScrape:       (data)       => apiPost('/api/members/scrape', data),
+  getScrapeJobs:     ()           => apiGet('/api/members/scrape-jobs'),
+  getScrapeMembers:  (jobId, limit = 500, offset = 0) =>
+    apiGet(`/api/members/scrape-jobs/${jobId}?limit=${limit}&offset=${offset}`),
+  deleteScrapeJob:   (jobId)      => apiDelete(`/api/members/scrape-jobs/${jobId}`),
+
+  // DM Campaigns
+  createCampaign:    (data)       => apiPost('/api/members/campaigns', data),
+  getCampaigns:      ()           => apiGet('/api/members/campaigns'),
+  getCampaign:       (id)         => apiGet(`/api/members/campaigns/${id}`),
+  startCampaign:     (id)         => apiPost(`/api/members/campaigns/${id}/start`, {}),
+  stopCampaign:      (id)         => apiPost(`/api/members/campaigns/${id}/stop`, {}),
+  deleteCampaign:    (id)         => apiDelete(`/api/members/campaigns/${id}`),
+  getCampaignLogs:   (id, limit = 200) =>
+    apiGet(`/api/members/campaigns/${id}/logs?limit=${limit}`),
+};
+
+
+// ── Analytics & Growth Features API ──────────────────────────────────────────
+const AnalyticsAPI = {
+  overview:            ()           => apiGet('/api/analytics/overview'),
+  dailyStats:          (days = 30)  => apiGet(`/api/analytics/daily-stats?days=${days}`),
+  accountHealth:       ()           => apiGet('/api/analytics/account-health'),
+  campaignPerformance: ()           => apiGet('/api/analytics/campaign-performance'),
+  exportMembers:       (jobId)      => `/api/export/members/${jobId}`,
+  exportCampaignLogs:  (campId)     => `/api/export/campaign-logs/${campId}`,
+  exportContacts:      ()           => '/api/export/contacts',
+};
+
+const TemplatesAPI = {
+  getAll:   ()           => apiGet('/api/templates'),
+  create:   (data)       => apiPost('/api/templates', data),
+  update:   (id, data)   => apiPut(`/api/templates/${id}`, data),
+  remove:   (id)         => apiDelete(`/api/templates/${id}`),
+};
+
+const AutoReplyAPI = {
+  getRules:   ()           => apiGet('/api/auto-reply/rules'),
+  createRule: (data)       => apiPost('/api/auto-reply/rules', data),
+  updateRule: (id, data)   => apiPut(`/api/auto-reply/rules/${id}`, data),
+  deleteRule: (id)         => apiDelete(`/api/auto-reply/rules/${id}`),
+  toggleRule: (id)         => apiPost(`/api/auto-reply/rules/${id}/toggle`, {}),
+  getLogs:    (ruleId, limit = 100) => apiGet(`/api/auto-reply/logs/${ruleId}?limit=${limit}`),
+};
+

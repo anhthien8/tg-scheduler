@@ -32,6 +32,51 @@ def normalize_text(t: str) -> str:
     t = re.sub(r'\s+', ' ', t.lower())
     return t.strip()
 
+
+def match_keyword_advanced(text: str, rule: str) -> bool:
+    """
+    Match text against a rule string.
+    Rule formats supported:
+    1. Regex: if starting with 're:', compile and check search.
+       e.g., 're:\b(solana|sol)\b'
+    2. Logic expression: parses simple operators (AND, OR, NOT).
+       All checks are case-insensitive.
+       e.g., 'solana AND gem NOT bot'
+    3. Plain substring: fallback, standard check.
+    """
+    text_lower = text.lower()
+    rule_trimmed = rule.strip()
+    
+    # 1. Regex Match
+    if rule_trimmed.lower().startswith("re:"):
+        pattern = rule_trimmed[3:].strip()
+        try:
+            return bool(re.search(pattern, text, re.IGNORECASE))
+        except Exception as e:
+            logger.warning(f"Invalid regex pattern '{pattern}' in watcher: {e}")
+            return False
+            
+    # 2. Logic Operators Match (AND, OR, NOT)
+    # Split by OR
+    or_clauses = re.split(r'\s+or\s+', rule_trimmed, flags=re.IGNORECASE)
+    for clause in or_clauses:
+        # Split by NOT
+        not_parts = re.split(r'\s+not\s+', clause, flags=re.IGNORECASE)
+        positive_clause = not_parts[0]
+        negative_clauses = not_parts[1:]
+        
+        # Check positive part (AND split)
+        and_parts = re.split(r'\s+and\s+', positive_clause, flags=re.IGNORECASE)
+        pos_match = all(part.strip().lower() in text_lower for part in and_parts if part.strip())
+        
+        # Check negative parts
+        neg_match = not any(neg.strip().lower() in text_lower for neg in negative_clauses if neg.strip())
+        
+        if pos_match and neg_match:
+            return True
+            
+    return False
+
 async def _resolve_peer_for_client(client, user_id: int, username: str | None, event=None, input_peer=None):
     """
     Resolve a sendable peer for the given Telegram client.
@@ -501,12 +546,12 @@ async def _do_send_dm_with_fallback(
             await db.add_to_dm_blacklist(user_id, username, reason="user_deactivated")
             break  # Stop immediately
 
-        except tg_errors.PeerInvalidError:
-            # PeerInvalidError = USER-level: peer ID/access_hash is invalid.
+        except tg_errors.PeerIdInvalidError:
+            # PeerIdInvalidError = USER-level: peer ID/access_hash is invalid.
             # No other account can fix this — break immediately to save resources.
-            last_error = _translate_dm_error("PeerInvalidError: peer invalid")
+            last_error = _translate_dm_error("PeerIdInvalidError: peer invalid")
             logger.warning(
-                f"[Watcher {watcher_id}] ✗ PeerInvalidError for {user_id} (user-level) — stopping all attempts"
+                f"[Watcher {watcher_id}] ✗ PeerIdInvalidError for {user_id} (user-level) — stopping all attempts"
             )
             await db.add_watcher_dm_log(
                 watcher_id, acc_id, user_id, username,
@@ -877,6 +922,8 @@ def _make_handler(watcher: dict):
 
 def _register_watcher(watcher: dict):
     """Register Telethon handlers for all sender accounts of a watcher."""
+    if watcher.get("platform", "telegram") != "telegram":
+        return
     watcher_id = watcher["id"]
     account_ids = watcher.get("sender_account_ids", [])
     group_ids = watcher.get("group_ids", [])

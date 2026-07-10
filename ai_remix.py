@@ -189,3 +189,28 @@ async def remix_message(original_text, provider, api_keys, sender_name=None):
         _mark_key_failed(provider, idx)
         logger.warning("[AI Remix] %s key[%d] error: %s - using original", provider, idx, e)
         return original_text
+
+
+async def generate_response(prompt: str, provider: str, api_keys: list[str]) -> str | None:
+    """
+    Generate a response to a prompt using the configured LLM provider and key rotation.
+    Used for AI auto-reply rules.
+    """
+    if not api_keys:
+        return None
+    idx, key = _next_key(api_keys, provider)
+    try:
+        return await _try_call(provider, key, prompt)
+    except Exception as e:
+        logger.warning("[AI AutoReply] %s key[%d] failed: %s", provider, idx, e)
+        _mark_key_failed(provider, idx)
+        if len(api_keys) > 1:
+            try:
+                idx2, key2 = _next_key(api_keys, provider)
+                if idx2 != idx:
+                    logger.info("[AI AutoReply] Retrying with key[%d]...", idx2)
+                    return await _try_call(provider, key2, prompt)
+            except Exception as e2:
+                logger.warning("[AI AutoReply] Retry failed: %s", e2)
+        return None
+

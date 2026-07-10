@@ -24,12 +24,16 @@ _DEFAULT_API_HASH = "b18441a1ff607e10a989891a5462e627"
 async def list_accounts():
     """List all Telegram accounts."""
     accounts = await db.get_all_accounts()
-    # Add login status from live client
-    for acc in accounts:
+    
+    import asyncio
+    
+    async def get_acc_status(acc):
         acc["is_logged_in"] = await tg.is_authorized(acc["id"])
         me = await tg.get_me(acc["id"])
         if me:
             acc["user_info"] = me
+
+    await asyncio.gather(*(get_acc_status(acc) for acc in accounts))
     return {"accounts": accounts}
 
 

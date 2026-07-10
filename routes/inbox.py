@@ -20,12 +20,14 @@ async def list_inbox(
     offset: int = 0,
     is_read: Optional[int] = None,
     watcher_id: Optional[int] = None,
+    account_id: Optional[int] = None,
 ):
     """
     Return DM replies.
     Query params:
       - is_read: 0=unread only, 1=read only, omit=all
       - watcher_id: filter to a specific watcher
+      - account_id: filter to a specific account
       - limit / offset: pagination
     """
     replies = await db.get_dm_replies(
@@ -33,6 +35,7 @@ async def list_inbox(
         offset=offset,
         is_read=is_read,
         watcher_id=watcher_id,
+        account_id=account_id,
     )
     return {"replies": replies, "count": len(replies)}
 

@@ -7,7 +7,7 @@ import os
 import json
 from datetime import datetime
 
-DB_DIR = os.path.join(os.path.dirname(__file__), "data")
+DB_DIR = os.getenv("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 DB_PATH = os.path.join(DB_DIR, "scheduler.db")
 
 
@@ -304,6 +304,156 @@ async def init_db():
             "ON dm_replies(is_read, received_at DESC)"
         )
         await db.commit()
+
+        # ── Discord Bots ──────────────────────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS discord_bots (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                name          TEXT NOT NULL,
+                bot_token     TEXT NOT NULL,
+                bot_user_id   TEXT,
+                bot_username  TEXT,
+                guild_count   INTEGER DEFAULT 0,
+                is_connected  INTEGER DEFAULT 0,
+                created_at    TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        # ── Multi-platform migrations ─────────────────────────────────────
+        _platform_migrations = [
+            ("keyword_watchers", "platform", "TEXT DEFAULT 'telegram'"),
+            ("watcher_dm_logs",  "platform", "TEXT DEFAULT 'telegram'"),
+            ("reaction_targets", "platform", "TEXT DEFAULT 'telegram'"),
+            ("reaction_logs",    "platform", "TEXT DEFAULT 'telegram'"),
+            ("dm_replies",       "platform", "TEXT DEFAULT 'telegram'"),
+        ]
+        for _tbl, _col, _coldef in _platform_migrations:
+            try:
+                await db.execute(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_coldef}")
+            except Exception:
+                pass  # column already exists
+        await db.commit()
+
+        # ── Member Scraping ───────────────────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS scraped_members (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                scrape_job_id   TEXT NOT NULL,
+                account_id      INTEGER NOT NULL,
+                group_id        INTEGER NOT NULL,
+                group_title     TEXT,
+                user_id         INTEGER NOT NULL,
+                username        TEXT,
+                first_name      TEXT,
+                last_name       TEXT,
+                phone           TEXT,
+                is_bot          INTEGER DEFAULT 0,
+                is_premium      INTEGER DEFAULT 0,
+                status          TEXT DEFAULT 'active',
+                last_seen       TEXT,
+                scraped_at      TEXT DEFAULT (datetime('now')),
+                UNIQUE(scrape_job_id, user_id)
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scraped_members_job "
+            "ON scraped_members(scrape_job_id)"
+        )
+
+        # ── DM Campaigns ──────────────────────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS dm_campaigns (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL,
+                scrape_job_id   TEXT NOT NULL,
+                sender_account_ids TEXT NOT NULL DEFAULT '[]',
+                messages        TEXT NOT NULL DEFAULT '[]',
+                delay_min       INTEGER DEFAULT 30,
+                delay_max       INTEGER DEFAULT 90,
+                daily_limit     INTEGER DEFAULT 30,
+                use_ai_remix    INTEGER DEFAULT 0,
+                status          TEXT DEFAULT 'draft',
+                total_targets   INTEGER DEFAULT 0,
+                sent_count      INTEGER DEFAULT 0,
+                failed_count    INTEGER DEFAULT 0,
+                skipped_count   INTEGER DEFAULT 0,
+                created_at      TEXT DEFAULT (datetime('now')),
+                updated_at      TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        # ── DM Campaign Logs ──────────────────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS dm_campaign_logs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id     INTEGER NOT NULL,
+                account_id      INTEGER,
+                target_user_id  INTEGER NOT NULL,
+                target_username TEXT,
+                status          TEXT NOT NULL CHECK(status IN ('success','failed','skipped')),
+                error_message   TEXT,
+                sent_at         TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (campaign_id) REFERENCES dm_campaigns(id) ON DELETE CASCADE
+            )
+        """)
+
+        # ── DM Templates ──────────────────────────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS dm_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                category TEXT DEFAULT 'general',
+                messages TEXT NOT NULL DEFAULT '[]',
+                is_default INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        # ── Auto-Reply Rules ──────────────────────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS auto_reply_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                trigger_type TEXT DEFAULT 'keyword',
+                trigger_keywords TEXT DEFAULT '[]',
+                reply_messages TEXT DEFAULT '[]',
+                account_ids TEXT DEFAULT '[]',
+                use_ai INTEGER DEFAULT 0,
+                ai_system_prompt TEXT,
+                max_replies_per_user INTEGER DEFAULT 3,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        # ── Auto-Reply Logs ───────────────────────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS auto_reply_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rule_id INTEGER,
+                account_id INTEGER,
+                user_id INTEGER,
+                username TEXT,
+                trigger_text TEXT,
+                reply_text TEXT,
+                status TEXT DEFAULT 'success',
+                sent_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        # ── Performance Indexes ──────────────────────────────────────────────
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_campaign ON dm_campaign_logs(campaign_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_watcher_dm_logs_lookup ON watcher_dm_logs(watcher_id, target_user_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_watcher_dm_logs_acc ON watcher_dm_logs(account_id, status)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_acc ON dm_campaign_logs(account_id, status)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_replies_sender ON dm_replies(sender_user_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_target ON dm_campaign_logs(target_user_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_auto_reply_logs_lookup ON auto_reply_logs(rule_id, user_id)")
+
+        await db.commit()
+
+    # Seed default templates after init
+    await seed_default_templates()
 
 
 # ── Account CRUD ──
@@ -649,8 +799,8 @@ async def create_watcher(data: dict) -> int:
         import json as _json
         cursor = await db.execute(
             """INSERT INTO keyword_watchers
-               (name, sender_account_ids, keywords, group_ids, cooldown_hours, dm_once, excluded_usernames, is_active)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (name, sender_account_ids, keywords, group_ids, cooldown_hours, dm_once, excluded_usernames, is_active, platform)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data["name"],
                 _json.dumps(data.get("sender_account_ids", [])),
@@ -660,6 +810,7 @@ async def create_watcher(data: dict) -> int:
                 1 if data.get("dm_once") else 0,
                 _json.dumps([u.lstrip("@").lower() for u in data.get("excluded_usernames", [])]),
                 data.get("is_active", 1),
+                data.get("platform", "telegram"),
             )
         )
         watcher_id = cursor.lastrowid
@@ -851,16 +1002,17 @@ async def add_watcher_dm_log(
     target_user_id: int, target_username: str | None,
     group_id: int | None, group_title: str | None,
     matched_keyword: str | None,
-    status: str, error_message: str | None = None
+    status: str, error_message: str | None = None,
+    platform: str = "telegram",
 ):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """INSERT INTO watcher_dm_logs
                (watcher_id, account_id, target_user_id, target_username,
-                group_id, group_title, matched_keyword, status, error_message)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                group_id, group_title, matched_keyword, status, error_message, platform)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (watcher_id, account_id, target_user_id, target_username,
-             group_id, group_title, matched_keyword, status, error_message)
+             group_id, group_title, matched_keyword, status, error_message, platform)
         )
         await db.commit()
 
@@ -1275,13 +1427,14 @@ async def add_reaction_log(
     reaction: str,
     status: str = "success",
     error_msg: str | None = None,
+    platform: str = "telegram",
 ) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """INSERT INTO reaction_logs
-               (target_id, account_id, channel_id, msg_id, reaction, status, error_msg)
-               VALUES (?,?,?,?,?,?,?)""",
-            (target_id, account_id, channel_id, msg_id, reaction, status, error_msg),
+               (target_id, account_id, channel_id, msg_id, reaction, status, error_msg, platform)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (target_id, account_id, channel_id, msg_id, reaction, status, error_msg, platform),
         )
         await db.commit()
 
@@ -1339,15 +1492,15 @@ async def add_dm_reply(data: dict) -> int:
     """
     Insert a new DM reply into dm_replies.
     data keys: account_id, sender_user_id, sender_username, sender_name,
-               message_text, watcher_id (optional)
+               message_text, watcher_id (optional), platform (optional)
     Returns the inserted row id.
     """
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """INSERT INTO dm_replies
                (watcher_id, account_id, sender_user_id, sender_username,
-                sender_name, message_text, is_read)
-               VALUES (?, ?, ?, ?, ?, ?, 0)""",
+                sender_name, message_text, is_read, platform)
+               VALUES (?, ?, ?, ?, ?, ?, 0, ?)""",
             (
                 data.get("watcher_id"),
                 data["account_id"],
@@ -1355,6 +1508,7 @@ async def add_dm_reply(data: dict) -> int:
                 data.get("sender_username"),
                 data.get("sender_name"),
                 data.get("message_text"),
+                data.get("platform", "telegram"),
             )
         )
         await db.commit()
@@ -1366,20 +1520,29 @@ async def get_dm_replies(
     offset: int = 0,
     is_read: int | None = None,
     watcher_id: int | None = None,
+    account_id: int | None = None,
 ) -> list[dict]:
     """
     Fetch DM replies with optional filters.
     is_read: None=all, 0=unread only, 1=read only
     watcher_id: filter to a specific watcher
+    account_id: filter to a specific account
     """
     conditions = []
     params: list = []
+    
+    # Exclude bots (username ending in 'bot' or similar)
+    conditions.append("(r.sender_username IS NULL OR r.sender_username NOT LIKE '%bot')")
+    
     if is_read is not None:
-        conditions.append("is_read = ?")
+        conditions.append("r.is_read = ?")
         params.append(is_read)
     if watcher_id is not None:
-        conditions.append("watcher_id = ?")
+        conditions.append("r.watcher_id = ?")
         params.append(watcher_id)
+    if account_id is not None:
+        conditions.append("r.account_id = ?")
+        params.append(account_id)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     params += [limit, offset]
@@ -1415,17 +1578,17 @@ async def mark_all_replies_read() -> int:
     """Mark all unread replies as read. Returns number of rows updated."""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "UPDATE dm_replies SET is_read = 1 WHERE is_read = 0"
+            "UPDATE dm_replies SET is_read = 1 WHERE is_read = 0 AND (sender_username IS NULL OR sender_username NOT LIKE '%bot')"
         )
         await db.commit()
         return cursor.rowcount
 
 
 async def count_unread_replies() -> int:
-    """Return the count of unread DM replies (for the inbox badge)."""
+    """Return the count of unread DM replies (for the inbox badge) excluding bots."""
     async with aiosqlite.connect(DB_PATH) as db:
         row = await (await db.execute(
-            "SELECT COUNT(*) FROM dm_replies WHERE is_read = 0"
+            "SELECT COUNT(*) FROM dm_replies WHERE is_read = 0 AND (sender_username IS NULL OR sender_username NOT LIKE '%bot')"
         )).fetchone()
         return row[0] if row else 0
 
@@ -1445,3 +1608,740 @@ async def find_watcher_id_for_user(user_id: int) -> int | None:
         )).fetchone()
         return row[0] if row else None
 
+
+# ── Discord Bot CRUD ─────────────────────────────────────────────────────────
+
+async def create_discord_bot(data: dict) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """INSERT INTO discord_bots (name, bot_token)
+               VALUES (?, ?)""",
+            (data["name"], data["bot_token"])
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_all_discord_bots() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            "SELECT * FROM discord_bots ORDER BY id"
+        )).fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_discord_bot(bot_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute(
+            "SELECT * FROM discord_bots WHERE id = ?", (bot_id,)
+        )).fetchone()
+        return dict(row) if row else None
+
+
+async def update_discord_bot(bot_id: int, data: dict) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """UPDATE discord_bots SET name = ?, bot_token = ?
+               WHERE id = ?""",
+            (data["name"], data["bot_token"], bot_id)
+        )
+        await db.commit()
+        return True
+
+
+async def update_discord_bot_status(bot_id: int, connected: bool,
+                                     user_id: str = None, username: str = None,
+                                     guild_count: int = 0):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """UPDATE discord_bots
+               SET is_connected = ?, bot_user_id = ?, bot_username = ?, guild_count = ?
+               WHERE id = ?""",
+            (1 if connected else 0, user_id, username, guild_count, bot_id)
+        )
+        await db.commit()
+
+
+async def delete_discord_bot(bot_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM discord_bots WHERE id = ?", (bot_id,))
+        await db.commit()
+        return True
+
+
+# ── Platform-filtered queries ────────────────────────────────────────────────
+
+async def get_all_watchers_by_platform(platform: str = "telegram") -> list[dict]:
+    """Return watchers filtered by platform."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            "SELECT * FROM keyword_watchers WHERE platform = ? ORDER BY id",
+            (platform,)
+        )).fetchall()
+        return [await _load_watcher_row(db, r) for r in rows]
+
+
+async def get_reaction_targets_by_platform(platform: str = "telegram") -> list[dict]:
+    """Return reaction targets filtered by platform."""
+    import json
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            "SELECT * FROM reaction_targets WHERE platform = ? ORDER BY id",
+            (platform,)
+        )).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["account_ids"] = json.loads(d["account_ids"] or "[]")
+            d["reactions"]   = json.loads(d["reactions"]   or '["👍"]')
+            result.append(d)
+        return result
+
+
+async def get_dm_logs_by_platform(platform: str = "telegram",
+                                   limit: int = 50, offset: int = 0,
+                                   watcher_id: int = None) -> list[dict]:
+    """Return DM logs filtered by platform."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        sql = "SELECT * FROM watcher_dm_logs WHERE platform = ?"
+        params = [platform]
+        if watcher_id:
+            sql += " AND watcher_id = ?"
+            params.append(watcher_id)
+        sql += " ORDER BY sent_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        rows = await (await db.execute(sql, params)).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ── Member Scraping ──
+
+async def save_scraped_members(scrape_job_id: str, account_id: int, group_id: int,
+                                group_title: str, members: list[dict]):
+    """Save scraped members to DB (INSERT OR IGNORE for dedup)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        for m in members:
+            await db.execute("""
+                INSERT OR IGNORE INTO scraped_members
+                (scrape_job_id, account_id, group_id, group_title, user_id,
+                 username, first_name, last_name, phone, is_bot, is_premium, status, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                scrape_job_id, account_id, group_id, group_title,
+                m["user_id"], m.get("username"), m.get("first_name"),
+                m.get("last_name"), m.get("phone"),
+                1 if m.get("is_bot") else 0,
+                1 if m.get("is_premium") else 0,
+                m.get("status", "active"),
+                m.get("last_seen")
+            ))
+        await db.commit()
+
+
+async def get_scrape_jobs() -> list:
+    """Get all distinct scrape jobs with counts."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT scrape_job_id, account_id, group_id, group_title,
+                   COUNT(*) as member_count,
+                   MIN(scraped_at) as scraped_at
+            FROM scraped_members
+            GROUP BY scrape_job_id
+            ORDER BY scraped_at DESC
+        """)
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+async def get_scraped_members(scrape_job_id: str, limit: int = 500, offset: int = 0) -> list:
+    """Get members for a specific scrape job."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT * FROM scraped_members
+            WHERE scrape_job_id = ?
+            ORDER BY username ASC
+            LIMIT ? OFFSET ?
+        """, (scrape_job_id, limit, offset))
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+async def delete_scrape_job(scrape_job_id: str):
+    """Delete all members for a scrape job."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM scraped_members WHERE scrape_job_id = ?", (scrape_job_id,))
+        await db.commit()
+
+
+# ── DM Campaigns ──
+
+async def create_dm_campaign(data: dict) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            INSERT INTO dm_campaigns
+            (name, scrape_job_id, sender_account_ids, messages,
+             delay_min, delay_max, daily_limit, use_ai_remix, total_targets, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data["name"], data["scrape_job_id"],
+            json.dumps(data.get("sender_account_ids", [])),
+            json.dumps(data.get("messages", [])),
+            data.get("delay_min", 30), data.get("delay_max", 90),
+            data.get("daily_limit", 30),
+            1 if data.get("use_ai_remix") else 0,
+            data.get("total_targets", 0),
+            "draft"
+        ))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_all_dm_campaigns() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT * FROM dm_campaigns ORDER BY created_at DESC
+        """)
+        rows = [dict(row) for row in await cursor.fetchall()]
+        for r in rows:
+            r["sender_account_ids"] = json.loads(r.get("sender_account_ids", "[]"))
+            r["messages"] = json.loads(r.get("messages", "[]"))
+        return rows
+
+
+async def get_dm_campaign(campaign_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM dm_campaigns WHERE id = ?", (campaign_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        r = dict(row)
+        r["sender_account_ids"] = json.loads(r.get("sender_account_ids", "[]"))
+        r["messages"] = json.loads(r.get("messages", "[]"))
+        return r
+
+
+async def update_dm_campaign_status(campaign_id: int, status: str,
+                                     sent: int = None, failed: int = None, skipped: int = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        updates = ["status = ?", "updated_at = datetime('now')"]
+        params = [status]
+        if sent is not None:
+            updates.append("sent_count = ?")
+            params.append(sent)
+        if failed is not None:
+            updates.append("failed_count = ?")
+            params.append(failed)
+        if skipped is not None:
+            updates.append("skipped_count = ?")
+            params.append(skipped)
+        params.append(campaign_id)
+        await db.execute(
+            f"UPDATE dm_campaigns SET {', '.join(updates)} WHERE id = ?",
+            params
+        )
+        await db.commit()
+
+
+async def delete_dm_campaign(campaign_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute("DELETE FROM dm_campaigns WHERE id = ?", (campaign_id,))
+        await db.commit()
+
+
+async def add_dm_campaign_log(campaign_id: int, account_id: int,
+                               target_user_id: int, target_username: str,
+                               status: str, error_message: str = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO dm_campaign_logs
+            (campaign_id, account_id, target_user_id, target_username, status, error_message)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (campaign_id, account_id, target_user_id, target_username, status, error_message))
+        await db.commit()
+
+
+async def get_dm_campaign_logs(campaign_id: int, limit: int = 200) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT * FROM dm_campaign_logs
+            WHERE campaign_id = ?
+            ORDER BY sent_at DESC
+            LIMIT ?
+        """, (campaign_id, limit))
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+# ============================================================
+# CSV EXPORT HELPERS
+# ============================================================
+
+async def get_all_scraped_contacts() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT username, first_name, last_name, user_id, phone,
+                   is_premium, status, group_title, scraped_at
+            FROM scraped_members
+            GROUP BY user_id
+            ORDER BY scraped_at DESC
+        """)
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+# ============================================================
+# ANALYTICS
+# ============================================================
+
+async def get_analytics_overview() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+
+        c = await db.execute("SELECT COUNT(*) as cnt FROM dm_campaign_logs WHERE status='success'")
+        campaign_sent = (await c.fetchone())["cnt"]
+        c = await db.execute("SELECT COUNT(*) as cnt FROM watcher_dm_logs WHERE status='success'")
+        watcher_sent = (await c.fetchone())["cnt"]
+        total_dm_sent = campaign_sent + watcher_sent
+
+        c = await db.execute("SELECT COUNT(*) as cnt FROM dm_campaign_logs WHERE status='failed'")
+        campaign_failed = (await c.fetchone())["cnt"]
+        c = await db.execute("SELECT COUNT(*) as cnt FROM watcher_dm_logs WHERE status='failed'")
+        watcher_failed = (await c.fetchone())["cnt"]
+        total_dm_failed = campaign_failed + watcher_failed
+
+        c = await db.execute("SELECT COUNT(*) as cnt FROM dm_campaign_logs WHERE status='skipped'")
+        campaign_skipped = (await c.fetchone())["cnt"]
+        c = await db.execute("SELECT COUNT(*) as cnt FROM watcher_dm_logs WHERE status='skipped'")
+        watcher_skipped = (await c.fetchone())["cnt"]
+        total_dm_skipped = campaign_skipped + watcher_skipped
+
+        c = await db.execute("SELECT COUNT(*) as cnt FROM dm_replies")
+        total_replies = (await c.fetchone())["cnt"]
+
+        response_rate = round((total_replies / total_dm_sent * 100), 2) if total_dm_sent > 0 else 0
+
+        c = await db.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM scraped_members")
+        total_contacts = (await c.fetchone())["cnt"]
+
+        c = await db.execute("SELECT COUNT(*) as cnt FROM dm_campaigns")
+        total_campaigns = (await c.fetchone())["cnt"]
+
+        c = await db.execute("SELECT COUNT(*) as cnt FROM dm_campaigns WHERE status='running'")
+        active_campaigns = (await c.fetchone())["cnt"]
+
+        c = await db.execute("SELECT COUNT(*) as cnt FROM keyword_watchers")
+        total_watchers = (await c.fetchone())["cnt"]
+
+        c = await db.execute("SELECT COUNT(*) as cnt FROM reaction_logs WHERE status='success'")
+        total_reactions = (await c.fetchone())["cnt"]
+
+        return {
+            "total_dm_sent": total_dm_sent,
+            "total_dm_failed": total_dm_failed,
+            "total_dm_skipped": total_dm_skipped,
+            "total_replies": total_replies,
+            "response_rate": response_rate,
+            "total_contacts": total_contacts,
+            "total_campaigns": total_campaigns,
+            "active_campaigns": active_campaigns,
+            "total_watchers": total_watchers,
+            "total_reactions": total_reactions,
+        }
+
+
+async def get_analytics_daily_stats(days: int = 30) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            WITH RECURSIVE dates(d) AS (
+                SELECT date('now', ? || ' days')
+                UNION ALL
+                SELECT date(d, '+1 day') FROM dates WHERE d < date('now')
+            ),
+            campaign_stats AS (
+                SELECT date(sent_at) as d,
+                       SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as sent,
+                       SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed
+                FROM dm_campaign_logs
+                WHERE sent_at >= datetime('now', ? || ' days')
+                GROUP BY date(sent_at)
+            ),
+            watcher_stats AS (
+                SELECT date(sent_at) as d,
+                       SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as sent,
+                       SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed
+                FROM watcher_dm_logs
+                WHERE sent_at >= datetime('now', ? || ' days')
+                GROUP BY date(sent_at)
+            ),
+            reply_stats AS (
+                SELECT date(received_at) as d, COUNT(*) as replies
+                FROM dm_replies
+                WHERE received_at >= datetime('now', ? || ' days')
+                GROUP BY date(received_at)
+            )
+            SELECT dates.d as date,
+                   COALESCE(cs.sent, 0) + COALESCE(ws.sent, 0) as sent,
+                   COALESCE(cs.failed, 0) + COALESCE(ws.failed, 0) as failed,
+                   COALESCE(rs.replies, 0) as replies
+            FROM dates
+            LEFT JOIN campaign_stats cs ON cs.d = dates.d
+            LEFT JOIN watcher_stats ws ON ws.d = dates.d
+            LEFT JOIN reply_stats rs ON rs.d = dates.d
+            ORDER BY dates.d ASC
+        """, (f"-{days}", f"-{days}", f"-{days}", f"-{days}"))
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+async def get_analytics_account_health() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        accounts = await (await db.execute("SELECT * FROM accounts ORDER BY id")).fetchall()
+        result = []
+        for acc in accounts:
+            acc = dict(acc)
+            aid = acc["id"]
+
+            c = await db.execute(
+                "SELECT COUNT(*) as cnt FROM dm_campaign_logs WHERE account_id=? AND status='success' AND date(sent_at)=date('now')", (aid,))
+            campaign_today = (await c.fetchone())["cnt"]
+            c = await db.execute(
+                "SELECT COUNT(*) as cnt FROM watcher_dm_logs WHERE account_id=? AND status='success' AND date(sent_at)=date('now')", (aid,))
+            watcher_today = (await c.fetchone())["cnt"]
+            dm_sent_today = campaign_today + watcher_today
+
+            c = await db.execute(
+                "SELECT COUNT(*) as cnt FROM dm_campaign_logs WHERE account_id=? AND status='success'", (aid,))
+            campaign_total = (await c.fetchone())["cnt"]
+            c = await db.execute(
+                "SELECT COUNT(*) as cnt FROM watcher_dm_logs WHERE account_id=? AND status='success'", (aid,))
+            watcher_total = (await c.fetchone())["cnt"]
+            dm_sent_total = campaign_total + watcher_total
+
+            c = await db.execute("""
+                SELECT COUNT(*) as cnt FROM (
+                    SELECT error_message FROM dm_campaign_logs WHERE account_id=? AND status='failed'
+                        AND (error_message LIKE '%Flood%' OR error_message LIKE '%PeerFlood%')
+                    UNION ALL
+                    SELECT error_message FROM watcher_dm_logs WHERE account_id=? AND status='failed'
+                        AND (error_message LIKE '%Flood%' OR error_message LIKE '%PeerFlood%')
+                )
+            """, (aid, aid))
+            flood_count = (await c.fetchone())["cnt"]
+
+            c = await db.execute("""
+                SELECT COUNT(*) as cnt FROM (
+                    SELECT id FROM dm_campaign_logs WHERE account_id=? AND status='failed'
+                    UNION ALL
+                    SELECT id FROM watcher_dm_logs WHERE account_id=? AND status='failed'
+                )
+            """, (aid, aid))
+            total_failed = (await c.fetchone())["cnt"]
+
+            total_attempts = dm_sent_total + total_failed
+            success_rate = round((dm_sent_total / total_attempts * 100), 1) if total_attempts > 0 else 100
+
+            health = 100
+            if acc.get("is_flagged"):
+                health -= 40
+            health -= min(flood_count * 5, 30)
+            health -= max(0, round((100 - success_rate) * 0.3))
+            health = max(0, min(100, health))
+
+            result.append({
+                "account_id": aid,
+                "account_name": acc.get("name", ""),
+                "dm_sent_today": dm_sent_today,
+                "dm_sent_total": dm_sent_total,
+                "flood_count": flood_count,
+                "success_rate": success_rate,
+                "is_flagged": acc.get("is_flagged", 0),
+                "flag_reason": acc.get("flag_reason"),
+                "health_score": health,
+            })
+        return result
+
+
+async def get_analytics_campaign_performance() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        campaigns = await (await db.execute(
+            "SELECT * FROM dm_campaigns ORDER BY created_at DESC")).fetchall()
+        result = []
+        for camp in campaigns:
+            camp = dict(camp)
+            cid = camp["id"]
+            sent = camp.get("sent_count", 0)
+            failed = camp.get("failed_count", 0)
+            skipped = camp.get("skipped_count", 0)
+            total = sent + failed
+            success_rate = round((sent / total * 100), 1) if total > 0 else 0
+
+            c = await db.execute("""
+                SELECT COUNT(*) as cnt FROM dm_replies
+                WHERE sender_user_id IN (
+                    SELECT DISTINCT target_user_id FROM dm_campaign_logs WHERE campaign_id=?
+                )
+            """, (cid,))
+            reply_count = (await c.fetchone())["cnt"]
+
+            result.append({
+                "id": cid,
+                "name": camp.get("name", ""),
+                "status": camp.get("status", ""),
+                "sent": sent,
+                "failed": failed,
+                "skipped": skipped,
+                "success_rate": success_rate,
+                "reply_count": reply_count,
+                "created_at": camp.get("created_at"),
+            })
+        return result
+
+
+# ============================================================
+# TEMPLATE LIBRARY
+# ============================================================
+
+async def get_all_templates() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            "SELECT * FROM dm_templates ORDER BY is_default DESC, created_at DESC"
+        )).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["messages"] = json.loads(d.get("messages") or "[]")
+            result.append(d)
+        return result
+
+
+async def get_template(template_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute(
+            "SELECT * FROM dm_templates WHERE id=?", (template_id,)
+        )).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["messages"] = json.loads(d.get("messages") or "[]")
+        return d
+
+
+async def create_template(data: dict) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            INSERT INTO dm_templates (name, category, messages, is_default)
+            VALUES (?, ?, ?, ?)
+        """, (
+            data["name"],
+            data.get("category", "general"),
+            json.dumps(data.get("messages", [])),
+            data.get("is_default", 0),
+        ))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def update_template(template_id: int, data: dict) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("""
+            UPDATE dm_templates SET name=?, category=?, messages=?, is_default=?
+            WHERE id=?
+        """, (
+            data["name"],
+            data.get("category", "general"),
+            json.dumps(data.get("messages", [])),
+            data.get("is_default", 0),
+            template_id,
+        ))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def delete_template(template_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("DELETE FROM dm_templates WHERE id=?", (template_id,))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def seed_default_templates():
+    async with aiosqlite.connect(DB_PATH) as db:
+        row = await (await db.execute("SELECT COUNT(*) FROM dm_templates")).fetchone()
+        if row[0] > 0:
+            return
+        defaults = [
+            ("Crypto Community Outreach", "crypto", json.dumps([
+                {"msg_type": "text", "content": "Hey {{first_name}}! 👋 I saw you in the group and thought I'd reach out. I'm building a crypto community focused on alpha calls and market analysis. Would love to connect!"}
+            ])),
+            ("NFT/Web3 Networking", "crypto", json.dumps([
+                {"msg_type": "text", "content": "Hi {{first_name}}! 🎨 Fellow Web3 enthusiast here. I noticed we're in the same NFT community. Always great to connect with like-minded people in the space!"}
+            ])),
+            ("Forex Signal Promotion", "finance", json.dumps([
+                {"msg_type": "text", "content": "Hello {{first_name}}! 📈 I run a trading signal channel with verified results. We've been consistently profitable this quarter. Interested in checking out our track record?"}
+            ])),
+            ("Affiliate Marketing", "marketing", json.dumps([
+                {"msg_type": "text", "content": "Hey {{first_name}}! I came across your profile and thought you might be interested in a revenue opportunity I've been working with. Mind if I share some details?"}
+            ])),
+            ("General Networking", "general", json.dumps([
+                {"msg_type": "text", "content": "Hi {{first_name}}! 👋 We're in the same group and I'd love to connect. Always looking to network with interesting people. How's your day going?"}
+            ])),
+            ("Service Promotion", "business", json.dumps([
+                {"msg_type": "text", "content": "Hello {{first_name}}! I help businesses grow their online presence with proven strategies. Would you be open to a quick chat about how we could help?"}
+            ])),
+        ]
+        for name, category, messages in defaults:
+            await db.execute(
+                "INSERT INTO dm_templates (name, category, messages, is_default) VALUES (?, ?, ?, 1)",
+                (name, category, messages)
+            )
+        await db.commit()
+
+
+# ============================================================
+# AUTO-REPLY RULES
+# ============================================================
+
+async def get_all_auto_reply_rules() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            "SELECT * FROM auto_reply_rules ORDER BY created_at DESC"
+        )).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["trigger_keywords"] = json.loads(d.get("trigger_keywords") or "[]")
+            d["reply_messages"] = json.loads(d.get("reply_messages") or "[]")
+            d["account_ids"] = json.loads(d.get("account_ids") or "[]")
+            result.append(d)
+        return result
+
+
+async def get_active_auto_reply_rules() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            "SELECT * FROM auto_reply_rules WHERE is_active=1 ORDER BY id"
+        )).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["trigger_keywords"] = json.loads(d.get("trigger_keywords") or "[]")
+            d["reply_messages"] = json.loads(d.get("reply_messages") or "[]")
+            d["account_ids"] = json.loads(d.get("account_ids") or "[]")
+            result.append(d)
+        return result
+
+
+async def create_auto_reply_rule(data: dict) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            INSERT INTO auto_reply_rules
+            (name, trigger_type, trigger_keywords, reply_messages, account_ids,
+             use_ai, ai_system_prompt, max_replies_per_user, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data["name"],
+            data.get("trigger_type", "keyword"),
+            json.dumps(data.get("trigger_keywords", [])),
+            json.dumps(data.get("reply_messages", [])),
+            json.dumps(data.get("account_ids", [])),
+            1 if data.get("use_ai") else 0,
+            data.get("ai_system_prompt"),
+            data.get("max_replies_per_user", 3),
+            data.get("is_active", 1),
+        ))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def update_auto_reply_rule(rule_id: int, data: dict) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("""
+            UPDATE auto_reply_rules
+            SET name=?, trigger_type=?, trigger_keywords=?, reply_messages=?,
+                account_ids=?, use_ai=?, ai_system_prompt=?, max_replies_per_user=?, is_active=?
+            WHERE id=?
+        """, (
+            data["name"],
+            data.get("trigger_type", "keyword"),
+            json.dumps(data.get("trigger_keywords", [])),
+            json.dumps(data.get("reply_messages", [])),
+            json.dumps(data.get("account_ids", [])),
+            1 if data.get("use_ai") else 0,
+            data.get("ai_system_prompt"),
+            data.get("max_replies_per_user", 3),
+            data.get("is_active", 1),
+            rule_id,
+        ))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def delete_auto_reply_rule(rule_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("DELETE FROM auto_reply_rules WHERE id=?", (rule_id,))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def toggle_auto_reply_rule(rule_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute(
+            "SELECT is_active FROM auto_reply_rules WHERE id=?", (rule_id,)
+        )).fetchone()
+        if not row:
+            return None
+        new_state = 0 if row["is_active"] else 1
+        await db.execute(
+            "UPDATE auto_reply_rules SET is_active=? WHERE id=?",
+            (new_state, rule_id))
+        await db.commit()
+        return {"id": rule_id, "is_active": new_state}
+
+
+async def add_auto_reply_log(data: dict) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            INSERT INTO auto_reply_logs
+            (rule_id, account_id, user_id, username, trigger_text, reply_text, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data["rule_id"], data.get("account_id"), data["user_id"],
+            data.get("username"), data.get("trigger_text"),
+            data.get("reply_text"), data.get("status", "success"),
+        ))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_auto_reply_logs(rule_id: int, limit: int = 100) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            "SELECT * FROM auto_reply_logs WHERE rule_id=? ORDER BY sent_at DESC LIMIT ?",
+            (rule_id, limit)
+        )).fetchall()
+        return [dict(r) for r in rows]
+
+
+async def count_user_auto_replies(rule_id: int, user_id: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        row = await (await db.execute(
+            "SELECT COUNT(*) FROM auto_reply_logs WHERE rule_id=? AND user_id=? AND status='success'",
+            (rule_id, user_id)
+        )).fetchone()
+        return row[0] if row else 0

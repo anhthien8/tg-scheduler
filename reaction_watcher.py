@@ -321,6 +321,8 @@ def _unregister_target(target_id: int) -> None:
 
 def _register_target(target: dict) -> None:
     """Register NewMessage handler for the target on all accounts."""
+    if target.get("platform", "telegram") != "telegram":
+        return
     target_id   = target["id"]
     account_ids = target.get("account_ids") or []
 

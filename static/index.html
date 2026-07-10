@@ -12,6 +12,13 @@
   <!-- Toast container -->
   <div class="toast-container" id="toasts"></div>
 
+  <!-- Mobile header -->
+  <div class="mobile-header">
+    <button class="hamburger" onclick="App.toggleSidebar()" aria-label="Menu">☰</button>
+    <span class="mobile-title">📨 TG Scheduler</span>
+  </div>
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="App.toggleSidebar()"></div>
+
   <!-- Login Page (no accounts yet) -->
   <div id="login-page" class="login-page hidden">
     <div class="login-card">
@@ -38,11 +45,11 @@
           <label class="form-label">Số điện thoại</label>
           <input type="tel" class="form-input" id="setup-phone" placeholder="+84912345678">
         </div>
-        <button class="btn btn-primary" style="width:100%" id="btn-add-account" onclick="App.addFirstAccount()">
+        <button class="btn btn-primary btn-full" id="btn-add-account" onclick="App.addFirstAccount()">
           Thêm tài khoản
         </button>
         <p class="form-hint" style="margin-top:12px;text-align:center">
-          <a href="https://my.telegram.org" target="_blank" style="color:var(--accent)">👉 Lấy API ID & Hash tại my.telegram.org</a>
+          <a href="https://my.telegram.org" target="_blank">👉 Lấy API ID & Hash tại my.telegram.org</a>
         </p>
       </div>
 
@@ -53,7 +60,7 @@
           <input type="text" class="form-input" id="login-code" placeholder="12345" maxlength="6">
           <p class="form-hint">Nhập mã OTP đã gửi đến Telegram</p>
         </div>
-        <button class="btn btn-primary" style="width:100%" id="btn-verify" onclick="App.verifyFirstAccount()">
+        <button class="btn btn-primary btn-full" id="btn-verify" onclick="App.verifyFirstAccount()">
           Xác nhận
         </button>
       </div>
@@ -64,7 +71,7 @@
           <label class="form-label">Mật khẩu 2FA</label>
           <input type="password" class="form-input" id="login-password" placeholder="Mật khẩu xác thực 2 bước">
         </div>
-        <button class="btn btn-primary" style="width:100%" onclick="App.verify2FAFirst()">
+        <button class="btn btn-primary btn-full" onclick="App.verify2FAFirst()">
           Xác nhận
         </button>
       </div>
@@ -74,18 +81,28 @@
   <!-- Dashboard -->
   <div id="dashboard-page" class="app hidden">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
       <div class="sidebar-logo">📨 TG Scheduler</div>
       <nav class="sidebar-nav">
+        <!-- Dashboard -->
         <div class="nav-item active" data-page="dashboard" onclick="App.navigate('dashboard')">
           📊 Tổng quan
+        </div>
+
+        <!-- Telegram Group -->
+        <div class="nav-section">Telegram</div>
+        <div class="nav-item" data-page="accounts" onclick="App.navigate('accounts')">
+          👤 Tài khoản
         </div>
         <div class="nav-item" data-page="schedules" onclick="App.navigate('schedules')">
           📅 Lịch gửi
         </div>
-        <div class="nav-item" data-page="accounts" onclick="App.navigate('accounts')">
-          👤 Tài khoản
+        <div class="nav-item" data-page="channels" onclick="App.navigate('channels')">
+          📤 Quản lý kênh
         </div>
+
+        <!-- Automation Group -->
+        <div class="nav-section">Automation</div>
         <div class="nav-item" data-page="watchers" onclick="App.navigate('watchers')">
           🎯 Keyword DM
         </div>
@@ -95,9 +112,33 @@
         <div class="nav-item" data-page="inbox" onclick="App.navigate('inbox')" id="nav-inbox">
           📬 Inbox <span id="inbox-badge" class="inbox-badge hidden">0</span>
         </div>
-        <div class="nav-item" data-page="channels" onclick="App.navigate('channels')">
-          📤 Quản lý kênh
+        <div class="nav-item" data-page="blacklist" onclick="App.navigate('blacklist')">
+          🚫 Blacklist
         </div>
+        <div class="nav-item" data-page="members" onclick="App.navigate('members')">
+          👥 Cào & DM
+        </div>
+
+        <!-- Growth Features -->
+        <div class="nav-section">Growth</div>
+        <div class="nav-item" data-page="analytics" onclick="App.navigate('analytics')">
+          📊 Analytics
+        </div>
+        <div class="nav-item" data-page="templates" onclick="App.navigate('templates')">
+          📋 Templates
+        </div>
+        <div class="nav-item" data-page="autoreply" onclick="App.navigate('autoreply')">
+          🤖 Auto-Reply
+        </div>
+
+        <!-- Discord Group -->
+        <div class="nav-section">Discord</div>
+        <div class="nav-item" data-page="discord" onclick="App.navigate('discord')">
+          🎮 Discord
+        </div>
+
+        <!-- System Group -->
+        <div class="nav-section">Hệ thống</div>
         <div class="nav-item" data-page="logs" onclick="App.navigate('logs')">
           📋 Lịch sử
         </div>
@@ -250,24 +291,27 @@
 
       <div class="card">
         <div id="ch-loading" style="text-align:center;padding:2rem;color:var(--text-secondary);">Chọn tài khoản để xem danh sách kênh...</div>
-        <table id="ch-table" class="hidden" style="width:100%;border-collapse:collapse;">
-          <thead>
-            <tr style="color:var(--text-secondary);font-size:.8rem;border-bottom:1px solid var(--border);">
-              <th style="padding:.6rem .5rem;text-align:center;width:40px;">
-                <input type="checkbox" id="ch-select-all" onchange="App._toggleSelectAll(this.checked)" title="Chọn / bỏ chọn tất cả">
-              </th>
-              <th style="padding:.6rem .75rem;text-align:left;">#</th>
-              <th style="padding:.6rem .75rem;text-align:left;">Tên kênh / nhóm</th>
-              <th style="padding:.6rem .75rem;text-align:left;">Loại</th>
-              <th style="padding:.6rem .75rem;text-align:left;">Thành viên</th>
-              <th style="padding:.6rem .75rem;text-align:left;">Username</th>
-              <th style="padding:.6rem .75rem;text-align:right;">Hành động</th>
-            </tr>
-          </thead>
-          <tbody id="ch-tbody"></tbody>
-        </table>
+        <div class="table-wrap">
+          <table id="ch-table" class="hidden" style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="color:var(--text-secondary);font-size:.8rem;border-bottom:1px solid var(--border);">
+                <th style="padding:.6rem .5rem;text-align:center;width:40px;">
+                  <input type="checkbox" id="ch-select-all" onchange="App._toggleSelectAll(this.checked)" title="Chọn / bỏ chọn tất cả">
+                </th>
+                <th style="padding:.6rem .75rem;text-align:left;">#</th>
+                <th style="padding:.6rem .75rem;text-align:left;">Tên kênh / nhóm</th>
+                <th style="padding:.6rem .75rem;text-align:left;">Loại</th>
+                <th style="padding:.6rem .75rem;text-align:left;">Thành viên</th>
+                <th style="padding:.6rem .75rem;text-align:left;">Username</th>
+                <th style="padding:.6rem .75rem;text-align:right;">Hành động</th>
+              </tr>
+            </thead>
+            <tbody id="ch-tbody"></tbody>
+          </table>
+        </div>
         <div id="ch-empty" class="hidden" style="text-align:center;padding:2rem;color:var(--text-secondary);">Không có kênh / nhóm nào.</div>
       </div>
+
     </div>
 
     <div id="view-logs" class="hidden">
@@ -621,7 +665,354 @@
         </div>
       </div>
 
+      <!-- ══ Members / Scraping / DM Campaign View ══ -->
+      <div id="view-members" class="hidden">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">👥 Cào Thành Viên & DM Hàng Loạt</h2>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid" id="members-stats" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+          <div class="stat-card"><div class="stat-label">Scrape Jobs</div><div class="stat-value accent" id="ms-total-jobs">0</div></div>
+          <div class="stat-card"><div class="stat-label">Tổng Members</div><div class="stat-value" id="ms-total-members">0</div></div>
+          <div class="stat-card"><div class="stat-label">DM Campaigns</div><div class="stat-value" id="ms-total-campaigns">0</div></div>
+          <div class="stat-card"><div class="stat-label">Đã gửi DM</div><div class="stat-value" style="color:var(--success)" id="ms-total-sent">0</div></div>
+        </div>
+
+        <!-- Sub navigation tabs -->
+        <div class="tab-bar" style="margin-bottom:16px">
+          <button class="tab-btn active" id="members-tab-scrape" onclick="Members.switchSubTab('scrape')">Cào Group & Chiến dịch</button>
+          <button class="tab-btn"        id="members-tab-similar" onclick="Members.switchSubTab('similar')">Quét Kênh Tương Tự (Leads)</button>
+        </div>
+
+        <div id="members-subview-scrape">
+          <!-- Section 1: Scraping -->
+          <div class="card" style="margin-bottom:20px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <h3 style="margin:0">🔍 Cào Thành Viên từ Group</h3>
+            </div>
+
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
+              <div class="form-group" style="margin:0;flex:1;min-width:180px">
+                <label class="form-label">Tài khoản</label>
+                <select id="ms-account-select" class="form-select" onchange="Members.loadGroups()"></select>
+              </div>
+              <div class="form-group" style="margin:0;flex:1;min-width:200px">
+                <label class="form-label">Chọn Group</label>
+                <select id="ms-group-select" class="form-select">
+                  <option value="">— Chọn group —</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0;min-width:160px">
+                <label class="form-label">Phương thức cào</label>
+                <select id="ms-scrape-method" class="form-select" onchange="Members.onScrapeMethodChange()">
+                  <option value="members">Thành viên (Mặc định)</option>
+                  <option value="history">Lịch sử Chat (Tránh ẩn member)</option>
+                </select>
+              </div>
+              <div class="form-group hidden" id="ms-max-messages-group" style="margin:0;min-width:120px">
+                <label class="form-label">Số tin nhắn quét</label>
+                <select id="ms-max-messages" class="form-select">
+                  <option value="1000">1,000</option>
+                  <option value="3000" selected>3,000</option>
+                  <option value="5000">5,000</option>
+                  <option value="10000">10,000</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0;min-width:140px">
+                <label class="form-label">Active trong</label>
+                <select id="ms-filter-active" class="form-select">
+                  <option value="">Tất cả</option>
+                  <option value="30">1 tháng</option>
+                  <option value="90">3 tháng</option>
+                  <option value="7">1 tuần</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" onclick="Members.startScrape()" id="ms-btn-scrape">
+                🔍 Bắt đầu cào
+              </button>
+            </div>
+
+            <!-- Scrape Jobs Table -->
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Group</th>
+                    <th>Members</th>
+                    <th>Ngày cào</th>
+                    <th>Hành động</th>
+                  </tr>
+            <tbody id="ms-jobs-tbody"></tbody>
+              </table>
+            </div>
+            <div id="ms-jobs-empty" class="empty-state hidden">
+              <div class="empty-state-icon">📋</div>
+              <p class="empty-state-text">Chưa có dữ liệu cào. Chọn group và bắt đầu!</p>
+            </div>
+          </div>
+
+          <!-- Section 2: DM Campaigns -->
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <h3 style="margin:0">📨 DM Campaign</h3>
+              <button class="btn btn-primary btn-sm" onclick="Members.openCampaignModal()">+ Tạo Campaign</button>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Tên</th>
+                    <th>Nguồn</th>
+                    <th>Trạng thái</th>
+                    <th>Tiến độ</th>
+                    <th>Hành động</th>
+                  </tr>
+                </thead>
+                <tbody id="ms-campaigns-tbody"></tbody>
+              </table>
+            </div>
+            <div id="ms-campaigns-empty" class="empty-state hidden">
+              <div class="empty-state-icon">📬</div>
+              <p class="empty-state-text">Chưa có campaign. Cào members trước rồi tạo campaign!</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="members-subview-similar" class="hidden">
+          <div class="card" style="margin-bottom:20px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <h3 style="margin:0">🔍 Deep Crawl Kênh Tương Tự & Trích Xuất Contact</h3>
+            </div>
+
+            <!-- Row 1: Channel input + Depth selector -->
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
+              <div class="form-group" style="margin:0;flex:2;min-width:280px">
+                <label class="form-label">Kênh nguồn (Link hoặc Username)</label>
+                <input type="text" id="sim-channel-input" class="form-input" placeholder="e.g. https://t.me/RichkidTradings hoặc @CryptoSignalVIP">
+              </div>
+              <div class="form-group" style="margin:0;min-width:140px">
+                <label class="form-label">Độ sâu (Depth)</label>
+                <select id="sim-depth-select" class="form-select">
+                  <option value="1">1 lớp (~5-10 kênh)</option>
+                  <option value="2" selected>2 lớp (~30-80 kênh)</option>
+                  <option value="3">3 lớp (~100-400 kênh)</option>
+                  <option value="4">4 lớp (~500-2000+ kênh)</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" onclick="Members.findSimilarChannels()" id="sim-btn-search">
+                🚀 Bắt đầu Deep Crawl
+              </button>
+              <button class="btn btn-ghost btn-sm hidden" onclick="Members.stopDeepCrawl()" id="sim-btn-stop" style="color:var(--danger)">
+                ⏹ Dừng Crawl
+              </button>
+            </div>
+
+            <!-- Row 2: Premium accounts multi-select checkboxes -->
+            <div style="margin-bottom:16px">
+              <label class="form-label">Tài khoản Premium (xoay vòng anti-ban)</label>
+              <div id="sim-premium-checkboxes" style="display:flex;gap:12px;flex-wrap:wrap;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
+                <span style="color:var(--text-muted);font-size:13px">Đang tải...</span>
+              </div>
+            </div>
+
+            <!-- Progress Panel (hidden by default) -->
+            <div id="sim-progress-panel" class="hidden" style="margin-bottom:20px;padding:16px;border-radius:10px;background:linear-gradient(135deg, rgba(99,102,241,0.08), rgba(168,85,247,0.08));border:1px solid rgba(99,102,241,0.2)">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <h4 style="margin:0;color:var(--accent)">⏳ Deep Crawl Progress</h4>
+                <span id="sim-progress-status" style="font-size:12px;padding:3px 10px;border-radius:12px;background:var(--accent);color:white;font-weight:600">Running</span>
+              </div>
+              <!-- Progress bar -->
+              <div style="width:100%;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden;margin-bottom:12px">
+                <div id="sim-progress-bar" style="width:0%;height:100%;background:linear-gradient(90deg,var(--accent),#a855f7);border-radius:4px;transition:width 0.5s ease"></div>
+              </div>
+              <!-- Stats row -->
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;font-size:13px">
+                <div><span style="color:var(--text-muted)">Depth:</span> <strong id="sim-prog-depth">0/0</strong></div>
+                <div><span style="color:var(--text-muted)">Kênh tìm thấy:</span> <strong id="sim-prog-found" style="color:var(--success)">0</strong></div>
+                <div><span style="color:var(--text-muted)">Đã xử lý:</span> <strong id="sim-prog-processed">0</strong></div>
+                <div><span style="color:var(--text-muted)">Contacts:</span> <strong id="sim-prog-contacts" style="color:var(--accent)">0</strong></div>
+                <div><span style="color:var(--text-muted)">Queue:</span> <strong id="sim-prog-queue">0</strong></div>
+                <div><span style="color:var(--text-muted)">Account:</span> <strong id="sim-prog-account">—</strong></div>
+              </div>
+              <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">
+                Đang quét: <em id="sim-prog-channel">—</em>
+              </div>
+              <!-- Errors log -->
+              <div id="sim-progress-errors" class="hidden" style="margin-top:10px;max-height:80px;overflow-y:auto;font-size:11px;color:var(--text-muted);background:var(--bg1);padding:8px;border-radius:6px"></div>
+            </div>
+
+            <!-- Results Container -->
+            <div id="sim-results-container" class="hidden">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px;flex-wrap:wrap;gap:12px">
+                <h4 style="margin:0;color:var(--accent)">📋 Danh sách kênh tương tự đề xuất</h4>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                  <input type="text" id="sim-import-job-id" class="form-input" style="width:240px;padding:6px 12px;font-size:13px" placeholder="Tên Scrape Job (e.g. leads_weex)">
+                  <button class="btn btn-green btn-sm" onclick="Members.importCheckedContacts()">📥 Import Contact Đã Chọn</button>
+                </div>
+              </div>
+
+              <!-- Depth filter tabs -->
+              <div id="sim-depth-filter-tabs" style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap"></div>
+
+              <div class="table-wrap">
+                <table class="data-table" id="sim-results-table">
+                  <thead>
+                    <tr>
+                      <th width="40"><input type="checkbox" id="sim-select-all-channels" onchange="Members.toggleSelectAllChannels(this)"></th>
+                      <th>Kênh đề xuất</th>
+                      <th>Subscribers</th>
+                      <th width="50">Depth</th>
+                      <th>Nguồn (Parent)</th>
+                      <th>Mô tả (Description)</th>
+                      <th>Admin Contact trích xuất</th>
+                      <th>Hành động</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sim-results-tbody"></tbody>
+                </table>
+              </div>
+              <div class="pagination" id="sim-pagination" style="margin-top:16px;display:flex;justify-content:center;align-items:center;gap:10px"></div>
+            </div>
+
+            <div id="sim-empty-state" class="empty-state">
+              <div class="empty-state-icon">📢</div>
+              <p class="empty-state-text">Nhập kênh nguồn và chọn độ sâu để tìm hàng trăm kênh tương tự và trích xuất contact ban quản trị.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </main>
+  </div>
+
+  <!-- ══ Members Detail Modal (view scraped members) ══ -->
+  <div class="modal-overlay" id="members-detail-modal">
+    <div class="modal" style="width:800px;max-height:92vh;overflow-y:auto">
+      <div class="modal-header">
+        <span class="modal-title" id="members-detail-title">Chi tiết Members</span>
+        <button class="modal-close" onclick="Members.closeDetailModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="table-wrap" style="max-height:60vh;overflow-y:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>User ID</th>
+                <th>Username</th>
+                <th>Tên</th>
+                <th>Premium</th>
+                <th>Last Seen</th>
+              </tr>
+            </thead>
+            <tbody id="members-detail-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="Members.closeDetailModal()">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Campaign Create/Edit Modal ══ -->
+  <div class="modal-overlay" id="campaign-modal">
+    <div class="modal" style="width:660px;max-height:92vh;overflow-y:auto">
+      <div class="modal-header">
+        <span class="modal-title" id="campaign-modal-title">Tạo DM Campaign</span>
+        <button class="modal-close" onclick="Members.closeCampaignModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Tên Campaign</label>
+          <input type="text" class="form-input" id="cmp-name" placeholder="VD: DM nhóm crypto...">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Nguồn Members (Scrape Job)</label>
+          <select id="cmp-scrape-job" class="form-select"></select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Tài khoản gửi</label>
+          <div id="cmp-accounts-list" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+          <p class="form-hint">Chọn các tài khoản sẽ luân phiên gửi DM</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Nội dung tin nhắn</label>
+          <div id="cmp-messages-list"></div>
+          <button class="btn btn-ghost btn-sm" onclick="Members.addCampaignMessage()" style="margin-top:8px">
+            + Thêm tin nhắn
+          </button>
+        </div>
+
+        <div style="display:flex;gap:12px">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Delay tối thiểu (giây)</label>
+            <input type="number" class="form-input" id="cmp-delay-min" value="30" min="10">
+          </div>
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Delay tối đa (giây)</label>
+            <input type="number" class="form-input" id="cmp-delay-max" value="90" min="20">
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">DM/ngày (mỗi account)</label>
+            <input type="number" class="form-input" id="cmp-daily-limit" value="30" min="1" max="50">
+          </div>
+          <div class="form-group" style="flex:1">
+            <label class="form-label">AI Remix tin nhắn</label>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              <label class="toggle">
+                <input type="checkbox" id="cmp-ai-remix">
+                <span class="toggle-slider"></span>
+              </label>
+              <span style="font-size:13px;color:var(--text2)">Bật AI cá nhân hóa</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="Members.closeCampaignModal()">Hủy</button>
+        <button class="btn btn-primary" onclick="Members.saveCampaign()">Tạo Campaign</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Campaign Logs Modal ══ -->
+  <div class="modal-overlay" id="campaign-logs-modal">
+    <div class="modal" style="width:800px;max-height:92vh;overflow-y:auto">
+      <div class="modal-header">
+        <span class="modal-title" id="campaign-logs-title">Logs Campaign</span>
+        <button class="modal-close" onclick="Members.closeCampaignLogs()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="table-wrap" style="max-height:60vh;overflow-y:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Account</th>
+                <th>Status</th>
+                <th>Lỗi</th>
+                <th>Thời gian</th>
+              </tr>
+            </thead>
+            <tbody id="campaign-logs-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="Members.closeCampaignLogs()">Đóng</button>
+      </div>
+    </div>
   </div>
 
   <!-- ══ Create/Edit Schedule Modal ══ -->
@@ -931,8 +1322,11 @@
     </div>
   </div>
 
-  <script src="/static/js/api.js?v=13"></script>
-  <script src="/static/js/app.js?v=21"></script>
+  <script src="/static/js/api.js?v=15"></script>
+  <script src="/static/js/discord.js?v=1"></script>
+  <script src="/static/js/members.js?v=1"></script>
+  <script src="/static/js/analytics.js?v=1"></script>
+  <script src="/static/js/app.js?v=24"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">
@@ -942,11 +1336,19 @@
         <button class="btn btn-ghost" id="btn-inbox-read-all" onclick="App.inboxReadAll()">✅ Đánh dấu tất cả đã đọc</button>
       </div>
 
-      <!-- Filter tabs -->
-      <div class="tab-bar" style="margin-bottom:16px">
-        <button class="tab-btn active" id="inbox-tab-all"    onclick="App.inboxFilter('all')">Tất cả</button>
-        <button class="tab-btn"        id="inbox-tab-unread" onclick="App.inboxFilter('unread')">Chưa đọc</button>
-        <button class="tab-btn"        id="inbox-tab-read"   onclick="App.inboxFilter('read')">Đã đọc</button>
+      <!-- Filter tabs & Account selector -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+        <div class="tab-bar" style="margin:0">
+          <button class="tab-btn active" id="inbox-tab-all"    onclick="App.inboxFilter('all')">Tất cả</button>
+          <button class="tab-btn"        id="inbox-tab-unread" onclick="App.inboxFilter('unread')">Chưa đọc</button>
+          <button class="tab-btn"        id="inbox-tab-read"   onclick="App.inboxFilter('read')">Đã đọc</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:13px;color:var(--text2)">Lọc theo tài khoản:</label>
+          <select id="inbox-account-filter" class="form-input" style="width:220px;padding:6px 12px;font-size:13px" onchange="App.inboxAccountFilterChange()">
+            <option value="">Tất cả tài khoản</option>
+          </select>
+        </div>
       </div>
 
       <!-- Table -->

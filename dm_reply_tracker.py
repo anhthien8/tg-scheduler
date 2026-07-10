@@ -17,12 +17,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
+import json
 from typing import Any
 
 from telethon import events
 
 import database as db
 import telegram_client as tg
+import ai_remix as ai_rmx
 
 logger = logging.getLogger("tg-scheduler.inbox")
 
@@ -105,6 +108,93 @@ def _make_handler(account_id: int):
             "message_text":    message_text,
             "watcher_id":      watcher_id,
         })
+
+        # ── Auto-Reply Chatbot Logic ──
+        rules = await db.get_active_auto_reply_rules()
+        if not rules:
+            return
+
+        for rule in rules:
+            # Check if rule applies to this account
+            if rule.get("account_ids") and account_id not in rule["account_ids"]:
+                continue
+
+            # Check trigger type
+            matched = False
+            trigger_type = rule.get("trigger_type", "keyword")
+            if trigger_type == "any":
+                matched = True
+            elif trigger_type == "keyword":
+                msg_norm = message_text.lower().strip()
+                for kw in rule.get("trigger_keywords", []):
+                    if kw.lower().strip() in msg_norm:
+                        matched = True
+                        break
+
+            if not matched:
+                continue
+
+            # Check reply limit for this user
+            sent_count = await db.count_user_auto_replies(rule["id"], sender_id)
+            if sent_count >= rule.get("max_replies_per_user", 3):
+                logger.debug(
+                    "[AutoReply] Limit reached (%d/%d) for user %d on rule '%s'",
+                    sent_count, rule.get("max_replies_per_user", 3), sender_id, rule["name"]
+                )
+                continue
+
+            # Prepare reply message
+            reply_text = None
+            if rule.get("use_ai"):
+                ai_provider = await db.get_setting("ai_provider", None)
+                if ai_provider in ("gemini", "deepseek", "openai", "groq"):
+                    try:
+                        raw = await db.get_setting("ai_keys_" + ai_provider, "[]")
+                        ai_keys = json.loads(raw) if raw else []
+                        if ai_keys:
+                            sys_prompt = rule.get("ai_system_prompt") or "You are a helpful assistant."
+                            prompt = f"Instructions:\n{sys_prompt}\n\nIncoming message from user:\n{message_text}\n\nResponse:"
+                            reply_text = await ai_rmx.generate_response(prompt, ai_provider, ai_keys)
+                    except Exception as e:
+                        logger.warning("[AutoReply] AI generation failed: %s", e)
+
+            # Fallback to templates if AI disabled or failed
+            if not reply_text:
+                replies = rule.get("reply_messages", [])
+                if replies:
+                    reply_text = replies[0].get("content")
+
+            if not reply_text:
+                continue
+
+            # Send reply with natural random delay
+            delay = random.uniform(2.0, 5.0)
+            logger.info("[AutoReply] Match found for rule '%s'. Replying in %.1fs...", rule["name"], delay)
+            await asyncio.sleep(delay)
+
+            try:
+                await client.send_message(sender_id, reply_text)
+                await db.add_auto_reply_log({
+                    "rule_id": rule["id"],
+                    "account_id": account_id,
+                    "user_id": sender_id,
+                    "username": sender_username,
+                    "trigger_text": message_text,
+                    "reply_text": reply_text,
+                    "status": "success"
+                })
+                logger.info("[AutoReply] Sent reply to user %d via acc %d", sender_id, account_id)
+            except Exception as ex:
+                logger.error("[AutoReply] Failed to send reply to user %d: %s", sender_id, ex)
+                await db.add_auto_reply_log({
+                    "rule_id": rule["id"],
+                    "account_id": account_id,
+                    "user_id": sender_id,
+                    "username": sender_username,
+                    "trigger_text": message_text,
+                    "reply_text": reply_text,
+                    "status": f"failed: {ex}"
+                })
 
     return _handler
 

@@ -22,7 +22,8 @@ import telegram_client as tg
 import scheduler as sch
 import message_queue as mq
 import keyword_watcher as kw
-from routes import auth, chats, schedules, messages, logs, watchers, settings, blacklist, reactions, inbox
+from routes import auth, chats, schedules, messages, logs, watchers, settings, blacklist, reactions, inbox, members, analytics
+from routes import discord as discord_routes
 import reaction_watcher as rw
 import dm_reply_tracker as drt
 
@@ -51,25 +52,32 @@ _startup_task = None
 async def connect_accounts_background():
     """Connect all Telegram clients in the background to avoid blocking server startup."""
     try:
-        logger.info("Connecting Telegram clients in the background...")
+        logger.info("Connecting Telegram clients in the background (concurrently)...")
         accounts = await db.get_all_accounts()
-        logged_count = 0
-        for acc in accounts:
+
+        async def connect_single(acc):
             try:
                 proxy_url = acc.get("proxy_url")  # Load per-account proxy from DB
                 await tg.create_client(acc["id"], int(acc["api_id"]), acc["api_hash"], acc["session_name"], proxy_url=proxy_url)
                 authorized = await asyncio.wait_for(tg.start_client(acc["id"]), timeout=30)
                 if authorized:
-                    logged_count += 1
                     await db.update_account_login_status(acc["id"], True)
+                    return True
                 else:
                     await db.update_account_login_status(acc["id"], False)
+                    return False
             except asyncio.TimeoutError:
                 logger.warning(f"Account {acc['id']} ({acc['name']}): connect timed out after 30s")
+                await db.update_account_login_status(acc["id"], False)
             except Exception as e:
                 logger.warning(f"Account {acc['id']} ({acc['name']}): connect failed: {e}")
+                await db.update_account_login_status(acc["id"], False)
+            return False
 
-        logger.info(f"Loaded {len(accounts)} accounts, {logged_count} already logged in")
+        results = await asyncio.gather(*(connect_single(acc) for acc in accounts), return_exceptions=True)
+        logged_count = sum(1 for r in results if r is True)
+
+        logger.info(f"Loaded {len(accounts)} accounts, {logged_count} successfully logged in")
 
         # Start keyword watchers
         await kw.start_all_watchers()
@@ -79,6 +87,50 @@ async def connect_accounts_background():
 
         # Start DM reply tracker (inbox)
         await drt.start_reply_tracker()
+
+        # Connect Discord bots
+        try:
+            from platforms.discord_adapter import DiscordAdapter
+            import discord_watcher as dw
+            import discord_reaction_watcher as drw
+            import discord_reply_tracker as drt_discord
+
+            adapter = DiscordAdapter()
+            discord_routes._adapter = adapter
+
+            dw.set_adapter(adapter)
+            drw.set_adapter(adapter)
+            drt_discord.set_adapter(adapter)
+
+            discord_bots = await db.get_all_discord_bots()
+            for bot in discord_bots:
+                try:
+                    success = await adapter.connect_bot(bot["id"], bot["bot_token"])
+                    if success:
+                        info = await adapter.get_account_info(bot["id"])
+                        await db.update_discord_bot_status(
+                            bot["id"], True,
+                            user_id=str(info.get("user_id", "")),
+                            username=info.get("username", ""),
+                            guild_count=info.get("guild_count", 0),
+                        )
+                        logger.info(f"Discord bot {bot['id']} ({bot['name']}): connected")
+                    else:
+                        logger.warning(f"Discord bot {bot['id']} ({bot['name']}): connect failed")
+                except Exception as e:
+                    logger.warning(f"Discord bot {bot['id']} ({bot['name']}): {e}")
+            logger.info(f"Discord: {len(discord_bots)} bots loaded")
+
+            # Start Discord engines
+            await dw.start_all_watchers()
+            await drw.start_all()
+            await drt_discord.start_reply_tracker()
+            logger.info("Discord engines started (watcher + reaction + reply)")
+        except ImportError:
+            logger.info("Discord adapter not available (discord.py not installed)")
+        except Exception as e:
+            logger.warning(f"Discord startup error: {e}")
+
         logger.info("All background engines started successfully.")
     except Exception as e:
         logger.error(f"Error in background account startup: {e}", exc_info=True)
@@ -107,7 +159,7 @@ async def lifespan(app: FastAPI):
     _startup_task = asyncio.create_task(connect_accounts_background())
 
     logger.info("=" * 50)
-    host = os.getenv("HOST", "127.0.0.1")
+    host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8888"))
     logger.info(f"Dashboard: http://{host}:{port}")
     logger.info("=" * 50)
@@ -123,6 +175,21 @@ async def lifespan(app: FastAPI):
     await rw.stop_all()
     await drt.stop_reply_tracker()
     await tg.disconnect_all()
+    # Disconnect Discord bots
+    try:
+        import discord_watcher as dw
+        import discord_reaction_watcher as drw
+        import discord_reply_tracker as drt_discord
+        await dw.stop_all_watchers()
+        await drw.stop_all()
+        await drt_discord.stop_reply_tracker()
+    except Exception:
+        pass
+    try:
+        if discord_routes._adapter:
+            await discord_routes._adapter.disconnect_all()
+    except Exception:
+        pass
     logger.info("Goodbye!")
 
 
@@ -149,6 +216,9 @@ app.include_router(settings.router, dependencies=_auth_dep)
 app.include_router(blacklist.router, dependencies=_auth_dep)
 app.include_router(reactions.router, dependencies=_auth_dep)
 app.include_router(inbox.router, dependencies=_auth_dep)
+app.include_router(discord_routes.router, dependencies=_auth_dep)
+app.include_router(members.router, dependencies=_auth_dep)
+app.include_router(analytics.router, dependencies=_auth_dep)
 
 # Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -161,6 +231,6 @@ async def root():
 
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "127.0.0.1")
+    host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8888"))
     uvicorn.run("main:app", host=host, port=port, reload=False)

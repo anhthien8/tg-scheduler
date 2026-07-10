@@ -11,6 +11,9 @@ this.showLogin()},
 
 toast(m,t='info'){const e=document.createElement('div');e.className=`toast ${t}`;e.textContent=m;document.getElementById('toasts').appendChild(e);setTimeout(()=>e.remove(),4000)},
 
+toggleSidebar(){const sb=document.getElementById('sidebar');const ov=document.getElementById('sidebar-overlay');if(sb){sb.classList.toggle('open');}if(ov){ov.classList.toggle('open');}},
+
+
 showLogin(){document.getElementById('login-page').classList.remove('hidden');document.getElementById('dashboard-page').classList.add('hidden')},
 
 showDashboard(user){document.getElementById('login-page').classList.add('hidden');document.getElementById('dashboard-page').classList.remove('hidden');
@@ -45,7 +48,10 @@ if(e.message.includes('2FA')){document.getElementById('login-step-otp').classLis
 
 async verify2FAFirst(){const pw=document.getElementById('login-password').value;try{const r=await API.verify(this.loginPhone,document.getElementById('login-code').value.trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('Đăng nhập thành công!','success');this.showDashboard(r)}catch(e){this.toast(e.message,'error')}},
 
-navigate(page){this.currentPage=page;if(page==='channels'){this._populateChAccountSelect();}document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
+navigate(page){this.currentPage=page;if(page==='channels'){this._populateChAccountSelect();}if(page==='members'){Members.populateAccounts();}document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
+// Close sidebar on mobile after navigation
+if(window.innerWidth<=768){const sb=document.getElementById('sidebar');const ov=document.getElementById('sidebar-overlay');if(sb)sb.classList.remove('open');if(ov)ov.classList.remove('open');}
+
 
 // Inbox uses a <template> — inject it once if not yet present
 if(page==='inbox'){
@@ -56,7 +62,138 @@ if(page==='inbox'){
   }
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
   document.getElementById('view-inbox').classList.remove('hidden');
+  this._populateInboxAccountFilter();
   this.inboxLoad();
+  return;
+}
+
+// Discord uses dynamic injection like inbox
+if(page==='discord'){
+  if(!document.getElementById('view-discord')){
+    const discordHtml = `<div id="view-discord">
+      <h2 class="page-title">🎮 Discord</h2>
+      <div class="stats-grid" id="discord-stats"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 12px">
+        <h3 style="margin:0">Bot Management</h3>
+        <button class="btn btn-primary btn-sm" onclick="Discord.addBot()">+ Thêm Bot</button>
+      </div>
+      <div id="discord-bot-list"></div>
+      <div style="margin-top:24px"><h3>Keyword Watchers (Discord)</h3></div>
+      <div id="discord-watcher-list"></div>
+    </div>`;
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = discordHtml;
+    document.querySelector('.main').appendChild(wrapper.firstElementChild);
+  }
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('view-discord').classList.remove('hidden');
+  Discord.init();
+  return;
+}
+
+// Analytics Dashboard
+if(page==='analytics'){
+  if(!document.getElementById('view-analytics')){
+    const html = `<div id="view-analytics">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h2 class="page-title" style="margin:0">📊 Analytics Dashboard</h2>
+        <button class="btn btn-primary btn-sm" onclick="Analytics.exportAllContacts()">📥 Export All Contacts</button>
+      </div>
+      <div class="stats-grid" style="margin-bottom:24px">
+        <div class="stat-card"><div class="stat-label">DM Sent</div><div class="stat-value accent" id="an-total-sent">–</div></div>
+        <div class="stat-card"><div class="stat-label">Replies</div><div class="stat-value green" id="an-total-replies">–</div></div>
+        <div class="stat-card"><div class="stat-label">Response Rate</div><div class="stat-value" id="an-response-rate">–</div></div>
+        <div class="stat-card"><div class="stat-label">Contacts</div><div class="stat-value accent" id="an-total-contacts">–</div></div>
+        <div class="stat-card"><div class="stat-label">Active Campaigns</div><div class="stat-value green" id="an-active-campaigns">–</div></div>
+        <div class="stat-card"><div class="stat-label">Reactions</div><div class="stat-value" id="an-total-reactions">–</div></div>
+      </div>
+      <div class="card" style="padding:16px;margin-bottom:24px">
+        <h3 style="margin:0 0 12px">📈 DM Activity (30 ngày)</h3>
+        <canvas id="an-chart"></canvas>
+      </div>
+      <h3>🏥 Account Health</h3>
+      <div id="an-health-list" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));gap:10px;margin-bottom:24px"></div>
+      <h3>🎯 Campaign Performance</h3>
+      <div id="an-campaign-list"></div>
+    </div>`;
+    const w = document.createElement('div'); w.innerHTML = html;
+    document.querySelector('.main').appendChild(w.firstElementChild);
+  }
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('view-analytics').classList.remove('hidden');
+  Analytics.init();
+  return;
+}
+
+// Templates Library
+if(page==='templates'){
+  if(!document.getElementById('view-templates')){
+    const html = `<div id="view-templates">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h2 class="page-title" style="margin:0">📋 Template Library</h2>
+        <button class="btn btn-primary btn-sm" onclick="Templates.openCreate()">+ Tạo Template</button>
+      </div>
+      <div id="tpl-list"></div>
+      <div id="tpl-modal" class="modal-overlay">
+        <div class="modal">
+          <div class="modal-header"><h3 class="modal-title" id="tpl-modal-title">Tạo Template</h3><button class="modal-close" onclick="document.getElementById('tpl-modal').classList.remove('open')">×</button></div>
+          <div class="modal-body">
+            <div class="form-group"><label class="form-label">Tên Template</label><input type="text" id="tpl-name" class="form-input" placeholder="VD: Crypto Outreach"></div>
+            <div class="form-group"><label class="form-label">Category</label><select id="tpl-category" class="form-select"><option value="general">General</option><option value="crypto">Crypto</option><option value="finance">Finance</option><option value="marketing">Marketing</option><option value="business">Business</option></select></div>
+            <div class="form-group"><label class="form-label">Nội dung tin nhắn</label><textarea id="tpl-content" class="form-textarea" rows="8" placeholder="Nhập nội dung template...&#10;Dùng {name} để chèn tên người nhận"></textarea></div>
+          </div>
+          <div class="modal-footer"><button class="btn btn-primary" onclick="Templates.save()">💾 Lưu</button></div>
+        </div>
+      </div>
+    </div>`;
+    const w = document.createElement('div'); w.innerHTML = html;
+    document.querySelector('.main').appendChild(w.firstElementChild);
+  }
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('view-templates').classList.remove('hidden');
+  Templates.init();
+  return;
+}
+
+// Auto-Reply Chatbot
+if(page==='autoreply'){
+  if(!document.getElementById('view-autoreply')){
+    const html = `<div id="view-autoreply">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h2 class="page-title" style="margin:0">🤖 Auto-Reply Chatbot</h2>
+        <button class="btn btn-primary btn-sm" onclick="AutoReply.openCreate()">+ Tạo Rule</button>
+      </div>
+      <div id="ar-rules-list" style="display:grid;gap:10px"></div>
+
+      <!-- Create/Edit Rule Modal -->
+      <div id="ar-modal" class="modal-overlay">
+        <div class="modal">
+          <div class="modal-header"><h3 class="modal-title" id="ar-modal-title">Tạo Auto-Reply Rule</h3><button class="modal-close" onclick="document.getElementById('ar-modal').classList.remove('open')">×</button></div>
+          <div class="modal-body">
+            <div class="form-group"><label class="form-label">Tên Rule</label><input type="text" id="ar-name" class="form-input" placeholder="VD: Welcome Reply"></div>
+            <div class="form-group"><label class="form-label">Trigger Type</label><select id="ar-trigger-type" class="form-select"><option value="keyword">Keyword Match</option><option value="any">Any Message</option></select></div>
+            <div class="form-group"><label class="form-label">Keywords (phân cách bởi dấu phẩy)</label><input type="text" id="ar-keywords" class="form-input" placeholder="hello, hi, xin chào"></div>
+            <div class="form-group"><label class="form-label">Nội dung Reply</label><textarea id="ar-reply-content" class="form-textarea" rows="6" placeholder="Nhập tin nhắn reply...&#10;Dùng --- để tách nhiều tin"></textarea></div>
+            <div class="form-group"><label class="form-label">Max replies per user</label><input type="number" id="ar-max-replies" class="form-input" value="3" min="1" max="50"></div>
+          </div>
+          <div class="modal-footer"><button class="btn btn-primary" onclick="AutoReply.save()">💾 Lưu</button></div>
+        </div>
+      </div>
+
+      <!-- Logs Modal -->
+      <div id="ar-logs-modal" class="modal-overlay">
+        <div class="modal" style="max-width:700px">
+          <div class="modal-header"><h3 class="modal-title">Auto-Reply Logs</h3><button class="modal-close" onclick="document.getElementById('ar-logs-modal').classList.remove('open')">×</button></div>
+          <div class="modal-body"><div class="table-wrap"><table><thead><tr><th>User</th><th>Trigger</th><th>Reply</th><th>Status</th><th>Time</th></tr></thead><tbody id="ar-logs-body"></tbody></table></div></div>
+        </div>
+      </div>
+    </div>`;
+    const w = document.createElement('div'); w.innerHTML = html;
+    document.querySelector('.main').appendChild(w.firstElementChild);
+  }
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('view-autoreply').classList.remove('hidden');
+  AutoReply.init();
   return;
 }
 
@@ -64,7 +201,8 @@ document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'
 const viewEl=document.getElementById(`view-${page}`);
 if(viewEl)viewEl.classList.remove('hidden');
 
-if(page==='dashboard')this.loadDashboard();else if(page==='schedules')this.loadSchedules();else if(page==='accounts')this.loadAccounts();else if(page==='logs')this.loadLogs();else if(page==='watchers')this.loadWatchers();else if(page==='watcher-logs')this.loadWatcherLogs();else if(page==='channels')this.loadChannels();else if(page==='settings')this.loadSettings();else if(page==='reactions')Reactions.init()},
+if(page==='dashboard')this.loadDashboard();else if(page==='schedules')this.loadSchedules();else if(page==='accounts')this.loadAccounts();else if(page==='logs')this.loadLogs();else if(page==='watchers')this.loadWatchers();else if(page==='watcher-logs')this.loadWatcherLogs();else if(page==='channels')this.loadChannels();else if(page==='settings')this.loadSettings();else if(page==='reactions')Reactions.init();else if(page==='members')Members.init()},
+
 
 async loadDashboard(){try{const[stats,sd]=await Promise.all([API.getStats(),API.getSchedules()]);
 
@@ -1933,6 +2071,7 @@ const Reactions = (() => {
 // ══════════════════════════════════════════════════════════════════
 Object.assign(App, {
   _inboxFilter: 'all',   // 'all' | 'unread' | 'read'
+  _inboxAccountFilter: '', // empty means all accounts
   _inboxOffset: 0,
   _inboxLimit: 50,
   _inboxHasMore: false,
@@ -1960,6 +2099,38 @@ Object.assign(App, {
     this._inboxBadgeTimer = setInterval(poll, 10000);
   },
 
+  async _populateInboxAccountFilter() {
+    const sel = document.getElementById('inbox-account-filter');
+    if (!sel) return;
+    try {
+      const d = await API.getAccounts();
+      const accounts = d.accounts || [];
+      const currentVal = sel.value;
+      sel.innerHTML = '<option value="">Tất cả tài khoản</option>' + accounts.map(a => {
+        const ui = a.user_info;
+        const name = ui ? [ui.first_name, ui.last_name].filter(Boolean).join(' ') : a.name;
+        const uname = ui && ui.username ? '@' + ui.username : (a.phone || '');
+        const label = name ? `${name} (${uname})` : (uname || `ID ${a.id}`);
+        return `<option value="${a.id}">${esc(label)}</option>`;
+      }).join('');
+      if (currentVal && accounts.some(a => String(a.id) === currentVal)) {
+        sel.value = currentVal;
+      } else {
+        sel.value = "";
+      }
+    } catch (e) {
+      sel.innerHTML = '<option value="">Tất cả tài khoản</option>';
+    }
+  },
+
+  inboxAccountFilterChange(){
+    const sel = document.getElementById('inbox-account-filter');
+    if(sel){
+      this._inboxAccountFilter = sel.value;
+    }
+    this.inboxLoad(true);
+  },
+
   // ── Load inbox ─────────────────────────────────────────────────
   async inboxLoad(reset=true){
     if(reset){ this._inboxOffset = 0; }
@@ -1968,6 +2139,7 @@ Object.assign(App, {
                  : undefined;
     let url = `/api/inbox?limit=${this._inboxLimit}&offset=${this._inboxOffset}`;
     if(isRead !== undefined) url += `&is_read=${isRead}`;
+    if(this._inboxAccountFilter) url += `&account_id=${this._inboxAccountFilter}`;
 
     try{
       const r = await fetch(url);
