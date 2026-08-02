@@ -394,6 +394,16 @@ async def init_db():
         except Exception:
             pass
 
+        # Member lang_code & Campaign auto_translate_native columns
+        try:
+            await db.execute("ALTER TABLE scraped_members ADD COLUMN lang_code TEXT DEFAULT NULL")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE dm_campaigns ADD COLUMN auto_translate_native INTEGER DEFAULT 1")
+        except Exception:
+            pass
+
         # View boost columns for reaction_targets
         try:
             await db.execute("ALTER TABLE reaction_targets ADD COLUMN view_enabled INTEGER DEFAULT 0")
@@ -2370,7 +2380,8 @@ async def save_scraped_members(scrape_job_id: str, account_id: int, group_id: in
             1 if m.get("is_bot") else 0,
             1 if m.get("is_premium") else 0,
             m.get("status", "active"),
-            m.get("last_seen")
+            m.get("last_seen"),
+            m.get("lang_code")
         )
         for m in members
     ]
@@ -2379,8 +2390,8 @@ async def save_scraped_members(scrape_job_id: str, account_id: int, group_id: in
         await db.executemany("""
             INSERT OR IGNORE INTO scraped_members
             (scrape_job_id, account_id, group_id, group_title, user_id,
-             username, first_name, last_name, phone, is_bot, is_premium, status, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             username, first_name, last_name, phone, is_bot, is_premium, status, last_seen, lang_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, data)
         await db.commit()
 

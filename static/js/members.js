@@ -857,6 +857,7 @@ const Members = {
     const useAi = document.getElementById('cmp-ai-remix')?.checked;
     const agentIdVal = document.getElementById('cmp-ai-agent')?.value;
     const aiAgentId = agentIdVal ? parseInt(agentIdVal) : null;
+    const autoNative = document.getElementById('cmp-auto-translate-native')?.checked ? 1 : 0;
     const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
 
     // Collect sender accounts
@@ -891,6 +892,7 @@ const Members = {
         daily_limit_normal: dailyLimitNormal,
         use_ai_remix: useAi,
         ai_agent_id: aiAgentId,
+        auto_translate_native: autoNative,
         exclude_previous_dms: excludePrev,
       });
       App.toast('✅ Đã cập nhật tin nhắn campaign!', 'success');
@@ -1280,6 +1282,7 @@ const Members = {
     const useAi = document.getElementById('cmp-ai-remix')?.checked;
     const agentIdVal2 = document.getElementById('cmp-ai-agent')?.value;
     const aiAgentId = agentIdVal2 ? parseInt(agentIdVal2) : null;
+    const autoNative = document.getElementById('cmp-auto-translate-native')?.checked ? 1 : 0;
     const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
 
     // --- NEW SCHEDULE FIELDS ---
@@ -1327,6 +1330,7 @@ const Members = {
         daily_limit_normal: dailyLimitNormal,
         use_ai_remix: useAi,
         ai_agent_id: aiAgentId,
+        auto_translate_native: autoNative,
         exclude_previous_dms: excludePrev,
         // --- NEW FIELDS ---
         schedule_enabled: scheduleEnabled,

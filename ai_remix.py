@@ -180,11 +180,11 @@ async def _try_call(provider, api_key, prompt, **kwargs):
         raise ValueError("Unknown provider: " + provider)
 
 
-def _build_prompt(original_text, sender_name=None, custom_instruction=None):
+def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto_translate_native=False, member_info=None):
     name_hint = ""
     if sender_name:
         name_hint = (
-            "\nThe recipient name is: " + sender_name + "."
+            "\nThe recipient name is: " + str(sender_name) + "."
             " Personalize the greeting if natural (e.g. use their name in the opening)."
         )
 
@@ -195,13 +195,31 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None):
             + str(custom_instruction).strip() + "\n"
         )
 
+    if auto_translate_native:
+        mem_info = member_info or {}
+        lang_code = mem_info.get("lang_code", "") or ""
+        first_name = mem_info.get("first_name", "") or ""
+        last_name = mem_info.get("last_name", "") or ""
+        username = mem_info.get("username", "") or ""
+        lang_rule = (
+            f"\n3. AUTO-LOCALIZATION / NATIVE LANGUAGE RULE:\n"
+            f"   - Target recipient Telegram lang_code: '{lang_code}'\n"
+            f"   - Target recipient name: '{first_name} {last_name}', username: @{username}\n"
+            f"   - DETECT the recipient's likely native language based on lang_code ('{lang_code}') and name ('{first_name} {last_name}').\n"
+            f"     (e.g., 'vi' -> Vietnamese, 'zh'/'zh-hans'/'zh-hant' -> Chinese, 'ru' -> Russian, 'tr' -> Turkish, 'fa'/'ar' -> Persian/Arabic, 'ko' -> Korean, 'ja' -> Japanese, 'es' -> Spanish, 'de' -> German, 'fr' -> French, 'en' -> English).\n"
+            f"   - TRANSLATE and rephrase the outreach message into their native language naturally, engagingly, and authentically.\n"
+            f"   - If lang_code is unavailable or 'en', check name character script (Hanzi, Cyrillic, Arabic script). If still ambiguous, write in natural English.\n"
+        )
+    else:
+        lang_rule = "\n3. Keep the SAME language as the original - do NOT translate.\n"
+
     prompt = (
         "You are an expert Telegram outreach assistant. Rephrase the message below to sound natural, authentic, and human.\n"
         "\n"
         "RULES (follow strictly):\n"
         "1. Preserve essential information and intent while prioritizing a natural, non-spammy tone.\n"
         "2. AGGRESSIVELY change wording, sentence order, and structure each time.\n"
-        "3. Keep the SAME language as the original - do NOT translate.\n"
+        + lang_rule +
         "4. Do NOT use any emoji or icon characters. Write plain text only. Messages with emoji look like spam/bot.\n"
         "5. Keep all @usernames, links, and numbers exactly as-is unless instructed to reframe.\n"
         "6. Write naturally like a real person texting a colleague or friend - casual, friendly, and authentic. Avoid robotic sales pitches.\n"
@@ -216,7 +234,7 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None):
     return prompt
 
 
-async def remix_message(original_text, provider, api_keys, sender_name=None, custom_instruction=None, **kwargs):
+async def remix_message(original_text, provider, api_keys, sender_name=None, custom_instruction=None, auto_translate_native=False, member_info=None, **kwargs):
     """
     Remix a DM message using round-robin AI key rotation.
     Supported providers: 'gemini', 'deepseek', 'openai', 'groq', 'openai_compatible'
@@ -226,10 +244,15 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
     if not original_text or not original_text.strip():
         return original_text
     if not api_keys:
-        logger.warning("[AI Remix] No API keys - using original")
         return original_text
 
-    prompt = _build_prompt(original_text, sender_name, custom_instruction=custom_instruction)
+    prompt = _build_prompt(
+        original_text,
+        sender_name=sender_name,
+        custom_instruction=custom_instruction,
+        auto_translate_native=auto_translate_native,
+        member_info=member_info
+    )
     idx, key = _next_key(api_keys, provider)
 
     try:

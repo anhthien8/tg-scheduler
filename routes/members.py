@@ -62,6 +62,7 @@ class CampaignCreate(BaseModel):
     scheduled_at: str | None = None       # ISO datetime: "2026-07-24 09:00"
     target_timezone: str | None = None    # IANA: "America/New_York"
     ai_agent_id: int | None = None
+    auto_translate_native: int = 1
 
 
 class CampaignUpdateMessages(BaseModel):
@@ -73,6 +74,7 @@ class CampaignUpdateMessages(BaseModel):
     use_ai_remix: Optional[bool] = None
     exclude_previous_dms: Optional[bool] = None
     ai_agent_id: Optional[int] = None
+    auto_translate_native: Optional[int] = None
 
 
 class CampaignCloneRequest(BaseModel):
@@ -505,6 +507,7 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
                                 "is_premium": getattr(user, "premium", False),
                                 "status": "active",
                                 "last_seen": last_seen,
+                                "lang_code": getattr(user, "lang_code", None),
                             })
                         await asyncio.sleep(0.5)
                     except Exception as e:
@@ -1639,12 +1642,21 @@ async def _run_campaign(campaign_id: int):
                         if ai_provider and ai_keys:
                             try:
                                 original_len = len(content)
+                                auto_native = bool(campaign.get("auto_translate_native", 1))
+                                mem_info = {
+                                    "first_name": target.get("first_name"),
+                                    "last_name": target.get("last_name"),
+                                    "username": username,
+                                    "lang_code": target.get("lang_code")
+                                }
                                 remixed_content = await ai_rmx.remix_message(
                                     original_text=content,
                                     provider=ai_provider,
                                     api_keys=ai_keys,
-                                    sender_name=username if username else None,
+                                    sender_name=username if username else target.get("first_name"),
                                     custom_instruction=ai_custom_prompt,
+                                    auto_translate_native=auto_native,
+                                    member_info=mem_info,
                                     **ai_remix_kwargs
                                 )
                                 if remixed_content and remixed_content != content:

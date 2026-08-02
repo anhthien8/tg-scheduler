@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v2.7.0",
+        "date": "02/08/2026",
+        "title": "🌐 AI Auto Native Language Outreach — Tự Động Dịch DM Theo Tiếng Bản Địa Của Khách Hàng",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "AI tự động phát hiện ngôn ngữ & quốc gia của từng member (Trung Quốc, Nga, Thổ Nhĩ Kỳ, Việt Nam...) để chuyển đổi tin nhắn outreach sang tiếng mẹ đẻ của họ, tăng Reply Rate 3-5x.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Tự Động Phát Hiện & Dịch Tiếng Bản Địa (Auto Native Language)",
+                "desc": "Khi bật tùy chọn '🌐 Tự Động Dịch Ngôn Ngữ Bản Địa' trong Chiến dịch DM, AI sẽ tự động phân tích `lang_code` và font chữ tên của từng member để dịch & biến tấu câu chào/nội dung outreach sang đúng tiếng mẹ đẻ (Trung 🇨🇳, Nga 🇷🇺, Thổ 🇹🇷, Việt 🇻🇳, Hàn 🇰🇷...).",
+                "tag": "Localization"
+            },
+            {
+                "type": "improvement",
+                "title": "Thu Thập Telegram Language Code (lang_code)",
+                "desc": "Tự động thu thập thuộc tính `lang_code` từ Telegram API khi cào member nhóm và lưu trữ trong cơ sở dữ liệu `scraped_members`.",
+                "tag": "Member Scraping"
+            },
+            {
+                "type": "improvement",
+                "title": "Bảo Toàn Tên Thương Hiệu, Link & Mã Giảm Giá",
+                "desc": "Giữ nguyên 100% tất cả liên kết (URL), username @, tên thương hiệu (WEEX, Blofin...) và mã giới thiệu khi thực hiện dịch thuật bản địa hóa.",
+                "tag": "AI Remix"
+            }
+        ]
+    },
+    {
         "version": "v2.6.0",
         "date": "02/08/2026",
         "title": "🤖 Chế Độ AI Care Auto-Pilot Theo Từng Tài Khoản Telegram",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Cho phép gán AI Agent trực tiếp cho từng Tài Khoản Telegram để tự động trả lời khách hàng khi bạn rời máy tính hoặc off.",
         "changes": [
             {
