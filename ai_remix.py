@@ -9,6 +9,40 @@ import time
 
 logger = logging.getLogger("tg-scheduler.ai_remix")
 
+
+def _parse_openai_compatible_json(raw: str) -> dict:
+    raw_str = (raw or "").strip()
+    if not raw_str:
+        raise ValueError("Empty response from OpenAI compatible API")
+
+    try:
+        return json.loads(raw_str)
+    except json.JSONDecodeError:
+        pass
+
+    for line in raw_str.splitlines():
+        line_s = line.strip()
+        if line_s.startswith("data:"):
+            line_s = line_s[5:].strip()
+        if line_s.startswith("{") and line_s.endswith("}"):
+            try:
+                return json.loads(line_s)
+            except json.JSONDecodeError:
+                pass
+
+    first_brace = raw_str.find("{")
+    if first_brace != -1:
+        last_brace = raw_str.rfind("}")
+        if last_brace > first_brace:
+            candidate = raw_str[first_brace:last_brace + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+
+    raise ValueError(f"Cannot parse API response: {raw_str[:200]}")
+
+
 _rr_index = {}
 _key_cooldown = {}
 _KEY_FAIL_COOLDOWN = 60
@@ -122,16 +156,7 @@ async def _call_openai_compatible(api_key, prompt, base_url, model):
         # Some local APIs (LM Studio, Ollama, vLLM) may return extra data after JSON
         # Use strict=False and handle partial JSON
         raw = resp.text
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            # Try to extract just the first JSON object
-            import re
-            match = re.search(r'\{.*?"choices"\s*:\s*\[.*?\]\s*\}', raw, re.DOTALL)
-            if match:
-                data = json.loads(match.group())
-            else:
-                raise ValueError(f"Cannot parse API response: {raw[:200]}")
+        data = _parse_openai_compatible_json(raw)
         content = data["choices"][0]["message"]["content"]
         return (content or "").strip()
 
@@ -389,15 +414,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             raw = resp.text
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                import re
-                match = re.search(r'\{.*?\"choices\"\s*:\s*\[.*?\]\s*\}', raw, re.DOTALL)
-                if match:
-                    data = json.loads(match.group())
-                else:
-                    raise ValueError(f"Cannot parse API response: {raw[:200]}")
+            data = _parse_openai_compatible_json(raw)
             return data["choices"][0]["message"]["content"].strip()
 
     prompt_str = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in messages])
