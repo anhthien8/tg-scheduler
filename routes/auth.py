@@ -209,3 +209,25 @@ async def unpause_account_route(account_id: int):
     """Manually unpause an auto-paused account."""
     await db.unpause_account(account_id)
     return {"ok": True, "message": f"Account {account_id} unpaused"}
+
+
+@router.post("/accounts/{account_id}/toggle-active")
+async def toggle_account_active(account_id: int, is_active: bool = True):
+    """Toggle ON/OFF (active/paused) status for a Telegram account."""
+    acc = await db.get_account(account_id)
+    if not acc:
+        raise HTTPException(404, "Tài khoản không tồn tại")
+    
+    if is_active:
+        await db.unpause_account(account_id)
+        msg = f"Đã BẬT tài khoản {acc.get('name') or acc.get('phone')} (Hoạt động bình thường)"
+    else:
+        await db.pause_account(account_id, "Tắt thủ công bởi người dùng")
+        msg = f"Đã TẮT tài khoản {acc.get('name') or acc.get('phone')} (Ngắt tất cả AI, DM & Tự động hóa)"
+        
+    return {
+        "success": True,
+        "is_paused": not is_active,
+        "is_active": is_active,
+        "message": msg
+    }

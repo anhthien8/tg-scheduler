@@ -90,6 +90,10 @@ const API = {
     this.clearAccountsCache();
     return this.post(`/api/auth/accounts/${id}/toggle-premium?is_premium=${isPremium}`);
   },
+  async toggleAccountActive(id, isActive) {
+    this.clearAccountsCache();
+    return parseApiResponse(await fetch(`/api/auth/accounts/${id}/toggle-active?is_active=${isActive}`, { method: 'POST' }));
+  },
   getDmStats(id) { return this.get(`/api/auth/accounts/${id}/dm-stats`); },
   sendCode(phone, accountId) { return this.post('/api/auth/send-code', { phone, account_id: accountId }); },
   async verify(phone, code, hash, accountId, password) {

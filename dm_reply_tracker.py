@@ -56,6 +56,11 @@ def _make_handler(account_id: int):
         if not event.is_private:
             return
 
+        # If account is OFF (paused by user or auto-paused), skip all auto-replies and AI processing
+        if await db.is_account_paused(account_id):
+            logger.debug("[Inbox] Account #%d is OFF/Paused — skipping message processing", account_id)
+            return
+
         sender = await event.get_sender()
         if sender is None:
             return
