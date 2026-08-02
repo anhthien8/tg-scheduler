@@ -188,9 +188,19 @@ const AIAgents = {
   },
 
   // ── Interactive Test Modal ─────────────────────────────────────────────
-  testAgent(id) {
-    const agent = this._agents.find(a => a.id === id);
-    if (!agent) return;
+  async testAgent(id) {
+    let agent = this._agents.find(a => a.id == id);
+    if (!agent) {
+      try {
+        agent = await AIAgentsAPI.get(id);
+      } catch (e) {
+        console.error('Failed to get agent info:', e);
+      }
+    }
+    if (!agent) {
+      App.toast(`Không tìm thấy AI Agent #${id}`, 'error');
+      return;
+    }
 
     document.getElementById('ai-agent-test-modal')?.remove();
 
