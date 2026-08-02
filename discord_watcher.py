@@ -570,12 +570,11 @@ def remove_watcher(watcher_id: int) -> None:
 async def _preload_dm_history() -> None:
     """Load recent successful DMs from DB into _user_dm_sent to persist across restarts."""
     try:
-        import aiosqlite
         from datetime import datetime, timezone
-        from database import DB_PATH as db_path
+        from database import get_db
 
         cutoff_secs = USER_DM_COOLDOWN_SECS
-        async with aiosqlite.connect(db_path) as conn:
+        async with get_db() as conn:
             rows = await conn.execute_fetchall(
                 """SELECT watcher_id, target_user_id, MAX(sent_at) as last_dm
                    FROM watcher_dm_logs

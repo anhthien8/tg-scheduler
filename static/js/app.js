@@ -1162,7 +1162,7 @@ _showMembershipWarning(warnings, ruleName) {
   // Show in a modal
   const modal = document.getElementById('membership-warn-modal');
   if(modal) {
-    document.getElementById('membership-warn-body').innerHTML = html;
+    document.getElementById('membership-warn-body')?.innerHTML = html;
     modal.classList.add('open');
   } else {
     // Fallback: create and show ad-hoc modal
@@ -1573,8 +1573,8 @@ App.loadSettings = async function() {
     App.renderAiKeysList('openai',   openaiKeys);
     App.renderAiKeysList('groq',     groqKeys);
     App.renderAiKeysList('openai_compatible', oaiCompatKeys);
-    document.getElementById('oai-compat-base-url').value = oaiCompatBaseUrl;
-    document.getElementById('oai-compat-model').value = oaiCompatModel;
+    document.getElementById('oai-compat-base-url')?.value = oaiCompatBaseUrl;
+    document.getElementById('oai-compat-model')?.value = oaiCompatModel;
     const customPromptEl = document.getElementById('ai-custom-prompt');
     if (customPromptEl) customPromptEl.value = customPrompt;
 
@@ -1612,7 +1612,7 @@ App.getOaiCompatModel = function() {
 
 // Fetch available models from OpenAI-compatible API
 App.fetchOaiModels = async function() {
-  const baseUrl = document.getElementById('oai-compat-base-url').value.trim();
+  const baseUrl = document.getElementById('oai-compat-base-url')?.value.trim();
   const statusEl = document.getElementById('oai-models-status');
   const selectEl = document.getElementById('oai-compat-model-select');
   const inputEl = document.getElementById('oai-compat-model');
@@ -1761,7 +1761,7 @@ App.saveSettings = async function() {
   if (provider === 'openai'   && openaiKeys.length   === 0) { App.toast('Them it nhat 1 OpenAI API Key', 'error'); return; }
   if (provider === 'groq'     && groqKeys.length     === 0) { App.toast('Them it nhat 1 Groq API Key', 'error'); return; }
   if (provider === 'openai_compatible') {
-    const baseUrl = document.getElementById('oai-compat-base-url').value.trim();
+    const baseUrl = document.getElementById('oai-compat-base-url')?.value.trim();
     const model = App.getOaiCompatModel();
     if (!baseUrl) { App.toast('Nhap Base URL cho OpenAI Compatible', 'error'); return; }
     if (!model) { App.toast('Nhap Model Name cho OpenAI Compatible', 'error'); return; }
@@ -1779,7 +1779,7 @@ App.saveSettings = async function() {
       API.setSetting('ai_keys_openai',   JSON.stringify(openaiKeys)),
       API.setSetting('ai_keys_groq',     JSON.stringify(groqKeys)),
       API.setSetting('ai_keys_openai_compatible', JSON.stringify(oaiCompatKeys)),
-      API.setSetting('ai_oai_compat_base_url', document.getElementById('oai-compat-base-url').value.trim()),
+      API.setSetting('ai_oai_compat_base_url', document.getElementById('oai-compat-base-url')?.value.trim()),
       API.setSetting('ai_oai_compat_model', App.getOaiCompatModel()),
       API.setSetting('ai_custom_prompt', customPromptVal)
     ]);
@@ -1832,7 +1832,7 @@ App.testAiRemix = async function() {
   try {
     const body = { provider: provider, keys: keys, text: sampleText };
     if (provider === 'openai_compatible') {
-      body.base_url = document.getElementById('oai-compat-base-url').value.trim();
+      body.base_url = document.getElementById('oai-compat-base-url')?.value.trim();
       body.model = App.getOaiCompatModel();
     }
     const resp = await fetch('/api/settings/test-remix', {
@@ -2931,7 +2931,7 @@ App.switchProxyTab = function(tab) {
 };
 
 App.fetchWebshare = async function() {
-  const apiKey = document.getElementById('webshare-api-key').value.trim();
+  const apiKey = document.getElementById('webshare-api-key')?.value.trim();
   if (!apiKey) { App.toast('Nhập Webshare API Key', 'error'); return; }
   const proxyType = document.getElementById('webshare-proxy-type').value;
   const btn = document.getElementById('btn-fetch-webshare');
@@ -3041,7 +3041,7 @@ App.loadProxyStatus = async function() {
     if (data.webshare_configured) {
       try {
         const keyResp = await API.getSetting('webshare_api_key');
-        if (keyResp.value) document.getElementById('webshare-api-key').value = keyResp.value;
+        if (keyResp.value) document.getElementById('webshare-api-key')?.value = keyResp.value;
       } catch(e) {}
     }
 
@@ -3152,27 +3152,27 @@ const Warmup = {
     this.loadScripts();
     document.getElementById('warmup-scripts-section').classList.remove('hidden');
     const g = this._groups.find(x => x.id === id);
-    document.getElementById('warmup-scripts-title').textContent = 'Scripts - ' + (g ? g.name : '');
+    document.getElementById('warmup-scripts-title')?.textContent = 'Scripts - ' + (g ? g.name : '');
   },
 
   openAddGroup() {
-    document.getElementById('wg-name').value = '';
-    document.getElementById('wg-chat-id').value = '';
-    document.getElementById('wg-chat-title').value = '';
-    document.getElementById('wg-chat-username').value = '';
+    document.getElementById('wg-name')?.value = '';
+    document.getElementById('wg-chat-id')?.value = '';
+    document.getElementById('wg-chat-title')?.value = '';
+    document.getElementById('wg-chat-username')?.value = '';
     document.getElementById('warmup-group-modal').classList.add('open');
   },
 
   async saveGroup() {
-    const name = document.getElementById('wg-name').value.trim();
-    const chatId = document.getElementById('wg-chat-id').value.trim();
+    const name = document.getElementById('wg-name')?.value.trim();
+    const chatId = document.getElementById('wg-chat-id')?.value.trim();
     if (!name || !chatId) { App.toast('Nhap ten va chat ID', 'error'); return; }
     try {
       await API.post('/api/warmup/groups', {
         name,
         chat_id: chatId,
-        chat_title: document.getElementById('wg-chat-title').value.trim(),
-        chat_username: document.getElementById('wg-chat-username').value.trim()
+        chat_title: document.getElementById('wg-chat-title')?.value.trim(),
+        chat_username: document.getElementById('wg-chat-username')?.value.trim()
       });
       document.getElementById('warmup-group-modal').classList.remove('open');
       App.toast('Da them nhom', 'success');
@@ -3222,18 +3222,18 @@ const Warmup = {
 
   openAddScript() {
     if (!this._selectedGroupId) { App.toast('Chon nhom truoc', 'error'); return; }
-    document.getElementById('ws-content').value = '';
-    document.getElementById('ws-ai-remix').checked = true;
+    document.getElementById('ws-content')?.value = '';
+    document.getElementById('ws-ai-remix')?.checked = true;
     document.getElementById('warmup-script-modal').classList.add('open');
   },
 
   async saveScript() {
-    const content = document.getElementById('ws-content').value.trim();
+    const content = document.getElementById('ws-content')?.value.trim();
     if (!content) { App.toast('Nhap noi dung', 'error'); return; }
     try {
       await API.post('/api/warmup/groups/' + this._selectedGroupId + '/scripts', {
         content,
-        use_ai_remix: document.getElementById('ws-ai-remix').checked ? 1 : 0
+        use_ai_remix: document.getElementById('ws-ai-remix')?.checked ? 1 : 0
       });
       document.getElementById('warmup-script-modal').classList.remove('open');
       App.toast('Da them script', 'success');
@@ -3333,11 +3333,11 @@ const Warmup = {
       accEl.innerHTML = '<span style="color:#f87171">Loi tai tai khoan</span>';
     }
 
-    document.getElementById('wj-interval-min').value = '30';
-    document.getElementById('wj-interval-max').value = '120';
-    document.getElementById('wj-start').value = '09:00';
-    document.getElementById('wj-end').value = '22:00';
-    document.getElementById('wj-daily-limit').value = '10';
+    document.getElementById('wj-interval-min')?.value = '30';
+    document.getElementById('wj-interval-max')?.value = '120';
+    document.getElementById('wj-start')?.value = '09:00';
+    document.getElementById('wj-end')?.value = '22:00';
+    document.getElementById('wj-daily-limit')?.value = '10';
     document.getElementById('warmup-job-modal').classList.add('open');
   },
 
@@ -3350,11 +3350,11 @@ const Warmup = {
       await API.post('/api/warmup/jobs', {
         group_id: groupId,
         account_ids: accIds,
-        interval_min: parseInt(document.getElementById('wj-interval-min').value) || 30,
-        interval_max: parseInt(document.getElementById('wj-interval-max').value) || 120,
-        schedule_start: document.getElementById('wj-start').value || '09:00',
-        schedule_end: document.getElementById('wj-end').value || '22:00',
-        daily_post_limit: parseInt(document.getElementById('wj-daily-limit').value) || 10
+        interval_min: parseInt(document.getElementById('wj-interval-min')?.value) || 30,
+        interval_max: parseInt(document.getElementById('wj-interval-max')?.value) || 120,
+        schedule_start: document.getElementById('wj-start')?.value || '09:00',
+        schedule_end: document.getElementById('wj-end')?.value || '22:00',
+        daily_post_limit: parseInt(document.getElementById('wj-daily-limit')?.value) || 10
       });
       document.getElementById('warmup-job-modal').classList.remove('open');
       App.toast('Da tao job', 'success');

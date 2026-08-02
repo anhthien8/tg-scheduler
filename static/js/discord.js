@@ -237,7 +237,7 @@ const Discord = (() => {
 
   function showToast(msg, type = 'info') {
     if (typeof App !== 'undefined' && App.showToast) {
-      App.showToast(msg, type);
+      App.toast(msg, type);
     } else {
       console.log(`[${type}] ${msg}`);
     }

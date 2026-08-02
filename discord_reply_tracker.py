@@ -131,9 +131,8 @@ async def _find_discord_watcher_for_user(user_id: int) -> int | None:
     """
     # Try platform-specific lookup first
     try:
-        import aiosqlite
-        from database import DB_PATH as db_path
-        async with aiosqlite.connect(db_path) as conn:
+        from database import get_db
+        async with get_db() as conn:
             row = await (await conn.execute(
                 """SELECT watcher_id FROM watcher_dm_logs
                    WHERE target_user_id = ? AND status = 'success'
