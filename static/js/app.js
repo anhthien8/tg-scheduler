@@ -1667,9 +1667,9 @@ App.fetchOaiModels = async function() {
       selectEl.appendChild(opt);
     });
 
-    // Show dropdown, hide text input
-    selectEl.style.display = '';
-    inputEl.style.display = 'none';
+    // Unhide dropdown select
+    (selectEl.classList || {remove:()=>{}}).remove('hidden');
+    selectEl.style.display = 'block';
 
     // Sync select → hidden input for save
     selectEl.onchange = function() {
@@ -2948,7 +2948,7 @@ App.fetchWebshare = async function() {
   try {
     const resp = await fetch('/api/proxy/webshare', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...API._headers() },
+      headers: { 'Content-Type': 'application/json', ...API.getHeaders() },
       body: JSON.stringify({ api_key: apiKey, proxy_type: proxyType, auto_assign: true })
     });
     const data = await resp.json();
@@ -2988,7 +2988,7 @@ App.importProxyList = async function() {
   try {
     const resp = await fetch('/api/proxy/import', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...API._headers() },
+      headers: { 'Content-Type': 'application/json', ...API.getHeaders() },
       body: JSON.stringify({ raw_text: rawText, default_scheme: scheme, auto_assign: true })
     });
     const data = await resp.json();
@@ -3035,7 +3035,7 @@ App._renderProxyTestResults = function(data) {
 
 App.loadProxyStatus = async function() {
   try {
-    const resp = await fetch('/api/proxy/status', { headers: API._headers() });
+    const resp = await fetch('/api/proxy/status', { headers: API.getHeaders() });
     const data = await resp.json();
 
     // Load webshare key if stored
@@ -3081,7 +3081,7 @@ App.removeAccountProxy = async function(accountId) {
   try {
     const resp = await fetch('/api/proxy/remove/' + accountId, {
       method: 'POST',
-      headers: API._headers()
+      headers: API.getHeaders()
     });
     const data = await resp.json();
     if (data.success) {
@@ -3098,7 +3098,7 @@ App.clearProxyPool = async function() {
   try {
     const resp = await fetch('/api/proxy/clear-pool', {
       method: 'POST',
-      headers: API._headers()
+      headers: API.getHeaders()
     });
     const data = await resp.json();
     if (data.success) {
