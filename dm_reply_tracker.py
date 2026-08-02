@@ -60,16 +60,24 @@ def _make_handler(account_id: int):
         if sender is None:
             return
 
-        # Ignore messages from ourselves (Saved Messages)
+        # Check if message is from ourselves (outgoing from human owner/admin)
         client = tg.get_client(account_id)
         if client is None:
             return
         try:
             me = await client.get_me()
             if me and sender.id == me.id:
+                # ── HUMAN ADMIN OUTGOING MESSAGE INTERCEPTION ──
+                # If human admin typed a message manually on Telegram to a user:
+                # Auto-pause AI Agent for this user so AI never intervenes in human conversations
+                peer = await event.get_input_chat()
+                peer_user_id = getattr(peer, "user_id", None) or getattr(event, "chat_id", None)
+                if peer_user_id and peer_user_id != me.id:
+                    logger.info("[AIFollowUp] 🛑 Human admin manually sent message to user %d — auto-pausing AI Agent (status='needs_human')", peer_user_id)
+                    await db.update_followup_chat_status(account_id, peer_user_id, "needs_human")
                 return
-        except Exception:
-            pass
+        except Exception as _me_err:
+            logger.debug("[Inbox] me check error: %s", _me_err)
 
         sender_id = sender.id
         msg_id = event.id
@@ -140,23 +148,19 @@ def _make_handler(account_id: int):
         try:
             enabled_str = await db.get_setting("ai_followup_enabled", "true")
             if enabled_str.lower() in ("true", "1"):
-                # 1. Identify if this user belongs to a campaign
-                campaign_log = await db.find_campaign_log_for_user(sender_id)
-                target_campaign_id = campaign_log.get("campaign_id") if campaign_log else None
+                # 1. Identify if this user belongs to an active RUNNING campaign
+                running_log = await db.find_running_campaign_log_for_user(sender_id)
+                target_campaign_id = running_log.get("campaign_id") if running_log else None
 
-                # Fallback to existing chat session's campaign_id if present
+                # 2. Strict Rule: If user has NO active RUNNING campaign, SKIP AI reply!
                 if not target_campaign_id:
-                    existing_chat = await db.get_followup_chat(account_id, sender_id)
-                    if existing_chat:
-                        target_campaign_id = existing_chat.get("campaign_id")
-
-                # 2. Strict Rule: If user has NO campaign, SKIP AI reply!
-                if not target_campaign_id:
-                    logger.info("[AIFollowUp] User %d does not belong to any DM campaign — skipping AI auto-reply", sender_id)
+                    logger.info("[AIFollowUp] User %d does not belong to any RUNNING DM campaign — skipping AI auto-reply", sender_id)
                 else:
-                    # 3. Strict Rule: If campaign has NO AI Agent, SKIP AI reply!
+                    # 3. Strict Rule: Campaign MUST BE RUNNING & HAVE AI AGENT!
                     cmp = await db.get_dm_campaign(target_campaign_id)
-                    if not cmp or not cmp.get("ai_agent_id"):
+                    if not cmp or cmp.get("status") != "running":
+                        logger.info("[AIFollowUp] Campaign #%s status is '%s' (not 'running') — skipping AI auto-reply for user %d", target_campaign_id, cmp.get("status") if cmp else None, sender_id)
+                    elif not cmp.get("ai_agent_id"):
                         logger.info("[AIFollowUp] Campaign #%s has no AI Agent assigned — skipping AI auto-reply for user %d", target_campaign_id, sender_id)
                     else:
                         agent_config = await db.get_ai_agent(cmp["ai_agent_id"])
@@ -294,6 +298,11 @@ def _make_handler(account_id: int):
             logger.error("[AIFollowUp] Error in AI follow-up engine: %s", ex_ai, exc_info=True)
 
         # ── Legacy Auto-Reply Chatbot Logic (Fallback) ──
+        existing_chat = await db.get_followup_chat(account_id, sender_id)
+        if existing_chat and existing_chat.get("status") in ("paused_admin", "onboarded", "needs_human"):
+            logger.info("[AutoReply] User %d chat status is '%s' — skipping legacy auto-reply", sender_id, existing_chat.get("status"))
+            return
+
         rules = await db.get_active_auto_reply_rules()
         if not rules:
             return
