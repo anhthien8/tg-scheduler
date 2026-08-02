@@ -111,6 +111,15 @@ if(page==='ai-agents'){
   return;
 }
 
+// Changelog Release Notes Page
+if(page==='changelog'){
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  const changelogView = document.getElementById('view-changelog');
+  if(changelogView) changelogView.classList.remove('hidden');
+  if(window.Changelog) window.Changelog.init();
+  return;
+}
+
 // AI Follow-Up Sales Agent Page
 if(page==='ai-followup'){
   if(!document.getElementById('view-ai-followup')){

@@ -151,6 +151,9 @@
         <div class="nav-item" data-page="settings" onclick="App.navigate('settings')">
           ⚙️ Cài đặt AI
         </div>
+        <div class="nav-item" data-page="changelog" onclick="App.navigate('changelog')">
+          🚀 Cập Nhật <span class="badge" style="background:linear-gradient(135deg, #8b5cf6, #ec4899);color:#fff;font-size:10px;padding:2px 6px;border-radius:10px;margin-left:6px;font-weight:700">NEW</span>
+        </div>
       </nav>
       <div class="sidebar-footer">
         <div class="user-info" id="user-info">
@@ -716,6 +719,18 @@
           <button class="btn btn-primary" onclick="window.AIAgents.openForm()">➕ Tạo AI Agent</button>
         </div>
         <div id="ai-agents-list"></div>
+      </div>
+
+      <!-- ══ Changelog View ══ -->
+      <div id="view-changelog" class="hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+          <div>
+            <h2 class="page-title" style="margin-bottom:4px">🚀 Nhật Ký Cập Nhật (Release Notes)</h2>
+            <p class="page-subtitle" style="margin:0;color:var(--text2)">Theo dõi các tính năng mới, cải tiến và bản sửa lỗi của hệ thống</p>
+          </div>
+          <button class="btn btn-outline" onclick="window.Changelog.showModal()">✨ Xem Tóm Tắt Bản Mới</button>
+        </div>
+        <div id="changelog-content"></div>
       </div>
 
       <!-- AI Agent Create/Edit Modal -->
@@ -1461,12 +1476,13 @@
     </div>
   </div>
 
-  <script src="/static/js/api.js?v=305"></script>
-  <script src="/static/js/discord.js?v=305"></script>
-  <script src="/static/js/members.js?v=305"></script>
-  <script src="/static/js/analytics.js?v=305"></script>
-  <script src="/static/js/ai_agents.js?v=305"></script>
-  <script src="/static/js/app.js?v=305"></script>
+  <script src="/static/js/api.js?v=400"></script>
+  <script src="/static/js/discord.js?v=400"></script>
+  <script src="/static/js/members.js?v=400"></script>
+  <script src="/static/js/analytics.js?v=400"></script>
+  <script src="/static/js/ai_agents.js?v=400"></script>
+  <script src="/static/js/changelog.js?v=400"></script>
+  <script src="/static/js/app.js?v=400"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

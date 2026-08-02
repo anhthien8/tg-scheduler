@@ -37,6 +37,7 @@ from routes import discord as discord_routes
 from routes import warmup as warmup_routes
 from routes import ai_followup
 from routes import ai_agents as ai_agents_routes
+from routes import changelog as changelog_routes
 import reaction_watcher as rw
 import dm_reply_tracker as drt
 
@@ -273,6 +274,7 @@ app.include_router(invite.router, dependencies=_auth_dep)
 app.include_router(warmup_routes.router, dependencies=_auth_dep)
 app.include_router(ai_followup.router, dependencies=_auth_dep)
 app.include_router(ai_agents_routes.router, dependencies=_auth_dep)
+app.include_router(changelog_routes.router, dependencies=_auth_dep)
 
 # Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
