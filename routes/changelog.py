@@ -8,11 +8,45 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v2.5.0",
+        "date": "02/08/2026",
+        "title": "🛑 Nút Bật/Tắt Account Thủ Công & Khóa AI Bảo Vệ Khách Hàng",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Bổ sung tính năng Tắt / Bật tài khoản Telegram thủ công ngắt 100% tự động hóa để test an toàn, cùng cơ chế tự động ngắt AI khi Admin nhắn tin.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Bật / Tắt (ON/OFF) Tài Khoản Thủ Công",
+                "desc": "Thêm nút '🛑 Tắt Account (OFF)' và '⚡ Bật Account (ON)' ngay trên từng thẻ tài khoản. Khi TẮT, tất cả AI Agent, Chiến dịch DM và Tự động hóa của tài khoản sẽ BỊ NGẮT HOÀN TOÀN để thử nghiệm an toàn không ảnh hưởng danh bạ cá nhân.",
+                "tag": "Accounts"
+            },
+            {
+                "type": "feature",
+                "title": "Tự Động Ngắt AI Khi Admin Nhắn Tin (Human Interception)",
+                "desc": "Tự động phát hiện khi bạn tự tay nhắn tin cho bất kỳ người dùng nào trên Telegram và chuyển cuộc hội thoại sang trạng thái 'needs_human' ngắt hoàn toàn AI Agent.",
+                "tag": "AI Safety"
+            },
+            {
+                "type": "improvement",
+                "title": "Khóa AI Agent Chỉ Hoạt Động Theo Chiến Dịch Đang Chạy",
+                "desc": "Ràng buộc AI Agent chỉ tự động trả lời người dùng thuộc các Chiến dịch đang có trạng thái 'running'. Bỏ qua 100% người dùng thuộc chiến dịch cũ đã dừng hoặc kết thúc.",
+                "tag": "Campaign Isolation"
+            },
+            {
+                "type": "improvement",
+                "title": "Nâng Cấp SQLite WAL Mode & High Concurrency",
+                "desc": "Bật chế độ SQLite WAL (PRAGMA journal_mode=WAL), busy_timeout=10s giúp hệ thống chạy đa tiến trình mượt mà, không bị lock database.",
+                "tag": "Database"
+            }
+        ]
+    },
+    {
         "version": "v2.4.0",
         "date": "02/08/2026",
         "title": "🔥 Đa AI Agent, Global Provider & Popup Test Trực Quan",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Nâng cấp toàn bộ kiến trúc AI với tính năng quản lý Đa AI Agent (Multi-Agent BD), dùng chung Provider toàn hệ thống và giao diện thử nghiệm tương tác.",
         "changes": [
             {
