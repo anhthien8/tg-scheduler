@@ -375,11 +375,12 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
     elif provider == "openai_compatible":
-        base_url = kwargs.get("base_url", "https://api.openai.com/v1")
+        base_url = kwargs.get("base_url") or "https://api.openai.com/v1"
+        model = kwargs.get("model") or "gpt-4o-mini"
         url = base_url.rstrip('/') + '/chat/completions'
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
-            "model": kwargs.get("model", "gpt-4o-mini"),
+            "model": model,
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 1000

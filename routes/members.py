@@ -1392,8 +1392,12 @@ async def _run_campaign(campaign_id: int):
                         break
 
             if ai_provider == "openai_compatible":
-                ai_remix_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
-                ai_remix_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
+                b_url = await db.get_setting("ai_oai_compat_base_url", "")
+                mod = await db.get_setting("ai_oai_compat_model", "")
+                if b_url and b_url.strip():
+                    ai_remix_kwargs["base_url"] = b_url.strip()
+                if mod and mod.strip():
+                    ai_remix_kwargs["model"] = mod.strip()
 
             # 2. Check for AI Agent override for remix prompt
             agent_id = campaign.get("ai_agent_id")

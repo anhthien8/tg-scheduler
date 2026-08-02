@@ -77,8 +77,12 @@ async def _get_system_ai_config():
 
     kwargs = {}
     if ai_provider == "openai_compatible":
-        kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
-        kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
+        b_url = await db.get_setting("ai_oai_compat_base_url", "")
+        mod = await db.get_setting("ai_oai_compat_model", "")
+        if b_url and b_url.strip():
+            kwargs["base_url"] = b_url.strip()
+        if mod and mod.strip():
+            kwargs["model"] = mod.strip()
 
     return ai_provider, ai_keys, kwargs
 
