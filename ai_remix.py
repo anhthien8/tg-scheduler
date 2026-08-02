@@ -387,7 +387,17 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"].strip()
+            raw = resp.text
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                import re
+                match = re.search(r'\{.*?\"choices\"\s*:\s*\[.*?\]\s*\}', raw, re.DOTALL)
+                if match:
+                    data = json.loads(match.group())
+                else:
+                    raise ValueError(f"Cannot parse API response: {raw[:200]}")
+            return data["choices"][0]["message"]["content"].strip()
 
     prompt_str = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in messages])
     return await generate_response(prompt_str, provider, [api_key])
