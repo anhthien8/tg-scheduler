@@ -140,148 +140,153 @@ def _make_handler(account_id: int):
         try:
             enabled_str = await db.get_setting("ai_followup_enabled", "true")
             if enabled_str.lower() in ("true", "1"):
-                # Get or create chat session
-                chat = await db.get_or_create_followup_chat(
-                    account_id=account_id,
-                    user_id=sender_id,
-                    username=sender_username,
-                    name=sender_name,
-                    watcher_id=watcher_id
-                )
+                # 1. Identify if this user belongs to a campaign
+                campaign_log = await db.find_campaign_log_for_user(sender_id)
+                target_campaign_id = campaign_log.get("campaign_id") if campaign_log else None
 
-                current_status = chat.get("status", "active")
-                if current_status in ("paused_admin", "onboarded", "needs_human"):
-                    logger.info("[AIFollowUp] User %d chat status is '%s' — skipping AI reply", sender_id, current_status)
+                # Fallback to existing chat session's campaign_id if present
+                if not target_campaign_id:
+                    existing_chat = await db.get_followup_chat(account_id, sender_id)
+                    if existing_chat:
+                        target_campaign_id = existing_chat.get("campaign_id")
+
+                # 2. Strict Rule: If user has NO campaign, SKIP AI reply!
+                if not target_campaign_id:
+                    logger.info("[AIFollowUp] User %d does not belong to any DM campaign — skipping AI auto-reply", sender_id)
                 else:
-                    # Append incoming user message
-                    chat = await db.append_followup_chat_message(account_id, sender_id, "user", message_text)
-
-                    # Check handover keywords
-                    handover_raw = await db.get_setting("ai_followup_handover_keywords", '["gặp admin", "tư vấn viên", "số điện thoại"]')
-                    try:
-                        handover_kws = json.loads(handover_raw) if handover_raw else []
-                    except Exception:
-                        handover_kws = []
-
-                    msg_lower = message_text.lower().strip()
-                    needs_handover = any(kw.lower().strip() in msg_lower for kw in handover_kws if kw.strip())
-
-                    max_replies_str = await db.get_setting("ai_followup_max_replies", "5")
-                    max_replies = int(max_replies_str) if max_replies_str.isdigit() else 5
-
-                    if needs_handover:
-                        logger.info("[AIFollowUp] Handover keyword matched for user %d — setting status to 'needs_human'", sender_id)
-                        await db.update_followup_chat_status(account_id, sender_id, "needs_human")
-                    elif chat.get("reply_count", 0) >= max_replies:
-                        logger.info("[AIFollowUp] Max replies (%d) reached for user %d — setting status to 'needs_human'", max_replies, sender_id)
-                        await db.update_followup_chat_status(account_id, sender_id, "needs_human")
+                    # 3. Strict Rule: If campaign has NO AI Agent, SKIP AI reply!
+                    cmp = await db.get_dm_campaign(target_campaign_id)
+                    if not cmp or not cmp.get("ai_agent_id"):
+                        logger.info("[AIFollowUp] Campaign #%s has no AI Agent assigned — skipping AI auto-reply for user %d", target_campaign_id, sender_id)
                     else:
-                        # Prepare system prompt + KB (Global provider/keys, Agent-specific prompts)
-                        async def _load_provider_keys(prov):
-                            if not prov:
-                                return []
-                            try:
-                                raw = await db.get_setting(f"ai_keys_{prov}", "[]")
-                                return json.loads(raw) if raw else []
-                            except Exception:
-                                return []
-
-                        ai_provider = await db.get_setting("ai_provider", "gemini")
-                        ai_keys = await _load_provider_keys(ai_provider)
-
-                        if not ai_keys:
-                            all_providers = ["gemini", "groq", "openai", "deepseek", "openai_compatible"]
-                            for alt_prov in all_providers:
-                                alt_keys = await _load_provider_keys(alt_prov)
-                                if alt_keys:
-                                    logger.warning(
-                                        "[AIFollowUp] Provider '%s' missing keys, falling back to '%s' (%d keys)",
-                                        ai_provider, alt_prov, len(alt_keys)
-                                    )
-                                    ai_provider = alt_prov
-                                    ai_keys = alt_keys
-                                    break
-
-                        kwargs = {}
-                        if ai_provider == "openai_compatible":
-                            b_url = await db.get_setting("ai_oai_compat_base_url", "")
-                            mod = await db.get_setting("ai_oai_compat_model", "")
-                            if b_url and b_url.strip():
-                                kwargs["base_url"] = b_url.strip()
-                            if mod and mod.strip():
-                                kwargs["model"] = mod.strip()
-
-                        # Check if this chat's campaign has an AI Agent
-                        agent_config = None
-                        chat_campaign_id = chat.get("campaign_id")
-                        if chat_campaign_id:
-                            cmp = await db.get_dm_campaign(chat_campaign_id)
-                            if cmp and cmp.get("ai_agent_id"):
-                                agent_config = await db.get_ai_agent(cmp["ai_agent_id"])
-
-                        if agent_config:
-                            sys_prompt = agent_config.get("system_prompt", "")
-                            kb = agent_config.get("knowledge_base", "")
-                            max_replies_val = agent_config.get("max_replies", 10)
-                            if chat.get("reply_count", 0) >= max_replies_val:
-                                logger.info("[AIFollowUp] Agent max replies (%d) reached for user %d", max_replies_val, sender_id)
-                                await db.update_followup_chat_status(account_id, sender_id, "needs_human")
-                                return
-                            logger.info("[AIFollowUp] 🤖 Using AI Agent '%s' for user %d", agent_config['name'], sender_id)
+                        agent_config = await db.get_ai_agent(cmp["ai_agent_id"])
+                        if not agent_config or not agent_config.get("is_active", 1):
+                            logger.info("[AIFollowUp] AI Agent #%s is inactive — skipping AI auto-reply for user %d", cmp.get("ai_agent_id"), sender_id)
                         else:
-                            sys_prompt = await db.get_setting("ai_followup_system_prompt", "")
-                            kb = await db.get_setting("ai_followup_knowledge_base", "")
-
-                        combined_prompt = sys_prompt
-                        if kb and kb.strip():
-                            combined_prompt += "\n\n--- KNOWLEDGE BASE ---\n" + kb.strip()
-
-                        if not ai_keys:
-                            logger.warning(
-                                "[AIFollowUp] ⚠️ Không thể tạo phản hồi AI cho user %d: Chưa có API Key nào được cài đặt!",
-                                sender_id
+                            # 4. Campaign & AI Agent verified! Get or create chat session
+                            chat = await db.get_or_create_followup_chat(
+                                account_id=account_id,
+                                user_id=sender_id,
+                                username=sender_username,
+                                name=sender_name,
+                                campaign_id=target_campaign_id,
+                                watcher_id=watcher_id
                             )
 
-                        if ai_keys:
-                            history = chat.get("history", [])
-                            try:
-                                ai_reply = await ai_rmx.generate_chat_response(history, combined_prompt, ai_provider, ai_keys, **kwargs)
-                            except Exception as ex_gen:
-                                logger.error("[AIFollowUp] AI generate_chat_response error for user %d: %s", sender_id, ex_gen)
-                                ai_reply = None
+                            current_status = chat.get("status", "active")
+                            if current_status in ("paused_admin", "onboarded", "needs_human"):
+                                logger.info("[AIFollowUp] User %d chat status is '%s' — skipping AI reply", sender_id, current_status)
+                            else:
+                                # Append incoming user message
+                                chat = await db.append_followup_chat_message(account_id, sender_id, "user", message_text)
 
-                            if ai_reply:
-                                # Check for tags
-                                new_status = "active"
-                                if "[HANDOVER_REQUIRED]" in ai_reply:
-                                    new_status = "needs_human"
-                                    ai_reply = ai_reply.replace("[HANDOVER_REQUIRED]", "").strip()
-                                elif "[ONBOARDED]" in ai_reply:
-                                    new_status = "onboarded"
-                                    ai_reply = ai_reply.replace("[ONBOARDED]", "").strip()
-
-                                if ai_reply:
-                                    # Human-like delay + typing indicator
-                                    delay = random.uniform(6.0, 15.0)
-                                    logger.info("[AIFollowUp] Replying to user %d (acc=%d) in %.1fs...", sender_id, account_id, delay)
+                                # Agent-specific handover keywords and max replies
+                                agent_handover_kws = agent_config.get("handover_keywords", [])
+                                if isinstance(agent_handover_kws, str):
                                     try:
-                                        await client.action(sender_id, "typing")
+                                        agent_handover_kws = json.loads(agent_handover_kws)
                                     except Exception:
-                                        pass
+                                        agent_handover_kws = []
 
-                                    await asyncio.sleep(delay)
+                                msg_lower = message_text.lower().strip()
+                                needs_handover = any(kw.lower().strip() in msg_lower for kw in agent_handover_kws if kw and kw.strip())
 
-                                    try:
-                                        await client.send_message(sender_id, ai_reply)
-                                        await db.append_followup_chat_message(
-                                            account_id, sender_id, "assistant", ai_reply, inc_reply_count=True
+                                max_replies_val = agent_config.get("max_replies", 10)
+
+                                if needs_handover:
+                                    logger.info("[AIFollowUp] Handover keyword matched for user %d — setting status to 'needs_human'", sender_id)
+                                    await db.update_followup_chat_status(account_id, sender_id, "needs_human")
+                                elif chat.get("reply_count", 0) >= max_replies_val:
+                                    logger.info("[AIFollowUp] Max replies (%d) reached for user %d — setting status to 'needs_human'", max_replies_val, sender_id)
+                                    await db.update_followup_chat_status(account_id, sender_id, "needs_human")
+                                else:
+                                    # Load global provider & keys
+                                    async def _load_provider_keys(prov):
+                                        if not prov:
+                                            return []
+                                        try:
+                                            raw = await db.get_setting(f"ai_keys_{prov}", "[]")
+                                            return json.loads(raw) if raw else []
+                                        except Exception:
+                                            return []
+
+                                    ai_provider = await db.get_setting("ai_provider", "gemini")
+                                    ai_keys = await _load_provider_keys(ai_provider)
+
+                                    if not ai_keys:
+                                        all_providers = ["gemini", "groq", "openai", "deepseek", "openai_compatible"]
+                                        for alt_prov in all_providers:
+                                            alt_keys = await _load_provider_keys(alt_prov)
+                                            if alt_keys:
+                                                ai_provider = alt_prov
+                                                ai_keys = alt_keys
+                                                break
+
+                                    kwargs = {}
+                                    if ai_provider == "openai_compatible":
+                                        b_url = await db.get_setting("ai_oai_compat_base_url", "")
+                                        mod = await db.get_setting("ai_oai_compat_model", "")
+                                        if b_url and b_url.strip():
+                                            kwargs["base_url"] = b_url.strip()
+                                        if mod and mod.strip():
+                                            kwargs["model"] = mod.strip()
+
+                                    sys_prompt = agent_config.get("system_prompt", "")
+                                    kb = agent_config.get("knowledge_base", "")
+                                    combined_prompt = sys_prompt
+                                    if kb and kb.strip():
+                                        combined_prompt += "\n\n--- KNOWLEDGE BASE ---\n" + kb.strip()
+
+                                    if not ai_keys:
+                                        logger.warning(
+                                            "[AIFollowUp] ⚠️ Cannot generate AI reply for user %d: No API Keys configured!",
+                                            sender_id
                                         )
-                                        if new_status != "active":
-                                            await db.update_followup_chat_status(account_id, sender_id, new_status)
-                                        logger.info("[AIFollowUp] AI reply sent to user %d", sender_id)
-                                        return  # Managed by AI Sales Agent, skip legacy rules
-                                    except Exception as ex_send:
-                                        logger.error("[AIFollowUp] Failed to send AI reply to user %d: %s", sender_id, ex_send)
+
+                                    if ai_keys:
+                                        history = chat.get("history", [])
+                                        logger.info(
+                                            "[AIFollowUp] 🤖 Generating AI reply using Agent '%s' for campaign #%s (user %d)...",
+                                            agent_config['name'], target_campaign_id, sender_id
+                                        )
+                                        try:
+                                            ai_reply = await ai_rmx.generate_chat_response(history, combined_prompt, ai_provider, ai_keys, **kwargs)
+                                        except Exception as ex_gen:
+                                            logger.error("[AIFollowUp] AI generate_chat_response error for user %d: %s", sender_id, ex_gen)
+                                            ai_reply = None
+
+                                        if ai_reply:
+                                            # Check for tags
+                                            new_status = "active"
+                                            if "[HANDOVER_REQUIRED]" in ai_reply:
+                                                new_status = "needs_human"
+                                                ai_reply = ai_reply.replace("[HANDOVER_REQUIRED]", "").strip()
+                                            elif "[ONBOARDED]" in ai_reply:
+                                                new_status = "onboarded"
+                                                ai_reply = ai_reply.replace("[ONBOARDED]", "").strip()
+
+                                            if ai_reply:
+                                                # Human-like delay + typing indicator
+                                                delay = random.uniform(6.0, 15.0)
+                                                logger.info("[AIFollowUp] Replying to user %d (acc=%d) in %.1fs...", sender_id, account_id, delay)
+                                                try:
+                                                    await client.action(sender_id, "typing")
+                                                except Exception:
+                                                    pass
+
+                                                await asyncio.sleep(delay)
+
+                                                try:
+                                                    await client.send_message(sender_id, ai_reply)
+                                                    await db.append_followup_chat_message(
+                                                        account_id, sender_id, "assistant", ai_reply, inc_reply_count=True
+                                                    )
+                                                    if new_status != "active":
+                                                        await db.update_followup_chat_status(account_id, sender_id, new_status)
+                                                    logger.info("[AIFollowUp] AI reply sent to user %d", sender_id)
+                                                    return  # Managed by AI Sales Agent, skip legacy rules
+                                                except Exception as ex_send:
+                                                    logger.error("[AIFollowUp] Failed to send AI reply to user %d: %s", sender_id, ex_send)
 
         except Exception as ex_ai:
             logger.error("[AIFollowUp] Error in AI follow-up engine: %s", ex_ai, exc_info=True)

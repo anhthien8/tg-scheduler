@@ -3595,6 +3595,21 @@ async def find_watcher_log_for_user(user_id: int) -> dict | None:
 
 # ── AI Follow-Up Sales Agent DB Helpers ─────────────────────────────────────
 
+async def get_followup_chat(account_id: int, user_id: int) -> dict | None:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM ai_followup_chats WHERE account_id = ? AND user_id = ?",
+            (account_id, user_id)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        res = dict(row)
+        res["history"] = json.loads(res.get("history_json", "[]"))
+        return res
+
+
 async def get_or_create_followup_chat(
     account_id: int,
     user_id: int,
@@ -3613,6 +3628,13 @@ async def get_or_create_followup_chat(
         if row:
             res = dict(row)
             res["history"] = json.loads(res.get("history_json", "[]"))
+            if campaign_id and not res.get("campaign_id"):
+                await db.execute(
+                    "UPDATE ai_followup_chats SET campaign_id = ? WHERE account_id = ? AND user_id = ?",
+                    (campaign_id, account_id, user_id)
+                )
+                await db.commit()
+                res["campaign_id"] = campaign_id
             return res
 
         # Create new
