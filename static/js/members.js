@@ -1,4 +1,4 @@
-const me_dummy = {}; const me_dummy_style = {};
+var me_dummy = me_dummy || {}; var me_dummy_style = me_dummy_style || {};
 /**
  * Members Module — Scraping + DM Campaign frontend logic.
  * Loaded BEFORE app.js so App can call Members.init() / Members.populateAccounts()

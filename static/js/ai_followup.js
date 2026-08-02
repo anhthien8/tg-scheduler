@@ -1,4 +1,4 @@
-const me_dummy = {}; const me_dummy_style = {};
+var me_dummy = me_dummy || {}; var me_dummy_style = me_dummy_style || {};
 /**
  * static/js/ai_followup.js
  * Frontend logic for AI Follow-Up Sales Agent

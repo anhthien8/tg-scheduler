@@ -1,4 +1,4 @@
-const me_dummy = {}; const me_dummy_style = {};
+var me_dummy = me_dummy || {}; var me_dummy_style = me_dummy_style || {};
 function debounce(func, delay = 250) {
   let timeoutId;
   return function (...args) {
