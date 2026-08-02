@@ -1264,7 +1264,7 @@ const Members = {
   },
 
   async saveCampaign() {
-    const name = document.getElementById('cmp-name')?.value.trim();
+    const name = (document.getElementById('cmp-name')?.value || "").trim();
     const jobId = document.getElementById('cmp-scrape-job')?.value;
     const delayMin = parseInt(document.getElementById('cmp-delay-min')?.value) || 30;
     const delayMax = parseInt(document.getElementById('cmp-delay-max')?.value) || 90;
@@ -1376,7 +1376,7 @@ const Members = {
     if (!confirm(confirmMsg)) return;
 
     try {
-      const res = await API.cloneCampaign(campaignId, {
+      const res = await MembersAPI.cloneCampaign(campaignId, {
         name: `${c.name} - Clone`,
         exclude_source_results: true
       });
@@ -1941,7 +1941,7 @@ const Members = {
       }
     }
 
-    const sourceInput = document.getElementById('sim-channel-input')?.value.trim();
+    const sourceInput = (document.getElementById('sim-channel-input')?.value || "").trim();
     const cleanName = sourceInput.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
     (document.getElementById('sim-import-job-id') || me_dummy).value = `deep_${cleanName || 'leads'}`;
   },
@@ -2354,7 +2354,7 @@ const Members = {
   },
 
   async resolveInviteGroup() {
-    const input = document.getElementById('inv-target-group')?.value.trim();
+    const input = (document.getElementById('inv-target-group')?.value || "").trim();
     if (!input) { App.toast('Nhập link hoặc username nhóm', 'error'); return; }
 
     const btn = document.getElementById('inv-resolve-btn');
@@ -2505,13 +2505,13 @@ const Members = {
   },
 
   async saveInviteCampaign() {
-    const name = document.getElementById('inv-name')?.value.trim();
+    const name = (document.getElementById('inv-name')?.value || "").trim();
     const jobId = document.getElementById('inv-scrape-job')?.value;
-    const targetGroup = document.getElementById('inv-target-group')?.value.trim();
+    const targetGroup = (document.getElementById('inv-target-group')?.value || "").trim();
     const targetGroupId = document.getElementById('inv-target-group-id')?.value;
     const targetGroupTitle = document.getElementById('inv-target-group-title')?.value;
     const inviteMode = document.querySelector('input[name="inv-mode"]:checked')?.value || 'direct';
-    const dmMessage = document.getElementById('inv-dm-message')?.value.trim();
+    const dmMessage = (document.getElementById('inv-dm-message')?.value || "").trim();
     const delayMin = parseInt(document.getElementById('inv-delay-min')?.value) || 45;
     const delayMax = parseInt(document.getElementById('inv-delay-max')?.value) || 120;
     const dailyLimit = parseInt(document.getElementById('inv-daily-limit')?.value) || 50;
@@ -2627,11 +2627,11 @@ const Members = {
     const id = this._editingInviteCampaignId;
     if (!id) { App.toast('Lỗi: không có campaign để sửa', 'error'); return; }
 
-    const targetGroup = document.getElementById('inv-target-group')?.value.trim();
+    const targetGroup = (document.getElementById('inv-target-group')?.value || "").trim();
     const targetGroupId = document.getElementById('inv-target-group-id')?.value;
     const targetGroupTitle = document.getElementById('inv-target-group-title')?.value;
     const inviteMode = document.querySelector('input[name="inv-mode"]:checked')?.value || 'direct';
-    const dmMessage = document.getElementById('inv-dm-message')?.value.trim();
+    const dmMessage = (document.getElementById('inv-dm-message')?.value || "").trim();
     const delayMin = parseInt(document.getElementById('inv-delay-min')?.value) || 45;
     const delayMax = parseInt(document.getElementById('inv-delay-max')?.value) || 120;
     const dailyLimit = parseInt(document.getElementById('inv-daily-limit')?.value) || 50;

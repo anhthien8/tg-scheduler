@@ -160,7 +160,9 @@ const API = {
   async testRemixDirect(provider, keys, text) {
     // Call backend to do the remix so we use real server-side logic
     return this.post('/api/settings/test-remix', { provider, keys, text });
-  }
+  },
+  // DM Campaigns
+  cloneCampaign(id, data) { return MembersAPI.cloneCampaign(id, data); }
 };
 
 
