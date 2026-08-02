@@ -167,9 +167,7 @@ const AIAgents = {
   async deleteAgent(id) {
     const agent = this._agents.find(a => a.id === id);
     if (!agent) return;
-    if (!confirm(`🗑️ Xoá AI Agent "${agent.name}"?
-
-Agent sẽ bị vô hiệu hoá (soft delete).`)) return;
+    if (!confirm(`🗑️ Xoá AI Agent "${agent.name}"?\n\nAgent sẽ bị vô hiệu hoá (soft delete).`)) return;
     try {
       await AIAgentsAPI.remove(id);
       App.toast(`Đã xoá "${agent.name}"`, 'success');
@@ -189,51 +187,91 @@ Agent sẽ bị vô hiệu hoá (soft delete).`)) return;
     }
   },
 
-  async testAgent(id) {
+  // ── Interactive Test Modal ─────────────────────────────────────────────
+  testAgent(id) {
     const agent = this._agents.find(a => a.id === id);
     if (!agent) return;
 
-    const testText = prompt(
-      `🧪 Test AI Agent "${agent.name}"
+    document.getElementById('ai-agent-test-modal')?.remove();
 
-Nhập tin nhắn test (giả lập user gửi DM):`,
-      'Chào bạn, mình đang tìm hiểu về sản phẩm. Cho mình biết thêm thông tin được không?'
-    );
-    if (!testText) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'ai-agent-test-modal';
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
 
-    App.toast('⏳ Đang gọi AI test...', 'info');
+    overlay.innerHTML = `
+      <div style="background:var(--bg2);border-radius:16px;padding:24px;max-width:640px;width:100%;max-height:85vh;overflow-y:auto;border:1px solid var(--border);box-shadow:0 20px 40px rgba(0,0,0,0.5)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+          <h3 style="margin:0;font-size:18px;display:flex;align-items:center;gap:8px">
+            <span>🧪</span> Test AI Agent: <span style="color:var(--primary)">${this._esc(agent.name)}</span>
+          </h3>
+          <button onclick="document.getElementById('ai-agent-test-modal').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text2)">✕</button>
+        </div>
+
+        <div style="margin-bottom:16px">
+          <label class="form-label" style="font-weight:600">📩 Tin nhắn giả lập từ khách hàng:</label>
+          <textarea id="ai-test-input-text" class="form-input" rows="3" placeholder="Nhập tin nhắn test...">Chào bạn, mình đang muốn tìm hiểu về hợp tác với WEEX, cho mình xin thêm thông tin nhé!</textarea>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:12px;margin-bottom:20px">
+          <button class="btn btn-secondary" onclick="document.getElementById('ai-agent-test-modal').remove()">Đóng</button>
+          <button class="btn btn-primary" id="btn-run-ai-test" onclick="AIAgents._executeTest(${agent.id})">🚀 Chạy Test</button>
+        </div>
+
+        <div id="ai-test-result-box" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:16px">
+          <div style="font-weight:600;margin-bottom:8px;font-size:13px;color:var(--primary)" id="ai-test-status-label">🤖 Kết quả AI trả lời:</div>
+          <div id="ai-test-output-content" style="white-space:pre-wrap;font-size:14px;line-height:1.6;color:var(--text1)"></div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+  },
+
+  async _executeTest(agentId) {
+    const textEl = document.getElementById('ai-test-input-text');
+    const text = textEl?.value?.trim();
+    if (!text) {
+      App.toast('Vui lòng nhập tin nhắn test', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('btn-run-ai-test');
+    const resultBox = document.getElementById('ai-test-result-box');
+    const statusLabel = document.getElementById('ai-test-status-label');
+    const outputContent = document.getElementById('ai-test-output-content');
+
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '⏳ AI đang suy nghĩ...';
+    }
+
+    if (resultBox) {
+      resultBox.style.display = 'block';
+      statusLabel.textContent = '⏳ AI đang suy nghĩ...';
+      outputContent.textContent = 'Đang kết nối tới AI Provider hệ thống...';
+    }
+
     try {
-      const res = await AIAgentsAPI.test(id, testText);
+      const res = await AIAgentsAPI.test(agentId, text);
       if (!res || !res.reply) {
-        App.toast('⚠️ AI không trả về kết quả. Kiểm tra lại API Key trong Cài đặt AI!', 'error');
-        return;
+        statusLabel.textContent = '❌ Lỗi phản hồi';
+        outputContent.textContent = res?.error || 'AI Provider không trả về kết quả. Vui lòng kiểm tra lại Cài đặt AI.';
+        App.toast('AI Provider không trả về kết quả', 'error');
+      } else {
+        statusLabel.textContent = `🤖 AI trả lời (Provider: ${res.provider || 'AI System'}):`;
+        outputContent.textContent = res.reply;
+        App.toast('✅ Test hoàn tất!', 'success');
       }
-      const resultHtml = `
-        <div style="text-align:left">
-          <div style="margin-bottom:12px">
-            <strong>📩 User gửi:</strong><br>
-            <div style="background:var(--bg3);padding:10px;border-radius:8px;margin-top:4px">${this._esc(testText)}</div>
-          </div>
-          <div>
-            <strong>🤖 AI trả lời (${res.provider || 'AI System'}):</strong><br>
-            <div style="background:var(--bg3);padding:10px;border-radius:8px;margin-top:4px;white-space:pre-wrap">${this._esc(res.reply)}</div>
-          </div>
-        </div>`;
-
-      const overlay = document.createElement('div');
-      overlay.className = 'modal-overlay';
-      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-      overlay.innerHTML = `
-        <div style="background:var(--bg2);border-radius:16px;padding:24px;max-width:600px;width:100%;max-height:80vh;overflow-y:auto;border:1px solid var(--border)">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <h3 style="margin:0">🧪 Kết quả Test - ${this._esc(agent.name)}</h3>
-            <button onclick="this.closest('.modal-overlay').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2)">✕</button>
-          </div>
-          ${resultHtml}
-        </div>`;
-      document.body.appendChild(overlay);
     } catch (e) {
+      if (statusLabel) statusLabel.textContent = '❌ Lỗi gọi AI';
+      if (outputContent) outputContent.textContent = `Lỗi: ${e.message}`;
       App.toast(`Lỗi test AI: ${e.message}`, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '🚀 Chạy Test lại';
+      }
     }
   }
 };
