@@ -713,7 +713,7 @@
             <h2 class="page-title" style="margin-bottom:4px">🤖 AI Agents</h2>
             <p class="page-subtitle" style="margin:0;color:var(--text2)">Quản lý các AI BD Agent — mỗi agent có prompt, provider và knowledge base riêng</p>
           </div>
-          <button class="btn btn-primary" onclick="AIAgents.openForm()">➕ Tạo AI Agent</button>
+          <button class="btn btn-primary" onclick="window.AIAgents.openForm()">➕ Tạo AI Agent</button>
         </div>
         <div id="ai-agents-list"></div>
       </div>
@@ -723,7 +723,7 @@
         <div style="background:var(--bg2);border-radius:16px;padding:28px;max-width:800px;width:100%;max-height:90vh;overflow-y:auto;border:1px solid var(--border)">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
             <h3 id="ai-agent-modal-title" style="margin:0">➕ Tạo AI Agent mới</h3>
-            <button onclick="AIAgents.closeForm()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2)">✕</button>
+            <button onclick="window.AIAgents.closeForm()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2)">✕</button>
           </div>
 
           <!-- Row 1: Basic Info -->
@@ -791,8 +791,8 @@
 
           <!-- Actions -->
           <div style="display:flex;justify-content:flex-end;gap:12px">
-            <button class="btn btn-outline" onclick="AIAgents.closeForm()">Huỷ</button>
-            <button class="btn btn-primary" onclick="AIAgents.saveAgent()">💾 Lưu Agent</button>
+            <button class="btn btn-outline" onclick="window.AIAgents.closeForm()">Huỷ</button>
+            <button class="btn btn-primary" onclick="window.AIAgents.saveAgent()">💾 Lưu Agent</button>
           </div>
         </div>
       </div>
@@ -1461,12 +1461,12 @@
     </div>
   </div>
 
-  <script src="/static/js/api.js?v=301"></script>
-  <script src="/static/js/discord.js?v=301"></script>
-  <script src="/static/js/members.js?v=301"></script>
-  <script src="/static/js/analytics.js?v=301"></script>
-  <script src="/static/js/ai_agents.js?v=301"></script>
-  <script src="/static/js/app.js?v=301"></script>
+  <script src="/static/js/api.js?v=305"></script>
+  <script src="/static/js/discord.js?v=305"></script>
+  <script src="/static/js/members.js?v=305"></script>
+  <script src="/static/js/analytics.js?v=305"></script>
+  <script src="/static/js/ai_agents.js?v=305"></script>
+  <script src="/static/js/app.js?v=305"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

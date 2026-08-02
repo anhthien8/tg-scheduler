@@ -26,13 +26,13 @@ const AIAgents = {
     const container = document.getElementById('ai-agents-list');
     if (!container) return;
 
-    if (this._agents.length === 0) {
+    if (!this._agents || this._agents.length === 0) {
       container.innerHTML = `
         <div style="text-align:center;padding:60px 20px;color:var(--text2)">
           <div style="font-size:48px;margin-bottom:16px">🤖</div>
           <h3 style="margin-bottom:8px;color:var(--text1)">Chưa có AI Agent nào</h3>
           <p style="margin-bottom:20px">Tạo AI Agent đầu tiên để bắt đầu tự động DM outreach & reply</p>
-          <button class="btn btn-primary" onclick="AIAgents.openForm()">➕ Tạo AI Agent</button>
+          <button class="btn btn-primary" onclick="window.AIAgents.openForm()">➕ Tạo AI Agent</button>
         </div>`;
       return;
     }
@@ -61,16 +61,16 @@ const AIAgents = {
             <span title="Handover keywords">🔑 ${(agent.handover_keywords || []).length} keywords</span>
           </div>
           <div class="ai-agent-actions">
-            <button class="btn btn-sm btn-outline" onclick="AIAgents.openForm(${agent.id})" title="Chỉnh sửa">
+            <button class="btn btn-sm btn-outline" data-agent-action="edit" data-agent-id="${agent.id}" onclick="window.AIAgents.openForm(${agent.id})" title="Chỉnh sửa">
               ✏️ Sửa
             </button>
-            <button class="btn btn-sm btn-outline" onclick="AIAgents.testAgent(${agent.id})" title="Test AI">
+            <button class="btn btn-sm btn-outline" data-agent-action="test" data-agent-id="${agent.id}" onclick="window.AIAgents.testAgent(${agent.id})" title="Test AI">
               🧪 Test
             </button>
-            <button class="btn btn-sm btn-outline" onclick="AIAgents.duplicateAgent(${agent.id})" title="Nhân bản">
+            <button class="btn btn-sm btn-outline" data-agent-action="clone" data-agent-id="${agent.id}" onclick="window.AIAgents.duplicateAgent(${agent.id})" title="Nhân bản">
               📑 Clone
             </button>
-            <button class="btn btn-sm btn-outline btn-danger" onclick="AIAgents.deleteAgent(${agent.id})" title="Xoá">
+            <button class="btn btn-sm btn-outline btn-danger" data-agent-action="delete" data-agent-id="${agent.id}" onclick="window.AIAgents.deleteAgent(${agent.id})" title="Xoá">
               🗑️
             </button>
           </div>
@@ -90,7 +90,7 @@ const AIAgents = {
   // ── Form: Create / Edit ──────────────────────────────────────────────
   openForm(agentId = null) {
     this._editingId = agentId;
-    const agent = agentId ? this._agents.find(a => a.id === agentId) : null;
+    const agent = agentId ? this._agents.find(a => a.id == agentId) : null;
     const isEdit = !!agent;
     const title = isEdit ? `✏️ Sửa "${agent.name}"` : '➕ Tạo AI Agent mới';
 
@@ -165,12 +165,12 @@ const AIAgents = {
 
   // ── Actions ──────────────────────────────────────────────────────────
   async deleteAgent(id) {
-    const agent = this._agents.find(a => a.id === id);
-    if (!agent) return;
-    if (!confirm(`🗑️ Xoá AI Agent "${agent.name}"?\n\nAgent sẽ bị vô hiệu hoá (soft delete).`)) return;
+    const agent = this._agents.find(a => a.id == id);
+    const agentName = agent ? agent.name : `#${id}`;
+    if (!confirm(`🗑️ Xoá AI Agent "${agentName}"?\n\nAgent sẽ bị vô hiệu hoá (soft delete).`)) return;
     try {
       await AIAgentsAPI.remove(id);
-      App.toast(`Đã xoá "${agent.name}"`, 'success');
+      App.toast(`Đã xoá "${agentName}"`, 'success');
       await this.load();
     } catch (e) {
       App.toast(`Lỗi: ${e.message}`, 'error');
@@ -189,6 +189,7 @@ const AIAgents = {
 
   // ── Interactive Test Modal ─────────────────────────────────────────────
   async testAgent(id) {
+    console.log('[AIAgents] testAgent called for ID:', id);
     let agent = this._agents.find(a => a.id == id);
     if (!agent) {
       try {
@@ -197,6 +198,7 @@ const AIAgents = {
         console.error('Failed to get agent info:', e);
       }
     }
+
     if (!agent) {
       App.toast(`Không tìm thấy AI Agent #${id}`, 'error');
       return;
@@ -207,13 +209,13 @@ const AIAgents = {
     const overlay = document.createElement('div');
     overlay.id = 'ai-agent-test-modal';
     overlay.className = 'modal-overlay';
-    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
 
     overlay.innerHTML = `
       <div style="background:var(--bg2);border-radius:16px;padding:24px;max-width:640px;width:100%;max-height:85vh;overflow-y:auto;border:1px solid var(--border);box-shadow:0 20px 40px rgba(0,0,0,0.5)">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)">
           <h3 style="margin:0;font-size:18px;display:flex;align-items:center;gap:8px">
-            <span>🧪</span> Test AI Agent: <span style="color:var(--primary)">${this._esc(agent.name)}</span>
+            <span>🧪</span> Test AI Agent: <span style="color:var(--primary)">${AIAgents._esc(agent.name)}</span>
           </h3>
           <button onclick="document.getElementById('ai-agent-test-modal').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text2)">✕</button>
         </div>
@@ -225,7 +227,7 @@ const AIAgents = {
 
         <div style="display:flex;justify-content:flex-end;gap:12px;margin-bottom:20px">
           <button class="btn btn-secondary" onclick="document.getElementById('ai-agent-test-modal').remove()">Đóng</button>
-          <button class="btn btn-primary" id="btn-run-ai-test" onclick="AIAgents._executeTest(${agent.id})">🚀 Chạy Test</button>
+          <button class="btn btn-primary" id="btn-run-ai-test" onclick="window.AIAgents._executeTest(${agent.id})">🚀 Chạy Test</button>
         </div>
 
         <div id="ai-test-result-box" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:16px">
@@ -289,7 +291,7 @@ const AIAgents = {
     const el = document.getElementById(elementId);
     if (!el) return;
 
-    if (this._agents.length === 0) {
+    if (!this._agents || this._agents.length === 0) {
       try {
         const res = await AIAgentsAPI.getAll();
         this._agents = res.agents || [];
@@ -307,7 +309,7 @@ const AIAgents = {
   },
 
   async getAgentsForDropdown() {
-    if (this._agents.length === 0) {
+    if (!this._agents || this._agents.length === 0) {
       try {
         const res = await AIAgentsAPI.getAll();
         this._agents = res.agents || [];
@@ -316,6 +318,27 @@ const AIAgents = {
       }
     }
     return this._agents;
-  },
-
+  }
 };
+
+// Bind globally to window object for reliable inline event invocation
+window.AIAgents = AIAgents;
+
+// Global Event Delegation fallback for AI Agent actions
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-agent-action]');
+  if (!btn) return;
+  const action = btn.dataset.agentAction;
+  const id = parseInt(btn.dataset.agentId);
+  if (!id) return;
+
+  if (action === 'test') {
+    window.AIAgents.testAgent(id);
+  } else if (action === 'edit') {
+    window.AIAgents.openForm(id);
+  } else if (action === 'clone') {
+    window.AIAgents.duplicateAgent(id);
+  } else if (action === 'delete') {
+    window.AIAgents.deleteAgent(id);
+  }
+});
