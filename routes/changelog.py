@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v2.6.0",
+        "date": "02/08/2026",
+        "title": "🤖 Chế Độ AI Care Auto-Pilot Theo Từng Tài Khoản Telegram",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Cho phép gán AI Agent trực tiếp cho từng Tài Khoản Telegram để tự động trả lời khách hàng khi bạn rời máy tính hoặc off.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "AI Care Auto-Pilot Cho Từng Tài Khoản",
+                "desc": "Thêm menu chọn '🤖 AI Care Account' trên mỗi thẻ Telegram Account. Khi bạn off máy, AI Agent được gán sẽ tự động phụ trách trả lời, tư vấn khách hàng phản hồi tự nhiên.",
+                "tag": "AI Care"
+            },
+            {
+                "type": "improvement",
+                "title": "Phân Cấp Phản Hỏi Thông Minh (Campaign -> Account)",
+                "desc": "Ưu tiên AI Agent của Chiến dịch DM nếu user thuộc chiến dịch running. Nếu không, tự động chuyển sang AI Agent của chính Account Telegram đó.",
+                "tag": "AI Routing"
+            },
+            {
+                "type": "feature",
+                "title": "Tự Động Bàn Giao (Auto-Handover)",
+                "desc": "Vẫn giữ nguyên cơ chế bảo vệ: Ngay khi bạn mở Telegram tự nhắn tin thủ công cho khách, hệ thống sẽ lập tức ngắt AI Agent để bạn chủ động hội thoại.",
+                "tag": "Safety"
+            }
+        ]
+    },
+    {
         "version": "v2.5.0",
         "date": "02/08/2026",
         "title": "🛑 Nút Bật/Tắt Account Thủ Công & Khóa AI Bảo Vệ Khách Hàng",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Bổ sung tính năng Tắt / Bật tài khoản Telegram thủ công ngắt 100% tự động hóa để test an toàn, cùng cơ chế tự động ngắt AI khi Admin nhắn tin.",
         "changes": [
             {

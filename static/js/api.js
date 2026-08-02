@@ -94,6 +94,14 @@ const API = {
     this.clearAccountsCache();
     return parseApiResponse(await fetch(`/api/auth/accounts/${id}/toggle-active?is_active=${isActive}`, { method: 'POST' }));
   },
+  async setAccountAiAgent(id, aiAgentId) {
+    this.clearAccountsCache();
+    return parseApiResponse(await fetch(`/api/auth/accounts/${id}/set-ai-agent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ai_agent_id: aiAgentId ? parseInt(aiAgentId) : null })
+    }));
+  },
   getDmStats(id) { return this.get(`/api/auth/accounts/${id}/dm-stats`); },
   sendCode(phone, accountId) { return this.post('/api/auth/send-code', { phone, account_id: accountId }); },
   async verify(phone, code, hash, accountId, password) {

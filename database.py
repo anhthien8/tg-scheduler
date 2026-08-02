@@ -388,6 +388,12 @@ async def init_db():
         except Exception:
             pass
 
+        # Account-level AI Agent assignment column
+        try:
+            await db.execute("ALTER TABLE accounts ADD COLUMN ai_agent_id INTEGER DEFAULT NULL")
+        except Exception:
+            pass
+
         # View boost columns for reaction_targets
         try:
             await db.execute("ALTER TABLE reaction_targets ADD COLUMN view_enabled INTEGER DEFAULT 0")
@@ -1903,6 +1909,16 @@ async def is_account_paused(account_id: int) -> bool:
             "SELECT is_paused FROM accounts WHERE id=?", (account_id,)
         )).fetchone()
         return bool(row and row[0])
+
+
+async def set_account_ai_agent(account_id: int, ai_agent_id: int | None):
+    """Set or remove account-level AI Agent for organic DMs."""
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE accounts SET ai_agent_id=? WHERE id=?",
+            (ai_agent_id, account_id)
+        )
+        await db.commit()
 
 
 async def get_paused_accounts() -> list:

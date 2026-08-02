@@ -3,6 +3,8 @@ Authentication & Account management routes.
 """
 import os
 import logging
+from typing import Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 from models import SendCodeRequest, VerifyCodeRequest, AccountCreate
 import telegram_client as tg
@@ -229,5 +231,37 @@ async def toggle_account_active(account_id: int, is_active: bool = True):
         "success": True,
         "is_paused": not is_active,
         "is_active": is_active,
+        "message": msg
+    }
+
+
+class SetAccountAiAgentRequest(BaseModel):
+    ai_agent_id: Optional[int] = None
+
+
+@router.post("/accounts/{account_id}/set-ai-agent")
+async def set_account_ai_agent_route(account_id: int, req: SetAccountAiAgentRequest):
+    """Assign or remove an AI Agent for organic DMs on this Telegram account."""
+    acc = await db.get_account(account_id)
+    if not acc:
+        raise HTTPException(404, "Tài khoản không tồn tại")
+    
+    agent = None
+    if req.ai_agent_id:
+        agent = await db.get_ai_agent(req.ai_agent_id)
+        if not agent:
+            raise HTTPException(404, "AI Agent không tồn tại")
+            
+    await db.set_account_ai_agent(account_id, req.ai_agent_id)
+    
+    if agent:
+        msg = f"Đã gán AI Agent '{agent['name']}' cho tài khoản {acc.get('name') or acc.get('phone')} (Auto-Pilot khi off máy)"
+    else:
+        msg = f"Đã tắt AI Agent cho tài khoản {acc.get('name') or acc.get('phone')}"
+        
+    return {
+        "success": True,
+        "account_id": account_id,
+        "ai_agent_id": req.ai_agent_id,
         "message": msg
     }
