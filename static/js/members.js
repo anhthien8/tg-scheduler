@@ -1,3 +1,4 @@
+const me_dummy = {}; const me_dummy_style = {};
 /**
  * Members Module — Scraping + DM Campaign frontend logic.
  * Loaded BEFORE app.js so App can call Members.init() / Members.populateAccounts()
@@ -141,13 +142,13 @@ const Members = {
 
   // ── Start Scrape ──
   async startScrape() {
-    const accountId = parseInt(document.getElementById('ms-account-select').value);
+    const accountId = parseInt(document.getElementById('ms-account-select')?.value);
     const groupSel = document.getElementById('ms-group-select');
     const groupId = parseInt(groupSel.value);
     const groupTitle = groupSel.options[groupSel.selectedIndex]?.text || '';
-    const filterDays = document.getElementById('ms-filter-active').value;
-    const scrapeMethod = document.getElementById('ms-scrape-method').value;
-    const maxMessages = parseInt(document.getElementById('ms-max-messages').value);
+    const filterDays = document.getElementById('ms-filter-active')?.value;
+    const scrapeMethod = document.getElementById('ms-scrape-method')?.value;
+    const maxMessages = parseInt(document.getElementById('ms-max-messages')?.value);
 
     if (!accountId || !groupId) {
       App.toast('Chọn tài khoản và group trước', 'error');
@@ -182,7 +183,7 @@ const Members = {
   },
 
   onScrapeMethodChange() {
-    const method = document.getElementById('ms-scrape-method').value;
+    const method = document.getElementById('ms-scrape-method')?.value;
     const msgGroup = document.getElementById('ms-max-messages-group');
     if (method === 'history') {
       msgGroup.classList.remove('hidden');
@@ -216,7 +217,7 @@ const Members = {
   // ── Resolve Channel Links ──
   async resolveChannelLinks() {
     const textarea = document.getElementById('ms-batch-links');
-    const accountId = parseInt(document.getElementById('ms-batch-account').value);
+    const accountId = parseInt(document.getElementById('ms-batch-account')?.value);
     if (!textarea || !accountId) {
       App.toast('Chọn tài khoản và nhập link channel', 'error');
       return;
@@ -260,7 +261,7 @@ const Members = {
 
       // Enable batch scrape if at least 1 resolved
       const hasValid = results.some(r => r.success);
-      document.getElementById('ms-btn-batch-scrape').disabled = !hasValid;
+      (document.getElementById('ms-btn-batch-scrape') || me_dummy).disabled = !hasValid;
 
       if (hasValid) {
         const validCount = results.filter(r => r.success).length;
@@ -278,10 +279,10 @@ const Members = {
 
   // ── Start Batch Scrape ──
   async startBatchScrape() {
-    const accountId = parseInt(document.getElementById('ms-batch-account').value);
+    const accountId = parseInt(document.getElementById('ms-batch-account')?.value);
     const textarea = document.getElementById('ms-batch-links');
-    const method = document.getElementById('ms-batch-method').value;
-    const filterDays = document.getElementById('ms-batch-filter').value;
+    const method = document.getElementById('ms-batch-method')?.value;
+    const filterDays = document.getElementById('ms-batch-filter')?.value;
 
     const lines = textarea.value.split('\n').map(l => l.trim()).filter(Boolean);
     if (!lines.length || !accountId) {
@@ -305,8 +306,8 @@ const Members = {
       App.toast(r.message || 'Đã bắt đầu cào hàng loạt!', 'success');
 
       // Show progress panel
-      document.getElementById('ms-batch-progress').classList.remove('hidden');
-      document.getElementById('ms-batch-preview').classList.add('hidden');
+      (document.getElementById('ms-batch-progress')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
+      (document.getElementById('ms-batch-preview')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
 
       // Start polling
       this._pollBatchProgress(r.batch_job_id);
@@ -325,11 +326,11 @@ const Members = {
         const r = await MembersAPI.getBatchProgress(batchJobId);
 
         // Update stats badges
-        document.getElementById('ms-batch-stat-total').textContent = `${r.total_channels} channels`;
-        document.getElementById('ms-batch-stat-done').textContent = `${r.done} xong`;
-        document.getElementById('ms-batch-stat-running').textContent = `${r.running} đang chạy`;
-        document.getElementById('ms-batch-stat-errors').textContent = `${r.errors} lỗi`;
-        document.getElementById('ms-batch-stat-members').textContent = r.total_members;
+        (document.getElementById('ms-batch-stat-total') || me_dummy).textContent = `${r.total_channels} channels`;
+        (document.getElementById('ms-batch-stat-done') || me_dummy).textContent = `${r.done} xong`;
+        (document.getElementById('ms-batch-stat-running') || me_dummy).textContent = `${r.running} đang chạy`;
+        (document.getElementById('ms-batch-stat-errors') || me_dummy).textContent = `${r.errors} lỗi`;
+        (document.getElementById('ms-batch-stat-members') || me_dummy).textContent = r.total_members;
 
         // Update progress table
         const tbody = document.getElementById('ms-batch-progress-tbody');
@@ -392,8 +393,8 @@ const Members = {
     if (!tbody) return;
 
     const jobs = this._scrapeJobs;
-    document.getElementById('ms-total-jobs').textContent = jobs.length;
-    document.getElementById('ms-total-members').textContent =
+    (document.getElementById('ms-total-jobs') || me_dummy).textContent = jobs.length;
+    (document.getElementById('ms-total-members') || me_dummy).textContent = 
       jobs.reduce((sum, j) => sum + (j.member_count || 0), 0);
 
     if (!jobs.length) {
@@ -423,10 +424,10 @@ const Members = {
 
   // ── View Members Detail ──
   async viewMembers(jobId, title) {
-    document.getElementById('members-detail-title').textContent = `Members: ${title || jobId}`;
+    (document.getElementById('members-detail-title') || me_dummy).textContent = `Members: ${title || jobId}`;
     const tbody = document.getElementById('members-detail-tbody');
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center">⏳ Đang tải...</td></tr>';
-    document.getElementById('members-detail-modal').classList.add('open');
+    (document.getElementById('members-detail-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
 
     try {
       const d = await MembersAPI.getScrapeMembers(jobId, 500);
@@ -453,7 +454,7 @@ const Members = {
   },
 
   closeDetailModal() {
-    document.getElementById('members-detail-modal').classList.remove('open');
+    (document.getElementById('members-detail-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
   },
 
   // ── Delete Scrape Job ──
@@ -514,8 +515,8 @@ const Members = {
     if (!tbody) return;
 
     const campaigns = this._campaigns;
-    document.getElementById('ms-total-campaigns').textContent = campaigns.length;
-    document.getElementById('ms-total-sent').textContent =
+    (document.getElementById('ms-total-campaigns') || me_dummy).textContent = campaigns.length;
+    (document.getElementById('ms-total-sent') || me_dummy).textContent = 
       campaigns.reduce((sum, c) => sum + (c.sent_count || 0), 0);
 
     if (!campaigns.length) {
@@ -732,16 +733,16 @@ const Members = {
       this._editingCampaignId = id;
 
       // Set modal title to edit mode
-      document.getElementById('campaign-modal-title').textContent = `✏️ Sửa Campaign: ${c.name}`;
+      (document.getElementById('campaign-modal-title') || me_dummy).textContent = `✏️ Sửa Campaign: ${c.name}`;
 
       // Fill in settings
-      document.getElementById('cmp-name').value = c.name;
-      document.getElementById('cmp-name').disabled = true; // Can't change name
-      document.getElementById('cmp-delay-min').value = c.delay_min || 30;
-      document.getElementById('cmp-delay-max').value = c.delay_max || 90;
-      document.getElementById('cmp-daily-limit-premium').value = c.daily_limit_premium || 60;
-      document.getElementById('cmp-daily-limit-normal').value = c.daily_limit_normal || 10;
-      document.getElementById('cmp-ai-remix').checked = !!c.use_ai_remix;
+      (document.getElementById('cmp-name') || me_dummy).value = c.name;
+      (document.getElementById('cmp-name') || me_dummy).disabled = true; // Can't change name
+      (document.getElementById('cmp-delay-min') || me_dummy).value = c.delay_min || 30;
+      (document.getElementById('cmp-delay-max') || me_dummy).value = c.delay_max || 90;
+      (document.getElementById('cmp-daily-limit-premium') || me_dummy).value = c.daily_limit_premium || 60;
+      (document.getElementById('cmp-daily-limit-normal') || me_dummy).value = c.daily_limit_normal || 10;
+      (document.getElementById('cmp-ai-remix') || me_dummy).checked = !!c.use_ai_remix;
       const excludePrevEl = document.getElementById('cmp-exclude-previous');
       if (excludePrevEl) {
         excludePrevEl.checked = c.exclude_previous_dms !== undefined ? !!c.exclude_previous_dms : true;
@@ -835,7 +836,7 @@ const Members = {
         saveBtn.textContent = '💾 Lưu thay đổi';
       }
 
-      document.getElementById('campaign-modal').classList.add('open');
+      (document.getElementById('campaign-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
     } catch (e) {
       App.toast(e.message, 'error');
     }
@@ -845,11 +846,11 @@ const Members = {
     const id = this._editingCampaignId;
     if (!id) { App.toast('Lỗi: không có campaign để sửa', 'error'); return; }
 
-    const delayMin = parseInt(document.getElementById('cmp-delay-min').value) || 30;
-    const delayMax = parseInt(document.getElementById('cmp-delay-max').value) || 90;
-    const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit-premium').value) || 60;
-    const dailyLimitNormal = parseInt(document.getElementById('cmp-daily-limit-normal').value) || 10;
-    const useAi = document.getElementById('cmp-ai-remix').checked;
+    const delayMin = parseInt(document.getElementById('cmp-delay-min')?.value) || 30;
+    const delayMax = parseInt(document.getElementById('cmp-delay-max')?.value) || 90;
+    const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit-premium')?.value) || 60;
+    const dailyLimitNormal = parseInt(document.getElementById('cmp-daily-limit-normal')?.value) || 10;
+    const useAi = document.getElementById('cmp-ai-remix')?.checked;
     const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
 
     // Collect sender accounts
@@ -896,10 +897,10 @@ const Members = {
 
   // ── Campaign Logs ──
   async viewCampaignLogs(id, name) {
-    document.getElementById('campaign-logs-title').textContent = `Logs: ${name}`;
+    (document.getElementById('campaign-logs-title') || me_dummy).textContent = `Logs: ${name}`;
     const tbody = document.getElementById('campaign-logs-tbody');
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">⏳ Đang tải...</td></tr>';
-    document.getElementById('campaign-logs-modal').classList.add('open');
+    (document.getElementById('campaign-logs-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
 
     try {
       const d = await MembersAPI.getCampaignLogs(id);
@@ -929,7 +930,7 @@ const Members = {
   },
 
   closeCampaignLogs() {
-    document.getElementById('campaign-logs-modal').classList.remove('open');
+    (document.getElementById('campaign-logs-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
   },
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -937,16 +938,16 @@ const Members = {
   // ═══════════════════════════════════════════════════════════════════════════
 
   async openCampaignModal() {
-    document.getElementById('campaign-modal-title').textContent = 'Tạo DM Campaign';
-    document.getElementById('cmp-name').value = '';
-    document.getElementById('cmp-delay-min').value = '30';
-    document.getElementById('cmp-delay-max').value = '90';
-    document.getElementById('cmp-daily-limit-premium').value = '60';
-    document.getElementById('cmp-daily-limit-normal').value = '10';
-    document.getElementById('cmp-ai-remix').checked = false;
+    (document.getElementById('campaign-modal-title') || me_dummy).textContent = 'Tạo DM Campaign';
+    (document.getElementById('cmp-name') || me_dummy).value = '';
+    (document.getElementById('cmp-delay-min') || me_dummy).value = '30';
+    (document.getElementById('cmp-delay-max') || me_dummy).value = '90';
+    (document.getElementById('cmp-daily-limit-premium') || me_dummy).value = '60';
+    (document.getElementById('cmp-daily-limit-normal') || me_dummy).value = '10';
+    (document.getElementById('cmp-ai-remix') || me_dummy).checked = false;
     const excludePrevEl = document.getElementById('cmp-exclude-previous');
     if (excludePrevEl) excludePrevEl.checked = true;
-    document.getElementById('cmp-messages-list').innerHTML = '';
+    (document.getElementById('cmp-messages-list') || me_dummy).innerHTML = '';
 
     const schedToggle = document.getElementById('cmp-schedule-toggle');
     if (schedToggle) {
@@ -999,11 +1000,11 @@ const Members = {
     // Add one empty message by default
     this.addCampaignMessage();
 
-    document.getElementById('campaign-modal').classList.add('open');
+    (document.getElementById('campaign-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
   closeCampaignModal() {
-    document.getElementById('campaign-modal').classList.remove('open');
+    (document.getElementById('campaign-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
     
     const schedToggle = document.getElementById('cmp-schedule-toggle');
     if (schedToggle) {
@@ -1016,8 +1017,8 @@ const Members = {
     // Reset edit mode state
     if (this._editingCampaignId) {
       this._editingCampaignId = null;
-      document.getElementById('cmp-name').disabled = false;
-      document.getElementById('cmp-scrape-job').disabled = false;
+      (document.getElementById('cmp-name') || me_dummy).disabled = false;
+      (document.getElementById('cmp-scrape-job') || me_dummy).disabled = false;
       const saveBtn = document.querySelector('#campaign-modal .btn-primary[onclick*="saveEditedCampaign"]');
       if (saveBtn) {
         saveBtn.setAttribute('onclick', 'Members.saveCampaign()');
@@ -1263,13 +1264,13 @@ const Members = {
   },
 
   async saveCampaign() {
-    const name = document.getElementById('cmp-name').value.trim();
-    const jobId = document.getElementById('cmp-scrape-job').value;
-    const delayMin = parseInt(document.getElementById('cmp-delay-min').value) || 30;
-    const delayMax = parseInt(document.getElementById('cmp-delay-max').value) || 90;
-    const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit-premium').value) || 60;
-    const dailyLimitNormal = parseInt(document.getElementById('cmp-daily-limit-normal').value) || 10;
-    const useAi = document.getElementById('cmp-ai-remix').checked;
+    const name = document.getElementById('cmp-name')?.value.trim();
+    const jobId = document.getElementById('cmp-scrape-job')?.value;
+    const delayMin = parseInt(document.getElementById('cmp-delay-min')?.value) || 30;
+    const delayMax = parseInt(document.getElementById('cmp-delay-max')?.value) || 90;
+    const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit-premium')?.value) || 60;
+    const dailyLimitNormal = parseInt(document.getElementById('cmp-daily-limit-normal')?.value) || 10;
+    const useAi = document.getElementById('cmp-ai-remix')?.checked;
     const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
 
     // --- NEW SCHEDULE FIELDS ---
@@ -1338,7 +1339,7 @@ const Members = {
   },
 
   toggleScheduleSection() {
-    const enabled = document.getElementById('cmp-schedule-toggle').checked;
+    const enabled = document.getElementById('cmp-schedule-toggle')?.checked;
     const fields = document.getElementById('cmp-schedule-fields');
     if (enabled) {
       fields.style.display = 'block';
@@ -1940,9 +1941,9 @@ const Members = {
       }
     }
 
-    const sourceInput = document.getElementById('sim-channel-input').value.trim();
+    const sourceInput = document.getElementById('sim-channel-input')?.value.trim();
     const cleanName = sourceInput.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-    document.getElementById('sim-import-job-id').value = `deep_${cleanName || 'leads'}`;
+    (document.getElementById('sim-import-job-id') || me_dummy).value = `deep_${cleanName || 'leads'}`;
   },
 
   setPage(p) {
@@ -2292,10 +2293,10 @@ const Members = {
 
   // ── Invite Campaign Logs ──
   async viewInviteCampaignLogs(id, name) {
-    document.getElementById('invite-campaign-logs-title').textContent = `Logs: ${name}`;
+    (document.getElementById('invite-campaign-logs-title') || me_dummy).textContent = `Logs: ${name}`;
     const tbody = document.getElementById('invite-campaign-logs-tbody');
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">⏳ Đang tải...</td></tr>';
-    document.getElementById('invite-campaign-logs-modal').classList.add('open');
+    (document.getElementById('invite-campaign-logs-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
 
     try {
       const d = await InviteAPI.getCampaignLogs(id);
@@ -2325,7 +2326,7 @@ const Members = {
   },
 
   closeInviteCampaignLogs() {
-    document.getElementById('invite-campaign-logs-modal').classList.remove('open');
+    (document.getElementById('invite-campaign-logs-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
   },
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -2343,7 +2344,7 @@ const Members = {
   },
 
   onInviteScheduleToggle() {
-    const enabled = document.getElementById('inv-schedule-enabled').checked;
+    const enabled = document.getElementById('inv-schedule-enabled')?.checked;
     const opts = document.getElementById('inv-schedule-options');
     if (enabled) {
       opts.classList.remove('hidden');
@@ -2353,7 +2354,7 @@ const Members = {
   },
 
   async resolveInviteGroup() {
-    const input = document.getElementById('inv-target-group').value.trim();
+    const input = document.getElementById('inv-target-group')?.value.trim();
     if (!input) { App.toast('Nhập link hoặc username nhóm', 'error'); return; }
 
     const btn = document.getElementById('inv-resolve-btn');
@@ -2363,8 +2364,8 @@ const Members = {
     try {
       const d = await InviteAPI.resolveGroup(input);
       const info = d.group || d;
-      document.getElementById('inv-target-group-id').value = info.id || info.group_id || '';
-      document.getElementById('inv-target-group-title').value = info.title || info.name || '';
+      (document.getElementById('inv-target-group-id') || me_dummy).value = info.id || info.group_id || '';
+      (document.getElementById('inv-target-group-title') || me_dummy).value = info.title || info.name || '';
       
       const infoDiv = document.getElementById('inv-group-info');
       const infoText = document.getElementById('inv-group-info-text');
@@ -2372,7 +2373,7 @@ const Members = {
       infoText.innerHTML = `✅ <strong>${esc(info.title || info.name || 'Unknown')}</strong> — ${info.members_count || info.participants_count || '?'} members`;
     } catch (e) {
       App.toast(e.message || 'Không thể kiểm tra nhóm', 'error');
-      document.getElementById('inv-group-info').classList.add('hidden');
+      (document.getElementById('inv-group-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
     } finally {
       btn.disabled = false;
       btn.textContent = '🔍 Kiểm tra';
@@ -2381,22 +2382,22 @@ const Members = {
 
   async openInviteCampaignModal() {
     this._editingInviteCampaignId = null;
-    document.getElementById('invite-campaign-modal-title').textContent = 'Tạo Invite Campaign';
-    document.getElementById('inv-name').value = '';
-    document.getElementById('inv-name').disabled = false;
-    document.getElementById('inv-target-group').value = '';
-    document.getElementById('inv-target-group-id').value = '';
-    document.getElementById('inv-target-group-title').value = '';
-    document.getElementById('inv-group-info').classList.add('hidden');
-    document.getElementById('inv-delay-min').value = '45';
-    document.getElementById('inv-delay-max').value = '120';
-    document.getElementById('inv-daily-limit').value = '50';
-    document.getElementById('inv-dm-message').value = '';
-    document.getElementById('inv-dm-message-group').classList.add('hidden');
-    document.getElementById('inv-schedule-enabled').checked = false;
-    document.getElementById('inv-schedule-options').classList.add('hidden');
-    document.getElementById('inv-schedule-time').value = '09:00';
-    document.getElementById('inv-schedule-days').value = '7';
+    (document.getElementById('invite-campaign-modal-title') || me_dummy).textContent = 'Tạo Invite Campaign';
+    (document.getElementById('inv-name') || me_dummy).value = '';
+    (document.getElementById('inv-name') || me_dummy).disabled = false;
+    (document.getElementById('inv-target-group') || me_dummy).value = '';
+    (document.getElementById('inv-target-group-id') || me_dummy).value = '';
+    (document.getElementById('inv-target-group-title') || me_dummy).value = '';
+    (document.getElementById('inv-group-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
+    (document.getElementById('inv-delay-min') || me_dummy).value = '45';
+    (document.getElementById('inv-delay-max') || me_dummy).value = '120';
+    (document.getElementById('inv-daily-limit') || me_dummy).value = '50';
+    (document.getElementById('inv-dm-message') || me_dummy).value = '';
+    (document.getElementById('inv-dm-message-group')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
+    (document.getElementById('inv-schedule-enabled') || me_dummy).checked = false;
+    (document.getElementById('inv-schedule-options')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
+    (document.getElementById('inv-schedule-time') || me_dummy).value = '09:00';
+    (document.getElementById('inv-schedule-days') || me_dummy).value = '7';
 
     // Reset invite mode to direct
     document.querySelectorAll('input[name="inv-mode"]').forEach(r => r.checked = r.value === 'direct');
@@ -2420,7 +2421,7 @@ const Members = {
     saveBtn.setAttribute('onclick', 'Members.saveInviteCampaign()');
     saveBtn.textContent = '🚀 Tạo Campaign';
 
-    document.getElementById('invite-campaign-modal').classList.add('open');
+    (document.getElementById('invite-campaign-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
   async _populateInviteAccounts(selectedIds = null) {
@@ -2499,21 +2500,21 @@ const Members = {
   },
 
   closeInviteCampaignModal() {
-    document.getElementById('invite-campaign-modal').classList.remove('open');
+    (document.getElementById('invite-campaign-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
     this._editingInviteCampaignId = null;
   },
 
   async saveInviteCampaign() {
-    const name = document.getElementById('inv-name').value.trim();
-    const jobId = document.getElementById('inv-scrape-job').value;
-    const targetGroup = document.getElementById('inv-target-group').value.trim();
-    const targetGroupId = document.getElementById('inv-target-group-id').value;
-    const targetGroupTitle = document.getElementById('inv-target-group-title').value;
+    const name = document.getElementById('inv-name')?.value.trim();
+    const jobId = document.getElementById('inv-scrape-job')?.value;
+    const targetGroup = document.getElementById('inv-target-group')?.value.trim();
+    const targetGroupId = document.getElementById('inv-target-group-id')?.value;
+    const targetGroupTitle = document.getElementById('inv-target-group-title')?.value;
     const inviteMode = document.querySelector('input[name="inv-mode"]:checked')?.value || 'direct';
-    const dmMessage = document.getElementById('inv-dm-message').value.trim();
-    const delayMin = parseInt(document.getElementById('inv-delay-min').value) || 45;
-    const delayMax = parseInt(document.getElementById('inv-delay-max').value) || 120;
-    const dailyLimit = parseInt(document.getElementById('inv-daily-limit').value) || 50;
+    const dmMessage = document.getElementById('inv-dm-message')?.value.trim();
+    const delayMin = parseInt(document.getElementById('inv-delay-min')?.value) || 45;
+    const delayMax = parseInt(document.getElementById('inv-delay-max')?.value) || 120;
+    const dailyLimit = parseInt(document.getElementById('inv-daily-limit')?.value) || 50;
 
     if (!name) { App.toast('Nhập tên campaign', 'error'); return; }
     if (!jobId) { App.toast('Chọn nguồn members', 'error'); return; }
@@ -2526,9 +2527,9 @@ const Members = {
     if (!senderIds.length) { App.toast('Chọn ít nhất 1 tài khoản', 'error'); return; }
 
     // Schedule
-    const scheduleEnabled = document.getElementById('inv-schedule-enabled').checked;
-    const scheduleTime = document.getElementById('inv-schedule-time').value;
-    const scheduleDays = parseInt(document.getElementById('inv-schedule-days').value) || 7;
+    const scheduleEnabled = document.getElementById('inv-schedule-enabled')?.checked;
+    const scheduleTime = document.getElementById('inv-schedule-time')?.value;
+    const scheduleDays = parseInt(document.getElementById('inv-schedule-days')?.value) || 7;
 
     const data = {
       name,
@@ -2570,9 +2571,9 @@ const Members = {
 
       this._editingInviteCampaignId = id;
 
-      document.getElementById('invite-campaign-modal-title').textContent = `✏️ Sửa Invite Campaign: ${c.name}`;
-      document.getElementById('inv-name').value = c.name;
-      document.getElementById('inv-name').disabled = true;
+      (document.getElementById('invite-campaign-modal-title') || me_dummy).textContent = `✏️ Sửa Invite Campaign: ${c.name}`;
+      (document.getElementById('inv-name') || me_dummy).value = c.name;
+      (document.getElementById('inv-name') || me_dummy).disabled = true;
 
       // Scrape job (locked)
       const jobSel = document.getElementById('inv-scrape-job');
@@ -2580,9 +2581,9 @@ const Members = {
       jobSel.disabled = true;
 
       // Target group
-      document.getElementById('inv-target-group').value = c.target_group || '';
-      document.getElementById('inv-target-group-id').value = c.target_group_id || '';
-      document.getElementById('inv-target-group-title').value = c.target_group_title || '';
+      (document.getElementById('inv-target-group') || me_dummy).value = c.target_group || '';
+      (document.getElementById('inv-target-group-id') || me_dummy).value = c.target_group_id || '';
+      (document.getElementById('inv-target-group-title') || me_dummy).value = c.target_group_title || '';
       if (c.target_group_title) {
         const infoDiv = document.getElementById('inv-group-info');
         const infoText = document.getElementById('inv-group-info-text');
@@ -2594,19 +2595,19 @@ const Members = {
       document.querySelectorAll('input[name="inv-mode"]').forEach(r => r.checked = r.value === (c.invite_mode || 'direct'));
       this.onInviteModeChange();
       if (c.invite_mode === 'dm_link' && c.dm_message) {
-        document.getElementById('inv-dm-message').value = c.dm_message;
+        (document.getElementById('inv-dm-message') || me_dummy).value = c.dm_message;
       }
 
       // Settings
-      document.getElementById('inv-delay-min').value = c.delay_min || 45;
-      document.getElementById('inv-delay-max').value = c.delay_max || 120;
-      document.getElementById('inv-daily-limit').value = c.daily_limit || 50;
+      (document.getElementById('inv-delay-min') || me_dummy).value = c.delay_min || 45;
+      (document.getElementById('inv-delay-max') || me_dummy).value = c.delay_max || 120;
+      (document.getElementById('inv-daily-limit') || me_dummy).value = c.daily_limit || 50;
 
       // Schedule
-      document.getElementById('inv-schedule-enabled').checked = !!c.schedule_enabled;
+      (document.getElementById('inv-schedule-enabled') || me_dummy).checked = !!c.schedule_enabled;
       this.onInviteScheduleToggle();
-      if (c.schedule_time) document.getElementById('inv-schedule-time').value = c.schedule_time;
-      if (c.schedule_days) document.getElementById('inv-schedule-days').value = c.schedule_days;
+      if (c.schedule_time) (document.getElementById('inv-schedule-time') || me_dummy).value = c.schedule_time;
+      if (c.schedule_days) (document.getElementById('inv-schedule-days') || me_dummy).value = c.schedule_days;
 
       // Accounts
       await this._populateInviteAccounts(c.sender_account_ids || []);
@@ -2616,7 +2617,7 @@ const Members = {
       saveBtn.setAttribute('onclick', 'Members.saveEditedInviteCampaign()');
       saveBtn.textContent = '💾 Lưu thay đổi';
 
-      document.getElementById('invite-campaign-modal').classList.add('open');
+      (document.getElementById('invite-campaign-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
     } catch (e) {
       App.toast(e.message, 'error');
     }
@@ -2626,22 +2627,22 @@ const Members = {
     const id = this._editingInviteCampaignId;
     if (!id) { App.toast('Lỗi: không có campaign để sửa', 'error'); return; }
 
-    const targetGroup = document.getElementById('inv-target-group').value.trim();
-    const targetGroupId = document.getElementById('inv-target-group-id').value;
-    const targetGroupTitle = document.getElementById('inv-target-group-title').value;
+    const targetGroup = document.getElementById('inv-target-group')?.value.trim();
+    const targetGroupId = document.getElementById('inv-target-group-id')?.value;
+    const targetGroupTitle = document.getElementById('inv-target-group-title')?.value;
     const inviteMode = document.querySelector('input[name="inv-mode"]:checked')?.value || 'direct';
-    const dmMessage = document.getElementById('inv-dm-message').value.trim();
-    const delayMin = parseInt(document.getElementById('inv-delay-min').value) || 45;
-    const delayMax = parseInt(document.getElementById('inv-delay-max').value) || 120;
-    const dailyLimit = parseInt(document.getElementById('inv-daily-limit').value) || 50;
+    const dmMessage = document.getElementById('inv-dm-message')?.value.trim();
+    const delayMin = parseInt(document.getElementById('inv-delay-min')?.value) || 45;
+    const delayMax = parseInt(document.getElementById('inv-delay-max')?.value) || 120;
+    const dailyLimit = parseInt(document.getElementById('inv-daily-limit')?.value) || 50;
 
     const accCheckboxes = document.querySelectorAll('.inv-acc-checkbox:checked');
     const senderIds = Array.from(accCheckboxes).map(cb => parseInt(cb.value));
     if (!senderIds.length) { App.toast('Chọn ít nhất 1 tài khoản', 'error'); return; }
 
-    const scheduleEnabled = document.getElementById('inv-schedule-enabled').checked;
-    const scheduleTime = document.getElementById('inv-schedule-time').value;
-    const scheduleDays = parseInt(document.getElementById('inv-schedule-days').value) || 7;
+    const scheduleEnabled = document.getElementById('inv-schedule-enabled')?.checked;
+    const scheduleTime = document.getElementById('inv-schedule-time')?.value;
+    const scheduleDays = parseInt(document.getElementById('inv-schedule-days')?.value) || 7;
 
     try {
       await InviteAPI.updateCampaign(id, {

@@ -1,3 +1,4 @@
+const me_dummy = {}; const me_dummy_style = {};
 /**
  * Analytics, Templates, Auto-Reply, CSV Export - Growth Features Module
  */
@@ -33,12 +34,12 @@ const Analytics = {
     const o = this._overview;
     if (!o) return;
     const rate = o.response_rate?.toFixed(1) || '0.0';
-    document.getElementById('an-total-sent').textContent = o.total_dm_sent || 0;
-    document.getElementById('an-total-replies').textContent = o.total_replies || 0;
-    document.getElementById('an-response-rate').textContent = rate + '%';
-    document.getElementById('an-total-contacts').textContent = o.total_contacts || 0;
-    document.getElementById('an-active-campaigns').textContent = o.active_campaigns || 0;
-    document.getElementById('an-total-reactions').textContent = o.total_reactions || 0;
+    (document.getElementById('an-total-sent') || me_dummy).textContent = o.total_dm_sent || 0;
+    (document.getElementById('an-total-replies') || me_dummy).textContent = o.total_replies || 0;
+    (document.getElementById('an-response-rate') || me_dummy).textContent = rate + '%';
+    (document.getElementById('an-total-contacts') || me_dummy).textContent = o.total_contacts || 0;
+    (document.getElementById('an-active-campaigns') || me_dummy).textContent = o.active_campaigns || 0;
+    (document.getElementById('an-total-reactions') || me_dummy).textContent = o.total_reactions || 0;
   },
 
   renderChart() {
@@ -235,11 +236,11 @@ const Templates = {
 
   openCreate() {
     this._editing = null;
-    document.getElementById('tpl-modal-title').textContent = 'T\u1EA1o Template M\u1EDBi';
-    document.getElementById('tpl-name').value = '';
-    document.getElementById('tpl-category').value = 'general';
-    document.getElementById('tpl-content').value = '';
-    document.getElementById('tpl-modal').classList.add('open');
+    (document.getElementById('tpl-modal-title') || me_dummy).textContent = 'T\u1EA1o Template M\u1EDBi';
+    (document.getElementById('tpl-name') || me_dummy).value = '';
+    (document.getElementById('tpl-category') || me_dummy).value = 'general';
+    (document.getElementById('tpl-content') || me_dummy).value = '';
+    (document.getElementById('tpl-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
   openEdit(id) {
@@ -247,17 +248,17 @@ const Templates = {
     if (!t) return;
     this._editing = id;
     const msgs = typeof t.messages === 'string' ? JSON.parse(t.messages) : (t.messages || []);
-    document.getElementById('tpl-modal-title').textContent = 'S\u1EEDa Template: ' + t.name;
-    document.getElementById('tpl-name').value = t.name;
-    document.getElementById('tpl-category').value = t.category || 'general';
-    document.getElementById('tpl-content').value = msgs.map(m => m.content).join('\n---\n');
-    document.getElementById('tpl-modal').classList.add('open');
+    (document.getElementById('tpl-modal-title') || me_dummy).textContent = 'S\u1EEDa Template: ' + t.name;
+    (document.getElementById('tpl-name') || me_dummy).value = t.name;
+    (document.getElementById('tpl-category') || me_dummy).value = t.category || 'general';
+    (document.getElementById('tpl-content') || me_dummy).value = msgs.map(m => m.content).join('\n---\n');
+    (document.getElementById('tpl-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
   async save() {
-    const name = document.getElementById('tpl-name').value.trim();
-    const category = document.getElementById('tpl-category').value;
-    const content = document.getElementById('tpl-content').value.trim();
+    const name = document.getElementById('tpl-name')?.value.trim();
+    const category = document.getElementById('tpl-category')?.value;
+    const content = document.getElementById('tpl-content')?.value.trim();
     if (!name || !content) { App.toast('Nh\u1EADp t\u00EAn v\u00E0 n\u1ED9i dung', 'error'); return; }
     const messages = [{ msg_type: 'text', content }];
     const data = { name, category, messages };
@@ -269,7 +270,7 @@ const Templates = {
         await TemplatesAPI.create(data);
         App.toast('Template \u0111\u00E3 t\u1EA1o!', 'success');
       }
-      document.getElementById('tpl-modal').classList.remove('open');
+      (document.getElementById('tpl-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
       this.init();
     } catch (e) { App.toast(e.message, 'error'); }
   },
@@ -385,19 +386,19 @@ const AutoReply = {
 
   async openCreate() {
     this._editing = null;
-    document.getElementById('ar-modal-title').textContent = 'T\u1EA1o Auto-Reply Rule';
-    document.getElementById('ar-name').value = '';
-    document.getElementById('ar-trigger-type').value = 'keyword';
-    document.getElementById('ar-keywords').value = '';
-    document.getElementById('ar-reply-content').value = '';
-    document.getElementById('ar-max-replies').value = '3';
+    (document.getElementById('ar-modal-title') || me_dummy).textContent = 'T\u1EA1o Auto-Reply Rule';
+    (document.getElementById('ar-name') || me_dummy).value = '';
+    (document.getElementById('ar-trigger-type') || me_dummy).value = 'keyword';
+    (document.getElementById('ar-keywords') || me_dummy).value = '';
+    (document.getElementById('ar-reply-content') || me_dummy).value = '';
+    (document.getElementById('ar-max-replies') || me_dummy).value = '3';
     const kwGroup = document.getElementById('ar-keywords-group');
     if (kwGroup) kwGroup.style.display = 'block';
 
     await this._loadAccounts();
     this._renderAccountChips([]);
 
-    document.getElementById('ar-modal').classList.add('open');
+    (document.getElementById('ar-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
   async edit(id) {
@@ -408,12 +409,12 @@ const AutoReply = {
     const msgs = typeof r.reply_messages === 'string' ? JSON.parse(r.reply_messages) : (r.reply_messages || []);
     const accIds = typeof r.account_ids === 'string' ? JSON.parse(r.account_ids) : (r.account_ids || []);
 
-    document.getElementById('ar-modal-title').textContent = 'S\u1EEDa Auto-Reply Rule';
-    document.getElementById('ar-name').value = r.name;
-    document.getElementById('ar-trigger-type').value = r.trigger_type || 'keyword';
-    document.getElementById('ar-keywords').value = keywords.join(', ');
-    document.getElementById('ar-reply-content').value = msgs.map(m => m.content).join('\n---\n');
-    document.getElementById('ar-max-replies').value = r.max_replies_per_user || 3;
+    (document.getElementById('ar-modal-title') || me_dummy).textContent = 'S\u1EEDa Auto-Reply Rule';
+    (document.getElementById('ar-name') || me_dummy).value = r.name;
+    (document.getElementById('ar-trigger-type') || me_dummy).value = r.trigger_type || 'keyword';
+    (document.getElementById('ar-keywords') || me_dummy).value = keywords.join(', ');
+    (document.getElementById('ar-reply-content') || me_dummy).value = msgs.map(m => m.content).join('\n---\n');
+    (document.getElementById('ar-max-replies') || me_dummy).value = r.max_replies_per_user || 3;
 
     const kwGroup = document.getElementById('ar-keywords-group');
     if (kwGroup) kwGroup.style.display = (r.trigger_type === 'any') ? 'none' : 'block';
@@ -421,15 +422,15 @@ const AutoReply = {
     await this._loadAccounts();
     this._renderAccountChips(accIds);
 
-    document.getElementById('ar-modal').classList.add('open');
+    (document.getElementById('ar-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
   async save() {
-    const name = document.getElementById('ar-name').value.trim();
-    const triggerType = document.getElementById('ar-trigger-type').value;
-    const keywordsStr = document.getElementById('ar-keywords').value.trim();
-    const replyContent = document.getElementById('ar-reply-content').value.trim();
-    const maxReplies = parseInt(document.getElementById('ar-max-replies').value) || 3;
+    const name = document.getElementById('ar-name')?.value.trim();
+    const triggerType = document.getElementById('ar-trigger-type')?.value;
+    const keywordsStr = document.getElementById('ar-keywords')?.value.trim();
+    const replyContent = document.getElementById('ar-reply-content')?.value.trim();
+    const maxReplies = parseInt(document.getElementById('ar-max-replies')?.value) || 3;
     if (!name) { App.toast('Nh\u1EADp t\u00EAn rule', 'error'); return; }
     if (!replyContent) { App.toast('Nh\u1EADp n\u1ED9i dung reply', 'error'); return; }
 
@@ -456,7 +457,7 @@ const AutoReply = {
         await AutoReplyAPI.createRule(data);
         App.toast('Rule \u0111\u00E3 t\u1EA1o!', 'success');
       }
-      document.getElementById('ar-modal').classList.remove('open');
+      (document.getElementById('ar-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
       this._accounts = null;
       this.init();
     } catch (e) { App.toast(e.message, 'error'); }
@@ -490,7 +491,7 @@ const AutoReply = {
         <td><span class="badge ${l.status === 'success' ? 'badge-green' : 'badge-red'}">${l.status}</span></td>
         <td>${l.sent_at?.slice(0, 16) || ''}</td>
       </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text2)">Ch\u01B0a c\u00F3 log</td></tr>';
-      document.getElementById('ar-logs-modal').classList.add('open');
+      (document.getElementById('ar-logs-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
     } catch (e) { App.toast(e.message, 'error'); }
   },
 };

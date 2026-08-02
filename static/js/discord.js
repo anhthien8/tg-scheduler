@@ -257,7 +257,7 @@ const Discord = (() => {
       <div style="background:var(--surface);border-radius:12px;padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <h3 style="margin:0">${title}</h3>
-          <button onclick="document.getElementById('discord-modal-overlay').remove()" 
+          <button onclick="document.getElementById('discord-modal-overlay')?.remove()" 
             style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-secondary)">✕</button>
         </div>
         ${bodyHtml}

@@ -1,3 +1,4 @@
+const me_dummy = {}; const me_dummy_style = {};
 function debounce(func, delay = 250) {
   let timeoutId;
   return function (...args) {
@@ -9,7 +10,7 @@ function debounce(func, delay = 250) {
 }
 
 function accDisplayName(a){if(!a)return'?';const ui=a.user_info;if(ui&&(ui.first_name||ui.last_name)){return[ui.first_name,ui.last_name].filter(Boolean).join(' ');}return a.name||'?';}
-function customConfirm(msg){return new Promise(r=>{const o=document.getElementById('confirm-modal');document.getElementById('confirm-msg').textContent=msg;o.classList.add('open');document.getElementById('confirm-yes').onclick=()=>{o.classList.remove('open');r(true)};document.getElementById('confirm-no').onclick=()=>{o.classList.remove('open');r(false)}})}
+function customConfirm(msg){return new Promise(r=>{const o=document.getElementById('confirm-modal');(document.getElementById('confirm-msg') || me_dummy).textContent = msg;o.classList.add('open');document.getElementById('confirm-yes').onclick=()=>{o.classList.remove('open');r(true)};document.getElementById('confirm-no').onclick=()=>{o.classList.remove('open');r(false)}})}
 
 const App={currentPage:'dashboard',chats:[],schedules:[],accounts:[],phoneCodeHash:'',loginAccountId:null,loginPhone:'',logOffset:0,logLimit:30,
 
@@ -24,15 +25,15 @@ toast(m,t='info'){const e=document.createElement('div');e.className=`toast ${t}`
 toggleSidebar(){const sb=document.getElementById('sidebar');const ov=document.getElementById('sidebar-overlay');if(sb){sb.classList.toggle('open');}if(ov){ov.classList.toggle('open');}},
 
 
-showLogin(){document.getElementById('login-page').classList.remove('hidden');document.getElementById('dashboard-page').classList.add('hidden')},
+showLogin(){(document.getElementById('login-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('dashboard-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden')},
 
-showDashboard(user){document.getElementById('login-page').classList.add('hidden');document.getElementById('dashboard-page').classList.remove('hidden');
+showDashboard(user){(document.getElementById('login-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('dashboard-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
 
-if(user){const n=[user.first_name,user.last_name].filter(Boolean).join(' ');document.getElementById('user-info').innerHTML=`<strong>${n}</strong><span>@${user.username||user.phone||''}</span>`}
+if(user){const n=[user.first_name,user.last_name].filter(Boolean).join(' ');(document.getElementById('user-info') || me_dummy).innerHTML = `<strong>${n}</strong><span>@${user.username||user.phone||''}</span>`}
 
 this.navigate('dashboard');document.querySelectorAll('.day-btn').forEach(b=>b.addEventListener('click',()=>b.classList.toggle('active')))},
 
-async addFirstAccount(){const name=document.getElementById('setup-name').value.trim();const apiId=document.getElementById('setup-api-id').value.trim();const apiHash=document.getElementById('setup-api-hash').value.trim();const phone=document.getElementById('setup-phone').value.trim();
+async addFirstAccount(){const name=document.getElementById('setup-name')?.value.trim();const apiId=document.getElementById('setup-api-id')?.value.trim();const apiHash=document.getElementById('setup-api-hash')?.value.trim();const phone=document.getElementById('setup-phone')?.value.trim();
 
 if(!name||!apiId||!apiHash||!phone)return this.toast('Điền đầy đủ thông tin','error');
 
@@ -42,21 +43,21 @@ try{const r=await API.addAccount({name,phone,api_id:apiId,api_hash:apiHash});thi
 
 const c=await API.sendCode(phone,r.account_id);this.phoneCodeHash=c.phone_code_hash;
 
-document.getElementById('login-step-setup').classList.add('hidden');document.getElementById('login-step-otp').classList.remove('hidden');document.getElementById('login-code').focus();this.toast('Mã OTP đã gửi','success')}catch(e){this.toast(e.message,'error')}
+(document.getElementById('login-step-setup')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('login-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');document.getElementById('login-code')?.focus();this.toast('Mã OTP đã gửi','success')}catch(e){this.toast(e.message,'error')}
 
 btn.disabled=false;btn.textContent='Thêm tài khoản'},
 
-async verifyFirstAccount(){const code=document.getElementById('login-code').value.trim();if(!code)return this.toast('Nhập mã OTP','error');
+async verifyFirstAccount(){const code=document.getElementById('login-code')?.value.trim();if(!code)return this.toast('Nhập mã OTP','error');
 
 try{const r=await API.verify(this.loginPhone,code,this.phoneCodeHash,this.loginAccountId);
 
-if(r.needs_password){document.getElementById('login-step-otp').classList.add('hidden');document.getElementById('login-step-2fa').classList.remove('hidden');return}
+if(r.needs_password){(document.getElementById('login-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('login-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');return}
 
 this.toast('Đăng nhập thành công!','success');this.showDashboard(r)}catch(e){
 
-if(e.message.includes('2FA')){document.getElementById('login-step-otp').classList.add('hidden');document.getElementById('login-step-2fa').classList.remove('hidden')}else this.toast(e.message,'error')}},
+if(e.message.includes('2FA')){(document.getElementById('login-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('login-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden')}else this.toast(e.message,'error')}},
 
-async verify2FAFirst(){const pw=document.getElementById('login-password').value;try{const r=await API.verify(this.loginPhone,document.getElementById('login-code').value.trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('Đăng nhập thành công!','success');this.showDashboard(r)}catch(e){this.toast(e.message,'error')}},
+async verify2FAFirst(){const pw=document.getElementById('login-password')?.value;try{const r=await API.verify(this.loginPhone,document.getElementById('login-code')?.value.trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('Đăng nhập thành công!','success');this.showDashboard(r)}catch(e){this.toast(e.message,'error')}},
 
 navigate(page){this.currentPage=page;try{if(page==='channels'){this._populateChAccountSelect();}}catch(e){console.error('channels populate error:',e);}try{if(page==='members'){Members.populateAccounts();}}catch(e){console.error('members populate error:',e);}document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
 // Close sidebar on mobile after navigation
@@ -71,7 +72,7 @@ if(page==='inbox'){
     document.querySelector('.main').appendChild(clone);
   }
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
-  document.getElementById('view-inbox').classList.remove('hidden');
+  (document.getElementById('view-inbox')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   this._populateInboxAccountFilter();
   this.inboxLoad();
   return;
@@ -96,7 +97,7 @@ if(page==='discord'){
     document.querySelector('.main').appendChild(wrapper.firstElementChild);
   }
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
-  document.getElementById('view-discord').classList.remove('hidden');
+  (document.getElementById('view-discord')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   Discord.init();
   return;
 }
@@ -208,7 +209,7 @@ if(page==='ai-followup'){
     document.querySelector('.main').appendChild(wrapper.firstElementChild);
   }
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
-  document.getElementById('view-ai-followup').classList.remove('hidden');
+  (document.getElementById('view-ai-followup')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   AIFollowUp.init();
   return;
 }
@@ -243,7 +244,7 @@ if(page==='analytics'){
     document.querySelector('.main').appendChild(w.firstElementChild);
   }
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
-  document.getElementById('view-analytics').classList.remove('hidden');
+  (document.getElementById('view-analytics')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   Analytics.init();
   return;
 }
@@ -259,7 +260,7 @@ if(page==='templates'){
       <div id="tpl-list"></div>
       <div id="tpl-modal" class="modal-overlay">
         <div class="modal">
-          <div class="modal-header"><h3 class="modal-title" id="tpl-modal-title">Tạo Template</h3><button class="modal-close" onclick="document.getElementById('tpl-modal').classList.remove('open')">×</button></div>
+          <div class="modal-header"><h3 class="modal-title" id="tpl-modal-title">Tạo Template</h3><button class="modal-close" onclick="(document.getElementById('tpl-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">×</button></div>
           <div class="modal-body">
             <div class="form-group"><label class="form-label">Tên Template</label><input type="text" id="tpl-name" class="form-input" placeholder="VD: Crypto Outreach"></div>
             <div class="form-group"><label class="form-label">Category</label><select id="tpl-category" class="form-select"><option value="general">General</option><option value="crypto">Crypto</option><option value="finance">Finance</option><option value="marketing">Marketing</option><option value="business">Business</option></select></div>
@@ -273,7 +274,7 @@ if(page==='templates'){
     document.querySelector('.main').appendChild(w.firstElementChild);
   }
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
-  document.getElementById('view-templates').classList.remove('hidden');
+  (document.getElementById('view-templates')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   Templates.init();
   return;
 }
@@ -291,10 +292,10 @@ if(page==='autoreply'){
       <!-- Create/Edit Rule Modal -->
       <div id="ar-modal" class="modal-overlay">
         <div class="modal">
-          <div class="modal-header"><h3 class="modal-title" id="ar-modal-title">Tạo Auto-Reply Rule</h3><button class="modal-close" onclick="document.getElementById('ar-modal').classList.remove('open')">×</button></div>
+          <div class="modal-header"><h3 class="modal-title" id="ar-modal-title">Tạo Auto-Reply Rule</h3><button class="modal-close" onclick="(document.getElementById('ar-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">×</button></div>
           <div class="modal-body">
             <div class="form-group"><label class="form-label">Tên Rule <span style="cursor:help;opacity:.6" title="Đặt tên để dễ quản lý, VD: Chào mừng khách mới">ℹ️</span></label><input type="text" id="ar-name" class="form-input" placeholder="VD: Welcome Reply"></div>
-            <div class="form-group"><label class="form-label">Trigger Type <span style="cursor:help;opacity:.6" title="Keyword Match: Bot reply khi tin nhắn chứa từ khóa nhất định\nAny Message: Bot reply mọi tin nhắn đến (không cần keyword)">ℹ️</span></label><select id="ar-trigger-type" class="form-select" onchange="document.getElementById('ar-keywords-group').style.display=this.value==='keyword'?'block':'none'"><option value="keyword">Keyword Match</option><option value="any">Any Message</option></select></div>
+            <div class="form-group"><label class="form-label">Trigger Type <span style="cursor:help;opacity:.6" title="Keyword Match: Bot reply khi tin nhắn chứa từ khóa nhất định\nAny Message: Bot reply mọi tin nhắn đến (không cần keyword)">ℹ️</span></label><select id="ar-trigger-type" class="form-select" onchange="((document.getElementById('ar-keywords-group') && document.getElementById('ar-keywords-group')?.style) || me_dummy_style).display = this.value==='keyword'?'block':'none'"><option value="keyword">Keyword Match</option><option value="any">Any Message</option></select></div>
             <div class="form-group" id="ar-keywords-group"><label class="form-label">Keywords <span style="cursor:help;opacity:.6" title="Danh sách từ khóa, phân cách bởi dấu phẩy.\nKhi ai đó nhắn tin chứa 1 trong các từ này → bot sẽ tự động reply">ℹ️</span></label><input type="text" id="ar-keywords" class="form-input" placeholder="hello, hi, xin chào, hợp tác"></div>
             <div class="form-group"><label class="form-label">Tài khoản áp dụng <span style="cursor:help;opacity:.6" title="Chọn tài khoản Telegram nào sẽ tự động reply.\nKhi có người nhắn tin đến tài khoản được chọn → bot auto reply.\nBỏ trống = áp dụng cho TẤT CẢ tài khoản">ℹ️</span></label><div id="ar-accounts-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"><span style="color:var(--text2);font-size:12px">Đang tải...</span></div></div>
             <div class="form-group"><label class="form-label">Nội dung Reply <span style="cursor:help;opacity:.6" title="Tin nhắn bot sẽ tự động gửi lại.\nDùng --- (trên 1 dòng riêng) để tách thành nhiều tin nhắn.\nVD:\nChào bạn!\n---\nMình có thể giúp gì?">ℹ️</span></label><textarea id="ar-reply-content" class="form-textarea" rows="6" placeholder="Nhập tin nhắn reply...&#10;Dùng --- để tách nhiều tin"></textarea></div>
@@ -307,7 +308,7 @@ if(page==='autoreply'){
       <!-- Logs Modal -->
       <div id="ar-logs-modal" class="modal-overlay">
         <div class="modal" style="max-width:700px">
-          <div class="modal-header"><h3 class="modal-title">Auto-Reply Logs</h3><button class="modal-close" onclick="document.getElementById('ar-logs-modal').classList.remove('open')">×</button></div>
+          <div class="modal-header"><h3 class="modal-title">Auto-Reply Logs</h3><button class="modal-close" onclick="(document.getElementById('ar-logs-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">×</button></div>
           <div class="modal-body"><div class="table-wrap"><table><thead><tr><th>User</th><th>Trigger</th><th>Reply</th><th>Status</th><th>Time</th></tr></thead><tbody id="ar-logs-body"></tbody></table></div></div>
         </div>
       </div>
@@ -316,7 +317,7 @@ if(page==='autoreply'){
     document.querySelector('.main').appendChild(w.firstElementChild);
   }
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
-  document.getElementById('view-autoreply').classList.remove('hidden');
+  (document.getElementById('view-autoreply')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   AutoReply.init();
   return;
 }
@@ -368,7 +369,7 @@ if(page==='warmup'){
       <!-- Add Group Modal -->
       <div id="warmup-group-modal" class="modal-overlay">
         <div class="modal">
-          <div class="modal-header"><h3 class="modal-title">Them nhom warmup</h3><button class="modal-close" onclick="document.getElementById('warmup-group-modal').classList.remove('open')">x</button></div>
+          <div class="modal-header"><h3 class="modal-title">Them nhom warmup</h3><button class="modal-close" onclick="(document.getElementById('warmup-group-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
           <div class="modal-body">
             <div class="form-group"><label class="form-label">Ten nhom</label><input type="text" id="wg-name" class="form-input" placeholder="VD: Crypto VN"></div>
             <div class="form-group"><label class="form-label">Chat ID</label><input type="text" id="wg-chat-id" class="form-input" placeholder="ID nhom Telegram"></div>
@@ -382,7 +383,7 @@ if(page==='warmup'){
       <!-- Add Script Modal -->
       <div id="warmup-script-modal" class="modal-overlay">
         <div class="modal">
-          <div class="modal-header"><h3 class="modal-title">Them script</h3><button class="modal-close" onclick="document.getElementById('warmup-script-modal').classList.remove('open')">x</button></div>
+          <div class="modal-header"><h3 class="modal-title">Them script</h3><button class="modal-close" onclick="(document.getElementById('warmup-script-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
           <div class="modal-body">
             <div class="form-group"><label class="form-label">Noi dung</label><textarea id="ws-content" class="form-textarea" rows="5" placeholder="Noi dung tin nhan warmup..."></textarea></div>
             <div class="form-group" style="display:flex;align-items:center;gap:8px">
@@ -397,7 +398,7 @@ if(page==='warmup'){
       <!-- Add Job Modal -->
       <div id="warmup-job-modal" class="modal-overlay">
         <div class="modal">
-          <div class="modal-header"><h3 class="modal-title">Tao warmup job</h3><button class="modal-close" onclick="document.getElementById('warmup-job-modal').classList.remove('open')">x</button></div>
+          <div class="modal-header"><h3 class="modal-title">Tao warmup job</h3><button class="modal-close" onclick="(document.getElementById('warmup-job-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
           <div class="modal-body">
             <div class="form-group"><label class="form-label">Nhom</label><select id="wj-group" class="form-select"></select></div>
             <div class="form-group"><label class="form-label">Tai khoan</label><div id="wj-accounts" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"></div></div>
@@ -418,7 +419,7 @@ if(page==='warmup'){
       <!-- Job Logs Modal -->
       <div id="warmup-logs-modal" class="modal-overlay">
         <div class="modal" style="max-width:700px">
-          <div class="modal-header"><h3 class="modal-title">Job Logs</h3><button class="modal-close" onclick="document.getElementById('warmup-logs-modal').classList.remove('open')">x</button></div>
+          <div class="modal-header"><h3 class="modal-title">Job Logs</h3><button class="modal-close" onclick="(document.getElementById('warmup-logs-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
           <div class="modal-body"><div class="table-wrap"><table><thead><tr><th>Thoi gian</th><th>Account</th><th>Noi dung</th><th>Trang thai</th></tr></thead><tbody id="warmup-job-logs-body"></tbody></table></div></div>
         </div>
       </div>
@@ -428,7 +429,7 @@ if(page==='warmup'){
     document.querySelector('.main').appendChild(w.firstElementChild);
   }
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
-  document.getElementById('view-warmup').classList.remove('hidden');
+  (document.getElementById('view-warmup')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   Warmup.init();
   return;
 }
@@ -561,7 +562,7 @@ if(page==='changelog'){
     document.querySelector('.main').appendChild(w.firstElementChild);
   }
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
-  document.getElementById('view-changelog').classList.remove('hidden');
+  (document.getElementById('view-changelog')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   return;
 }
 
@@ -574,7 +575,7 @@ if(page==='dashboard')this.loadDashboard();else if(page==='schedules')this.loadS
 
 async loadDashboard(){try{const[stats,sd]=await Promise.all([API.getStats(),API.getSchedules({active_only: true, limit: 10})]);
 
-document.getElementById('stat-accounts').textContent=stats.total_accounts;document.getElementById('stat-active').textContent=stats.active_schedules;document.getElementById('stat-total').textContent=stats.total_schedules;document.getElementById('stat-today').textContent=stats.today;document.getElementById('stat-success').textContent=stats.success;document.getElementById('stat-failed').textContent=stats.failed;
+(document.getElementById('stat-accounts') || me_dummy).textContent = stats.total_accounts;document.getElementById('stat-active').textContent=stats.active_schedules;document.getElementById('stat-total').textContent=stats.total_schedules;document.getElementById('stat-today').textContent=stats.today;document.getElementById('stat-success').textContent=stats.success;document.getElementById('stat-failed').textContent=stats.failed;
 
 const active=sd.schedules.filter(s=>s.next_run);const tbody=document.getElementById('upcoming-body');
 
@@ -593,9 +594,9 @@ Click để bỏ cảnh báo">⚠️ Cảnh báo</span>`:''}
 ${a.is_paused?`<span style="background:rgba(251,146,60,.18);border:1px solid rgba(251,146,60,.5);border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:#fb923c;cursor:pointer" onclick="App.unpauseAccount(${a.id})" title="${esc(a.pause_reason||'')}
 Click để bỏ tạm dừng">⏸️ Tạm dừng</span>`:''}</div><div style="margin-top:4px"><small style="color:#6b7280">DM limit: ${a.is_premium?'50':'10'}/ngày</small></div></div><div class="account-card-actions">${!logged?`<button class="btn btn-primary btn-sm" onclick="App.loginAccount(${a.id},'${a.phone}')">Login</button>`:''}<button class="btn btn-danger btn-sm" onclick="App.deleteAccount(${a.id})">Xóa</button></div></div>`}).join('')}catch(e){this.toast(e.message,'error')}},
 
-openAddAccountModal(){document.getElementById('acc-step-info').classList.remove('hidden');document.getElementById('acc-step-otp').classList.add('hidden');document.getElementById('acc-step-2fa').classList.add('hidden');document.getElementById('acc-phone').value='';const proxyEl=document.getElementById('acc-proxy');if(proxyEl)proxyEl.value='';document.getElementById('account-modal').classList.add('open')},
+openAddAccountModal(){(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-phone') || me_dummy).value = '';const proxyEl=document.getElementById('acc-proxy');if(proxyEl)proxyEl.value='';(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
 
-closeAccountModal(){document.getElementById('account-modal').classList.remove('open')},
+closeAccountModal(){(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')},
 
 async unflagAccount(accId){if(!await customConfirm('Bỏ cảnh báo tài khoản này?'))return;try{await fetch(`/api/auth/accounts/${accId}/unflag`,{method:'POST'});API.clearAccountsCache();this.toast('Đã bỏ cảnh báo','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
 
@@ -611,17 +612,17 @@ async addBlacklist(userId,username,reason){try{await fetch('/api/blacklist',{met
 
 async removeBlacklist(id){if(!await customConfirm('Xóa user này khỏi blacklist?'))return;try{await fetch(`/api/blacklist/${id}`,{method:'DELETE'});this.toast('Đã xóa khỏi blacklist','success');this.loadBlacklist();}catch(e){this.toast(e.message,'error')}},
 
-async addAccount(){const phone=document.getElementById('acc-phone').value.trim();if(!phone)return this.toast('Nhập số điện thoại','error');const proxyUrl=document.getElementById('acc-proxy')?.value?.trim()||null;try{const r=await API.addAccount({phone,proxy_url:proxyUrl||null});this.loginAccountId=r.account_id;this.loginPhone=phone;const c=await API.sendCode(phone,r.account_id);this.phoneCodeHash=c.phone_code_hash;document.getElementById('acc-step-info').classList.add('hidden');document.getElementById('acc-step-otp').classList.remove('hidden');this.toast('OTP đã gửi','success')}catch(e){this.toast(e.message||String(e),'error')}},
+async addAccount(){const phone=document.getElementById('acc-phone')?.value.trim();if(!phone)return this.toast('Nhập số điện thoại','error');const proxyUrl=document.getElementById('acc-proxy')?.value?.trim()||null;try{const r=await API.addAccount({phone,proxy_url:proxyUrl||null});this.loginAccountId=r.account_id;this.loginPhone=phone;const c=await API.sendCode(phone,r.account_id);this.phoneCodeHash=c.phone_code_hash;(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');this.toast('OTP đã gửi','success')}catch(e){this.toast(e.message||String(e),'error')}},
 
-async verifyAccount(){const code=document.getElementById('acc-code').value.trim();if(!code)return this.toast('Nhập OTP','error');
+async verifyAccount(){const code=document.getElementById('acc-code')?.value.trim();if(!code)return this.toast('Nhập OTP','error');
 
-try{const r=await API.verify(this.loginPhone,code,this.phoneCodeHash,this.loginAccountId);if(r.needs_password){document.getElementById('acc-step-otp').classList.add('hidden');document.getElementById('acc-step-2fa').classList.remove('hidden');return}
+try{const r=await API.verify(this.loginPhone,code,this.phoneCodeHash,this.loginAccountId);if(r.needs_password){(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');return}
 
-this.toast('Đăng nhập thành công!','success');this.closeAccountModal();this.loadAccounts()}catch(e){if(e.message.includes('2FA')){document.getElementById('acc-step-otp').classList.add('hidden');document.getElementById('acc-step-2fa').classList.remove('hidden')}else this.toast(e.message,'error')}},
+this.toast('Đăng nhập thành công!','success');this.closeAccountModal();this.loadAccounts()}catch(e){if(e.message.includes('2FA')){(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden')}else this.toast(e.message,'error')}},
 
-async verify2FAAccount(){const pw=document.getElementById('acc-password').value;try{await API.verify(this.loginPhone,document.getElementById('acc-code').value.trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('OK!','success');this.closeAccountModal();this.loadAccounts()}catch(e){this.toast(e.message,'error')}},
+async verify2FAAccount(){const pw=document.getElementById('acc-password')?.value;try{await API.verify(this.loginPhone,document.getElementById('acc-code')?.value.trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('OK!','success');this.closeAccountModal();this.loadAccounts()}catch(e){this.toast(e.message,'error')}},
 
-async loginAccount(id,phone){this.loginAccountId=id;this.loginPhone=phone;try{const c=await API.sendCode(phone,id);this.phoneCodeHash=c.phone_code_hash;this.openAddAccountModal();document.getElementById('acc-step-info').classList.add('hidden');document.getElementById('acc-step-otp').classList.remove('hidden');this.toast('OTP đã gửi','success')}catch(e){this.toast(e.message,'error')}},
+async loginAccount(id,phone){this.loginAccountId=id;this.loginPhone=phone;try{const c=await API.sendCode(phone,id);this.phoneCodeHash=c.phone_code_hash;this.openAddAccountModal();(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');this.toast('OTP đã gửi','success')}catch(e){this.toast(e.message,'error')}},
 
 async togglePremium(accountId, makePremium) {
   try {
@@ -684,12 +685,12 @@ async showBlockedTargets(scheduleId) {
     div.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:1.5rem;max-width:560px;width:100%;max-height:80vh;overflow-y:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem">
         <h3 style="margin:0;font-size:1.05rem">⛔ Targets bị block</h3>
-        <button onclick="document.getElementById('blocked-targets-overlay').remove()" 
+        <button onclick="document.getElementById('blocked-targets-overlay')?.remove()" 
                 style="background:none;border:none;color:var(--text-secondary);font-size:1.5rem;cursor:pointer;line-height:1">×</button>
       </div>
       ${html}
       <div style="text-align:right;margin-top:1rem">
-        <button onclick="document.getElementById('blocked-targets-overlay').remove()" class="btn btn-primary">Đóng</button>
+        <button onclick="document.getElementById('blocked-targets-overlay')?.remove()" class="btn btn-primary">Đóng</button>
       </div>
     </div>`;
     document.getElementById('blocked-targets-overlay')?.remove();
@@ -716,27 +717,27 @@ async previewSchedule(id){try{const r=await API.previewSchedule(id);this.toast(r
 
 async resetCount(id){try{await API.resetCount(id);this.toast('Đã reset','success');this.loadSchedules()}catch(e){this.toast(e.message,'error')}},
 
-async openCreateModal(){document.getElementById('modal-title').textContent='Tạo lịch gửi';document.getElementById('edit-schedule-id').value='';document.getElementById('sch-name').value='';document.getElementById('sch-type').value='daily';document.getElementById('sch-time').value='08:00';document.getElementById('sch-day-of-month').value='1';document.getElementById('sch-once-date').value='';document.getElementById('sch-max-sends').value='';document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('active'));document.getElementById('messages-list').innerHTML='';
+async openCreateModal(){(document.getElementById('modal-title') || me_dummy).textContent = 'Tạo lịch gửi';document.getElementById('edit-schedule-id').value='';document.getElementById('sch-name').value='';document.getElementById('sch-type').value='daily';document.getElementById('sch-time').value='08:00';document.getElementById('sch-day-of-month').value='1';document.getElementById('sch-once-date').value='';document.getElementById('sch-max-sends').value='';document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('active'));document.getElementById('messages-list').innerHTML='';
 
 this.onScheduleTypeChange();await this.loadAccountSelector();await this.loadChatList();
 
-document.querySelectorAll('#chat-list input[type="checkbox"]').forEach(c=>c.checked=false);document.getElementById('schedule-modal').classList.add('open')},
+document.querySelectorAll('#chat-list input[type="checkbox"]').forEach(c=>c.checked=false);(document.getElementById('schedule-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
 
-async editSchedule(id){try{const s=await API.getSchedule(id);document.getElementById('modal-title').textContent='Sửa lịch gửi';document.getElementById('edit-schedule-id').value=s.id;document.getElementById('sch-name').value=s.name;document.getElementById('sch-type').value=s.schedule_type;document.getElementById('sch-time').value=s.time_of_day;document.getElementById('sch-day-of-month').value=s.day_of_month||1;document.getElementById('sch-once-date').value=s.once_date||'';document.getElementById('sch-max-sends').value=s.max_sends||'';
+async editSchedule(id){try{const s=await API.getSchedule(id);(document.getElementById('modal-title') || me_dummy).textContent = 'Sửa lịch gửi';document.getElementById('edit-schedule-id').value=s.id;document.getElementById('sch-name').value=s.name;document.getElementById('sch-type').value=s.schedule_type;document.getElementById('sch-time').value=s.time_of_day;document.getElementById('sch-day-of-month').value=s.day_of_month||1;document.getElementById('sch-once-date').value=s.once_date||'';document.getElementById('sch-max-sends').value=s.max_sends||'';
 
 document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('active'));if(s.days_of_week)s.days_of_week.split(',').forEach(d=>{const btn=document.querySelector(`.day-btn[data-day="${d.trim()}"]`);if(btn)btn.classList.add('active')});
 
-this.onScheduleTypeChange();document.getElementById('messages-list').innerHTML='';(s.messages||[]).forEach(m=>this.addMessage(m.msg_type,m));
+this.onScheduleTypeChange();(document.getElementById('messages-list') || me_dummy).innerHTML = '';(s.messages||[]).forEach(m=>this.addMessage(m.msg_type,m));
 
-await this.loadAccountSelector();document.getElementById('sch-account').value=s.account_id;await this.loadChatList();
+await this.loadAccountSelector();(document.getElementById('sch-account') || me_dummy).value = s.account_id;await this.loadChatList();
 
 const tids=new Set((s.targets||[]).map(t=>t.chat_id));document.querySelectorAll('#chat-list input[type="checkbox"]').forEach(cb=>cb.checked=tids.has(parseInt(cb.value)));
 
-document.getElementById('schedule-modal').classList.add('open')}catch(e){this.toast(e.message,'error')}},
+(document.getElementById('schedule-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')}catch(e){this.toast(e.message,'error')}},
 
-closeModal(){document.getElementById('schedule-modal').classList.remove('open')},
+closeModal(){(document.getElementById('schedule-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')},
 
-onScheduleTypeChange(){const t=document.getElementById('sch-type').value;document.getElementById('weekly-days-group').classList.toggle('hidden',t!=='weekly');document.getElementById('monthly-day-group').classList.toggle('hidden',t!=='monthly');document.getElementById('once-date-group').classList.toggle('hidden',t!=='once');
+onScheduleTypeChange(){const t=document.getElementById('sch-type')?.value;(document.getElementById('weekly-days-group')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).toggle('hidden',t!=='weekly');(document.getElementById('monthly-day-group')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).toggle('hidden',t!=='monthly');(document.getElementById('once-date-group')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).toggle('hidden',t!=='once');
 
 const lbl=document.getElementById('time-label');lbl.textContent=t==='hourly'?'Phút gửi (mỗi giờ)':'Giờ gửi'},
 
@@ -750,7 +751,7 @@ renderChatList(chats){const el=document.getElementById('chat-list');if(!chats.le
 
 el.innerHTML=chats.map(c=>{const icon=c.chat_type==='channel'?'📢':c.chat_type==='supergroup'?'👥':'💬';return`<label class="chat-item"><input type="checkbox" value="${c.chat_id}" data-title="${esc(c.chat_title)}" data-type="${c.chat_type}"><span class="chat-type-icon">${icon}</span><span class="chat-name">${esc(c.chat_title)}</span><span class="chat-type-badge">${c.chat_type}</span></label>`}).join('')},
 
-filterChats: debounce(function(){const q=document.getElementById('chat-search').value.toLowerCase();this.renderChatList(this.chats.filter(c=>c.chat_title.toLowerCase().includes(q)))}, 250),
+filterChats: debounce(function(){const q=document.getElementById('chat-search')?.value.toLowerCase();this.renderChatList(this.chats.filter(c=>c.chat_title.toLowerCase().includes(q)))}, 250),
 
 addMessage(type,data=null){const list=document.getElementById('messages-list');const div=document.createElement('div');div.className='msg-item';div.dataset.type=type;
 
@@ -768,15 +769,15 @@ addPollOption(btn){const c=btn.previousElementSibling;const n=c.children.length;
 
 async handleFileUpload(input){const file=input.files[0];if(!file)return;try{const r=await API.upload(file);input.parentElement.querySelector('.msg-media-path').value=r.path;const ex=input.parentElement.querySelector('small');if(ex)ex.remove();const s=document.createElement('small');s.style.color='var(--green)';s.textContent=`✓ ${r.original_name}`;input.parentElement.appendChild(s);this.toast('Uploaded','success')}catch(e){this.toast('Upload lỗi: '+e.message,'error')}},
 
-async saveSchedule(){const editId=document.getElementById('edit-schedule-id').value;const name=document.getElementById('sch-name').value.trim();const type=document.getElementById('sch-type').value;const time=document.getElementById('sch-time').value;const accountId=parseInt(document.getElementById('sch-account').value);const maxSendsVal=document.getElementById('sch-max-sends').value.trim();const maxSends=maxSendsVal?parseInt(maxSendsVal):null;
+async saveSchedule(){const editId=document.getElementById('edit-schedule-id')?.value;const name=document.getElementById('sch-name')?.value.trim();const type=document.getElementById('sch-type')?.value;const time=document.getElementById('sch-time')?.value;const accountId=parseInt(document.getElementById('sch-account')?.value);const maxSendsVal=document.getElementById('sch-max-sends')?.value.trim();const maxSends=maxSendsVal?parseInt(maxSendsVal):null;
 
 if(!name)return this.toast('Nhập tên lịch','error');if(!time)return this.toast('Chọn giờ','error');
 
 let days_of_week=null;if(type==='weekly'){const sel=[...document.querySelectorAll('.day-btn.active')].map(b=>b.dataset.day);if(!sel.length)return this.toast('Chọn ít nhất 1 ngày','error');days_of_week=sel.join(',')}
 
-let day_of_month=null;if(type==='monthly')day_of_month=parseInt(document.getElementById('sch-day-of-month').value)||1;
+let day_of_month=null;if(type==='monthly')day_of_month=parseInt(document.getElementById('sch-day-of-month')?.value)||1;
 
-let once_date=null;if(type==='once'){once_date=document.getElementById('sch-once-date').value;if(!once_date)return this.toast('Chọn ngày','error')}
+let once_date=null;if(type==='once'){once_date=document.getElementById('sch-once-date')?.value;if(!once_date)return this.toast('Chọn ngày','error')}
 
 const targets=[];document.querySelectorAll('#chat-list input[type="checkbox"]:checked').forEach(cb=>targets.push({chat_id:parseInt(cb.value),chat_title:cb.dataset.title,chat_type:cb.dataset.type}));
 
@@ -802,7 +803,7 @@ try{if(editId)await API.updateSchedule(editId,payload);else await API.createSche
 
 btn.disabled=false;btn.textContent='Lưu lịch'},
 
-async loadLogs(){const status=document.getElementById('log-filter-status').value;try{const d=await API.getLogs({limit:this.logLimit,offset:this.logOffset,...(status?{status}:{})});const tbody=document.getElementById('logs-body');
+async loadLogs(){const status=document.getElementById('log-filter-status')?.value;try{const d=await API.getLogs({limit:this.logLimit,offset:this.logOffset,...(status?{status}:{})});const tbody=document.getElementById('logs-body');
 
 if(!d.logs.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:24px">Chưa có log</td></tr>';return}
 
@@ -824,13 +825,13 @@ async loadWatchers(){try{
 
   const[ws,stats]=await Promise.all([API.getWatchers(),API.getWatcherStats()]);
 
-  document.getElementById('ws-active').textContent=stats.active_watchers||0;
+  (document.getElementById('ws-active') || me_dummy).textContent = stats.active_watchers||0;
 
-  document.getElementById('ws-success').textContent=stats.success||0;
+  (document.getElementById('ws-success') || me_dummy).textContent = stats.success||0;
 
-  document.getElementById('ws-today').textContent=stats.today||0;
+  (document.getElementById('ws-today') || me_dummy).textContent = stats.today||0;
 
-  document.getElementById('ws-failed').textContent=stats.failed||0;
+  (document.getElementById('ws-failed') || me_dummy).textContent = stats.failed||0;
 
   const tbody=document.getElementById('watchers-body');
 
@@ -860,20 +861,20 @@ async loadWatchers(){try{
 
 async openWatcherModal(){
 
-  document.getElementById('watcher-modal-title').textContent='Tạo Keyword DM Rule';
+  (document.getElementById('watcher-modal-title') || me_dummy).textContent = 'Tạo Keyword DM Rule';
 
-  document.getElementById('edit-watcher-id').value='';
+  (document.getElementById('edit-watcher-id') || me_dummy).value = '';
 
-  document.getElementById('w-name').value='';
+  (document.getElementById('w-name') || me_dummy).value = '';
 
-  document.getElementById('w-cooldown').value='24';
+  (document.getElementById('w-cooldown') || me_dummy).value = '24';
 
-  document.getElementById('w-dm-once').checked=false;
-  document.getElementById('w-reply-in-group').checked=false;
-  document.getElementById('w-group-reply-text').value='Check my DM 😊';
-  document.getElementById('w-group-reply-section').style.display='none';
+  (document.getElementById('w-dm-once') || me_dummy).checked = false;
+  (document.getElementById('w-reply-in-group') || me_dummy).checked = false;
+  (document.getElementById('w-group-reply-text') || me_dummy).value = 'Check my DM 😊';
+  ((document.getElementById('w-group-reply-section') && document.getElementById('w-group-reply-section')?.style) || me_dummy_style).display = 'none';
 
-  document.getElementById('w-messages-list').innerHTML='';
+  (document.getElementById('w-messages-list') || me_dummy).innerHTML = '';
 
   this._watcherKeywords=[];this._watcherExcludes=[];this._watcherSelectedGroups=new Set();
 
@@ -883,24 +884,24 @@ async openWatcherModal(){
 
   await this._loadWatcherAccounts([]);await this._loadWatcherChatList([]);
 
-  document.getElementById('watcher-modal').classList.add('open')},
+  (document.getElementById('watcher-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
 
 async editWatcher(id){try{
 
   const w=await API.getWatcher(id);
 
-  document.getElementById('watcher-modal-title').textContent='Sửa Keyword DM Rule';
+  (document.getElementById('watcher-modal-title') || me_dummy).textContent = 'Sửa Keyword DM Rule';
 
-  document.getElementById('edit-watcher-id').value=w.id;
+  (document.getElementById('edit-watcher-id') || me_dummy).value = w.id;
 
-  document.getElementById('w-name').value=w.name;
+  (document.getElementById('w-name') || me_dummy).value = w.name;
 
-  document.getElementById('w-cooldown').value=w.cooldown_hours||24;
+  (document.getElementById('w-cooldown') || me_dummy).value = w.cooldown_hours||24;
 
-  document.getElementById('w-dm-once').checked=!!w.dm_once;
-  document.getElementById('w-reply-in-group').checked=!!w.reply_in_group;
-  document.getElementById('w-group-reply-text').value=w.group_reply_text||'Check my DM 😊';
-  document.getElementById('w-group-reply-section').style.display=w.reply_in_group?'block':'none';
+  (document.getElementById('w-dm-once') || me_dummy).checked = !!w.dm_once;
+  (document.getElementById('w-reply-in-group') || me_dummy).checked = !!w.reply_in_group;
+  (document.getElementById('w-group-reply-text') || me_dummy).value = w.group_reply_text||'Check my DM 😊';
+  ((document.getElementById('w-group-reply-section') && document.getElementById('w-group-reply-section')?.style) || me_dummy_style).display = w.reply_in_group?'block':'none';
 
   this._watcherKeywords=[...w.keywords];this._renderWatcherKeywords();
 
@@ -908,7 +909,7 @@ async editWatcher(id){try{
 
   this._watcherSelectedGroups=new Set(w.group_ids.map(Number));
 
-  document.getElementById('w-messages-list').innerHTML='';
+  (document.getElementById('w-messages-list') || me_dummy).innerHTML = '';
 
   (w.messages||[]).forEach(m=>this.addWatcherMessage(m.msg_type,m));
 
@@ -916,11 +917,11 @@ async editWatcher(id){try{
 
   await this._loadWatcherAccounts(w.sender_account_ids||[]);await this._loadWatcherChatList(w.group_ids||[]);
 
-  document.getElementById('watcher-modal').classList.add('open')
+  (document.getElementById('watcher-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')
 
 }catch(e){this.toast(e.message,'error')}},
 
-closeWatcherModal(){document.getElementById('watcher-modal').classList.remove('open')},
+closeWatcherModal(){(document.getElementById('watcher-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')},
 
 async _loadWatcherAccounts(selected=[]){try{
 
@@ -1044,7 +1045,7 @@ _renderWatcherChatList(chats,preSelected=null){
 
 _onWatcherGroupToggle(cb){const id=parseInt(cb.value);if(cb.checked)this._watcherSelectedGroups.add(id);else this._watcherSelectedGroups.delete(id)},
 
-filterWatcherChats: debounce(function(){const q=document.getElementById('w-chat-search').value.toLowerCase();this._renderWatcherChatList(this._watcherChats.filter(c=>c.chat_title.toLowerCase().includes(q)))}, 250),
+filterWatcherChats: debounce(function(){const q=document.getElementById('w-chat-search')?.value.toLowerCase();this._renderWatcherChatList(this._watcherChats.filter(c=>c.chat_title.toLowerCase().includes(q)))}, 250),
 
 addWatcherKeyword(){const inp=document.getElementById('w-keyword-input');const v=inp.value.trim();if(!v)return;if(!this._watcherKeywords.includes(v))this._watcherKeywords.push(v);inp.value='';this._renderWatcherKeywords()},
 
@@ -1074,11 +1075,11 @@ addWatcherMessage(type,data=null){
 
 async saveWatcher(){
 
-  const editId=document.getElementById('edit-watcher-id').value;
+  const editId=document.getElementById('edit-watcher-id')?.value;
 
-  const name=document.getElementById('w-name').value.trim();
+  const name=document.getElementById('w-name')?.value.trim();
 
-  const cooldown=parseInt(document.getElementById('w-cooldown').value)||24;
+  const cooldown=parseInt(document.getElementById('w-cooldown')?.value)||24;
 
   if(!name)return this.toast('Nhập tên rule','error');
 
@@ -1100,9 +1101,9 @@ async saveWatcher(){
 
   if(!messages.length)return this.toast('Thêm ít nhất 1 tin nhắn DM','error');
 
-  const dmOnce=document.getElementById('w-dm-once').checked;
-  const replyInGroup=document.getElementById('w-reply-in-group').checked;
-  const groupReplyText=document.getElementById('w-group-reply-text').value.trim()||'Check my DM 😊';
+  const dmOnce=document.getElementById('w-dm-once')?.checked;
+  const replyInGroup=document.getElementById('w-reply-in-group')?.checked;
+  const groupReplyText=document.getElementById('w-group-reply-text')?.value.trim()||'Check my DM 😊';
 
   const payload={name,sender_account_ids:accIds,keywords:this._watcherKeywords,excluded_usernames:this._watcherExcludes,group_ids:[...this._watcherSelectedGroups],cooldown_hours:cooldown,dm_once:dmOnce,reply_in_group:replyInGroup,group_reply_text:groupReplyText,is_active:1,messages};
 
@@ -1162,7 +1163,7 @@ _showMembershipWarning(warnings, ruleName) {
   // Show in a modal
   const modal = document.getElementById('membership-warn-modal');
   if(modal) {
-    document.getElementById('membership-warn-body')?.innerHTML = html;
+    (document.getElementById('membership-warn-body') || me_dummy).innerHTML = html;
     modal.classList.add('open');
   } else {
     // Fallback: create and show ad-hoc modal
@@ -1257,7 +1258,7 @@ async loadSettings(){
 
 
 
-    document.getElementById('ai-provider-select').value = provider;
+    (document.getElementById('ai-provider-select') || me_dummy).value = provider;
 
     this._renderAiKeysList('gemini', geminiKeys);
 
@@ -1271,13 +1272,13 @@ async loadSettings(){
 
 onProviderChange(){
 
-  const p = document.getElementById('ai-provider-select').value;
+  const p = document.getElementById('ai-provider-select')?.value;
 
-  document.getElementById('ai-gemini-section').classList.toggle('hidden', p !== 'gemini');
+  (document.getElementById('ai-gemini-section')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).toggle('hidden', p !== 'gemini');
 
-  document.getElementById('ai-deepseek-section').classList.toggle('hidden', p !== 'deepseek');
+  (document.getElementById('ai-deepseek-section')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).toggle('hidden', p !== 'deepseek');
 
-  document.getElementById('test-remix-result').classList.add('hidden');
+  (document.getElementById('test-remix-result')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
 
 },
 
@@ -1363,7 +1364,7 @@ async saveSettings(){
 
   const statusEl = document.getElementById('settings-status');
 
-  const provider = document.getElementById('ai-provider-select').value;
+  const provider = document.getElementById('ai-provider-select')?.value;
 
   const geminiKeys = this._collectKeys('gemini');
 
@@ -1415,7 +1416,7 @@ async testAiRemix(){
 
   const btn = document.getElementById('btn-test-remix');
 
-  const provider = document.getElementById('ai-provider-select').value;
+  const provider = document.getElementById('ai-provider-select')?.value;
 
   const resultBox = document.getElementById('test-remix-result');
 
@@ -1501,19 +1502,19 @@ _wlPage(p){this._wlOffset=p*this._wlLimit;this.loadWatcherLogs()},
 
 openTestDM(watcherId){
 
-  document.getElementById('test-dm-watcher-id').value=watcherId;
+  (document.getElementById('test-dm-watcher-id') || me_dummy).value = watcherId;
 
-  document.getElementById('test-dm-target').value='';
+  (document.getElementById('test-dm-target') || me_dummy).value = '';
 
-  document.getElementById('test-dm-modal').classList.add('open');
+  (document.getElementById('test-dm-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
 
-  setTimeout(()=>document.getElementById('test-dm-target').focus(),100)},
+  setTimeout(()=>document.getElementById('test-dm-target')?.focus(),100)},
 
 async sendTestDM(){
 
-  const wId=document.getElementById('test-dm-watcher-id').value;
+  const wId=document.getElementById('test-dm-watcher-id')?.value;
 
-  const target=document.getElementById('test-dm-target').value.trim();
+  const target=document.getElementById('test-dm-target')?.value.trim();
 
   if(!target)return this.toast('Nhập username hoặc User ID','error');
 
@@ -1527,7 +1528,7 @@ async sendTestDM(){
 
     this.toast(r.message||'Đã gửi!','success');
 
-    document.getElementById('test-dm-modal').classList.remove('open');
+    (document.getElementById('test-dm-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
 
     this.loadWatcherLogs()
 
@@ -1567,14 +1568,14 @@ App.loadSettings = async function() {
     const oaiCompatModel   = res[7].value || '';
     const customPrompt     = res[8].value || '';
 
-    document.getElementById('ai-provider-select').value = provider;
+    (document.getElementById('ai-provider-select') || me_dummy).value = provider;
     App.renderAiKeysList('gemini',   geminiKeys);
     App.renderAiKeysList('deepseek', deepseekKeys);
     App.renderAiKeysList('openai',   openaiKeys);
     App.renderAiKeysList('groq',     groqKeys);
     App.renderAiKeysList('openai_compatible', oaiCompatKeys);
-    document.getElementById('oai-compat-base-url')?.value = oaiCompatBaseUrl;
-    document.getElementById('oai-compat-model')?.value = oaiCompatModel;
+    (document.getElementById('oai-compat-base-url') || me_dummy).value = oaiCompatBaseUrl;
+    (document.getElementById('oai-compat-model') || me_dummy).value = oaiCompatModel;
     const customPromptEl = document.getElementById('ai-custom-prompt');
     if (customPromptEl) customPromptEl.value = customPrompt;
 
@@ -1587,16 +1588,16 @@ App.loadSettings = async function() {
 };
 
 App.onProviderChange = function() {
-  const p = document.getElementById('ai-provider-select').value;
-  document.getElementById('ai-gemini-section').classList.toggle('hidden', p !== 'gemini');
-  document.getElementById('ai-deepseek-section').classList.toggle('hidden', p !== 'deepseek');
+  const p = document.getElementById('ai-provider-select')?.value;
+  (document.getElementById('ai-gemini-section')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).toggle('hidden', p !== 'gemini');
+  (document.getElementById('ai-deepseek-section')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).toggle('hidden', p !== 'deepseek');
   const openaiEl = document.getElementById('ai-openai-section');
   if (openaiEl) openaiEl.classList.toggle('hidden', p !== 'openai');
   const groqEl = document.getElementById('ai-groq-section');
   if (groqEl) groqEl.classList.toggle('hidden', p !== 'groq');
   const oaiCompatEl = document.getElementById('ai-openai_compatible-section');
   if (oaiCompatEl) oaiCompatEl.classList.toggle('hidden', p !== 'openai_compatible');
-  document.getElementById('test-remix-result').classList.add('hidden');
+  (document.getElementById('test-remix-result')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
 };
 
 // Get current model value from either dropdown or text input
@@ -1750,7 +1751,7 @@ App.collectAiKeys = function(provider) {
 App.saveSettings = async function() {
   const btn = document.getElementById('btn-save-settings');
   const statusEl = document.getElementById('settings-status');
-  const provider = document.getElementById('ai-provider-select').value;
+  const provider = document.getElementById('ai-provider-select')?.value;
   const geminiKeys   = App.collectAiKeys('gemini');
   const deepseekKeys = App.collectAiKeys('deepseek');
   const openaiKeys   = App.collectAiKeys('openai');
@@ -1812,7 +1813,7 @@ App.applyAiPromptPreset = function(type) {
 
 App.testAiRemix = async function() {
   const btn = document.getElementById('btn-test-remix');
-  const provider = document.getElementById('ai-provider-select').value;
+  const provider = document.getElementById('ai-provider-select')?.value;
   const resultBox = document.getElementById('test-remix-result');
   const outputEl  = document.getElementById('test-remix-output');
   if (!provider) { App.toast('Chon AI provider truoc', 'error'); return; }
@@ -1935,19 +1936,19 @@ App.loadChannels = async function() {
 
 
 
-  document.getElementById('ch-loading').classList.remove('hidden');
+  (document.getElementById('ch-loading')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
 
-  document.getElementById('ch-loading').textContent = '\u0110ang t\u1EA3i danh s\u00E1ch k\u00EAnh...';
+  (document.getElementById('ch-loading') || me_dummy).textContent = '\u0110ang t\u1EA3i danh s\u00E1ch k\u00EAnh...';
 
-  document.getElementById('ch-table').classList.add('hidden');
+  (document.getElementById('ch-table')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
 
-  document.getElementById('ch-empty').classList.add('hidden');
+  (document.getElementById('ch-empty')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
 
-  document.getElementById('ch-status-banner').classList.add('hidden');
+  (document.getElementById('ch-status-banner')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
 
-  document.getElementById('ch-search').value = '';
+  (document.getElementById('ch-search') || me_dummy).value = '';
 
-  document.getElementById('ch-type-filter').value = 'all';
+  (document.getElementById('ch-type-filter') || me_dummy).value = 'all';
 
 
 
@@ -1963,7 +1964,7 @@ App.loadChannels = async function() {
 
   } catch(e) {
 
-    document.getElementById('ch-loading').textContent = 'L\u1ED7i: ' + e.message;
+    (document.getElementById('ch-loading') || me_dummy).textContent = 'L\u1ED7i: ' + e.message;
 
   }
 
@@ -1973,9 +1974,9 @@ App.loadChannels = async function() {
 
 App._filterChannels = function() {
 
-  const typeFilter = document.getElementById('ch-type-filter').value;
+  const typeFilter = document.getElementById('ch-type-filter')?.value;
 
-  const search = (document.getElementById('ch-search').value || '').toLowerCase().trim();
+  const search = (document.getElementById('ch-search')?.value || '').toLowerCase().trim();
 
 
 
@@ -2469,9 +2470,9 @@ App.loadDailySummary = async function() {
 
 App.saveDailySummary = async function() {
   const statusEl = document.getElementById('daily-summary-status');
-  const enabled = document.getElementById('daily-summary-enabled').checked ? '1' : '0';
-  const time = document.getElementById('daily-summary-time').value || '21:00';
-  const accountId = document.getElementById('daily-summary-account').value;
+  const enabled = document.getElementById('daily-summary-enabled')?.checked ? '1' : '0';
+  const time = document.getElementById('daily-summary-time')?.value || '21:00';
+  const accountId = document.getElementById('daily-summary-account')?.value;
   statusEl.textContent = 'Dang luu...';
   try {
     const headers = { ...API.getHeaders(), 'Content-Type': 'application/json' };
@@ -2584,9 +2585,9 @@ const Reactions = (() => {
   }
 
   async function addTarget() {
-    const link = document.getElementById('rt-link').value.trim();
-    const delayMin = parseInt(document.getElementById('rt-delay-min').value) || 5;
-    const delayMax = parseInt(document.getElementById('rt-delay-max').value) || 30;
+    const link = document.getElementById('rt-link')?.value.trim();
+    const delayMin = parseInt(document.getElementById('rt-delay-min')?.value) || 5;
+    const delayMax = parseInt(document.getElementById('rt-delay-max')?.value) || 30;
     const viewEnabled = document.getElementById('rt-view-enabled')?.checked ? 1 : 0;
     const viewRatio = parseFloat(document.getElementById('rt-view-ratio')?.value || '1.0');
     const accIds = _getSelectedAccounts();
@@ -2602,7 +2603,7 @@ const Reactions = (() => {
         view_enabled: viewEnabled, view_ratio: viewRatio
       });
       if (res.ok) {
-        document.getElementById('rt-link').value = '';
+        (document.getElementById('rt-link') || me_dummy).value = '';
         function fmtJoin(s) {
           if (s === 'ok') return '✅ Đã join';
           if (s === 'already_member') return '✅ Đã vào (sẵn)';
@@ -2933,7 +2934,7 @@ App.switchProxyTab = function(tab) {
 App.fetchWebshare = async function() {
   const apiKey = document.getElementById('webshare-api-key')?.value.trim();
   if (!apiKey) { App.toast('Nhập Webshare API Key', 'error'); return; }
-  const proxyType = document.getElementById('webshare-proxy-type').value;
+  const proxyType = document.getElementById('webshare-proxy-type')?.value;
   const btn = document.getElementById('btn-fetch-webshare');
   const progress = document.getElementById('proxy-progress');
   const progressText = document.getElementById('proxy-progress-text');
@@ -2942,7 +2943,7 @@ App.fetchWebshare = async function() {
   btn.textContent = 'Đang xử lý...';
   progress.classList.remove('hidden');
   progressText.textContent = 'Đang fetch proxy từ Webshare → test → assign...';
-  document.getElementById('proxy-test-results').classList.add('hidden');
+  (document.getElementById('proxy-test-results')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
 
   try {
     const resp = await fetch('/api/proxy/webshare', {
@@ -2971,9 +2972,9 @@ App.fetchWebshare = async function() {
 };
 
 App.importProxyList = async function() {
-  const rawText = document.getElementById('proxy-paste-input').value.trim();
+  const rawText = document.getElementById('proxy-paste-input')?.value.trim();
   if (!rawText) { App.toast('Paste proxy list vào textarea', 'error'); return; }
-  const scheme = document.getElementById('paste-default-scheme').value;
+  const scheme = document.getElementById('paste-default-scheme')?.value;
   const btn = document.getElementById('btn-import-proxies');
   const progress = document.getElementById('proxy-progress');
   const progressText = document.getElementById('proxy-progress-text');
@@ -2982,7 +2983,7 @@ App.importProxyList = async function() {
   btn.textContent = 'Đang xử lý...';
   progress.classList.remove('hidden');
   progressText.textContent = 'Đang parse → test → assign...';
-  document.getElementById('proxy-test-results').classList.add('hidden');
+  (document.getElementById('proxy-test-results')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
 
   try {
     const resp = await fetch('/api/proxy/import', {
@@ -3041,7 +3042,7 @@ App.loadProxyStatus = async function() {
     if (data.webshare_configured) {
       try {
         const keyResp = await API.getSetting('webshare_api_key');
-        if (keyResp.value) document.getElementById('webshare-api-key')?.value = keyResp.value;
+        if (keyResp.value) (document.getElementById('webshare-api-key') || me_dummy).value = keyResp.value;
       } catch(e) {}
     }
 
@@ -3103,7 +3104,7 @@ App.clearProxyPool = async function() {
     if (data.success) {
       App.toast('Da xoa tat ca proxy', 'success');
       App.loadProxyStatus();
-      document.getElementById('proxy-test-results').classList.add('hidden');
+      (document.getElementById('proxy-test-results')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
     }
   } catch(e) { App.toast(e.message, 'error'); }
 };
@@ -3150,17 +3151,17 @@ const Warmup = {
     this._selectedGroupId = id;
     this.loadGroups();
     this.loadScripts();
-    document.getElementById('warmup-scripts-section').classList.remove('hidden');
+    (document.getElementById('warmup-scripts-section')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
     const g = this._groups.find(x => x.id === id);
-    document.getElementById('warmup-scripts-title')?.textContent = 'Scripts - ' + (g ? g.name : '');
+    (document.getElementById('warmup-scripts-title') || me_dummy).textContent = 'Scripts - ' + (g ? g.name : '');
   },
 
   openAddGroup() {
-    document.getElementById('wg-name')?.value = '';
-    document.getElementById('wg-chat-id')?.value = '';
-    document.getElementById('wg-chat-title')?.value = '';
-    document.getElementById('wg-chat-username')?.value = '';
-    document.getElementById('warmup-group-modal').classList.add('open');
+    (document.getElementById('wg-name') || me_dummy).value = '';
+    (document.getElementById('wg-chat-id') || me_dummy).value = '';
+    (document.getElementById('wg-chat-title') || me_dummy).value = '';
+    (document.getElementById('wg-chat-username') || me_dummy).value = '';
+    (document.getElementById('warmup-group-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
   async saveGroup() {
@@ -3174,7 +3175,7 @@ const Warmup = {
         chat_title: document.getElementById('wg-chat-title')?.value.trim(),
         chat_username: document.getElementById('wg-chat-username')?.value.trim()
       });
-      document.getElementById('warmup-group-modal').classList.remove('open');
+      (document.getElementById('warmup-group-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
       App.toast('Da them nhom', 'success');
       this.loadGroups();
     } catch(e) { App.toast(e.message, 'error'); }
@@ -3186,7 +3187,7 @@ const Warmup = {
       await API.del('/api/warmup/groups/' + id);
       if (this._selectedGroupId === id) {
         this._selectedGroupId = null;
-        document.getElementById('warmup-scripts-section').classList.add('hidden');
+        (document.getElementById('warmup-scripts-section')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
       }
       App.toast('Da xoa', 'success');
       this.loadGroups();
@@ -3222,9 +3223,9 @@ const Warmup = {
 
   openAddScript() {
     if (!this._selectedGroupId) { App.toast('Chon nhom truoc', 'error'); return; }
-    document.getElementById('ws-content')?.value = '';
-    document.getElementById('ws-ai-remix')?.checked = true;
-    document.getElementById('warmup-script-modal').classList.add('open');
+    (document.getElementById('ws-content') || me_dummy).value = '';
+    (document.getElementById('ws-ai-remix') || me_dummy).checked = true;
+    (document.getElementById('warmup-script-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
   async saveScript() {
@@ -3235,7 +3236,7 @@ const Warmup = {
         content,
         use_ai_remix: document.getElementById('ws-ai-remix')?.checked ? 1 : 0
       });
-      document.getElementById('warmup-script-modal').classList.remove('open');
+      (document.getElementById('warmup-script-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
       App.toast('Da them script', 'success');
       this.loadScripts();
     } catch(e) { App.toast(e.message, 'error'); }
@@ -3333,16 +3334,16 @@ const Warmup = {
       accEl.innerHTML = '<span style="color:#f87171">Loi tai tai khoan</span>';
     }
 
-    document.getElementById('wj-interval-min')?.value = '30';
-    document.getElementById('wj-interval-max')?.value = '120';
-    document.getElementById('wj-start')?.value = '09:00';
-    document.getElementById('wj-end')?.value = '22:00';
-    document.getElementById('wj-daily-limit')?.value = '10';
-    document.getElementById('warmup-job-modal').classList.add('open');
+    (document.getElementById('wj-interval-min') || me_dummy).value = '30';
+    (document.getElementById('wj-interval-max') || me_dummy).value = '120';
+    (document.getElementById('wj-start') || me_dummy).value = '09:00';
+    (document.getElementById('wj-end') || me_dummy).value = '22:00';
+    (document.getElementById('wj-daily-limit') || me_dummy).value = '10';
+    (document.getElementById('warmup-job-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
   async saveJob() {
-    const groupId = parseInt(document.getElementById('wj-group').value);
+    const groupId = parseInt(document.getElementById('wj-group')?.value);
     if (!groupId) { App.toast('Chon nhom', 'error'); return; }
     const accIds = Array.from(document.querySelectorAll('.wj-acc-cb:checked')).map(cb => parseInt(cb.value));
     if (!accIds.length) { App.toast('Chon it nhat 1 tai khoan', 'error'); return; }
@@ -3356,7 +3357,7 @@ const Warmup = {
         schedule_end: document.getElementById('wj-end')?.value || '22:00',
         daily_post_limit: parseInt(document.getElementById('wj-daily-limit')?.value) || 10
       });
-      document.getElementById('warmup-job-modal').classList.remove('open');
+      (document.getElementById('warmup-job-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
       App.toast('Da tao job', 'success');
       this.loadJobs();
     } catch(e) { App.toast(e.message, 'error'); }
@@ -3407,7 +3408,7 @@ const Warmup = {
           </tr>`;
         }).join('');
       }
-      document.getElementById('warmup-logs-modal').classList.add('open');
+      (document.getElementById('warmup-logs-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
     } catch(e) { App.toast(e.message, 'error'); }
   },
 

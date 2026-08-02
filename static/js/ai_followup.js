@@ -1,3 +1,4 @@
+const me_dummy = {}; const me_dummy_style = {};
 /**
  * static/js/ai_followup.js
  * Frontend logic for AI Follow-Up Sales Agent
@@ -159,7 +160,7 @@ const AIFollowUp = {
     const modal = document.getElementById('aifu-history-modal');
     if (!modal) return;
 
-    document.getElementById('aifu-modal-title').textContent = `Lịch sử chat với ${userName} (Acc #${accountId})`;
+    (document.getElementById('aifu-modal-title') || me_dummy).textContent = `Lịch sử chat với ${userName} (Acc #${accountId})`;
 
     const historyBox = document.getElementById('aifu-modal-chat-box');
     if (!history || history.length === 0) {
