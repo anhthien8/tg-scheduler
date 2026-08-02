@@ -37,7 +37,7 @@ async addFirstAccount(){const name=document.getElementById('setup-name')?.value.
 
 if(!name||!apiId||!apiHash||!phone)return this.toast('Điền đầy đủ thông tin','error');
 
-const btn=document.getElementById('btn-add-account');btn.disabled=true;btn.textContent='Đang xử lý...';
+const btn=document.getElementById('btn-add-account');if(btn){btn.disabled=true;btn.textContent='Đang xử lý...';}
 
 try{const r=await API.addAccount({name,phone,api_id:apiId,api_hash:apiHash});this.loginAccountId=r.account_id;this.loginPhone=phone;
 
@@ -739,11 +739,11 @@ closeModal(){(document.getElementById('schedule-modal')?.classList || {add:()=>{
 
 onScheduleTypeChange(){const t=document.getElementById('sch-type')?.value;(document.getElementById('weekly-days-group')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).toggle('hidden',t!=='weekly');(document.getElementById('monthly-day-group')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).toggle('hidden',t!=='monthly');(document.getElementById('once-date-group')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).toggle('hidden',t!=='once');
 
-const lbl=document.getElementById('time-label');lbl.textContent=t==='hourly'?'Phút gửi (mỗi giờ)':'Giờ gửi'},
+const lbl=document.getElementById('time-label');if(lbl){lbl.textContent=t==='hourly'?'Phút gửi (mỗi giờ)':'Giờ gửi';}},
 
-async loadAccountSelector(){try{const d=await API.getAccounts();this.accounts=d.accounts;const sel=document.getElementById('sch-account');sel.innerHTML=this.accounts.map(a=>`<option value="${a.id}">${esc(accDisplayName(a))} (${a.phone})</option>`).join('')}catch(e){console.error(e)}},
+async loadAccountSelector(){try{const d=await API.getAccounts();this.accounts=d.accounts;const sel=document.getElementById('sch-account');if(sel)sel.innerHTML=this.accounts.map(a=>`<option value="${a.id}">${esc(accDisplayName(a))} (${a.phone})</option>`).join('')}catch(e){console.error(e)}},
 
-async loadChatList(){const sel=document.getElementById('sch-account');const accId=sel?sel.value:1;const el=document.getElementById('chat-list');el.innerHTML='<div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>';
+async loadChatList(){const sel=document.getElementById('sch-account');const accId=sel?sel.value:1;const el=document.getElementById('chat-list');if(el)el.innerHTML='<div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>';
 
 try{const d=await API.getChats(accId);this.chats=d.chats;this.renderChatList(this.chats)}catch(e){el.innerHTML=`<div style="padding:12px;color:var(--red)">Lỗi: ${e.message}</div>`}},
 
@@ -797,7 +797,7 @@ if(!messages.length)return this.toast('Thêm ít nhất 1 tin nhắn','error');
 
 const payload={account_id:accountId,name,schedule_type:type,time_of_day:time,days_of_week,day_of_month,once_date,max_sends:maxSends,is_active:true,messages,targets};
 
-const btn=document.getElementById('btn-save-schedule');btn.disabled=true;btn.textContent='Đang lưu...';
+const btn=document.getElementById('btn-save-schedule');if(btn){btn.disabled=true;btn.textContent='Đang lưu...';}
 
 try{if(editId)await API.updateSchedule(editId,payload);else await API.createSchedule(payload);this.toast(editId?'Đã cập nhật':'Đã tạo mới','success');this.closeModal();this.loadSchedules()}catch(e){this.toast(e.message,'error')}
 
@@ -1019,7 +1019,7 @@ toggleWatcherAccount(accId, cb){
 
 },
 
-async _loadWatcherChatList(selectedIds=[]){const el=document.getElementById('w-chat-list');el.innerHTML='<div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>';
+async _loadWatcherChatList(selectedIds=[]){const el=document.getElementById('w-chat-list');if(el)el.innerHTML='<div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>';
 
   const selSet=new Set(selectedIds.map(Number));this._watcherSelectedGroups=new Set(selSet);
 
@@ -1049,7 +1049,7 @@ filterWatcherChats: debounce(function(){const q=document.getElementById('w-chat-
 
 addWatcherKeyword(){const inp=document.getElementById('w-keyword-input');const v=inp.value.trim();if(!v)return;if(!this._watcherKeywords.includes(v))this._watcherKeywords.push(v);inp.value='';this._renderWatcherKeywords()},
 
-_renderWatcherKeywords(){const c=document.getElementById('w-keywords-tags');c.innerHTML=this._watcherKeywords.map((k,i)=>`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px">${esc(k)}<button onclick="App._removeWatcherKeyword(${i})" style="background:none;border:none;color:#fff;cursor:pointer;font-size:14px;line-height:1">×</button></span>`).join('')},
+_renderWatcherKeywords(){const c=document.getElementById('w-keywords-tags');if(c)c.innerHTML=this._watcherKeywords.map((k,i)=>`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px">${esc(k)}<button onclick="App._removeWatcherKeyword(${i})" style="background:none;border:none;color:#fff;cursor:pointer;font-size:14px;line-height:1">×</button></span>`).join('')},
 
 _removeWatcherKeyword(i){this._watcherKeywords.splice(i,1);this._renderWatcherKeywords()},
 
@@ -3048,29 +3048,33 @@ App.loadProxyStatus = async function() {
 
     // Render mapping
     const listEl = document.getElementById('proxy-mapping-list');
-    if (!data.accounts || !data.accounts.length) {
-      listEl.innerHTML = '<p style="color:var(--text2);text-align:center;padding:12px">Chưa có tài khoản nào</p>';
-    } else {
-      listEl.innerHTML = data.accounts.map(function(a) {
-        const masked = a.proxy_url ? a.proxy_url.replace(/:([^:@]{3})[^@]*@/, ':$1***@') : '';
-        const statusIcon = a.has_proxy ? '🔒' : '⚠️';
-        const statusColor = a.has_proxy ? '#a78bfa' : '#f59e0b';
-        const removeBtn = a.has_proxy
-          ? '<button class="btn btn-ghost btn-sm" onclick="App.removeAccountProxy(' + a.account_id + ')" style="font-size:.7rem;padding:1px 6px" title="Xóa proxy">✕</button>'
-          : '';
-        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">' +
-          '<div><span style="margin-right:6px">' + (a.is_logged_in ? '🟢' : '🔴') + '</span>' +
-          '<strong style="font-size:13px">' + (a.account_name || 'Acc #' + a.account_id) + '</strong></div>' +
-          '<div style="display:flex;align-items:center;gap:6px">' +
-          '<span style="color:' + statusColor + ';font-size:12px;font-family:monospace">' +
-          statusIcon + ' ' + (masked || 'Không có proxy') + '</span>' + removeBtn + '</div></div>';
-      }).join('');
+    if (listEl) {
+      if (!data.accounts || !data.accounts.length) {
+        listEl.innerHTML = '<p style="color:var(--text2);text-align:center;padding:12px">Chưa có tài khoản nào</p>';
+      } else {
+        listEl.innerHTML = data.accounts.map(function(a) {
+          const masked = a.proxy_url ? a.proxy_url.replace(/:([^:@]{3})[^@]*@/, ':$1***@') : '';
+          const statusIcon = a.has_proxy ? '🔒' : '⚠️';
+          const statusColor = a.has_proxy ? '#a78bfa' : '#f59e0b';
+          const removeBtn = a.has_proxy
+            ? '<button class="btn btn-ghost btn-sm" onclick="App.removeAccountProxy(' + a.account_id + ')" style="font-size:.7rem;padding:1px 6px" title="Xóa proxy">✕</button>'
+            : '';
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">' +
+            '<div><span style="margin-right:6px">' + (a.is_logged_in ? '🟢' : '🔴') + '</span>' +
+            '<strong style="font-size:13px">' + (a.account_name || 'Acc #' + a.account_id) + '</strong></div>' +
+            '<div style="display:flex;align-items:center;gap:6px">' +
+            '<span style="color:' + statusColor + ';font-size:12px;font-family:monospace">' +
+            statusIcon + ' ' + (masked || 'Không có proxy') + '</span>' + removeBtn + '</div></div>';
+        }).join('');
+      }
     }
 
     // Pool info
     const infoEl = document.getElementById('proxy-pool-info');
-    infoEl.textContent = 'Pool: ' + data.pool_size + ' proxy | ' +
-      data.accounts_with_proxy + ' có proxy / ' + data.accounts_without_proxy + ' chưa có';
+    if (infoEl) {
+      infoEl.textContent = 'Pool: ' + data.pool_size + ' proxy | ' +
+        data.accounts_with_proxy + ' có proxy / ' + data.accounts_without_proxy + ' chưa có';
+    }
   } catch(e) {
     console.error('loadProxyStatus error:', e);
   }
