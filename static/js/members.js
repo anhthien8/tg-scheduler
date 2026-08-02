@@ -1523,7 +1523,7 @@ const Members = {
     const progressPanel = document.getElementById('sim-progress-panel');
 
     btn.disabled = true;
-    btn.textContent = 'Đang khởi tạo...';
+    btn.textContent = '⏳ Đang gửi...';
     if (stopBtn) stopBtn.classList.remove('hidden');
     if (progressPanel) progressPanel.classList.remove('hidden');
 
@@ -1542,15 +1542,18 @@ const Members = {
 
       // Handle queued response
       if (d.queued) {
-        App.toast(`📥 ${d.message}`, 'info');
+        App.toast(`📥 ${d.message || 'Đã thêm link vào hàng chờ!'}`, 'success');
         btn.disabled = false;
-        btn.textContent = '🚀 Thêm vào Queue';
-        // Refresh queue display via next poll
+        btn.textContent = '➕ Thêm Vào Queue';
+        // Immediately poll progress to update queue UI
+        this._deepCrawlPolling = true;
+        this._pollDeepCrawlProgress();
         return;
       }
 
-      App.toast(d.message, 'success');
-      btn.textContent = '⏳ Đang Deep Crawl...';
+      App.toast(d.message || '🚀 Đã bắt đầu Deep Crawl!', 'success');
+      btn.disabled = false;
+      btn.textContent = '➕ Thêm Vào Queue';
 
       // Reset backoff state
       this._deepCrawlPollInterval = 3000;
@@ -1718,7 +1721,10 @@ const Members = {
         const queueCount = s.queue_count || 0;
         if (queueCount > 0 && s.status !== 'idle') {
           const btn = document.getElementById('sim-btn-search');
-          if (btn) btn.textContent = `⏳ Chờ tiếp tục (${queueCount} trong queue)...`;
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = `➕ Thêm Kênh Vào Queue (${queueCount} đang chờ)`;
+          }
           this._deepCrawlPollInterval = 3000;
           setTimeout(() => this._pollDeepCrawlProgress(), 3000);
           return;
