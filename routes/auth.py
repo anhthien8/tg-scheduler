@@ -196,3 +196,16 @@ async def unflag_account_route(account_id: int):
     """Clear the warning flag on an account."""
     await db.unflag_account(account_id)
     return {"ok": True}
+
+
+@router.get("/accounts/paused")
+async def get_paused():
+    """List all auto-paused accounts."""
+    return await db.get_paused_accounts()
+
+
+@router.post("/accounts/{account_id}/unpause")
+async def unpause_account_route(account_id: int):
+    """Manually unpause an auto-paused account."""
+    await db.unpause_account(account_id)
+    return {"ok": True, "message": f"Account {account_id} unpaused"}

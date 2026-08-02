@@ -1,7 +1,6 @@
 .env
 *.session
 sessions/
-data/*.db
 media/*
 !media/.gitkeep
 __pycache__/
@@ -9,8 +8,16 @@ __pycache__/
 .venv/
 venv/
 
-# Database files (contains user data)
+# Database files and WAL/SHM (contain user data & secrets)
 *.db
+*.db-wal
+*.db-shm
+data/
+
+# Agent working directories
+.agents/
+agents/
+scratch/
 
 # Runtime / temp
 start_server.bat

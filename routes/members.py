@@ -16,6 +16,9 @@ from typing import Optional
 import database as db
 import telegram_client as tg
 import ai_remix as ai_rmx
+import template_rotation as tmpl_rot
+import image_randomizer as img_rand
+from telethon import errors as tg_errors
 
 logger = logging.getLogger("tg-scheduler.members")
 router = APIRouter(prefix="/api/members", tags=["members"])
@@ -36,15 +39,44 @@ class ScrapeRequest(BaseModel):
     max_messages: Optional[int] = 3000
 
 
+class BatchScrapeRequest(BaseModel):
+    account_id: int
+    channels: list[str]  # List of t.me links or usernames
+    filter_active_days: Optional[int] = None
+    exclude_bots: bool = True
+    scrape_method: Optional[str] = "members"
+    max_messages: Optional[int] = 3000
+
+
 class CampaignCreate(BaseModel):
     name: str
     scrape_job_id: str
     sender_account_ids: list[int]
     messages: list[dict]  # [{msg_type, content, media_path}]
-    delay_min: int = 30
-    delay_max: int = 90
-    daily_limit: int = 30
+    delay_min: int = 180
+    delay_max: int = 420
+    daily_limit_premium: int = 60
+    daily_limit_normal: int = 10
     use_ai_remix: bool = False
+    exclude_previous_dms: bool = True
+    scheduled_at: str | None = None       # ISO datetime: "2026-07-24 09:00"
+    target_timezone: str | None = None    # IANA: "America/New_York"
+
+
+class CampaignUpdateMessages(BaseModel):
+    messages: list[dict]
+    delay_min: Optional[int] = None
+    delay_max: Optional[int] = None
+    daily_limit_premium: Optional[int] = None
+    daily_limit_normal: Optional[int] = None
+    use_ai_remix: Optional[bool] = None
+    exclude_previous_dms: Optional[bool] = None
+
+
+class CampaignCloneRequest(BaseModel):
+    name: Optional[str] = None
+    scrape_job_id: Optional[str] = None
+    exclude_source_results: bool = True
 
 
 class SimilarChannelsRequest(BaseModel):
@@ -84,6 +116,89 @@ _deep_crawl_state: dict = {
     "results": [],
 }
 _deep_crawl_stop_flag: dict = {"stopped": False}
+_deep_crawl_task = None  # asyncio.Task reference — survives browser refresh
+_deep_crawl_queue: list[dict] = []  # Queue of pending crawl requests
+
+
+def _parse_channel_identifier(raw: str) -> str:
+    """Extract channel username from various formats."""
+    raw = raw.strip()
+    if not raw:
+        return ""
+    # Handle https://t.me/username, http://t.me/username, t.me/username
+    for prefix in ["https://t.me/", "http://t.me/", "t.me/", "https://telegram.me/", "http://telegram.me/"]:
+        if raw.lower().startswith(prefix):
+            raw = raw[len(prefix):]
+            break
+    # Remove trailing slashes and +joinchat prefix
+    raw = raw.strip("/")
+    # Handle @username
+    if raw.startswith("@"):
+        raw = raw[1:]
+    return raw
+
+
+def _get_last_seen(sender, message=None):
+    """Extract last_seen from a user status."""
+    from telethon.tl.types import (
+        UserStatusOnline, UserStatusOffline, UserStatusRecently,
+        UserStatusLastWeek, UserStatusLastMonth,
+    )
+    status = getattr(sender, "status", None)
+    if isinstance(status, UserStatusOnline):
+        return datetime.utcnow().isoformat()
+    elif isinstance(status, UserStatusOffline):
+        return status.was_online.isoformat() if status.was_online else None
+    elif isinstance(status, UserStatusRecently):
+        return "recently"
+    elif isinstance(status, UserStatusLastWeek):
+        return "last_week"
+    elif isinstance(status, UserStatusLastMonth):
+        return "last_month"
+    # Fallback to message date
+    if message and message.date:
+        return message.date.isoformat()
+    return None
+
+
+def _get_last_seen_from_user(user):
+    """Extract last_seen from user (no message context)."""
+    return _get_last_seen(user)
+
+
+def _passes_active_filter(last_seen, filter_active_days):
+    """Check if a user passes the active days filter."""
+    if not filter_active_days:
+        return True
+    if last_seen is None:
+        return False
+    if last_seen == "recently":
+        return True
+    if last_seen == "last_week":
+        return filter_active_days >= 7
+    if last_seen == "last_month":
+        return filter_active_days >= 30
+    try:
+        seen_dt = datetime.fromisoformat(last_seen)
+        cutoff = datetime.utcnow() - timedelta(days=filter_active_days)
+        return seen_dt >= cutoff
+    except Exception:
+        return False
+
+
+def _build_member_dict(user, last_seen):
+    """Build a member dict from a Telethon User object."""
+    return {
+        "user_id": user.id,
+        "username": getattr(user, "username", None),
+        "first_name": getattr(user, "first_name", None),
+        "last_name": getattr(user, "last_name", None),
+        "phone": getattr(user, "phone", None),
+        "is_bot": getattr(user, "bot", False),
+        "is_premium": getattr(user, "premium", False),
+        "status": "active",
+        "last_seen": last_seen,
+    }
 
 
 # ── Member Scraping ─────────────────────────────────────────────────────────
@@ -425,6 +540,276 @@ async def delete_scrape_job(scrape_job_id: str):
     return {"status": "deleted"}
 
 
+# ── Batch Scrape ─────────────────────────────────────────────────────────────
+
+@router.post("/batch-scrape")
+async def batch_scrape_members(req: BatchScrapeRequest, background_tasks: BackgroundTasks):
+    """Start batch scraping members from multiple channels."""
+    client = tg.get_client(req.account_id)
+    if not client:
+        raise HTTPException(status_code=400, detail="Tài khoản không tồn tại hoặc chưa đăng nhập")
+    if not client.is_connected():
+        raise HTTPException(status_code=400, detail="Tài khoản chưa kết nối Telegram")
+
+    # Parse channel identifiers
+    channels = []
+    for raw in req.channels:
+        parsed = _parse_channel_identifier(raw)
+        if parsed:
+            channels.append(parsed)
+
+    if not channels:
+        raise HTTPException(status_code=400, detail="Không tìm thấy channel hợp lệ")
+
+    batch_job_id = f"batch_{uuid.uuid4().hex[:8]}"
+
+    # Create batch channel records
+    for ch in channels:
+        await db.create_batch_channel(batch_job_id, ch)
+
+    background_tasks.add_task(
+        _do_batch_scrape, batch_job_id, req.account_id, channels,
+        req.filter_active_days, req.exclude_bots, req.scrape_method, req.max_messages
+    )
+
+    return {
+        "status": "started",
+        "batch_job_id": batch_job_id,
+        "channel_count": len(channels),
+        "message": f"Đang cào {len(channels)} channel... Kiểm tra tiến trình bên dưới."
+    }
+
+
+@router.get("/batch-scrape/{batch_job_id}/progress")
+async def get_batch_progress(batch_job_id: str):
+    """Get progress of a batch scrape job."""
+    channels = await db.get_batch_channels(batch_job_id)
+    total_members = await db.count_scraped_members(batch_job_id)
+
+    done = sum(1 for c in channels if c["status"] == "done")
+    errors = sum(1 for c in channels if c["status"] == "error")
+    running = sum(1 for c in channels if c["status"] == "running")
+    pending = sum(1 for c in channels if c["status"] == "pending")
+
+    overall_status = "running"
+    if pending == 0 and running == 0:
+        overall_status = "done"
+
+    return {
+        "batch_job_id": batch_job_id,
+        "status": overall_status,
+        "total_channels": len(channels),
+        "done": done,
+        "errors": errors,
+        "running": running,
+        "pending": pending,
+        "total_members": total_members,
+        "channels": channels,
+    }
+
+
+@router.post("/batch-scrape/resolve")
+async def resolve_channels(data: BatchScrapeRequest):
+    """Resolve multiple channel identifiers to get their info."""
+    client = tg.get_client(data.account_id)
+    if not client:
+        raise HTTPException(status_code=400, detail="Tài khoản không tồn tại")
+    if not client.is_connected():
+        raise HTTPException(status_code=400, detail="Tài khoản chưa kết nối")
+
+    results = []
+    for raw in data.channels:
+        username = _parse_channel_identifier(raw)
+        if not username:
+            results.append({"input": raw, "success": False, "error": "Link không hợp lệ"})
+            continue
+        try:
+            entity = await client.get_entity(username)
+            title = getattr(entity, "title", username)
+            participants = getattr(entity, "participants_count", None)
+            results.append({
+                "input": raw,
+                "success": True,
+                "username": username,
+                "title": title,
+                "channel_id": entity.id,
+                "participants_count": participants,
+            })
+        except Exception as e:
+            results.append({"input": raw, "success": False, "error": str(e), "username": username})
+        await asyncio.sleep(0.5)  # Rate limit
+
+    return {"results": results}
+
+
+async def _do_batch_scrape(batch_job_id: str, account_id: int, channels: list[str],
+                            filter_active_days: int, exclude_bots: bool,
+                            scrape_method: str = "members", max_messages: int = 3000):
+    """Background task: scrape members from multiple channels with dedup."""
+    global_seen_ids = set()  # Cross-channel dedup
+    total_saved = 0
+
+    for channel_username in channels:
+        logger.info(f"[Batch {batch_job_id}] Starting channel: {channel_username}")
+        await db.update_batch_channel(batch_job_id, channel_username,
+                                       status="running",
+                                       started_at=datetime.utcnow().isoformat())
+        try:
+            client = tg.get_client(account_id)
+            if not client or not client.is_connected():
+                raise Exception("Client not connected")
+
+            # Resolve channel
+            try:
+                entity = await client.get_entity(channel_username)
+            except Exception as e:
+                raise Exception(f"Không thể resolve: {e}")
+
+            group_id = entity.id
+            group_title = getattr(entity, "title", channel_username)
+            input_chat = await client.get_input_entity(group_id)
+
+            from telethon.tl.functions.channels import GetParticipantsRequest
+            from telethon.tl.types import (
+                ChannelParticipantsSearch, ChannelParticipantsAdmins,
+                UserStatusOnline, UserStatusOffline, UserStatusRecently,
+                UserStatusLastWeek, UserStatusLastMonth,
+            )
+
+            # Get admin IDs to exclude
+            admin_ids = set()
+            try:
+                admins_result = await client(GetParticipantsRequest(
+                    channel=input_chat, filter=ChannelParticipantsAdmins(),
+                    offset=0, limit=200, hash=0,
+                ))
+                admin_ids = {a.id for a in admins_result.users}
+            except Exception:
+                pass
+
+            channel_members = []
+
+            if scrape_method == "history":
+                async for message in client.iter_messages(input_chat, limit=max_messages):
+                    sender = message.sender
+                    if not sender:
+                        try:
+                            sender = await message.get_sender()
+                        except Exception:
+                            continue
+                    if not sender:
+                        continue
+
+                    from telethon.tl.types import User
+                    if not isinstance(sender, User):
+                        continue
+                    if sender.id in global_seen_ids:
+                        continue
+                    if sender.id in admin_ids:
+                        continue
+                    if exclude_bots and getattr(sender, "bot", False):
+                        continue
+
+                    last_seen = _get_last_seen(sender, message)
+                    if not _passes_active_filter(last_seen, filter_active_days):
+                        continue
+
+                    global_seen_ids.add(sender.id)
+                    channel_members.append(_build_member_dict(sender, last_seen))
+            else:
+                # Members method
+                offset = 0
+                batch_size = 200
+                local_seen = set()
+
+                while True:
+                    try:
+                        result = await client(GetParticipantsRequest(
+                            channel=input_chat,
+                            filter=ChannelParticipantsSearch(""),
+                            offset=offset, limit=batch_size, hash=0,
+                        ))
+                    except Exception:
+                        break
+
+                    if not result.users:
+                        break
+
+                    for user in result.users:
+                        if user.id in global_seen_ids or user.id in local_seen:
+                            continue
+                        local_seen.add(user.id)
+                        if user.id in admin_ids:
+                            continue
+                        if exclude_bots and getattr(user, "bot", False):
+                            continue
+
+                        last_seen = _get_last_seen_from_user(user)
+                        if not _passes_active_filter(last_seen, filter_active_days):
+                            continue
+
+                        global_seen_ids.add(user.id)
+                        channel_members.append(_build_member_dict(user, last_seen))
+
+                    offset += len(result.participants)
+                    if len(result.participants) < batch_size:
+                        break
+                    await asyncio.sleep(1.5)
+
+                # Alphabetical fallback if too few
+                if len(channel_members) < 100:
+                    for letter in "abcdefghijklmnopqrstuvwxyz":
+                        try:
+                            result = await client(GetParticipantsRequest(
+                                channel=input_chat,
+                                filter=ChannelParticipantsSearch(letter),
+                                offset=0, limit=200, hash=0,
+                            ))
+                            for user in result.users:
+                                if user.id in global_seen_ids:
+                                    continue
+                                if user.id in admin_ids:
+                                    continue
+                                if exclude_bots and getattr(user, "bot", False):
+                                    continue
+                                last_seen = _get_last_seen_from_user(user)
+                                if not _passes_active_filter(last_seen, filter_active_days):
+                                    continue
+                                global_seen_ids.add(user.id)
+                                channel_members.append(_build_member_dict(user, last_seen))
+                            await asyncio.sleep(0.5)
+                        except Exception:
+                            continue
+
+            # Save members for this channel under the BATCH job_id
+            if channel_members:
+                await db.save_scraped_members(
+                    batch_job_id, account_id, group_id, group_title, channel_members
+                )
+                total_saved += len(channel_members)
+
+            await db.update_batch_channel(batch_job_id, channel_username,
+                                           status="done",
+                                           channel_title=group_title,
+                                           channel_id=group_id,
+                                           member_count=len(channel_members),
+                                           finished_at=datetime.utcnow().isoformat())
+            logger.info(f"[Batch {batch_job_id}] Done {channel_username}: {len(channel_members)} members (deduped)")
+
+            # Delay between channels to avoid rate limits
+            await asyncio.sleep(3)
+
+        except Exception as e:
+            logger.error(f"[Batch {batch_job_id}] Error on {channel_username}: {e}")
+            await db.update_batch_channel(batch_job_id, channel_username,
+                                           status="error",
+                                           error_message=str(e),
+                                           finished_at=datetime.utcnow().isoformat())
+            await asyncio.sleep(2)
+
+    logger.info(f"[Batch {batch_job_id}] All channels done! Total unique members: {total_saved}")
+
+
 # ── Similar Channels Scraper ──────────────────────────────────────────────────
 
 @router.post("/similar-channels")
@@ -448,17 +833,46 @@ async def join_channel(req: JoinChannelRequest):
 
 @router.post("/import-contacts")
 async def import_contacts(req: ImportContactsRequest):
-    """Import selected contacts into the scraped_members table under a specific job."""
+    """Import selected contacts into the scraped_members table under a specific job.
+    Automatically deduplicates against all previously DM'd users across campaigns and watchers."""
     try:
         import zlib
+        from database import get_db
+
+        # ── Step 1: Collect already-DM'd usernames (cross-campaign dedup) ──
+        already_dmd: set[str] = set()
+        async with get_db() as conn:
+            # From DM campaigns (success only)
+            cursor = await conn.execute(
+                "SELECT DISTINCT LOWER(target_username) FROM dm_campaign_logs "
+                "WHERE status = 'success' AND target_username IS NOT NULL AND target_username != ''"
+            )
+            for row in await cursor.fetchall():
+                already_dmd.add(row[0])
+
+            # From Watcher auto-DMs (success only)
+            cursor = await conn.execute(
+                "SELECT DISTINCT LOWER(target_username) FROM watcher_dm_logs "
+                "WHERE status = 'success' AND target_username IS NOT NULL AND target_username != ''"
+            )
+            for row in await cursor.fetchall():
+                already_dmd.add(row[0])
+
+        # ── Step 2: Build members list, filtering out already-DM'd ──
         members_list = []
+        skipped_count = 0
         for c in req.contacts:
             username = c.get("username", "").strip()
             if username.startswith("@"):
                 username = username[1:]
             if not username:
                 continue
-            
+
+            # Cross-campaign dedup check
+            if username.lower() in already_dmd:
+                skipped_count += 1
+                continue
+
             # Generate deterministic negative ID based on username hash to satisfy UNIQUE(scrape_job_id, user_id)
             h = zlib.crc32(username.encode("utf-8")) & 0x7fffffff
             if h == 0:
@@ -476,6 +890,8 @@ async def import_contacts(req: ImportContactsRequest):
                 "status": "active",
                 "last_seen": "Recently"
             })
+
+        # ── Step 3: Save to DB ──
         if members_list:
             await db.save_scraped_members(
                 scrape_job_id=req.scrape_job_id,
@@ -484,7 +900,14 @@ async def import_contacts(req: ImportContactsRequest):
                 group_title=req.group_title,
                 members=members_list
             )
-        return {"success": True, "count": len(members_list)}
+
+        return {
+            "success": True,
+            "count": len(members_list),
+            "skipped_dmd": skipped_count,
+            "message": f"Imported {len(members_list)} contacts"
+                       + (f", bỏ qua {skipped_count} đã DM trước đó" if skipped_count else "")
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -492,17 +915,34 @@ async def import_contacts(req: ImportContactsRequest):
 # ── Deep Crawl (BFS Multi-Layer) ─────────────────────────────────────────────
 
 @router.post("/deep-crawl")
-async def start_deep_crawl(req: DeepCrawlRequest, bg: BackgroundTasks):
-    """Start a deep BFS crawl of similar channels (1-4 layers)."""
-    global _deep_crawl_state, _deep_crawl_stop_flag
-
-    if _deep_crawl_state.get("status") == "running":
-        raise HTTPException(status_code=409, detail="Deep crawl đang chạy. Vui lòng dừng trước khi bắt đầu mới.")
+async def start_deep_crawl(req: DeepCrawlRequest):
+    """Start a deep BFS crawl of similar channels (1-4 layers).
+    If a crawl is already running, the request is added to the queue."""
+    global _deep_crawl_state, _deep_crawl_stop_flag, _deep_crawl_task, _deep_crawl_queue
+    import asyncio
 
     if req.max_depth < 1 or req.max_depth > 4:
         raise HTTPException(status_code=400, detail="Độ sâu phải từ 1 đến 4.")
 
-    # Reset state
+    # If a crawl is running, queue this request
+    if _deep_crawl_state.get("status") == "running":
+        queue_item = {
+            "account_ids": req.account_ids,
+            "channel_link": req.channel_link,
+            "max_depth": req.max_depth,
+            "added_at": datetime.now().isoformat(),
+        }
+        _deep_crawl_queue.append(queue_item)
+        pos = len(_deep_crawl_queue)
+        logger.info(f"[DeepCrawl] Queued: {req.channel_link} (depth={req.max_depth}), position #{pos}")
+        return {
+            "success": True,
+            "queued": True,
+            "position": pos,
+            "message": f"Đã thêm vào hàng đợi (vị trí #{pos}). Sẽ tự chạy khi crawl hiện tại xong."
+        }
+
+    # Start immediately
     _deep_crawl_state = {
         "status": "running",
         "current_depth": 0,
@@ -515,16 +955,20 @@ async def start_deep_crawl(req: DeepCrawlRequest, bg: BackgroundTasks):
         "current_account": "",
         "errors": [],
         "results": [],
+        "source_url": req.channel_link,
     }
     _deep_crawl_stop_flag = {"stopped": False}
 
-    bg.add_task(_do_deep_crawl, req.account_ids, req.channel_link, req.max_depth)
-    return {"success": True, "message": f"Deep crawl started: {req.max_depth} layers"}
+    _deep_crawl_task = asyncio.create_task(
+        _do_deep_crawl(req.account_ids, req.channel_link, req.max_depth)
+    )
+    return {"success": True, "queued": False, "message": f"Deep crawl started: {req.max_depth} layers"}
 
 
 async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: int):
-    """Background task that runs the BFS deep crawl."""
-    global _deep_crawl_state
+    """Background task that runs the BFS deep crawl. Auto-starts next queued item when done."""
+    global _deep_crawl_state, _deep_crawl_queue, _deep_crawl_stop_flag, _deep_crawl_task
+    import asyncio
 
     async def _progress_cb(state: dict):
         """Callback to update module-level state for polling."""
@@ -547,13 +991,41 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
         _deep_crawl_state["errors"].append(f"Fatal: {str(e)}")
         logger.error(f"[DeepCrawl] Fatal error: {e}", exc_info=True)
 
+    # ── Auto-start next queued crawl ──
+    await asyncio.sleep(3)  # Brief pause between crawls
+    if _deep_crawl_queue:
+        next_item = _deep_crawl_queue.pop(0)
+        logger.info(f"[DeepCrawl] Queue: auto-starting next → {next_item['channel_link']} (depth={next_item['max_depth']}), {len(_deep_crawl_queue)} remaining")
+        _deep_crawl_state = {
+            "status": "running",
+            "current_depth": 0,
+            "max_depth": next_item["max_depth"],
+            "channels_found": 0,
+            "channels_processed": 0,
+            "contacts_found": 0,
+            "queue_remaining": 0,
+            "current_channel": "Đang khởi tạo...",
+            "current_account": "",
+            "errors": [],
+            "results": [],
+            "source_url": next_item["channel_link"],
+        }
+        _deep_crawl_stop_flag = {"stopped": False}
+        _deep_crawl_task = asyncio.create_task(
+            _do_deep_crawl(next_item["account_ids"], next_item["channel_link"], next_item["max_depth"])
+        )
+
 
 @router.get("/deep-crawl/status")
 async def get_deep_crawl_status():
-    """Poll the current deep crawl progress."""
-    # Return state without the full results array to keep response small during polling
+    """Poll the current deep crawl progress + queue info."""
     state_copy = {k: v for k, v in _deep_crawl_state.items() if k != "results"}
     state_copy["results_count"] = len(_deep_crawl_state.get("results", []))
+    state_copy["queue"] = [
+        {"channel_link": q["channel_link"], "max_depth": q["max_depth"], "added_at": q.get("added_at", "")}
+        for q in _deep_crawl_queue
+    ]
+    state_copy["queue_count"] = len(_deep_crawl_queue)
     return state_copy
 
 
@@ -577,19 +1049,54 @@ async def stop_deep_crawl():
     return {"success": True, "message": "Đang dừng deep crawl..."}
 
 
+@router.get("/deep-crawl/queue")
+async def get_deep_crawl_queue():
+    """Get the pending deep crawl queue."""
+    return {
+        "queue": [
+            {"channel_link": q["channel_link"], "max_depth": q["max_depth"],
+             "added_at": q.get("added_at", ""), "index": i}
+            for i, q in enumerate(_deep_crawl_queue)
+        ],
+        "count": len(_deep_crawl_queue)
+    }
+
+
+@router.delete("/deep-crawl/queue/{index}")
+async def remove_from_deep_crawl_queue(index: int):
+    """Remove an item from the queue by index."""
+    global _deep_crawl_queue
+    if index < 0 or index >= len(_deep_crawl_queue):
+        raise HTTPException(status_code=404, detail="Không tìm thấy item trong queue")
+    removed = _deep_crawl_queue.pop(index)
+    logger.info(f"[DeepCrawl] Queue: removed #{index} → {removed['channel_link']}")
+    return {"success": True, "removed": removed["channel_link"], "remaining": len(_deep_crawl_queue)}
+
+
+@router.delete("/deep-crawl/queue")
+async def clear_deep_crawl_queue():
+    """Clear the entire queue."""
+    global _deep_crawl_queue
+    count = len(_deep_crawl_queue)
+    _deep_crawl_queue = []
+    logger.info(f"[DeepCrawl] Queue: cleared {count} items")
+    return {"success": True, "cleared": count}
+
+
 # ── DM Campaigns ────────────────────────────────────────────────────────────
 
 @router.post("/campaigns")
 async def create_campaign(req: CampaignCreate):
     """Create a new DM campaign."""
-    # Validate scrape job exists
-    members = await db.get_scraped_members(req.scrape_job_id, limit=1)
-    if not members:
+    # Count total targets (efficient COUNT query, no row loading)
+    total = await db.count_scraped_members(req.scrape_job_id)
+    if total == 0:
         raise HTTPException(status_code=400, detail="Scrape job không tồn tại hoặc trống")
 
-    # Count total targets
-    all_members = await db.get_scraped_members(req.scrape_job_id, limit=10000)
-    total = len(all_members)
+    # Determine status: scheduled if scheduled_at provided, else draft
+    status = "draft"
+    if req.scheduled_at and req.target_timezone:
+        status = "scheduled"
 
     campaign_id = await db.create_dm_campaign({
         "name": req.name,
@@ -598,18 +1105,97 @@ async def create_campaign(req: CampaignCreate):
         "messages": [m if isinstance(m, dict) else m.dict() for m in req.messages],
         "delay_min": req.delay_min,
         "delay_max": req.delay_max,
-        "daily_limit": req.daily_limit,
+        "daily_limit_premium": req.daily_limit_premium,
+        "daily_limit_normal": req.daily_limit_normal,
         "use_ai_remix": req.use_ai_remix,
+        "exclude_previous_dms": req.exclude_previous_dms,
         "total_targets": total,
+        "status": status,
+        "scheduled_at": req.scheduled_at,
+        "target_timezone": req.target_timezone,
     })
+
+    # Register APScheduler job if scheduled
+    if status == "scheduled":
+        import scheduler as sch
+        sch.add_campaign_schedule_job(campaign_id, req.scheduled_at, req.target_timezone)
 
     return {"status": "created", "campaign_id": campaign_id, "total_targets": total}
 
 
+@router.post("/campaigns/{campaign_id}/clone")
+async def clone_campaign(campaign_id: int, req: Optional[CampaignCloneRequest] = None):
+    """Clone an existing campaign, optionally excluding already-contacted members."""
+    source_cmp = await db.get_dm_campaign(campaign_id)
+    if not source_cmp:
+        raise HTTPException(status_code=404, detail="Campaign nguồn không tồn tại")
+
+    target_job_id = (req.scrape_job_id if req and req.scrape_job_id else source_cmp["scrape_job_id"])
+    target_name = (req.name if req and req.name else f"{source_cmp['name']} - Clone")
+    exclude_source = req.exclude_source_results if req else True
+
+    total = await db.count_scraped_members(target_job_id)
+    if total == 0:
+        raise HTTPException(status_code=400, detail="Scrape job target không tồn tại hoặc trống")
+
+    # Count excluded members from source campaign
+    excluded_count = 0
+    exclude_ids_json = "[]"
+    if exclude_source:
+        from database import get_db
+        async with get_db() as conn:
+            cursor = await conn.execute(
+                "SELECT COUNT(DISTINCT target_user_id) FROM dm_campaign_logs "
+                "WHERE campaign_id = ? AND status IN ('success', 'failed')",
+                (campaign_id,)
+            )
+            row = await cursor.fetchone()
+            excluded_count = row[0] if row else 0
+        exclude_ids_json = json.dumps([campaign_id])
+
+    adjusted_total = max(0, total - excluded_count)
+
+    new_campaign_id = await db.create_dm_campaign({
+        "name": target_name,
+        "scrape_job_id": target_job_id,
+        "sender_account_ids": source_cmp.get("sender_account_ids", []),
+        "messages": source_cmp.get("messages", []),
+        "delay_min": source_cmp.get("delay_min", 180),
+        "delay_max": source_cmp.get("delay_max", 420),
+        "daily_limit_premium": source_cmp.get("daily_limit_premium", 60),
+        "daily_limit_normal": source_cmp.get("daily_limit_normal", 10),
+        "use_ai_remix": bool(source_cmp.get("use_ai_remix", False)),
+        "exclude_previous_dms": bool(source_cmp.get("exclude_previous_dms", 1)),
+        "total_targets": adjusted_total,
+    })
+
+    # Save exclude_campaign_ids to new campaign
+    if exclude_source and exclude_ids_json != "[]":
+        from database import get_db
+        async with get_db() as conn:
+            await conn.execute(
+                "UPDATE dm_campaigns SET exclude_campaign_ids = ? WHERE id = ?",
+                (exclude_ids_json, new_campaign_id)
+            )
+            await conn.commit()
+
+    return {
+        "status": "cloned",
+        "campaign_id": new_campaign_id,
+        "name": target_name,
+        "total_targets": adjusted_total,
+        "excluded_count": excluded_count,
+        "source_campaign_id": campaign_id
+    }
+
+
 @router.get("/campaigns")
-async def list_campaigns():
+async def list_campaigns(updated_since: Optional[str] = None):
     """List all DM campaigns."""
-    campaigns = await db.get_all_dm_campaigns()
+    if updated_since:
+        campaigns = await db.get_campaigns_updated_since(updated_since)
+    else:
+        campaigns = await db.get_all_dm_campaigns()
     return {"campaigns": campaigns}
 
 
@@ -649,6 +1235,21 @@ async def stop_campaign(campaign_id: int):
     return {"status": "stopped"}
 
 
+@router.post("/campaigns/{campaign_id}/cancel-schedule")
+async def cancel_campaign_schedule(campaign_id: int):
+    """Cancel a scheduled campaign, reverting it to draft."""
+    campaign = await db.get_dm_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign không tồn tại")
+    if campaign["status"] != "scheduled":
+        raise HTTPException(status_code=400, detail="Campaign không ở trạng thái đã hẹn giờ")
+
+    import scheduler as sch
+    sch.remove_campaign_schedule_job(campaign_id)
+    await db.update_dm_campaign_status(campaign_id, "draft")
+    return {"status": "ok", "message": "Đã hủy lịch hẹn giờ"}
+
+
 @router.delete("/campaigns/{campaign_id}")
 async def delete_campaign(campaign_id: int):
     """Delete a campaign."""
@@ -656,12 +1257,70 @@ async def delete_campaign(campaign_id: int):
     await db.delete_dm_campaign(campaign_id)
     return {"status": "deleted"}
 
+@router.put("/campaigns/{campaign_id}/messages")
+async def update_campaign_messages(campaign_id: int, req: CampaignUpdateMessages):
+    """Update campaign messages/settings (only when paused or draft)."""
+    campaign = await db.get_dm_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign không tồn tại")
+    if campaign["status"] not in ("draft", "paused", "error"):
+        raise HTTPException(status_code=400,
+                            detail="Chỉ có thể sửa campaign khi đang tạm dừng hoặc chưa chạy")
+    if not req.messages:
+        raise HTTPException(status_code=400, detail="Cần ít nhất 1 tin nhắn")
+
+    msgs = [m if isinstance(m, dict) else m.dict() for m in req.messages]
+    await db.update_dm_campaign_messages(
+        campaign_id, msgs,
+        delay_min=req.delay_min,
+        delay_max=req.delay_max,
+        daily_limit_premium=req.daily_limit_premium,
+        daily_limit_normal=req.daily_limit_normal,
+        use_ai_remix=req.use_ai_remix,
+        exclude_previous_dms=req.exclude_previous_dms,
+    )
+    return {"status": "updated", "message": "Đã cập nhật tin nhắn campaign"}
+
+
 
 @router.get("/campaigns/{campaign_id}/logs")
 async def get_campaign_logs(campaign_id: int, limit: int = Query(200, ge=1, le=1000)):
     """Get logs for a campaign."""
     logs = await db.get_dm_campaign_logs(campaign_id, limit)
     return {"logs": logs}
+
+
+# ── SpamBot Health Check Endpoints ──────────────────────────────────────────
+
+@router.post("/accounts/{account_id}/spam-check")
+async def check_account_spam(account_id: int):
+    """Check spam status of a single account via @SpamBot."""
+    result = await tg.check_spam_status(account_id)
+    return {"account_id": account_id, **result}
+
+
+@router.post("/accounts/spam-check-all")
+async def check_all_accounts_spam():
+    """Check spam status of all connected accounts via @SpamBot."""
+    accounts = await db.get_all_accounts()
+    results = []
+    for acc in accounts:
+        aid = acc["id"]
+        client = tg.get_client(aid)
+        if client and client.is_connected():
+            result = await tg.check_spam_status(aid)
+            results.append({"account_id": aid, "phone": acc.get("phone", ""), **result})
+            # Small delay between checks to avoid rate-limiting SpamBot itself
+            await asyncio.sleep(2)
+        else:
+            results.append({
+                "account_id": aid,
+                "phone": acc.get("phone", ""),
+                "status": "unknown",
+                "message": "Tài khoản chưa kết nối",
+                "checked_at": datetime.now().isoformat(),
+            })
+    return {"results": results}
 
 
 async def _run_campaign(campaign_id: int):
@@ -676,31 +1335,173 @@ async def _run_campaign(campaign_id: int):
         messages = campaign["messages"]
         delay_min = campaign["delay_min"]
         delay_max = campaign["delay_max"]
-        daily_limit = campaign["daily_limit"]
+        limit_premium = campaign.get("daily_limit_premium", 60)
+        limit_normal = campaign.get("daily_limit_normal", 10)
         use_ai = campaign["use_ai_remix"]
+
+        # ── Smart Template Rotation: detect multi-variant messages ──
+        # If messages is a list-of-lists, each sub-list is a variant.
+        # If messages is a flat list of message dicts, treat as single variant.
+        template_id = campaign.get("template_id")  # may be None
+        is_multi_variant = (
+            messages
+            and isinstance(messages[0], list)
+        )
+        if not is_multi_variant:
+            # Wrap single variant for uniform handling
+            messages_variants = [messages]
+        else:
+            messages_variants = messages
 
         # Load AI settings if enabled
         ai_provider = None
         ai_keys = []
+        ai_remix_kwargs = {}
+        ai_custom_prompt = None
         if use_ai:
             ai_provider = await db.get_setting("ai_provider", None)
-            if ai_provider:
+            ai_custom_prompt = await db.get_setting("ai_custom_prompt", None)
+
+            async def _load_provider_keys(prov):
+                if not prov:
+                    return []
                 try:
-                    raw = await db.get_setting(f"ai_keys_{ai_provider}", "[]")
-                    ai_keys = json.loads(raw) if raw else []
+                    raw = await db.get_setting(f"ai_keys_{prov}", "[]")
+                    return json.loads(raw) if raw else []
                 except Exception:
-                    ai_keys = []
+                    return []
+
+            if ai_provider:
+                ai_keys = await _load_provider_keys(ai_provider)
+
+            # Auto-fallback to any provider with keys if current provider has no keys
+            if not ai_keys:
+                all_providers = ["gemini", "groq", "openai", "deepseek", "openai_compatible"]
+                for alt_prov in all_providers:
+                    alt_keys = await _load_provider_keys(alt_prov)
+                    if alt_keys:
+                        logger.warning(
+                            f"[Campaign {campaign_id}] ⚠️ Provider '{ai_provider}' không có API key. "
+                            f"Tự động chuyển sang '{alt_prov}' ({len(alt_keys)} keys available)."
+                        )
+                        ai_provider = alt_prov
+                        ai_keys = alt_keys
+                        break
+
+            if ai_provider == "openai_compatible":
+                ai_remix_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
+                ai_remix_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
+
+            if not ai_keys:
+                logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix BẬT nhưng không tìm thấy API Key nào cho bất kỳ nhà cung cấp nào!")
 
         # Get already-sent user IDs for this campaign
         existing_logs = await db.get_dm_campaign_logs(campaign_id, limit=50000)
         sent_user_ids = {log["target_user_id"] for log in existing_logs if log["status"] == "success"}
+
+        # ── Cross-campaign / watcher dedup pre-loading ──
+        exclude_previous_dms = bool(campaign.get("exclude_previous_dms", 1))
+        all_previous_user_ids: set[int] = set()
+        all_previous_usernames: set[str] = set()
+
+        if exclude_previous_dms:
+            from database import get_db
+            async with get_db() as conn:
+                # From other DM campaigns (success only)
+                cursor = await conn.execute(
+                    "SELECT DISTINCT target_user_id, LOWER(target_username) FROM dm_campaign_logs "
+                    "WHERE status = 'success' AND campaign_id != ?", (campaign_id,)
+                )
+                for row in await cursor.fetchall():
+                    if row[0]:
+                        all_previous_user_ids.add(row[0])
+                    if row[1]:
+                        all_previous_usernames.add(row[1])
+
+                # From Watcher auto-DMs (success only)
+                cursor = await conn.execute(
+                    "SELECT DISTINCT target_user_id, LOWER(target_username) FROM watcher_dm_logs "
+                    "WHERE status = 'success'"
+                )
+                for row in await cursor.fetchall():
+                    if row[0]:
+                        all_previous_user_ids.add(row[0])
+                    if row[1]:
+                        all_previous_usernames.add(row[1])
+
+        # ── Exclude members from source campaigns (clone exclusion) ──
+        exclude_campaign_ids = campaign.get("exclude_campaign_ids", []) or []
+        if isinstance(exclude_campaign_ids, str):
+            try:
+                exclude_campaign_ids = json.loads(exclude_campaign_ids)
+            except Exception:
+                exclude_campaign_ids = []
+        if exclude_campaign_ids:
+            from database import get_db
+            async with get_db() as conn:
+                placeholders = ','.join('?' * len(exclude_campaign_ids))
+                cursor = await conn.execute(
+                    f"SELECT DISTINCT target_user_id FROM dm_campaign_logs "
+                    f"WHERE campaign_id IN ({placeholders}) AND status IN ('success', 'failed')",
+                    exclude_campaign_ids
+                )
+                for row in await cursor.fetchall():
+                    if row[0]:
+                        sent_user_ids.add(row[0])
+            logger.info(
+                f"[Campaign {campaign_id}] 🔗 Clone exclusion: loaded {len(exclude_campaign_ids)} source campaign(s), "
+                f"total excluded user_ids now = {len(sent_user_ids)}"
+            )
 
         sent = campaign.get("sent_count", 0)
         failed = campaign.get("failed_count", 0)
         skipped = campaign.get("skipped_count", 0)
         daily_sent = 0  # Track daily sends per session
         account_idx = 0  # Round-robin account index
+        consecutive_errors = 0  # Track consecutive errors for backoff
         flooded_accounts = set()
+
+        # Pre-load blacklist ONCE (avoid N+1 query pattern)
+        bl = await db.get_dm_blacklist()
+        blacklisted_ids = {b["user_id"] for b in bl}
+
+        # ── Pre-campaign SpamBot health check ──
+        # Automatically exclude accounts that are currently spam-limited
+        for sid in list(sender_ids):
+            try:
+                spam_result = await tg.check_spam_status(sid)
+                if spam_result["status"] == "limited":
+                    logger.warning(f"[Campaign {campaign_id}] ⚠️ Account {sid} is spam-limited, excluding from senders")
+                    flooded_accounts.add(sid)
+                    await db.add_dm_campaign_log(campaign_id, sid, 0, None, "skipped",
+                                                f"SpamBot: tài khoản đang bị giới hạn — {spam_result['message'][:80]}")
+                await asyncio.sleep(2)  # Delay between SpamBot checks
+            except Exception as e:
+                logger.warning(f"[Campaign {campaign_id}] SpamBot check failed for {sid}: {e}")
+
+        # Check if any senders are still available after spam check
+        available_after_check = [s for s in sender_ids if s not in flooded_accounts]
+        if not available_after_check:
+            logger.error(f"[Campaign {campaign_id}] 🛑 All sender accounts are spam-limited! Cannot start campaign.")
+            await db.update_dm_campaign_status(campaign_id, "paused",
+                                                sent=sent, failed=failed, skipped=skipped)
+            _active_campaigns.pop(campaign_id, None)
+            return
+
+        # ── Diagnostic logging: show filtering stats ──
+        _total_members = len(members)
+        _already_sent = len(sent_user_ids)
+        _cross_excluded = len(all_previous_user_ids) + len(all_previous_usernames)
+        _blacklisted = len(blacklisted_ids)
+        logger.info(
+            f"[Campaign {campaign_id}] 📊 Campaign start stats: "
+            f"{_total_members} total members | "
+            f"{_already_sent} already sent (this campaign) | "
+            f"{'exclude_previous ON' if exclude_previous_dms else 'exclude_previous OFF'} "
+            f"({len(all_previous_user_ids)} user_ids + {len(all_previous_usernames)} usernames from other campaigns) | "
+            f"{_blacklisted} blacklisted | "
+            f"{len(available_after_check)} sender accounts available"
+        )
 
         for member in members:
             # Check if campaign was stopped
@@ -711,50 +1512,79 @@ async def _run_campaign(campaign_id: int):
             user_id = member["user_id"]
             username = member.get("username")
 
-            # Skip already sent
+            # Skip already sent in current campaign
             if user_id in sent_user_ids:
                 continue
 
+            # Skip previously sent in other campaigns/watchers if exclude_previous_dms is True
+            if exclude_previous_dms:
+                uname_lower = username.lower() if username else None
+                if user_id in all_previous_user_ids or (uname_lower and uname_lower in all_previous_usernames):
+                    skipped += 1
+                    await db.add_dm_campaign_log(campaign_id, None, user_id, username, "skipped",
+                                                "Đã từng nhận DM ở chiến dịch/watcher khác")
+                    continue
+
             # Check daily limit
-            if daily_sent >= daily_limit:
-                logger.info(f"[Campaign {campaign_id}] Daily limit reached ({daily_limit}), stopping")
+            # Check total daily limit across all accounts (use total sender count, not shrinking available)
+            total_daily_limit = limit_premium * len(sender_ids)
+            if daily_sent >= total_daily_limit:
+                logger.info(f"[Campaign {campaign_id}] Total daily limit reached ({daily_sent}/{total_daily_limit}), stopping")
                 await db.update_dm_campaign_status(campaign_id, "paused",
                                                     sent=sent, failed=failed, skipped=skipped)
+                _active_campaigns.pop(campaign_id, None)
                 return
 
-            # Check blacklist
-            bl = await db.get_dm_blacklist()
-            blacklisted_ids = {b["user_id"] for b in bl}
+            # Check blacklist (pre-loaded)
             if user_id in blacklisted_ids:
                 skipped += 1
                 await db.add_dm_campaign_log(campaign_id, None, user_id, username, "skipped", "Trong blacklist")
                 continue
 
-            # Pick sender account (round-robin, excluding flooded ones)
-            available_senders = [sid for sid in sender_ids if sid not in flooded_accounts]
-            if not available_senders:
-                logger.warning(f"[Campaign {campaign_id}] Tất cả các tài khoản gửi đều bị giới hạn/flood. Tạm dừng chiến dịch.")
-                await db.update_dm_campaign_status(campaign_id, "paused",
-                                                    sent=sent, failed=failed, skipped=skipped)
+            # Pick sender account (round-robin, excluding flooded/offline ones)
+            # Inner loop: try different accounts for this member until one works
+            acc_id = None
+            client = None
+            all_accounts_exhausted = False
+            while True:
+                available_senders = [sid for sid in sender_ids if sid not in flooded_accounts]
+                if not available_senders:
+                    logger.warning(f"[Campaign {campaign_id}] Tất cả các tài khoản gửi đều bị giới hạn/flood/offline. Tạm dừng chiến dịch.")
+                    await db.update_dm_campaign_status(campaign_id, "paused",
+                                                        sent=sent, failed=failed, skipped=skipped)
+                    _active_campaigns.pop(campaign_id, None)
+                    all_accounts_exhausted = True
+                    break
+
+                acc_id = available_senders[account_idx % len(available_senders)]
+                account_idx += 1
+
+                c = tg.get_client(acc_id)
+                if not c or not c.is_connected():
+                    # Account offline → remove from rotation, retry with another
+                    flooded_accounts.add(acc_id)
+                    logger.warning(f"[Campaign {campaign_id}] Account {acc_id} offline, loại khỏi danh sách gửi")
+                    await db.add_dm_campaign_log(campaign_id, acc_id, 0, None, "failed", f"Account {acc_id} offline")
+                    continue  # Try next account in inner loop
+
+                # Daily DM limit check per account
+                limit_reached, dm_count, dm_limit = await db.is_account_dm_limit_reached(
+                    acc_id, limit_premium=limit_premium, limit_normal=limit_normal
+                )
+                if limit_reached:
+                    logger.warning(f"[Campaign {campaign_id}] Account {acc_id} daily limit ({dm_count}/{dm_limit})")
+                    flooded_accounts.add(acc_id)
+                    await db.add_dm_campaign_log(campaign_id, acc_id, 0, None, "skipped",
+                                                f"Account {acc_id} hết limit DM hàng ngày")
+                    continue  # Try next account in inner loop
+
+                # Found a working account
+                client = c
                 break
 
-            acc_id = available_senders[account_idx % len(available_senders)]
-            account_idx += 1
-
-            client = tg.get_client(acc_id)
-            if not client or not client.is_connected():
-                skipped += 1
-                await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped", "Account offline")
-                continue
-
-            # Daily DM limit check per account
-            limit_reached, dm_count, dm_limit = await db.is_account_dm_limit_reached(acc_id)
-            if limit_reached:
-                logger.warning(f"[Campaign {campaign_id}] Account {acc_id} daily limit ({dm_count}/{dm_limit})")
-                skipped += 1
-                await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped",
-                                            f"Account {acc_id} hết limit DM hàng ngày")
-                continue
+            if all_accounts_exhausted:
+                # Already paused & popped — exit and return to prevent overwriting status
+                return
 
             try:
                 # Resolve peer using get_entity (safe & uses session cache)
@@ -773,61 +1603,217 @@ async def _run_campaign(campaign_id: int):
                                                     "skipped", f"Không resolve được: {str(pe2)[:80]}")
                         continue
 
+                # ── Smart Template Rotation: select variant ──
+                selected_msgs, variant_idx = await tmpl_rot.select_variant(
+                    messages_variants,
+                    template_id=template_id,
+                    campaign_id=campaign_id,
+                )
+
                 # Send messages
-                for msg in sorted(messages, key=lambda m: m.get("msg_order", 0)):
+                for msg in sorted(selected_msgs, key=lambda m: m.get("msg_order", 0)):
                     content = msg.get("content", "")
                     msg_type = msg.get("msg_type", "text")
 
                     # AI remix if enabled
-                    if use_ai and ai_provider and ai_keys and content:
-                        try:
-                            content = await ai_rmx.remix_message(
-                                original_text=content,
-                                provider=ai_provider,
-                                api_keys=ai_keys,
-                                sender_name=username if username else None
-                            )
-                        except Exception as ae:
-                            logger.warning(f"[Campaign {campaign_id}] AI remix failed: {ae}")
+                    if use_ai and content:
+                        if ai_provider and ai_keys:
+                            try:
+                                original_len = len(content)
+                                remixed_content = await ai_rmx.remix_message(
+                                    original_text=content,
+                                    provider=ai_provider,
+                                    api_keys=ai_keys,
+                                    sender_name=username if username else None,
+                                    custom_instruction=ai_custom_prompt,
+                                    **ai_remix_kwargs
+                                )
+                                if remixed_content and remixed_content != content:
+                                    content = remixed_content
+                                    logger.info(f"[Campaign {campaign_id}] ✨ AI Remix thành công ({ai_provider}) cho @{username or user_id}")
+                                else:
+                                    logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix không thay đổi nội dung, dùng bản gốc")
+                            except Exception as ae:
+                                logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix thất bại ({ae}), dùng bản gốc")
+                        else:
+                            logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix BẬT nhưng thiếu API Key (vui lòng kiểm tra Cài Đặt AI Remix)")
 
                     if msg_type == "text":
                         await client.send_message(peer, content)
                     elif msg_type in ("photo", "video", "document"):
                         media_path = msg.get("media_path")
                         if media_path:
-                            await client.send_file(peer, media_path, caption=content)
+                            # Randomize image to change hash (anti-spam)
+                            rand_path = None
+                            actual_path = media_path
+                            if msg_type == "photo":
+                                rand_path = img_rand.randomize_image(media_path)
+                                actual_path = rand_path
+                            try:
+                                await client.send_file(peer, actual_path, caption=content)
+                            finally:
+                                if rand_path:
+                                    img_rand.cleanup_temp_image(rand_path, media_path)
                         elif content:
                             await client.send_message(peer, content)
 
                     # Small delay between messages in sequence
-                    if len(messages) > 1:
+                    if len(selected_msgs) > 1:
                         await asyncio.sleep(random.uniform(2, 5))
 
                 sent += 1
                 daily_sent += 1
-                await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "success")
-                logger.info(f"[Campaign {campaign_id}] Sent to {username or user_id} via account {acc_id} [{sent}/{len(members)}]")
+                consecutive_errors = 0  # Reset on success
+                await db.add_dm_campaign_log(
+                    campaign_id, acc_id, user_id, username, "success",
+                    template_variant_id=template_id,
+                    template_variant_index=variant_idx,
+                )
+                # Record send for template performance tracking
+                if template_id:
+                    try:
+                        await tmpl_rot.record_send(
+                            template_id, variant_idx, campaign_id=campaign_id
+                        )
+                    except Exception:
+                        pass  # Non-critical — don't break send loop
+                logger.info(f"[Campaign {campaign_id}] Sent to {username or user_id} via account {acc_id} [{sent}/{len(members)}] (variant={variant_idx})")
+
+            except tg_errors.FloodWaitError as e:
+                # ── CRITICAL: Respect Telegram's FloodWait timer exactly ──
+                wait_time = e.seconds + random.randint(5, 15)  # Add buffer
+                logger.warning(f"[Campaign {campaign_id}] ⏳ FloodWait on account {acc_id}: waiting {wait_time}s (Telegram requested {e.seconds}s)")
+                await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
+                                            f"FloodWait: chờ {wait_time}s")
+                flooded_accounts.add(acc_id)
+                failed += 1
+                consecutive_errors += 1
+                # Actually wait the required time
+                await asyncio.sleep(wait_time)
+                # After waiting, allow account back
+                flooded_accounts.discard(acc_id)
+
+            except tg_errors.UserPrivacyRestrictedError:
+                # User has privacy settings blocking DMs
+                skipped += 1
+                try:
+                    await db.add_to_dm_blacklist(user_id, username, "Privacy restricted")
+                except Exception:
+                    pass
+                await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped",
+                                            "User chặn tin nhắn (Privacy Restricted)")
+
+            except tg_errors.InputUserDeactivatedError:
+                # User account is deactivated
+                skipped += 1
+                try:
+                    await db.add_to_dm_blacklist(user_id, username, "Account deactivated")
+                except Exception:
+                    pass
+                await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped",
+                                            "Tài khoản đã bị xóa/vô hiệu hóa")
+
+            except tg_errors.PeerFloodError:
+                # Account is globally rate-limited — VERY DANGEROUS
+                logger.error(f"[Campaign {campaign_id}] 🚨 PeerFlood on account {acc_id}! Tạm loại khỏi danh sách gửi.")
+                flooded_accounts.add(acc_id)
+                failed += 1
+                consecutive_errors += 1
+                await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
+                                            "PeerFlood — tài khoản bị giới hạn, tạm loại khỏi chiến dịch")
+                # Wait extra time to protect account, then allow it back
+                await asyncio.sleep(random.uniform(120, 300))  # 2-5 min cooldown
+                flooded_accounts.discard(acc_id)  # Allow retry after cooldown
 
             except Exception as e:
                 err_str = str(e)
+                err_lower = err_str.lower()
                 logger.warning(f"[Campaign {campaign_id}] Error sending to {user_id}: {err_str}")
 
-                # Auto-blacklist on privacy errors
-                if "UserPrivacyRestricted" in err_str or "UserDeactivated" in err_str:
+                # ── Auto-join detection ────────────────────────────────────
+                # "You join the discussion group before commenting" = account not in group
+                # This is NOT a user-level error — don't blacklist!
+                if ("join" in err_lower and ("discussion" in err_lower or "group" in err_lower)) or \
+                   "chatwriteforbidden" in err_lower.replace("_", "").replace(" ", ""):
+                    logger.warning(
+                        f"[Campaign {campaign_id}] Account {acc_id} not in source group — auto-joining..."
+                    )
+                    # Get group_id from scrape job
                     try:
-                        await db.add_to_dm_blacklist(user_id, username, f"Campaign auto: {err_str[:50]}")
+                        source_group_id = None
+                        scrape_members = await db.get_scraped_members(campaign["scrape_job_id"], limit=1)
+                        if scrape_members:
+                            source_group_id = scrape_members[0].get("group_id")
+                        
+                        if source_group_id:
+                            join_result = await tg.join_channel(acc_id, str(source_group_id))
+                            if join_result.get("success"):
+                                logger.info(
+                                    f"[Campaign {campaign_id}] ✓ Account {acc_id} auto-joined group "
+                                    f"{source_group_id} ({join_result.get('title', '?')}). "
+                                    f"Retrying DM to {user_id}..."
+                                )
+                                await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
+                                                            "Đã auto-join nhóm, sẽ retry ở vòng tiếp")
+                                # Don't increment failures — this is recoverable
+                                continue
+                            else:
+                                logger.warning(
+                                    f"[Campaign {campaign_id}] Auto-join failed: {join_result.get('error')}"
+                                )
+                        else:
+                            logger.warning(f"[Campaign {campaign_id}] Could not determine source group_id")
+                    except Exception as je:
+                        logger.warning(f"[Campaign {campaign_id}] Auto-join exception: {je}")
+                    
+                    # If auto-join failed, skip but don't blacklist
+                    skipped += 1
+                    await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped",
+                                                "Cần join nhóm trước — không thể auto-join")
+                    continue
+
+                # ── Skip + blacklist non-sendable errors (don't retry) ──
+                skip_patterns = [
+                    "PRIVACY_PREMIUM_REQUIRED",
+                    "UserPrivacyRestricted",
+                    "UserDeactivated",
+                    "UserIsBot",
+                    "UserBannedInChannel",
+                    "UserBlocked",
+                    "InputUserDeactivated",
+                    "can't write in this chat",
+                    "You can't send messages",
+                    "PEER_ID_INVALID",
+                    "USER_ID_INVALID",
+                    "CHAT_SEND_PLAIN_FORBIDDEN",
+                    "CHAT_GUEST_SEND_FORBIDDEN",
+                ]
+                if any(p.lower() in err_lower for p in skip_patterns):
+                    skipped += 1
+                    consecutive_errors = 0  # Target-side issue, not our account's fault
+                    try:
+                        await db.add_to_dm_blacklist(user_id, username, f"Auto: {err_str[:50]}")
                     except Exception:
                         pass
-                    skipped += 1
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped", err_str[:100])
-                elif "PeerFlood" in err_str or "FloodWait" in err_str:
-                    # Account-level error — mark as flooded to exclude from rotation
+                elif "FloodWait" in err_str or "Too many requests" in err_str or "PeerFlood" in err_str:
+                    # Catch string-based flood errors too
                     flooded_accounts.add(acc_id)
                     failed += 1
-                    await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed", f"Flood: {err_str[:80]}")
-                    logger.warning(f"[Campaign {campaign_id}] Account {acc_id} rate-limited/flooded. Excluded from this run.")
+                    consecutive_errors += 1
+                    # Try to extract wait time from error string
+                    import re
+                    wait_match = re.search(r'(\d+)', err_str)
+                    wait_secs = int(wait_match.group(1)) if wait_match else 60
+                    wait_secs = min(max(wait_secs, 30), 600)  # Clamp 30s-600s
+                    logger.warning(f"[Campaign {campaign_id}] Flood detected on {acc_id}, waiting {wait_secs}s")
+                    await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
+                                                f"Flood: chờ {wait_secs}s")
+                    await asyncio.sleep(wait_secs)
+                    flooded_accounts.discard(acc_id)
                 else:
                     failed += 1
+                    consecutive_errors += 1
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed", err_str[:100])
 
             # Update progress periodically
@@ -835,17 +1821,40 @@ async def _run_campaign(campaign_id: int):
                 await db.update_dm_campaign_status(campaign_id, "running",
                                                     sent=sent, failed=failed, skipped=skipped)
 
-            # Random delay between DMs (anti-ban)
-            delay = random.uniform(delay_min, delay_max)
-            logger.info(f"[Campaign {campaign_id}] Waiting {delay:.0f}s before next DM")
-            await asyncio.sleep(delay)
+            # ── Smart delay with exponential backoff (anti-ban) ──
+            base_delay = random.uniform(delay_min, delay_max)
+            # Increase delay when encountering consecutive errors
+            if consecutive_errors > 0:
+                backoff_multiplier = min(2 ** consecutive_errors, 16)  # Cap at 16x
+                base_delay = base_delay * backoff_multiplier
+                base_delay = min(base_delay, 300)  # Max 5 minutes
+                logger.info(f"[Campaign {campaign_id}] ⚠️ Backoff x{backoff_multiplier}: waiting {base_delay:.0f}s (consecutive errors: {consecutive_errors})")
+            else:
+                logger.info(f"[Campaign {campaign_id}] Waiting {base_delay:.0f}s before next DM")
+
+            # Auto-pause if too many consecutive errors (protect accounts)
+            if consecutive_errors >= 10:
+                logger.error(f"[Campaign {campaign_id}] 🛑 {consecutive_errors} consecutive errors! Auto-pausing campaign to protect accounts.")
+                await db.update_dm_campaign_status(campaign_id, "paused",
+                                                    sent=sent, failed=failed, skipped=skipped)
+                _active_campaigns.pop(campaign_id, None)
+                logger.info(f"[Campaign {campaign_id}] Finished: paused (consecutive errors) — {sent} sent, {failed} failed, {skipped} skipped")
+                return
+
+            await asyncio.sleep(base_delay)
 
         # Campaign completed
-        final_status = "completed" if _active_campaigns.get(campaign_id) else "paused"
+        if not _active_campaigns.get(campaign_id):
+            final_status = "paused"  # Stopped by user
+        elif sent == 0:
+            final_status = "paused"  # Nothing was sent — likely all accounts offline/limited
+            logger.warning(f"[Campaign {campaign_id}] ⚠️ 0 tin nhắn gửi thành công. Đánh dấu tạm dừng thay vì hoàn thành.")
+        else:
+            final_status = "completed"
         _active_campaigns.pop(campaign_id, None)
         await db.update_dm_campaign_status(campaign_id, final_status,
                                             sent=sent, failed=failed, skipped=skipped)
-        logger.info(f"[Campaign {campaign_id}] Finished: {sent} sent, {failed} failed, {skipped} skipped")
+        logger.info(f"[Campaign {campaign_id}] Finished: {final_status} — {sent} sent, {failed} failed, {skipped} skipped (out of {len(members)} total members)")
 
     except Exception as e:
         logger.error(f"[Campaign {campaign_id}] Fatal error: {e}", exc_info=True)

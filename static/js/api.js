@@ -43,23 +43,72 @@ const API = {
   del(path) { return this.request('DELETE', path); },
 
   // Auth & Accounts
+  _accountsPromise: null,
+  clearAccountsCache() {
+    this._accountsPromise = null;
+    sessionStorage.removeItem('tgs_accounts_cache');
+  },
   authStatus() { return this.get('/api/auth/status'); },
-  getAccounts() { return this.get('/api/auth/accounts'); },
-  addAccount(data) { return this.post('/api/auth/accounts', data); },
-  deleteAccount(id) { return this.del(`/api/auth/accounts/${id}`); },
-  togglePremium(id, isPremium) { return this.post(`/api/auth/accounts/${id}/toggle-premium?is_premium=${isPremium}`); },
+  getAccounts() {
+    if (this._accountsPromise) {
+      return this._accountsPromise;
+    }
+    const cached = sessionStorage.getItem('tgs_accounts_cache');
+    if (cached) {
+      try {
+        this._accountsPromise = Promise.resolve(JSON.parse(cached));
+        return this._accountsPromise;
+      } catch (e) {
+        sessionStorage.removeItem('tgs_accounts_cache');
+      }
+    }
+    const p = this.get('/api/auth/accounts')
+      .then(data => {
+        if (this._accountsPromise === p) {
+          sessionStorage.setItem('tgs_accounts_cache', JSON.stringify(data));
+        }
+        return data;
+      })
+      .catch(err => {
+        if (this._accountsPromise === p) {
+          this._accountsPromise = null;
+        }
+        throw err;
+      });
+    this._accountsPromise = p;
+    return p;
+  },
+  async addAccount(data) {
+    this.clearAccountsCache();
+    return this.post('/api/auth/accounts', data);
+  },
+  async deleteAccount(id) {
+    this.clearAccountsCache();
+    return this.del(`/api/auth/accounts/${id}`);
+  },
+  async togglePremium(id, isPremium) {
+    this.clearAccountsCache();
+    return this.post(`/api/auth/accounts/${id}/toggle-premium?is_premium=${isPremium}`);
+  },
   getDmStats(id) { return this.get(`/api/auth/accounts/${id}/dm-stats`); },
   sendCode(phone, accountId) { return this.post('/api/auth/send-code', { phone, account_id: accountId }); },
-  verify(phone, code, hash, accountId, password) {
+  async verify(phone, code, hash, accountId, password) {
+    this.clearAccountsCache();
     return this.post('/api/auth/verify', { phone, code, phone_code_hash: hash, account_id: accountId, password });
   },
-  logoutAccount(id) { return this.post(`/api/auth/logout/${id}`); },
+  async logoutAccount(id) {
+    this.clearAccountsCache();
+    return this.post(`/api/auth/logout/${id}`);
+  },
 
   // Chats
   getChats(accountId) { return this.get(`/api/chats?account_id=${accountId}`); },
 
   // Schedules
-  getSchedules() { return this.get('/api/schedules'); },
+  getSchedules(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return this.get('/api/schedules' + (q ? '?' + q : ''));
+  },
   getSchedule(id) { return this.get(`/api/schedules/${id}`); },
   createSchedule(data) { return this.post('/api/schedules', data); },
   updateSchedule(id, data) { return this.put(`/api/schedules/${id}`, data); },
@@ -101,6 +150,7 @@ const API = {
   getWatcherStats() { return this.get('/api/watchers/stats'); },
   testWatcherDM(id, target) { return this.post(`/api/watchers/${id}/test-dm`, { target }); },
   checkMembership(account_ids, group_ids) { return this.post('/api/watchers/check-membership', { account_ids, group_ids }); },
+  joinChannel(account_id, channel_link) { return this.post('/api/members/join-channel', { account_id, channel_link: String(channel_link) }); },
 
   // Settings
   getSetting(key) { return this.get(`/api/settings/${key}`); },
@@ -186,15 +236,43 @@ const MembersAPI = {
     apiGet(`/api/members/scrape-jobs/${jobId}?limit=${limit}&offset=${offset}`),
   deleteScrapeJob:   (jobId)      => apiDelete(`/api/members/scrape-jobs/${jobId}`),
 
+  // Batch Scraping
+  batchScrape:        (data)    => apiPost('/api/members/batch-scrape', data),
+  getBatchProgress:   (jobId)   => apiGet(`/api/members/batch-scrape/${jobId}/progress`),
+  resolveChannels:    (data)    => apiPost('/api/members/batch-scrape/resolve', data),
+
   // DM Campaigns
   createCampaign:    (data)       => apiPost('/api/members/campaigns', data),
-  getCampaigns:      ()           => apiGet('/api/members/campaigns'),
+  getCampaigns:      (updatedSince = null) => {
+    const q = updatedSince ? `?updated_since=${encodeURIComponent(updatedSince)}` : '';
+    return apiGet('/api/members/campaigns' + q);
+  },
   getCampaign:       (id)         => apiGet(`/api/members/campaigns/${id}`),
   startCampaign:     (id)         => apiPost(`/api/members/campaigns/${id}/start`, {}),
   stopCampaign:      (id)         => apiPost(`/api/members/campaigns/${id}/stop`, {}),
+  cancelSchedule:    (id)         => apiPost(`/api/members/campaigns/${id}/cancel-schedule`, {}),
   deleteCampaign:    (id)         => apiDelete(`/api/members/campaigns/${id}`),
+  cloneCampaign:     (id, data)   => apiPost(`/api/members/campaigns/${id}/clone`, data || {}),
+  updateCampaignMessages: (id, data) => apiPut(`/api/members/campaigns/${id}/messages`, data),
   getCampaignLogs:   (id, limit = 200) =>
     apiGet(`/api/members/campaigns/${id}/logs?limit=${limit}`),
+};
+
+// ── Invite Campaigns API ─────────────────────────────────────────────────────
+const InviteAPI = {
+  getCampaigns:      (updatedSince = null) => {
+    const q = updatedSince ? `?updated_since=${encodeURIComponent(updatedSince)}` : '';
+    return apiGet('/api/invite-campaigns' + q);
+  },
+  getCampaign:       (id)         => apiGet(`/api/invite-campaigns/${id}`),
+  createCampaign:    (data)       => apiPost('/api/invite-campaigns', data),
+  updateCampaign:    (id, data)   => apiPut(`/api/invite-campaigns/${id}`, data),
+  deleteCampaign:    (id)         => apiDelete(`/api/invite-campaigns/${id}`),
+  startCampaign:     (id)         => apiPost(`/api/invite-campaigns/${id}/start`, {}),
+  stopCampaign:      (id)         => apiPost(`/api/invite-campaigns/${id}/stop`, {}),
+  getCampaignLogs:   (id, limit = 200) =>
+    apiGet(`/api/invite-campaigns/${id}/logs?limit=${limit}`),
+  resolveGroup:      (identifier) => apiPost('/api/invite-campaigns/resolve-group', { identifier }),
 };
 
 

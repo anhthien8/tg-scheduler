@@ -12,8 +12,8 @@ router = APIRouter(prefix="/api/schedules", tags=["schedules"])
 
 
 @router.get("")
-async def list_schedules():
-    schedules = await db.get_all_schedules()
+async def list_schedules(limit: int = None, active_only: bool = False):
+    schedules = await db.get_all_schedules(limit=limit, active_only=active_only)
     for s in schedules:
         s["next_run"] = sch.get_next_run(s["id"])
     return {"schedules": schedules}
@@ -40,8 +40,7 @@ async def create_schedule(data: ScheduleCreate):
 
 @router.put("/{schedule_id}")
 async def update_schedule(schedule_id: int, data: ScheduleUpdate):
-    existing = await db.get_schedule(schedule_id)
-    if not existing:
+    if not await db.schedule_exists(schedule_id):
         raise HTTPException(404, "Schedule not found")
     payload = data.model_dump()
     await db.update_schedule(schedule_id, payload)
@@ -55,8 +54,7 @@ async def update_schedule(schedule_id: int, data: ScheduleUpdate):
 
 @router.delete("/{schedule_id}")
 async def delete_schedule(schedule_id: int):
-    existing = await db.get_schedule(schedule_id)
-    if not existing:
+    if not await db.schedule_exists(schedule_id):
         raise HTTPException(404, "Schedule not found")
     sch.remove_schedule_job(schedule_id)
     await db.delete_schedule(schedule_id)
@@ -78,8 +76,7 @@ async def toggle_schedule(schedule_id: int):
 
 @router.post("/{schedule_id}/send-now")
 async def send_now(schedule_id: int):
-    schedule = await db.get_schedule(schedule_id)
-    if not schedule:
+    if not await db.schedule_exists(schedule_id):
         raise HTTPException(404, "Schedule not found")
     await mq.enqueue_schedule(schedule_id)
     return {"success": True, "message": "Đã đưa vào hàng đợi gửi"}
@@ -121,8 +118,7 @@ async def preview(schedule_id: int):
 @router.post("/{schedule_id}/reset-count")
 async def reset_count(schedule_id: int):
     """Reset the send counter for a schedule."""
-    schedule = await db.get_schedule(schedule_id)
-    if not schedule:
+    if not await db.schedule_exists(schedule_id):
         raise HTTPException(404, "Schedule not found")
     await db.reset_send_count(schedule_id)
     return {"success": True, "message": "Đã reset số lần gửi"}
@@ -131,8 +127,7 @@ async def reset_count(schedule_id: int):
 @router.get("/{schedule_id}/blocked-targets")
 async def get_blocked_targets(schedule_id: int):
     """Get all (account, chat) pairs blocked due to repeated failures."""
-    schedule = await db.get_schedule(schedule_id)
-    if not schedule:
+    if not await db.schedule_exists(schedule_id):
         raise HTTPException(404, "Schedule not found")
     blocks = await db.get_blocked_targets(schedule_id)
     return {"blocked": blocks, "count": len(blocks)}

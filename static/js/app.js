@@ -1,3 +1,13 @@
+function debounce(func, delay = 250) {
+  let timeoutId;
+  return function (...args) {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      func.apply(this, args);
+    }, delay);
+  };
+}
+
 function accDisplayName(a){if(!a)return'?';const ui=a.user_info;if(ui&&(ui.first_name||ui.last_name)){return[ui.first_name,ui.last_name].filter(Boolean).join(' ');}return a.name||'?';}
 function customConfirm(msg){return new Promise(r=>{const o=document.getElementById('confirm-modal');document.getElementById('confirm-msg').textContent=msg;o.classList.add('open');document.getElementById('confirm-yes').onclick=()=>{o.classList.remove('open');r(true)};document.getElementById('confirm-no').onclick=()=>{o.classList.remove('open');r(false)}})}
 
@@ -48,7 +58,7 @@ if(e.message.includes('2FA')){document.getElementById('login-step-otp').classLis
 
 async verify2FAFirst(){const pw=document.getElementById('login-password').value;try{const r=await API.verify(this.loginPhone,document.getElementById('login-code').value.trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('Đăng nhập thành công!','success');this.showDashboard(r)}catch(e){this.toast(e.message,'error')}},
 
-navigate(page){this.currentPage=page;if(page==='channels'){this._populateChAccountSelect();}if(page==='members'){Members.populateAccounts();}document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
+navigate(page){this.currentPage=page;try{if(page==='channels'){this._populateChAccountSelect();}}catch(e){console.error('channels populate error:',e);}try{if(page==='members'){Members.populateAccounts();}}catch(e){console.error('members populate error:',e);}document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
 // Close sidebar on mobile after navigation
 if(window.innerWidth<=768){const sb=document.getElementById('sidebar');const ov=document.getElementById('sidebar-overlay');if(sb)sb.classList.remove('open');if(ov)ov.classList.remove('open');}
 
@@ -90,6 +100,119 @@ if(page==='discord'){
   Discord.init();
   return;
 }
+
+// AI Follow-Up Sales Agent Page
+if(page==='ai-followup'){
+  if(!document.getElementById('view-ai-followup')){
+    const aiHtml = `<div id="view-ai-followup">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <div>
+          <h2 class="page-title" style="margin-bottom:4px">🤖 AI Sales Agent (Follow-Up & Onboarding)</h2>
+          <p class="page-subtitle" style="margin:0">Tự động nhắn tin tương tác, giải đáp thắc mắc và chốt deal/onboard người dùng khi họ phản hồi DM</p>
+        </div>
+      </div>
+
+      <!-- Agent Settings Card -->
+      <div class="card" style="padding:20px;margin-bottom:24px;border:1px solid rgba(139,92,246,0.3);border-radius:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <h3 style="margin:0;font-size:16px;display:flex;align-items:center;gap:8px">
+            <span>⚙️ Kịch Bản & Cấu Hình Agent</span>
+          </h3>
+          <label class="toggle">
+            <input type="checkbox" id="aifu-enabled">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div>
+            <label class="form-label" style="font-weight:600">🎯 Sales Persona & Strategy (Kịch bản tư vấn)</label>
+            <textarea id="aifu-sys-prompt" class="form-input" rows="6" placeholder="Nhập vai AI chuyên gia tư vấn..."></textarea>
+            <div style="font-size:11px;color:var(--text2);margin-top:4px">Mô tả tính cách, xưng hô và cách khéo léo chốt deal/gửi link onboard.</div>
+          </div>
+          <div>
+            <label class="form-label" style="font-weight:600">📚 Knowledge Base (Thông tin Sản Phẩm & Giá)</label>
+            <textarea id="aifu-kb" class="form-input" rows="6" placeholder="Thông tin sản phẩm, bảng giá, FAQ, link onboard..."></textarea>
+            <div style="font-size:11px;color:var(--text2);margin-top:4px">AI sẽ sử dụng thông tin này để trả lời thắc mắc của khách hàng.</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:16px;margin-top:16px">
+          <div>
+            <label class="form-label" style="font-weight:600">🔢 Số câu AI tự trả lời tối đa / user</label>
+            <input type="number" id="aifu-max-replies" class="form-input" min="1" max="20" value="5">
+          </div>
+          <div>
+            <label class="form-label" style="font-weight:600">🛑 Từ khóa bàn giao người thật (phân cách bằng dấu phẩy)</label>
+            <input type="text" id="aifu-handover-kw" class="form-input" placeholder="gặp admin, tư vấn viên, số điện thoại, lừa đảo...">
+          </div>
+        </div>
+
+        <div style="text-align:right;margin-top:16px">
+          <button class="btn btn-primary" onclick="AIFollowUp.saveSettings()">💾 Lưu Cấu Hình Sales Agent</button>
+        </div>
+      </div>
+
+      <!-- Live Lead Chat History Table -->
+      <div class="card" style="padding:20px;border-radius:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <h3 style="margin:0;font-size:16px">💬 Danh Sách Lead Tương Tác & Handover</h3>
+          <div style="display:flex;gap:10px;align-items:center">
+            <select id="aifu-chat-status-filter" class="form-select" style="max-width:180px" onchange="AIFollowUp.loadChats()">
+              <option value="">Tất cả trạng thái</option>
+              <option value="active">🤖 AI Active</option>
+              <option value="needs_human">⚠️ Cần Người Thật</option>
+              <option value="onboarded">✅ Onboarded</option>
+              <option value="paused_admin">⏸ Tắt AI (Handover)</option>
+            </select>
+            <button class="btn btn-sm btn-ghost" onclick="AIFollowUp.loadChats()">🔄 Làm mới</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Người Dùng</th>
+                <th>Tài Khoản Tele</th>
+                <th>Số Lượt Chat</th>
+                <th>Trạng Thái</th>
+                <th>Cập Nhật Lần Cuối</th>
+                <th>Hành Động</th>
+              </tr>
+            </thead>
+            <tbody id="aifu-chats-table-body">
+              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text2)">Đang tải cuộc trò chuyện...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Chat History Modal -->
+      <div id="aifu-history-modal" class="modal-overlay">
+        <div class="modal" style="max-width:650px">
+          <div class="modal-header">
+            <h3 id="aifu-modal-title" style="margin:0">Lịch sử trò chuyện</h3>
+            <button class="modal-close" onclick="AIFollowUp.closeHistoryModal()">&times;</button>
+          </div>
+          <div class="modal-body" style="max-height:450px;overflow-y:auto;padding:16px" id="aifu-modal-chat-box">
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = aiHtml;
+    document.querySelector('.main').appendChild(wrapper.firstElementChild);
+  }
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('view-ai-followup').classList.remove('hidden');
+  AIFollowUp.init();
+  return;
+}
+
 
 // Analytics Dashboard
 if(page==='analytics'){
@@ -170,11 +293,12 @@ if(page==='autoreply'){
         <div class="modal">
           <div class="modal-header"><h3 class="modal-title" id="ar-modal-title">Tạo Auto-Reply Rule</h3><button class="modal-close" onclick="document.getElementById('ar-modal').classList.remove('open')">×</button></div>
           <div class="modal-body">
-            <div class="form-group"><label class="form-label">Tên Rule</label><input type="text" id="ar-name" class="form-input" placeholder="VD: Welcome Reply"></div>
-            <div class="form-group"><label class="form-label">Trigger Type</label><select id="ar-trigger-type" class="form-select"><option value="keyword">Keyword Match</option><option value="any">Any Message</option></select></div>
-            <div class="form-group"><label class="form-label">Keywords (phân cách bởi dấu phẩy)</label><input type="text" id="ar-keywords" class="form-input" placeholder="hello, hi, xin chào"></div>
-            <div class="form-group"><label class="form-label">Nội dung Reply</label><textarea id="ar-reply-content" class="form-textarea" rows="6" placeholder="Nhập tin nhắn reply...&#10;Dùng --- để tách nhiều tin"></textarea></div>
-            <div class="form-group"><label class="form-label">Max replies per user</label><input type="number" id="ar-max-replies" class="form-input" value="3" min="1" max="50"></div>
+            <div class="form-group"><label class="form-label">Tên Rule <span style="cursor:help;opacity:.6" title="Đặt tên để dễ quản lý, VD: Chào mừng khách mới">ℹ️</span></label><input type="text" id="ar-name" class="form-input" placeholder="VD: Welcome Reply"></div>
+            <div class="form-group"><label class="form-label">Trigger Type <span style="cursor:help;opacity:.6" title="Keyword Match: Bot reply khi tin nhắn chứa từ khóa nhất định\nAny Message: Bot reply mọi tin nhắn đến (không cần keyword)">ℹ️</span></label><select id="ar-trigger-type" class="form-select" onchange="document.getElementById('ar-keywords-group').style.display=this.value==='keyword'?'block':'none'"><option value="keyword">Keyword Match</option><option value="any">Any Message</option></select></div>
+            <div class="form-group" id="ar-keywords-group"><label class="form-label">Keywords <span style="cursor:help;opacity:.6" title="Danh sách từ khóa, phân cách bởi dấu phẩy.\nKhi ai đó nhắn tin chứa 1 trong các từ này → bot sẽ tự động reply">ℹ️</span></label><input type="text" id="ar-keywords" class="form-input" placeholder="hello, hi, xin chào, hợp tác"></div>
+            <div class="form-group"><label class="form-label">Tài khoản áp dụng <span style="cursor:help;opacity:.6" title="Chọn tài khoản Telegram nào sẽ tự động reply.\nKhi có người nhắn tin đến tài khoản được chọn → bot auto reply.\nBỏ trống = áp dụng cho TẤT CẢ tài khoản">ℹ️</span></label><div id="ar-accounts-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"><span style="color:var(--text2);font-size:12px">Đang tải...</span></div></div>
+            <div class="form-group"><label class="form-label">Nội dung Reply <span style="cursor:help;opacity:.6" title="Tin nhắn bot sẽ tự động gửi lại.\nDùng --- (trên 1 dòng riêng) để tách thành nhiều tin nhắn.\nVD:\nChào bạn!\n---\nMình có thể giúp gì?">ℹ️</span></label><textarea id="ar-reply-content" class="form-textarea" rows="6" placeholder="Nhập tin nhắn reply...&#10;Dùng --- để tách nhiều tin"></textarea></div>
+            <div class="form-group"><label class="form-label">Max replies per user <span style="cursor:help;opacity:.6" title="Số lần reply tối đa cho mỗi user.\nTránh spam: bot chỉ reply tối đa N lần cho cùng 1 người">ℹ️</span></label><input type="number" id="ar-max-replies" class="form-input" value="3" min="1" max="50"></div>
           </div>
           <div class="modal-footer"><button class="btn btn-primary" onclick="AutoReply.save()">💾 Lưu</button></div>
         </div>
@@ -197,6 +321,250 @@ if(page==='autoreply'){
   return;
 }
 
+// Warmup Nhom
+if(page==='warmup'){
+  if(!document.getElementById('view-warmup')){
+    const html = `<div id="view-warmup">
+      <h2 class="page-title">Warmup Nhom</h2>
+
+      <!-- Stats -->
+      <div class="stats-grid" id="warmup-stats" style="margin-bottom:20px"></div>
+
+      <!-- Groups -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="margin:0">Nhom</h3>
+        <button class="btn btn-primary btn-sm" onclick="Warmup.openAddGroup()">+ Them nhom</button>
+      </div>
+      <div id="warmup-group-list"></div>
+
+      <!-- Scripts (shown after selecting group) -->
+      <div id="warmup-scripts-section" class="hidden" style="margin-top:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0" id="warmup-scripts-title">Scripts</h3>
+          <button class="btn btn-primary btn-sm" onclick="Warmup.openAddScript()">+ Them script</button>
+        </div>
+        <div id="warmup-script-list"></div>
+      </div>
+
+      <!-- Jobs -->
+      <div style="margin-top:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0">Jobs</h3>
+          <button class="btn btn-primary btn-sm" onclick="Warmup.openAddJob()">+ Tao job</button>
+        </div>
+        <div id="warmup-job-list"></div>
+      </div>
+
+      <!-- Logs -->
+      <div style="margin-top:24px">
+        <h3>Logs gan day</h3>
+        <div class="table-wrap">
+          <table class="data-table"><thead><tr>
+            <th>Thoi gian</th><th>Job</th><th>Account</th><th>Noi dung</th><th>Trang thai</th>
+          </tr></thead><tbody id="warmup-log-body"></tbody></table>
+        </div>
+      </div>
+
+      <!-- Add Group Modal -->
+      <div id="warmup-group-modal" class="modal-overlay">
+        <div class="modal">
+          <div class="modal-header"><h3 class="modal-title">Them nhom warmup</h3><button class="modal-close" onclick="document.getElementById('warmup-group-modal').classList.remove('open')">x</button></div>
+          <div class="modal-body">
+            <div class="form-group"><label class="form-label">Ten nhom</label><input type="text" id="wg-name" class="form-input" placeholder="VD: Crypto VN"></div>
+            <div class="form-group"><label class="form-label">Chat ID</label><input type="text" id="wg-chat-id" class="form-input" placeholder="ID nhom Telegram"></div>
+            <div class="form-group"><label class="form-label">Tieu de</label><input type="text" id="wg-chat-title" class="form-input" placeholder="Tieu de nhom (tuy chon)"></div>
+            <div class="form-group"><label class="form-label">Username</label><input type="text" id="wg-chat-username" class="form-input" placeholder="@username (tuy chon)"></div>
+          </div>
+          <div class="modal-footer"><button class="btn btn-primary" onclick="Warmup.saveGroup()">Luu</button></div>
+        </div>
+      </div>
+
+      <!-- Add Script Modal -->
+      <div id="warmup-script-modal" class="modal-overlay">
+        <div class="modal">
+          <div class="modal-header"><h3 class="modal-title">Them script</h3><button class="modal-close" onclick="document.getElementById('warmup-script-modal').classList.remove('open')">x</button></div>
+          <div class="modal-body">
+            <div class="form-group"><label class="form-label">Noi dung</label><textarea id="ws-content" class="form-textarea" rows="5" placeholder="Noi dung tin nhan warmup..."></textarea></div>
+            <div class="form-group" style="display:flex;align-items:center;gap:8px">
+              <input type="checkbox" id="ws-ai-remix" checked>
+              <label for="ws-ai-remix" style="cursor:pointer">AI Remix</label>
+            </div>
+          </div>
+          <div class="modal-footer"><button class="btn btn-primary" onclick="Warmup.saveScript()">Luu</button></div>
+        </div>
+      </div>
+
+      <!-- Add Job Modal -->
+      <div id="warmup-job-modal" class="modal-overlay">
+        <div class="modal">
+          <div class="modal-header"><h3 class="modal-title">Tao warmup job</h3><button class="modal-close" onclick="document.getElementById('warmup-job-modal').classList.remove('open')">x</button></div>
+          <div class="modal-body">
+            <div class="form-group"><label class="form-label">Nhom</label><select id="wj-group" class="form-select"></select></div>
+            <div class="form-group"><label class="form-label">Tai khoan</label><div id="wj-accounts" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"></div></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div class="form-group"><label class="form-label">Interval min (phut)</label><input type="number" id="wj-interval-min" class="form-input" value="30"></div>
+              <div class="form-group"><label class="form-label">Interval max (phut)</label><input type="number" id="wj-interval-max" class="form-input" value="120"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div class="form-group"><label class="form-label">Bat dau</label><input type="time" id="wj-start" class="form-input" value="09:00"></div>
+              <div class="form-group"><label class="form-label">Ket thuc</label><input type="time" id="wj-end" class="form-input" value="22:00"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Gioi han/ngay</label><input type="number" id="wj-daily-limit" class="form-input" value="10"></div>
+          </div>
+          <div class="modal-footer"><button class="btn btn-primary" onclick="Warmup.saveJob()">Tao</button></div>
+        </div>
+      </div>
+
+      <!-- Job Logs Modal -->
+      <div id="warmup-logs-modal" class="modal-overlay">
+        <div class="modal" style="max-width:700px">
+          <div class="modal-header"><h3 class="modal-title">Job Logs</h3><button class="modal-close" onclick="document.getElementById('warmup-logs-modal').classList.remove('open')">x</button></div>
+          <div class="modal-body"><div class="table-wrap"><table><thead><tr><th>Thoi gian</th><th>Account</th><th>Noi dung</th><th>Trang thai</th></tr></thead><tbody id="warmup-job-logs-body"></tbody></table></div></div>
+        </div>
+      </div>
+
+    </div>`;
+    const w = document.createElement('div'); w.innerHTML = html;
+    document.querySelector('.main').appendChild(w.firstElementChild);
+  }
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('view-warmup').classList.remove('hidden');
+  Warmup.init();
+  return;
+}
+
+// ── Changelog page ──
+if(page==='changelog'){
+  if(!document.getElementById('view-changelog')){
+    const CHANGELOG = [
+      {
+        version: '2.8.0', date: '2026-08-01', tag: 'latest',
+        changes: [
+          { type: 'fix', text: 'Sửa lỗi campaign dừng sớm — chỉ gửi 66/1600+ members do accounts exhausted ghi đè status thành "completed"' },
+          { type: 'fix', text: 'PeerFlood accounts giờ sẽ tự phục hồi sau cooldown 2-5 phút thay vì bị loại vĩnh viễn' },
+          { type: 'fix', text: 'Daily limit không còn co rút khi accounts bị flood — dùng tổng sender ban đầu' },
+          { type: 'improve', text: 'Thêm diagnostic logging chi tiết trước mỗi campaign: tổng members, đã gửi, cross-excluded, blacklisted' },
+          { type: 'new', text: 'Thêm trang Changelog để theo dõi lịch sử cập nhật phần mềm' },
+        ]
+      },
+      {
+        version: '2.7.0', date: '2026-07-24',
+        changes: [
+          { type: 'new', text: 'AI Sales Agent — tự động phản hồi DM bằng AI để chốt deal & onboard khách hàng' },
+          { type: 'new', text: 'Hỗ trợ đa nhà cung cấp AI: Gemini, Groq, OpenAI, DeepSeek, OpenAI-Compatible' },
+          { type: 'improve', text: 'Auto-fallback AI provider — tự chuyển sang provider khác nếu provider chính thiếu key' },
+          { type: 'fix', text: 'Sửa lỗi Settings không lưu được khi F5 (save_setting alias)' },
+        ]
+      },
+      {
+        version: '2.6.0', date: '2026-07-22',
+        changes: [
+          { type: 'new', text: 'AI Remix nội dung DM — mỗi tin nhắn được AI viết lại khác nhau chống spam' },
+          { type: 'new', text: 'SpamBot pre-check — tự kiểm tra account bị spam-limited trước khi chạy campaign' },
+          { type: 'improve', text: 'Cross-campaign dedup — loại trừ user đã nhận DM từ campaign/watcher khác' },
+          { type: 'improve', text: 'Auto-join nhóm nếu account chưa join source group khi gửi DM' },
+        ]
+      },
+      {
+        version: '2.5.0', date: '2026-07-17',
+        changes: [
+          { type: 'new', text: 'Smart Template Rotation — xoay vòng variant template thông minh dựa trên hiệu suất' },
+          { type: 'new', text: 'Warmup Module — tự join/chat nhóm để làm nóng account mới' },
+          { type: 'new', text: 'Daily Summary — báo cáo tổng hợp cuối ngày tự động' },
+          { type: 'new', text: 'Auto-Pause khi phát hiện account bị restricted' },
+        ]
+      },
+      {
+        version: '2.4.0', date: '2026-07-15',
+        changes: [
+          { type: 'new', text: 'Batch Scrape — scrape members từ nhiều nhóm cùng lúc' },
+          { type: 'new', text: 'Invite Module — mời members vào nhóm/kênh chỉ định' },
+          { type: 'improve', text: 'Cải thiện round-robin account selection với anti-ban backoff' },
+        ]
+      },
+      {
+        version: '2.3.0', date: '2026-07-12',
+        changes: [
+          { type: 'new', text: 'DM Campaign — gửi DM hàng loạt đến members đã scrape' },
+          { type: 'new', text: 'Blacklist management — quản lý danh sách chặn user' },
+          { type: 'new', text: 'Image randomization — thay đổi hash ảnh chống phát hiện trùng lặp' },
+          { type: 'fix', text: 'Sửa lỗi FloodWait không đợi đúng thời gian Telegram yêu cầu' },
+        ]
+      },
+      {
+        version: '2.2.0', date: '2026-07-09',
+        changes: [
+          { type: 'new', text: 'Analytics Dashboard — thống kê hiệu suất gửi tin, biểu đồ trực quan' },
+          { type: 'new', text: 'Template Library — lưu trữ & quản lý mẫu tin nhắn' },
+          { type: 'new', text: 'Auto-Reply Chatbot — tự động trả lời keyword trong nhóm' },
+        ]
+      },
+      {
+        version: '2.1.0', date: '2026-07-04',
+        changes: [
+          { type: 'new', text: 'Discord Bot integration — quản lý bot Discord, keyword watchers' },
+          { type: 'improve', text: 'Reactions Module — tự động react tin nhắn trong kênh/nhóm' },
+        ]
+      },
+      {
+        version: '2.0.0', date: '2026-06-20',
+        changes: [
+          { type: 'new', text: 'Thiết kế lại toàn bộ UI — Dark theme premium với Glassmorphism' },
+          { type: 'new', text: 'Multi-account management — quản lý nhiều tài khoản Telegram' },
+          { type: 'new', text: 'Scheduled posting — đặt lịch gửi tin theo múi giờ quốc gia' },
+          { type: 'new', text: 'Keyword Watchers — theo dõi keyword & auto-DM members mới' },
+          { type: 'new', text: 'Inbox — xem & quản lý tin nhắn đến từ tất cả accounts' },
+        ]
+      },
+    ];
+
+    const typeIcons = { new: '✨', fix: '🐛', improve: '⚡', security: '🔒', breaking: '💥' };
+    const typeLabels = { new: 'Tính năng mới', fix: 'Sửa lỗi', improve: 'Cải thiện', security: 'Bảo mật', breaking: 'Breaking' };
+    const typeBadgeClass = { new: 'cl-badge-new', fix: 'cl-badge-fix', improve: 'cl-badge-improve', security: 'cl-badge-security', breaking: 'cl-badge-breaking' };
+
+    const entriesHtml = CHANGELOG.map((entry, idx) => {
+      const changesHtml = entry.changes.map(c => `
+        <div class="cl-change">
+          <span class="cl-badge ${typeBadgeClass[c.type] || 'cl-badge-new'}">${typeIcons[c.type] || '📌'} ${typeLabels[c.type] || c.type}</span>
+          <span class="cl-change-text">${c.text}</span>
+        </div>
+      `).join('');
+      const tagHtml = entry.tag === 'latest' ? '<span class="cl-tag-latest">LATEST</span>' : '';
+      return `
+        <div class="cl-entry ${idx === 0 ? 'cl-entry-latest' : ''}">
+          <div class="cl-entry-header">
+            <div class="cl-version-row">
+              <span class="cl-version">v${entry.version}</span>
+              ${tagHtml}
+            </div>
+            <span class="cl-date">${entry.date}</span>
+          </div>
+          <div class="cl-changes">${changesHtml}</div>
+        </div>
+      `;
+    }).join('');
+
+    const clHtml = `<div id="view-changelog">
+      <div class="cl-header">
+        <div>
+          <h2 class="page-title" style="margin:0">📝 Changelog</h2>
+          <p class="cl-subtitle">Lịch sử cập nhật & phiên bản mới nhất</p>
+        </div>
+        <div class="cl-current-version">
+          <span class="cl-cv-label">Phiên bản hiện tại</span>
+          <span class="cl-cv-number">v${CHANGELOG[0].version}</span>
+        </div>
+      </div>
+      <div class="cl-timeline">${entriesHtml}</div>
+    </div>`;
+    const w = document.createElement('div'); w.innerHTML = clHtml;
+    document.querySelector('.main').appendChild(w.firstElementChild);
+  }
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('view-changelog').classList.remove('hidden');
+  return;
+}
+
 document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
 const viewEl=document.getElementById(`view-${page}`);
 if(viewEl)viewEl.classList.remove('hidden');
@@ -204,15 +572,15 @@ if(viewEl)viewEl.classList.remove('hidden');
 if(page==='dashboard')this.loadDashboard();else if(page==='schedules')this.loadSchedules();else if(page==='accounts')this.loadAccounts();else if(page==='logs')this.loadLogs();else if(page==='watchers')this.loadWatchers();else if(page==='watcher-logs')this.loadWatcherLogs();else if(page==='channels')this.loadChannels();else if(page==='settings')this.loadSettings();else if(page==='reactions')Reactions.init();else if(page==='members')Members.init()},
 
 
-async loadDashboard(){try{const[stats,sd]=await Promise.all([API.getStats(),API.getSchedules()]);
+async loadDashboard(){try{const[stats,sd]=await Promise.all([API.getStats(),API.getSchedules({active_only: true, limit: 10})]);
 
 document.getElementById('stat-accounts').textContent=stats.total_accounts;document.getElementById('stat-active').textContent=stats.active_schedules;document.getElementById('stat-total').textContent=stats.total_schedules;document.getElementById('stat-today').textContent=stats.today;document.getElementById('stat-success').textContent=stats.success;document.getElementById('stat-failed').textContent=stats.failed;
 
-const active=sd.schedules.filter(s=>s.is_active&&s.next_run);const tbody=document.getElementById('upcoming-body');
+const active=sd.schedules.filter(s=>s.next_run);const tbody=document.getElementById('upcoming-body');
 
 if(!active.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:24px">Không có lịch nào sắp tới</td></tr>';return}
 
-tbody.innerHTML=active.slice(0,10).map(s=>{const sends=s.max_sends?`${s.current_sends||0}/${s.max_sends}`:(s.current_sends||0);return`<tr><td>${esc(s.name)}</td><td>${esc(s.account_name||'—')}</td><td><span class="badge badge-blue">${s.schedule_type}</span></td><td>${s.time_of_day}</td><td>${formatDate(s.next_run)}</td><td>${sends}</td></tr>`}).join('')}catch(e){this.toast('Lỗi: '+e.message,'error')}},
+tbody.innerHTML=active.map(s=>{const sends=s.max_sends?`${s.current_sends||0}/${s.max_sends}`:(s.current_sends||0);return`<tr><td>${esc(s.name)}</td><td>${esc(s.account_name||'—')}</td><td><span class="badge badge-blue">${s.schedule_type}</span></td><td>${s.time_of_day}</td><td>${formatDate(s.next_run)}</td><td>${sends}</td></tr>`}).join('')}catch(e){this.toast('Lỗi: '+e.message,'error')}},
 
 async loadAccounts(){try{const d=await API.getAccounts();this.accounts=d.accounts;App._accounts=d.accounts;const grid=document.getElementById('accounts-grid');
 
@@ -220,14 +588,18 @@ if(!this.accounts.length){grid.innerHTML='<div class="empty-state"><div class="e
 
 grid.innerHTML=this.accounts.map(a=>{const logged=a.is_logged_in;const ui=a.user_info;const name=ui?[ui.first_name,ui.last_name].filter(Boolean).join(' '):a.name;const uname=ui?`@${ui.username||ui.phone}`:`@${a.phone}`;
 
-return`<div class="account-card"><div class="account-card-header"><div class="account-avatar">${logged?'🟢':'🔴'}</div><div><strong>${esc(name)}</strong><br><small style="color:var(--text2)">${esc(uname)}</small></div></div><div class="account-card-body"><div><small>API ID: ${a.api_id}</small></div><div><small>Session: ${a.session_name}</small></div>${a.proxy_url?`<div style="font-size:.75rem;color:#a78bfa;margin-top:.2rem">🔒 ${esc(a.proxy_url.replace(/:([^:@]+)@/,':***@'))}</div>`:''}<div style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="badge ${logged?'badge-green':'badge-red'}">${logged?'Online':'Offline'}</span><span style="cursor:pointer;background:${a.is_premium?'rgba(251,191,36,.18)':'rgba(255,255,255,.07)'};border:1px solid ${a.is_premium?'rgba(251,191,36,.5)':'rgba(255,255,255,.12)'};border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:${a.is_premium?'#fbbf24':'#888'}" onclick="App.togglePremium(${a.id},${a.is_premium?'false':'true'})" title="Click để ${a.is_premium?'bỏ':'bật'} Premium (${a.is_premium?50:10}→${a.is_premium?10:50} DM/ngày)">${a.is_premium?'⭐ Premium':'⬜ Thường'}</span>${a.is_flagged?`<span style="background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:#f87171;cursor:pointer" onclick="App.unflagAccount(${a.id})" title="${esc(a.flag_reason||'')}
-Click để bỏ cảnh báo">⚠️ Cảnh báo</span>`:''}</div><div style="margin-top:4px"><small style="color:#6b7280">DM limit: ${a.is_premium?'50':'10'}/ngày</small></div></div><div class="account-card-actions">${!logged?`<button class="btn btn-primary btn-sm" onclick="App.loginAccount(${a.id},'${a.phone}')">Login</button>`:''}<button class="btn btn-danger btn-sm" onclick="App.deleteAccount(${a.id})">Xóa</button></div></div>`}).join('')}catch(e){this.toast(e.message,'error')}},
+return`<div class="account-card" data-account-id="${a.id}"><div class="account-card-header"><div class="account-avatar">${logged?'🟢':'🔴'}</div><div><strong>${esc(name)}</strong><br><small style="color:var(--text2)">${esc(uname)}</small></div></div><div class="account-card-body"><div><small>API ID: ${a.api_id}</small></div><div><small>Session: ${a.session_name}</small></div>${a.proxy_url?`<div style="font-size:.75rem;color:#a78bfa;margin-top:.2rem">🔒 ${esc(a.proxy_url.replace(/:([^:@]+)@/,':***@'))}</div>`:''}<div style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="badge ${logged?'badge-green':'badge-red'}">${logged?'Online':'Offline'}</span><span class="spam-badge-slot"></span><span style="cursor:pointer;background:${a.is_premium?'rgba(251,191,36,.18)':'rgba(255,255,255,.07)'};border:1px solid ${a.is_premium?'rgba(251,191,36,.5)':'rgba(255,255,255,.12)'};border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:${a.is_premium?'#fbbf24':'#888'}" onclick="App.togglePremium(${a.id},${a.is_premium?'false':'true'})" title="Click để ${a.is_premium?'bỏ':'bật'} Premium (${a.is_premium?50:10}→${a.is_premium?10:50} DM/ngày)">${a.is_premium?'⭐ Premium':'⬜ Thường'}</span>${a.is_flagged?`<span style="background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:#f87171;cursor:pointer" onclick="App.unflagAccount(${a.id})" title="${esc(a.flag_reason||'')}
+Click để bỏ cảnh báo">⚠️ Cảnh báo</span>`:''}
+${a.is_paused?`<span style="background:rgba(251,146,60,.18);border:1px solid rgba(251,146,60,.5);border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:#fb923c;cursor:pointer" onclick="App.unpauseAccount(${a.id})" title="${esc(a.pause_reason||'')}
+Click để bỏ tạm dừng">⏸️ Tạm dừng</span>`:''}</div><div style="margin-top:4px"><small style="color:#6b7280">DM limit: ${a.is_premium?'50':'10'}/ngày</small></div></div><div class="account-card-actions">${!logged?`<button class="btn btn-primary btn-sm" onclick="App.loginAccount(${a.id},'${a.phone}')">Login</button>`:''}<button class="btn btn-danger btn-sm" onclick="App.deleteAccount(${a.id})">Xóa</button></div></div>`}).join('')}catch(e){this.toast(e.message,'error')}},
 
 openAddAccountModal(){document.getElementById('acc-step-info').classList.remove('hidden');document.getElementById('acc-step-otp').classList.add('hidden');document.getElementById('acc-step-2fa').classList.add('hidden');document.getElementById('acc-phone').value='';const proxyEl=document.getElementById('acc-proxy');if(proxyEl)proxyEl.value='';document.getElementById('account-modal').classList.add('open')},
 
 closeAccountModal(){document.getElementById('account-modal').classList.remove('open')},
 
-async unflagAccount(accId){if(!await customConfirm('Bỏ cảnh báo tài khoản này?'))return;try{await fetch(`/api/auth/accounts/${accId}/unflag`,{method:'POST'});this.toast('Đã bỏ cảnh báo','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
+async unflagAccount(accId){if(!await customConfirm('Bỏ cảnh báo tài khoản này?'))return;try{await fetch(`/api/auth/accounts/${accId}/unflag`,{method:'POST'});API.clearAccountsCache();this.toast('Đã bỏ cảnh báo','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
+
+async unpauseAccount(accId){if(!await customConfirm('Bỏ tạm dừng tài khoản này? Tài khoản sẽ hoạt động lại bình thường.'))return;try{await fetch(`/api/auth/accounts/${accId}/unpause`,{method:'POST'});API.clearAccountsCache();this.toast('Đã bỏ tạm dừng','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
 
 async _populateLogAccountFilter(){const sel=document.getElementById('log-filter-account');if(!sel)return;const accs=this.accounts||App._accounts||[];if(!sel.options.length||sel.options.length===1){while(sel.options.length>1)sel.remove(1);accs.forEach(a=>{const opt=document.createElement('option');opt.value=a.id;opt.textContent=a.name||a.phone;sel.appendChild(opt);});} },
 
@@ -378,7 +750,7 @@ renderChatList(chats){const el=document.getElementById('chat-list');if(!chats.le
 
 el.innerHTML=chats.map(c=>{const icon=c.chat_type==='channel'?'📢':c.chat_type==='supergroup'?'👥':'💬';return`<label class="chat-item"><input type="checkbox" value="${c.chat_id}" data-title="${esc(c.chat_title)}" data-type="${c.chat_type}"><span class="chat-type-icon">${icon}</span><span class="chat-name">${esc(c.chat_title)}</span><span class="chat-type-badge">${c.chat_type}</span></label>`}).join('')},
 
-filterChats(){const q=document.getElementById('chat-search').value.toLowerCase();this.renderChatList(this.chats.filter(c=>c.chat_title.toLowerCase().includes(q)))},
+filterChats: debounce(function(){const q=document.getElementById('chat-search').value.toLowerCase();this.renderChatList(this.chats.filter(c=>c.chat_title.toLowerCase().includes(q)))}, 250),
 
 addMessage(type,data=null){const list=document.getElementById('messages-list');const div=document.createElement('div');div.className='msg-item';div.dataset.type=type;
 
@@ -672,7 +1044,7 @@ _renderWatcherChatList(chats,preSelected=null){
 
 _onWatcherGroupToggle(cb){const id=parseInt(cb.value);if(cb.checked)this._watcherSelectedGroups.add(id);else this._watcherSelectedGroups.delete(id)},
 
-filterWatcherChats(){const q=document.getElementById('w-chat-search').value.toLowerCase();this._renderWatcherChatList(this._watcherChats.filter(c=>c.chat_title.toLowerCase().includes(q)))},
+filterWatcherChats: debounce(function(){const q=document.getElementById('w-chat-search').value.toLowerCase();this._renderWatcherChatList(this._watcherChats.filter(c=>c.chat_title.toLowerCase().includes(q)))}, 250),
 
 addWatcherKeyword(){const inp=document.getElementById('w-keyword-input');const v=inp.value.trim();if(!v)return;if(!this._watcherKeywords.includes(v))this._watcherKeywords.push(v);inp.value='';this._renderWatcherKeywords()},
 
@@ -764,13 +1136,28 @@ _showMembershipWarning(warnings, ruleName) {
     html += `<div style="background:rgba(0,0,0,.2);border-radius:8px;padding:.7rem .9rem;margin-bottom:.5rem;">
       <div style="font-weight:600;color:#fbbf24;margin-bottom:.3rem;">📱 ${this._esc(w.account_name)} (ID: ${w.account_id})</div>`;
     w.missing_groups.forEach(g => {
-      html += `<div style="color:var(--text-secondary);font-size:.83rem;padding-left:.5rem;">• Chưa join: <span style="color:#f87171">${this._esc(g.group_title)}</span></div>`;
+      const btnId = `join-btn-${w.account_id}-${g.group_id}`;
+      html += `<div style="display:flex;align-items:center;gap:.5rem;padding-left:.5rem;margin-bottom:2px;">
+        <span style="color:var(--text-secondary);font-size:.83rem;flex:1;">• Chưa join: <span style="color:#f87171">${this._esc(g.group_title)}</span></span>
+        <button id="${btnId}" onclick="App._joinFromWarning(this,${w.account_id},'${g.group_id}')"
+          style="background:#6d28d9;color:#fff;border:none;border-radius:6px;padding:2px 10px;font-size:.75rem;cursor:pointer;white-space:nowrap;font-weight:600;">
+          Join
+        </button>
+      </div>`;
     });
     html += `</div>`;
   });
-  html += `<p style="color:var(--text-secondary);font-size:.82rem;margin-top:.8rem;">
-    💡 <strong>Cách fix:</strong> Dùng Telegram để join các nhóm trên bằng tài khoản được liệt kê.
-  </p></div>`;
+  // "Join tất cả" bulk button
+  html += `<div style="margin-top:.8rem;display:flex;align-items:center;gap:.6rem;">
+    <button id="join-all-missing-btn" onclick="App._joinAllMissing()" 
+      style="background:#6d28d9;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:.85rem;cursor:pointer;font-weight:600;">
+      🚀 Join tất cả
+    </button>
+    <span style="color:var(--text-secondary);font-size:.82rem;">Tự động join tất cả nhóm còn thiếu</span>
+  </div></div>`;
+
+  // Store warnings data for bulk join
+  this._membershipWarnings = warnings;
 
   // Show in a modal
   const modal = document.getElementById('membership-warn-modal');
@@ -794,6 +1181,51 @@ _showMembershipWarning(warnings, ruleName) {
     document.body.appendChild(div);
   }
 },
+
+async _joinFromWarning(btn, accountId, groupId) {
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  btn.style.background = '#555';
+  try {
+    await API.joinChannel(accountId, groupId);
+    btn.textContent = '✅ Joined';
+    btn.style.background = '#16a34a';
+  } catch(e) {
+    btn.textContent = '❌ Lỗi';
+    btn.style.background = '#dc2626';
+    btn.title = e.message || 'Join failed';
+    setTimeout(() => { btn.disabled = false; btn.textContent = 'Join'; btn.style.background = '#6d28d9'; }, 3000);
+  }
+},
+
+async _joinAllMissing() {
+  const btn = document.getElementById('join-all-missing-btn');
+  if(!btn || !this._membershipWarnings) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Đang join...';
+  btn.style.background = '#555';
+  let ok = 0, fail = 0;
+  for(const w of this._membershipWarnings) {
+    for(const g of w.missing_groups) {
+      const itemBtn = document.getElementById(`join-btn-${w.account_id}-${g.group_id}`);
+      if(itemBtn && itemBtn.textContent.includes('✅')) continue; // Already joined
+      if(itemBtn) { itemBtn.disabled = true; itemBtn.textContent = '⏳'; itemBtn.style.background = '#555'; }
+      try {
+        await API.joinChannel(w.account_id, String(g.group_id));
+        ok++;
+        if(itemBtn) { itemBtn.textContent = '✅ Joined'; itemBtn.style.background = '#16a34a'; }
+      } catch(e) {
+        fail++;
+        if(itemBtn) { itemBtn.textContent = '❌ Lỗi'; itemBtn.style.background = '#dc2626'; itemBtn.title = e.message || ''; }
+      }
+      await new Promise(r => setTimeout(r, 2000)); // Delay between joins
+    }
+  }
+  btn.textContent = `✅ Xong (${ok} joined, ${fail} lỗi)`;
+  btn.style.background = ok > 0 ? '#16a34a' : '#dc2626';
+  if(ok > 0) this.toast(`Đã join ${ok} nhóm thành công${fail ? `, ${fail} lỗi` : ''}`, 'success');
+},
+
 
 _esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')},
 
@@ -1114,7 +1546,11 @@ App.loadSettings = async function() {
       API.getSetting('ai_keys_gemini'),
       API.getSetting('ai_keys_deepseek'),
       API.getSetting('ai_keys_openai'),
-      API.getSetting('ai_keys_groq')
+      API.getSetting('ai_keys_groq'),
+      API.getSetting('ai_keys_openai_compatible'),
+      API.getSetting('ai_oai_compat_base_url'),
+      API.getSetting('ai_oai_compat_model'),
+      API.getSetting('ai_custom_prompt')
     ]);
     const provider = res[0].value || '';
     let geminiKeys = [];
@@ -1125,12 +1561,26 @@ App.loadSettings = async function() {
     try { deepseekKeys = JSON.parse(res[2].value || '[]'); } catch(e) {}
     try { openaiKeys   = JSON.parse(res[3].value || '[]'); } catch(e) {}
     try { groqKeys     = JSON.parse(res[4].value || '[]'); } catch(e) {}
+    let oaiCompatKeys = [];
+    try { oaiCompatKeys = JSON.parse(res[5].value || '[]'); } catch(e) {}
+    const oaiCompatBaseUrl = res[6].value || '';
+    const oaiCompatModel   = res[7].value || '';
+    const customPrompt     = res[8].value || '';
+
     document.getElementById('ai-provider-select').value = provider;
     App.renderAiKeysList('gemini',   geminiKeys);
     App.renderAiKeysList('deepseek', deepseekKeys);
     App.renderAiKeysList('openai',   openaiKeys);
     App.renderAiKeysList('groq',     groqKeys);
+    App.renderAiKeysList('openai_compatible', oaiCompatKeys);
+    document.getElementById('oai-compat-base-url').value = oaiCompatBaseUrl;
+    document.getElementById('oai-compat-model').value = oaiCompatModel;
+    const customPromptEl = document.getElementById('ai-custom-prompt');
+    if (customPromptEl) customPromptEl.value = customPrompt;
+
     App.onProviderChange();
+    // Also load proxy status when settings page loads
+    App.loadProxyStatus();
   } catch(e) {
     App.toast('Loi tai cai dat: ' + e.message, 'error');
   }
@@ -1144,7 +1594,112 @@ App.onProviderChange = function() {
   if (openaiEl) openaiEl.classList.toggle('hidden', p !== 'openai');
   const groqEl = document.getElementById('ai-groq-section');
   if (groqEl) groqEl.classList.toggle('hidden', p !== 'groq');
+  const oaiCompatEl = document.getElementById('ai-openai_compatible-section');
+  if (oaiCompatEl) oaiCompatEl.classList.toggle('hidden', p !== 'openai_compatible');
   document.getElementById('test-remix-result').classList.add('hidden');
+};
+
+// Get current model value from either dropdown or text input
+App.getOaiCompatModel = function() {
+  const selectEl = document.getElementById('oai-compat-model-select');
+  const inputEl = document.getElementById('oai-compat-model');
+  // If select is visible and has a value, use it
+  if (selectEl && selectEl.style.display !== 'none' && selectEl.value) {
+    return selectEl.value;
+  }
+  return inputEl ? inputEl.value.trim() : '';
+};
+
+// Fetch available models from OpenAI-compatible API
+App.fetchOaiModels = async function() {
+  const baseUrl = document.getElementById('oai-compat-base-url').value.trim();
+  const statusEl = document.getElementById('oai-models-status');
+  const selectEl = document.getElementById('oai-compat-model-select');
+  const inputEl = document.getElementById('oai-compat-model');
+  const btn = document.getElementById('oai-load-models-btn');
+
+  if (!baseUrl) {
+    App.toast('Nhập Base URL trước', 'error');
+    return;
+  }
+
+  // Get first API key if available
+  const keys = App.collectAiKeys('openai_compatible');
+  const apiKey = keys.length > 0 ? keys[0] : '';
+
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  statusEl.textContent = 'Đang tải danh sách models...';
+  statusEl.style.color = 'var(--text2)';
+
+  try {
+    const resp = await fetch('/api/settings/fetch-models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base_url: baseUrl, api_key: apiKey })
+    });
+    const data = await resp.json();
+
+    if (!data.success) {
+      statusEl.textContent = '❌ ' + (data.error || 'Lỗi không xác định');
+      statusEl.style.color = '#ef4444';
+      return;
+    }
+
+    const models = data.models || [];
+    if (models.length === 0) {
+      statusEl.textContent = '⚠️ API trả về 0 models. Nhập tên model thủ công.';
+      statusEl.style.color = '#f59e0b';
+      return;
+    }
+
+    // Remember current selection
+    const currentModel = inputEl.value.trim() || (selectEl.value || '');
+
+    // Populate dropdown
+    selectEl.innerHTML = '<option value="">-- Chọn model (' + models.length + ' models) --</option>';
+    models.forEach(function(m) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.id + (m.owned_by ? ' (' + m.owned_by + ')' : '');
+      if (m.id === currentModel) opt.selected = true;
+      selectEl.appendChild(opt);
+    });
+
+    // Show dropdown, hide text input
+    selectEl.style.display = '';
+    inputEl.style.display = 'none';
+
+    // Sync select → hidden input for save
+    selectEl.onchange = function() {
+      inputEl.value = selectEl.value;
+    };
+    if (currentModel) {
+      selectEl.value = currentModel;
+      inputEl.value = currentModel;
+    }
+
+    statusEl.textContent = '✅ Đã tải ' + models.length + ' models';
+    statusEl.style.color = '#22c55e';
+
+    // Auto-clear status after 5s
+    setTimeout(() => { statusEl.textContent = ''; }, 5000);
+  } catch (e) {
+    statusEl.textContent = '❌ Lỗi kết nối: ' + e.message;
+    statusEl.style.color = '#ef4444';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 Load';
+  }
+};
+
+// Switch back to manual input mode
+App.switchToManualModelInput = function() {
+  const selectEl = document.getElementById('oai-compat-model-select');
+  const inputEl = document.getElementById('oai-compat-model');
+  selectEl.style.display = 'none';
+  inputEl.style.display = '';
+  inputEl.focus();
 };
 
 App.renderAiKeysList = function(provider, keys) {
@@ -1200,32 +1755,58 @@ App.saveSettings = async function() {
   const deepseekKeys = App.collectAiKeys('deepseek');
   const openaiKeys   = App.collectAiKeys('openai');
   const groqKeys     = App.collectAiKeys('groq');
+  const oaiCompatKeys = App.collectAiKeys('openai_compatible');
   if (provider === 'gemini'   && geminiKeys.length   === 0) { App.toast('Them it nhat 1 Gemini API Key', 'error'); return; }
   if (provider === 'deepseek' && deepseekKeys.length === 0) { App.toast('Them it nhat 1 DeepSeek API Key', 'error'); return; }
   if (provider === 'openai'   && openaiKeys.length   === 0) { App.toast('Them it nhat 1 OpenAI API Key', 'error'); return; }
   if (provider === 'groq'     && groqKeys.length     === 0) { App.toast('Them it nhat 1 Groq API Key', 'error'); return; }
+  if (provider === 'openai_compatible') {
+    const baseUrl = document.getElementById('oai-compat-base-url').value.trim();
+    const model = App.getOaiCompatModel();
+    if (!baseUrl) { App.toast('Nhap Base URL cho OpenAI Compatible', 'error'); return; }
+    if (!model) { App.toast('Nhap Model Name cho OpenAI Compatible', 'error'); return; }
+    if (oaiCompatKeys.length === 0) { App.toast('Them it nhat 1 API Key', 'error'); return; }
+  }
   btn.disabled = true;
   btn.textContent = 'Dang luu...';
   statusEl.textContent = '';
   try {
+    const customPromptVal = (document.getElementById('ai-custom-prompt')?.value || '').trim();
     await Promise.all([
       API.setSetting('ai_provider',       provider),
       API.setSetting('ai_keys_gemini',   JSON.stringify(geminiKeys)),
       API.setSetting('ai_keys_deepseek', JSON.stringify(deepseekKeys)),
       API.setSetting('ai_keys_openai',   JSON.stringify(openaiKeys)),
-      API.setSetting('ai_keys_groq',     JSON.stringify(groqKeys))
+      API.setSetting('ai_keys_groq',     JSON.stringify(groqKeys)),
+      API.setSetting('ai_keys_openai_compatible', JSON.stringify(oaiCompatKeys)),
+      API.setSetting('ai_oai_compat_base_url', document.getElementById('oai-compat-base-url').value.trim()),
+      API.setSetting('ai_oai_compat_model', App.getOaiCompatModel()),
+      API.setSetting('ai_custom_prompt', customPromptVal)
     ]);
-    App.toast('Da luu cai dat AI!', 'success');
-    const cnt = provider === 'gemini' ? geminiKeys.length : (provider === 'deepseek' ? deepseekKeys.length : (provider === 'groq' ? groqKeys.length : openaiKeys.length));
-    const labelMap = { gemini: 'Gemini', deepseek: 'DeepSeek', openai: 'OpenAI', groq: 'Groq' };
+    App.toast('Đã lưu cài đặt AI!', 'success');
+    const cnt = provider === 'gemini' ? geminiKeys.length : (provider === 'deepseek' ? deepseekKeys.length : (provider === 'groq' ? groqKeys.length : (provider === 'openai_compatible' ? oaiCompatKeys.length : openaiKeys.length)));
+    const labelMap = { gemini: 'Gemini', deepseek: 'DeepSeek', openai: 'OpenAI', groq: 'Groq', openai_compatible: 'OpenAI Compatible' };
     statusEl.textContent = provider
-      ? ('Dang dung: ' + (labelMap[provider] || provider) + ' (' + cnt + ' key)')
-      : 'AI Remix dang tat';
+      ? ('Đang dùng: ' + (labelMap[provider] || provider) + ' (' + cnt + ' key)')
+      : 'AI Remix đang tắt';
   } catch(e) {
-    App.toast('Loi luu: ' + e.message, 'error');
+    App.toast('Lỗi lưu: ' + e.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Luu cai dat';
+    btn.textContent = 'Lưu cài đặt';
+  }
+};
+
+App.applyAiPromptPreset = function(type) {
+  const el = document.getElementById('ai-custom-prompt');
+  if (!el) return;
+
+  if (type === 'curiosity') {
+    el.value = "Hãy viết lại tin nhắn theo phong cách cực kỳ ngắn gọn (1-2 câu max), giọng điệu tự nhiên như đồng nghiệp nhắn tin trao đổi kinh nghiệm. Đặt câu hỏi mở ở cuối để kích thích người nhận nhắn tin trả lời lại. Tuyệt đối không dùng từ ngữ chào hàng hay quảng cáo đơn phương.";
+  } else if (type === 'peer') {
+    el.value = "Hãy viết lại tin nhắn ngắn gọn, thân thiện như bạn bè/đồng nghiệp lâu ngày hỏi thăm công việc. Dùng ngôn từ tự nhiên, gần gũi, tuyệt đối không dùng emoji hay từ ngữ bán hàng.";
+  } else if (type === 'clear') {
+    el.value = "";
   }
 };
 
@@ -1249,10 +1830,15 @@ App.testAiRemix = async function() {
   btn.textContent = 'Dang remix...';
   resultBox.classList.add('hidden');
   try {
+    const body = { provider: provider, keys: keys, text: sampleText };
+    if (provider === 'openai_compatible') {
+      body.base_url = document.getElementById('oai-compat-base-url').value.trim();
+      body.model = App.getOaiCompatModel();
+    }
     const resp = await fetch('/api/settings/test-remix', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: provider, keys: keys, text: sampleText })
+      body: JSON.stringify(body)
     });
     const data = await resp.json();
     if (data.remixed) {
@@ -1303,7 +1889,7 @@ App._populateChAccountSelect = async function() {
 
   if (!App._accounts || App._accounts.length === 0) {
 
-    try { const d = await fetch('/api/auth/accounts').then(r=>r.json()); App._accounts = d.accounts || []; } catch(e) {}
+    try { const d = await API.getAccounts(); App._accounts = d.accounts || []; } catch(e) {}
 
   }
 
@@ -1443,6 +2029,10 @@ App._filterChannels = function() {
 
 };
 
+App.filterChannelsSearch = debounce(function() {
+  App._filterChannels();
+}, 250);
+
 
 
 App._renderChannelTable = function(channels) {
@@ -1475,9 +2065,9 @@ App._renderChannelTable = function(channels) {
 
 
 
-  const typeLabel = {channel: '\uD83D\uDCE2 K\u00EAnh', supergroup: '\uD83D\uDC65 Si\u00EAu nh\u00F3m', group: '\uD83D\uDCAC Nh\u00F3m'};
+  const typeLabel = {channel: '📢 Kênh', supergroup: '👥 Siêu nhóm', group: '💬 Nhóm', bot: '🤖 Bot'};
 
-  const typeColor = {channel: '#f59e0b', supergroup: '#6366f1', group: '#22c55e'};
+  const typeColor = {channel: '#f59e0b', supergroup: '#6366f1', group: '#22c55e', bot: '#ec4899'};
 
 
 
@@ -1513,15 +2103,15 @@ App._renderChannelTable = function(channels) {
 
       </td>
 
-      <td style="padding:.6rem .75rem;color:var(--text-secondary);font-size:.82rem;">${ch.participants_count != null ? ch.participants_count.toLocaleString() : '\u2014'}</td>
+      <td style="padding:.6rem .75rem;color:var(--text-secondary);font-size:.82rem;">${ch.participants_count != null ? ch.participants_count.toLocaleString() : '—'}</td>
 
-      <td style="padding:.6rem .75rem;color:var(--accent);font-size:.82rem;">${ch.username ? '@' + ch.username : '\u2014'}</td>
+      <td style="padding:.6rem .75rem;color:var(--accent);font-size:.82rem;">${ch.username ? '@' + ch.username : '—'}</td>
 
       <td style="padding:.6rem .75rem;text-align:right;">
 
-        <button class="btn btn-sm btn-danger" onclick="App.leaveOne(${ch.chat_id}, '${esc(ch.chat_title).replace(/'/g, "\\'")}')"
+        <button class="btn btn-sm btn-danger" onclick="App.leaveOne(${ch.chat_id}, '${esc(ch.chat_title).replace(/'/g, "\\'")}', '${ch.chat_type}')"
 
-                id="ch-btn-${ch.chat_id}">R\u1EDDi</button>
+                id="ch-btn-${ch.chat_id}">${ch.chat_type === 'bot' ? 'Xoá' : 'Rời'}</button>
 
       </td>
 
@@ -1613,9 +2203,13 @@ App._updateActionBar = function() {
 
 
 
-App.leaveOne = async function(chatId, chatTitle) {
+App.leaveOne = async function(chatId, chatTitle, chatType = '') {
 
-  if (!confirm(`R\u1EDDi kh\u1ECFi "${chatTitle}"?`)) return;
+  const isBot = chatType === 'bot';
+
+  const confirmMsg = isBot ? `Dừng và xoá cuộc trò chuyện với "${chatTitle}"?` : `Rời khỏi "${chatTitle}"?`;
+
+  if (!confirm(confirmMsg)) return;
 
   const btn = document.getElementById('ch-btn-' + chatId);
 
@@ -1647,15 +2241,15 @@ App.leaveOne = async function(chatId, chatTitle) {
 
       App._filterChannels();
 
-      App._showChBanner(`\u2705 \u0110\u00E3 r\u1EDDi "${chatTitle}"`, 'success');
+      App._showChBanner(isBot ? `✅ Đã dừng & xoá "${chatTitle}"` : `✅ Đã rời "${chatTitle}"`, 'success');
 
     } else {
 
       const err = await res.json();
 
-      App._showChBanner(`\u274C L\u1ED7i: ${err.detail || 'Unknown'}`, 'error');
+      App._showChBanner(`❌ Lỗi: ${err.detail || 'Unknown'}`, 'error');
 
-      if (btn) { btn.disabled = false; btn.textContent = 'R\u1EDDi'; }
+      if (btn) { btn.disabled = false; btn.textContent = isBot ? 'Xoá' : 'Rời'; }
 
       if (row) row.style.opacity = '1';
 
@@ -1832,11 +2426,70 @@ App.toggleApiKeyVisibility = function() {
   }
 };
 
-// Patch loadSettings to also load API key UI
+// Patch loadSettings to also load API key UI + Daily Summary
 const _origLoadSettings = App.loadSettings;
 App.loadSettings = async function() {
   if (_origLoadSettings) await _origLoadSettings.call(this);
   App.loadApiKeyUi();
+  App.loadDailySummary();
+};
+
+// ══════════════════════════════════════════════════════════
+//  DAILY SUMMARY SETTINGS
+// ══════════════════════════════════════════════════════════
+
+App.loadDailySummary = async function() {
+  try {
+    // Populate account dropdown
+    const sel = document.getElementById('daily-summary-account');
+    if (sel) {
+      const accs = App._accounts || [];
+      sel.innerHTML = '<option value="">Tu dong (tai khoan dau tien)</option>';
+      accs.forEach(a => {
+        const name = a.name || a.phone || ('ID ' + a.id);
+        sel.innerHTML += `<option value="${a.id}">${name} (ID ${a.id})</option>`;
+      });
+    }
+    // Load saved settings
+    const resp = await fetch('/api/settings/daily-summary', {
+      headers: API.getHeaders()
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      const cb = document.getElementById('daily-summary-enabled');
+      if (cb) cb.checked = data.enabled === '1';
+      const timeEl = document.getElementById('daily-summary-time');
+      if (timeEl) timeEl.value = data.time || '21:00';
+      if (sel && data.account_id) sel.value = data.account_id;
+    }
+  } catch(e) {
+    console.error('loadDailySummary error:', e);
+  }
+};
+
+App.saveDailySummary = async function() {
+  const statusEl = document.getElementById('daily-summary-status');
+  const enabled = document.getElementById('daily-summary-enabled').checked ? '1' : '0';
+  const time = document.getElementById('daily-summary-time').value || '21:00';
+  const accountId = document.getElementById('daily-summary-account').value;
+  statusEl.textContent = 'Dang luu...';
+  try {
+    const headers = { ...API.getHeaders(), 'Content-Type': 'application/json' };
+    const resp = await fetch('/api/settings/daily-summary', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ enabled, time, account_id: accountId })
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || 'Loi luu');
+    }
+    App.toast('Da luu cai dat bao cao!', 'success');
+    statusEl.textContent = enabled === '1' ? ('Gui luc ' + time + ' moi ngay') : 'Dang tat';
+  } catch(e) {
+    App.toast('Loi: ' + e.message, 'error');
+    statusEl.textContent = '';
+  }
 };
 
 document.addEventListener('DOMContentLoaded',()=>App.init());
@@ -1898,7 +2551,7 @@ const Reactions = (() => {
     if (!container) return;
     let allAccounts = [];
     try {
-      const data = await apiGet('/api/auth/accounts');
+      const data = await API.getAccounts();
       // Hiển thị TẤT CẢ accounts, không filter is_logged_in
       // (account có thể offline tạm thời khi page load nhưng vẫn hoạt động)
       allAccounts = data.accounts || [];
@@ -2253,4 +2906,547 @@ const _origShowDashboard = App.showDashboard.bind(App);
 App.showDashboard = function(user){
   _origShowDashboard(user);
   App.startInboxBadgePolling();
+};
+
+// ══════════════════════════════════════════════════════════
+//  PROXY POOL MANAGEMENT
+// ══════════════════════════════════════════════════════════
+
+App.switchProxyTab = function(tab) {
+  const wsTab = document.getElementById('proxy-webshare-tab');
+  const pasteTab = document.getElementById('proxy-paste-tab');
+  const wsBtn = document.getElementById('proxy-tab-webshare');
+  const pasteBtn = document.getElementById('proxy-tab-paste');
+  if (tab === 'webshare') {
+    wsTab.classList.remove('hidden');
+    pasteTab.classList.add('hidden');
+    wsBtn.style.background = 'var(--accent)'; wsBtn.style.color = '#fff'; wsBtn.className = 'btn btn-sm';
+    pasteBtn.style.background = ''; pasteBtn.style.color = ''; pasteBtn.className = 'btn btn-ghost btn-sm';
+  } else {
+    wsTab.classList.add('hidden');
+    pasteTab.classList.remove('hidden');
+    pasteBtn.style.background = 'var(--accent)'; pasteBtn.style.color = '#fff'; pasteBtn.className = 'btn btn-sm';
+    wsBtn.style.background = ''; wsBtn.style.color = ''; wsBtn.className = 'btn btn-ghost btn-sm';
+  }
+};
+
+App.fetchWebshare = async function() {
+  const apiKey = document.getElementById('webshare-api-key').value.trim();
+  if (!apiKey) { App.toast('Nhập Webshare API Key', 'error'); return; }
+  const proxyType = document.getElementById('webshare-proxy-type').value;
+  const btn = document.getElementById('btn-fetch-webshare');
+  const progress = document.getElementById('proxy-progress');
+  const progressText = document.getElementById('proxy-progress-text');
+
+  btn.disabled = true;
+  btn.textContent = 'Đang xử lý...';
+  progress.classList.remove('hidden');
+  progressText.textContent = 'Đang fetch proxy từ Webshare → test → assign...';
+  document.getElementById('proxy-test-results').classList.add('hidden');
+
+  try {
+    const resp = await fetch('/api/proxy/webshare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...API._headers() },
+      body: JSON.stringify({ api_key: apiKey, proxy_type: proxyType, auto_assign: true })
+    });
+    const data = await resp.json();
+    progress.classList.add('hidden');
+
+    if (data.success) {
+      App.toast(`✅ ${data.passed}/${data.fetched} proxy passed → đã assign!`, 'success');
+      App._renderProxyTestResults(data);
+      App.loadProxyStatus();
+    } else {
+      App.toast('❌ ' + (data.error || 'Lỗi không xác định'), 'error');
+      if (data.test_results) App._renderProxyTestResults(data);
+    }
+  } catch(e) {
+    progress.classList.add('hidden');
+    App.toast('Lỗi: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🚀 Fetch & Test & Assign';
+  }
+};
+
+App.importProxyList = async function() {
+  const rawText = document.getElementById('proxy-paste-input').value.trim();
+  if (!rawText) { App.toast('Paste proxy list vào textarea', 'error'); return; }
+  const scheme = document.getElementById('paste-default-scheme').value;
+  const btn = document.getElementById('btn-import-proxies');
+  const progress = document.getElementById('proxy-progress');
+  const progressText = document.getElementById('proxy-progress-text');
+
+  btn.disabled = true;
+  btn.textContent = 'Đang xử lý...';
+  progress.classList.remove('hidden');
+  progressText.textContent = 'Đang parse → test → assign...';
+  document.getElementById('proxy-test-results').classList.add('hidden');
+
+  try {
+    const resp = await fetch('/api/proxy/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...API._headers() },
+      body: JSON.stringify({ raw_text: rawText, default_scheme: scheme, auto_assign: true })
+    });
+    const data = await resp.json();
+    progress.classList.add('hidden');
+
+    if (data.success) {
+      App.toast(`✅ ${data.passed}/${data.parsed} proxy passed → pool: ${data.pool_total}`, 'success');
+      App._renderProxyTestResults(data);
+      App.loadProxyStatus();
+    } else {
+      App.toast('❌ ' + (data.error || 'Lỗi không xác định'), 'error');
+      if (data.test_results) App._renderProxyTestResults(data);
+    }
+  } catch(e) {
+    progress.classList.add('hidden');
+    App.toast('Lỗi: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📥 Import & Test & Assign';
+  }
+};
+
+App._renderProxyTestResults = function(data) {
+  const container = document.getElementById('proxy-test-results');
+  const list = document.getElementById('proxy-test-list');
+  const passedEl = document.getElementById('proxy-stat-passed');
+  const failedEl = document.getElementById('proxy-stat-failed');
+
+  passedEl.textContent = '✅ ' + (data.passed || 0) + ' passed';
+  failedEl.textContent = '❌ ' + (data.failed || 0) + ' failed';
+
+  if (data.test_results && data.test_results.length) {
+    list.innerHTML = data.test_results.map(function(r) {
+      const masked = (r.proxy || '').replace(/:([^:@]{3})[^@]*@/, ':$1***@');
+      const icon = r.ok ? '✅' : '❌';
+      const latency = r.latency_ms ? r.latency_ms + 'ms' : '';
+      const err = r.error ? ' — ' + r.error.substring(0, 40) : '';
+      const color = r.ok ? '#22c55e' : '#ef4444';
+      return '<div style="padding:3px 0;color:' + color + '">' + icon + ' ' + masked + ' ' + latency + err + '</div>';
+    }).join('');
+  }
+  container.classList.remove('hidden');
+};
+
+App.loadProxyStatus = async function() {
+  try {
+    const resp = await fetch('/api/proxy/status', { headers: API._headers() });
+    const data = await resp.json();
+
+    // Load webshare key if stored
+    if (data.webshare_configured) {
+      try {
+        const keyResp = await API.getSetting('webshare_api_key');
+        if (keyResp.value) document.getElementById('webshare-api-key').value = keyResp.value;
+      } catch(e) {}
+    }
+
+    // Render mapping
+    const listEl = document.getElementById('proxy-mapping-list');
+    if (!data.accounts || !data.accounts.length) {
+      listEl.innerHTML = '<p style="color:var(--text2);text-align:center;padding:12px">Chưa có tài khoản nào</p>';
+    } else {
+      listEl.innerHTML = data.accounts.map(function(a) {
+        const masked = a.proxy_url ? a.proxy_url.replace(/:([^:@]{3})[^@]*@/, ':$1***@') : '';
+        const statusIcon = a.has_proxy ? '🔒' : '⚠️';
+        const statusColor = a.has_proxy ? '#a78bfa' : '#f59e0b';
+        const removeBtn = a.has_proxy
+          ? '<button class="btn btn-ghost btn-sm" onclick="App.removeAccountProxy(' + a.account_id + ')" style="font-size:.7rem;padding:1px 6px" title="Xóa proxy">✕</button>'
+          : '';
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">' +
+          '<div><span style="margin-right:6px">' + (a.is_logged_in ? '🟢' : '🔴') + '</span>' +
+          '<strong style="font-size:13px">' + (a.account_name || 'Acc #' + a.account_id) + '</strong></div>' +
+          '<div style="display:flex;align-items:center;gap:6px">' +
+          '<span style="color:' + statusColor + ';font-size:12px;font-family:monospace">' +
+          statusIcon + ' ' + (masked || 'Không có proxy') + '</span>' + removeBtn + '</div></div>';
+      }).join('');
+    }
+
+    // Pool info
+    const infoEl = document.getElementById('proxy-pool-info');
+    infoEl.textContent = 'Pool: ' + data.pool_size + ' proxy | ' +
+      data.accounts_with_proxy + ' có proxy / ' + data.accounts_without_proxy + ' chưa có';
+  } catch(e) {
+    console.error('loadProxyStatus error:', e);
+  }
+};
+
+App.removeAccountProxy = async function(accountId) {
+  if (!await customConfirm('Xóa proxy khỏi account #' + accountId + '?')) return;
+  try {
+    const resp = await fetch('/api/proxy/remove/' + accountId, {
+      method: 'POST',
+      headers: API._headers()
+    });
+    const data = await resp.json();
+    if (data.success) {
+      App.toast('Đã xóa proxy', 'success');
+      App.loadProxyStatus();
+    } else {
+      App.toast(data.error || 'Lỗi', 'error');
+    }
+  } catch(e) { App.toast(e.message, 'error'); }
+};
+
+App.clearProxyPool = async function() {
+  if (!await customConfirm('Xóa TẤT CẢ proxy khỏi tất cả accounts và pool?')) return;
+  try {
+    const resp = await fetch('/api/proxy/clear-pool', {
+      method: 'POST',
+      headers: API._headers()
+    });
+    const data = await resp.json();
+    if (data.success) {
+      App.toast('Da xoa tat ca proxy', 'success');
+      App.loadProxyStatus();
+      document.getElementById('proxy-test-results').classList.add('hidden');
+    }
+  } catch(e) { App.toast(e.message, 'error'); }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ══ Warmup Module ═══════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+
+const Warmup = {
+  _selectedGroupId: null,
+  _groups: [],
+  _jobs: [],
+
+  async init() {
+    await Promise.all([this.loadGroups(), this.loadJobs(), this.loadRecentLogs()]);
+  },
+
+  // ── Groups ──
+  async loadGroups() {
+    try {
+      const data = await API.get('/api/warmup/groups');
+      this._groups = data.groups || [];
+      const el = document.getElementById('warmup-group-list');
+      if (!this._groups.length) {
+        el.innerHTML = '<div class="empty-state"><p class="empty-state-text">Chua co nhom nao</p></div>';
+        return;
+      }
+      el.innerHTML = this._groups.map(g => {
+        const active = this._selectedGroupId === g.id;
+        return `<div class="card" style="padding:12px;margin-bottom:8px;cursor:pointer;border:1px solid ${active ? 'var(--accent)' : 'var(--border)'}" onclick="Warmup.selectGroup(${g.id})">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div><strong>${this._esc(g.name)}</strong>
+              <span style="color:var(--text2);font-size:.85rem;margin-left:8px">${this._esc(g.chat_title || '')} ${g.chat_username ? '@' + g.chat_username : ''}</span>
+              <span style="color:var(--text2);font-size:.78rem;margin-left:8px">ID: ${g.chat_id}</span>
+            </div>
+            <button onclick="event.stopPropagation();Warmup.deleteGroup(${g.id})" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoa</button>
+          </div>
+        </div>`;
+      }).join('');
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  selectGroup(id) {
+    this._selectedGroupId = id;
+    this.loadGroups();
+    this.loadScripts();
+    document.getElementById('warmup-scripts-section').classList.remove('hidden');
+    const g = this._groups.find(x => x.id === id);
+    document.getElementById('warmup-scripts-title').textContent = 'Scripts - ' + (g ? g.name : '');
+  },
+
+  openAddGroup() {
+    document.getElementById('wg-name').value = '';
+    document.getElementById('wg-chat-id').value = '';
+    document.getElementById('wg-chat-title').value = '';
+    document.getElementById('wg-chat-username').value = '';
+    document.getElementById('warmup-group-modal').classList.add('open');
+  },
+
+  async saveGroup() {
+    const name = document.getElementById('wg-name').value.trim();
+    const chatId = document.getElementById('wg-chat-id').value.trim();
+    if (!name || !chatId) { App.toast('Nhap ten va chat ID', 'error'); return; }
+    try {
+      await API.post('/api/warmup/groups', {
+        name,
+        chat_id: chatId,
+        chat_title: document.getElementById('wg-chat-title').value.trim(),
+        chat_username: document.getElementById('wg-chat-username').value.trim()
+      });
+      document.getElementById('warmup-group-modal').classList.remove('open');
+      App.toast('Da them nhom', 'success');
+      this.loadGroups();
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  async deleteGroup(id) {
+    if (!await customConfirm('Xoa nhom nay va tat ca scripts/jobs?')) return;
+    try {
+      await API.del('/api/warmup/groups/' + id);
+      if (this._selectedGroupId === id) {
+        this._selectedGroupId = null;
+        document.getElementById('warmup-scripts-section').classList.add('hidden');
+      }
+      App.toast('Da xoa', 'success');
+      this.loadGroups();
+      this.loadJobs();
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  // ── Scripts ──
+  async loadScripts() {
+    if (!this._selectedGroupId) return;
+    try {
+      const data = await API.get('/api/warmup/groups/' + this._selectedGroupId + '/scripts');
+      const scripts = data.scripts || [];
+      const el = document.getElementById('warmup-script-list');
+      if (!scripts.length) {
+        el.innerHTML = '<div style="color:var(--text2);padding:12px">Chua co script nao. Them script de bat dau warmup.</div>';
+        return;
+      }
+      el.innerHTML = scripts.map((s, i) => {
+        const short = s.content.length > 120 ? s.content.substring(0, 120) + '...' : s.content;
+        return `<div class="card" style="padding:10px;margin-bottom:6px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div style="flex:1">
+              <div style="font-size:.85rem;white-space:pre-wrap">${this._esc(short)}</div>
+              <div style="margin-top:4px"><span class="badge ${s.use_ai_remix ? 'badge-green' : 'badge-red'}">${s.use_ai_remix ? 'AI Remix' : 'Nguyen ban'}</span></div>
+            </div>
+            <button onclick="Warmup.deleteScript(${s.id})" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem;margin-left:8px">Xoa</button>
+          </div>
+        </div>`;
+      }).join('');
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  openAddScript() {
+    if (!this._selectedGroupId) { App.toast('Chon nhom truoc', 'error'); return; }
+    document.getElementById('ws-content').value = '';
+    document.getElementById('ws-ai-remix').checked = true;
+    document.getElementById('warmup-script-modal').classList.add('open');
+  },
+
+  async saveScript() {
+    const content = document.getElementById('ws-content').value.trim();
+    if (!content) { App.toast('Nhap noi dung', 'error'); return; }
+    try {
+      await API.post('/api/warmup/groups/' + this._selectedGroupId + '/scripts', {
+        content,
+        use_ai_remix: document.getElementById('ws-ai-remix').checked ? 1 : 0
+      });
+      document.getElementById('warmup-script-modal').classList.remove('open');
+      App.toast('Da them script', 'success');
+      this.loadScripts();
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  async deleteScript(id) {
+    if (!await customConfirm('Xoa script nay?')) return;
+    try {
+      await API.del('/api/warmup/scripts/' + id);
+      App.toast('Da xoa', 'success');
+      this.loadScripts();
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  // ── Jobs ──
+  async loadJobs() {
+    try {
+      const data = await API.get('/api/warmup/jobs');
+      this._jobs = data.jobs || [];
+      const el = document.getElementById('warmup-job-list');
+      if (!this._jobs.length) {
+        el.innerHTML = '<div style="color:var(--text2);padding:12px">Chua co job nao.</div>';
+
+        // Update stats
+        const statsEl = document.getElementById('warmup-stats');
+        statsEl.innerHTML = `
+          <div class="stat-card"><div class="stat-label">Nhom</div><div class="stat-value accent">${this._groups.length}</div></div>
+          <div class="stat-card"><div class="stat-label">Jobs</div><div class="stat-value">0</div></div>
+          <div class="stat-card"><div class="stat-label">Dang chay</div><div class="stat-value green">0</div></div>
+        `;
+        return;
+      }
+
+      const running = this._jobs.filter(j => j.is_running || j.status === 'running').length;
+      const statsEl = document.getElementById('warmup-stats');
+      statsEl.innerHTML = `
+        <div class="stat-card"><div class="stat-label">Nhom</div><div class="stat-value accent">${this._groups.length}</div></div>
+        <div class="stat-card"><div class="stat-label">Jobs</div><div class="stat-value">${this._jobs.length}</div></div>
+        <div class="stat-card"><div class="stat-label">Dang chay</div><div class="stat-value green">${running}</div></div>
+      `;
+
+      el.innerHTML = this._jobs.map(j => {
+        const grp = this._groups.find(g => g.id === j.group_id);
+        const grpName = grp ? grp.name : 'Nhom #' + j.group_id;
+        const isRunning = j.is_running || j.status === 'running';
+        const statusBadge = isRunning
+          ? '<span class="badge badge-green">Dang chay</span>'
+          : j.status === 'error'
+            ? '<span class="badge badge-red">Loi</span>'
+            : '<span class="badge">Dung</span>';
+        const accIds = JSON.parse(j.account_ids || '[]');
+        const lastPost = j.last_post_at ? j.last_post_at.replace('T', ' ').slice(0, 16) : 'Chua co';
+
+        return `<div class="card" style="padding:12px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <strong>${this._esc(grpName)}</strong> ${statusBadge}
+              <div style="font-size:.82rem;color:var(--text2);margin-top:4px">
+                ${accIds.length} tai khoan | ${j.interval_min}-${j.interval_max} phut | ${j.schedule_start}-${j.schedule_end} | Limit: ${j.daily_post_limit}/ngay
+              </div>
+              <div style="font-size:.8rem;color:var(--text2)">
+                Hom nay: ${j.posts_today}/${j.daily_post_limit} | Lan cuoi: ${lastPost}
+              </div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              ${isRunning
+                ? '<button class="btn btn-danger btn-sm" onclick="Warmup.stopJob(' + j.id + ')">Dung</button>'
+                : '<button class="btn btn-primary btn-sm" onclick="Warmup.startJob(' + j.id + ')">Chay</button>'}
+              <button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.3)" onclick="Warmup.viewJobLogs(${j.id})">Logs</button>
+              <button onclick="Warmup.deleteJob(${j.id})" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoa</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  async openAddJob() {
+    // Populate groups select
+    const sel = document.getElementById('wj-group');
+    sel.innerHTML = this._groups.map(g => `<option value="${g.id}">${this._esc(g.name)}</option>`).join('');
+
+    // Populate accounts
+    const accEl = document.getElementById('wj-accounts');
+    try {
+      const d = await API.getAccounts();
+      const accounts = d.accounts || [];
+      accEl.innerHTML = accounts.filter(a => a.is_logged_in).map(a => {
+        const name = a.user_info ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ') : a.name;
+        return `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:.85rem">
+          <input type="checkbox" value="${a.id}" class="wj-acc-cb"> ${this._esc(name)}
+        </label>`;
+      }).join('');
+    } catch(e) {
+      accEl.innerHTML = '<span style="color:#f87171">Loi tai tai khoan</span>';
+    }
+
+    document.getElementById('wj-interval-min').value = '30';
+    document.getElementById('wj-interval-max').value = '120';
+    document.getElementById('wj-start').value = '09:00';
+    document.getElementById('wj-end').value = '22:00';
+    document.getElementById('wj-daily-limit').value = '10';
+    document.getElementById('warmup-job-modal').classList.add('open');
+  },
+
+  async saveJob() {
+    const groupId = parseInt(document.getElementById('wj-group').value);
+    if (!groupId) { App.toast('Chon nhom', 'error'); return; }
+    const accIds = Array.from(document.querySelectorAll('.wj-acc-cb:checked')).map(cb => parseInt(cb.value));
+    if (!accIds.length) { App.toast('Chon it nhat 1 tai khoan', 'error'); return; }
+    try {
+      await API.post('/api/warmup/jobs', {
+        group_id: groupId,
+        account_ids: accIds,
+        interval_min: parseInt(document.getElementById('wj-interval-min').value) || 30,
+        interval_max: parseInt(document.getElementById('wj-interval-max').value) || 120,
+        schedule_start: document.getElementById('wj-start').value || '09:00',
+        schedule_end: document.getElementById('wj-end').value || '22:00',
+        daily_post_limit: parseInt(document.getElementById('wj-daily-limit').value) || 10
+      });
+      document.getElementById('warmup-job-modal').classList.remove('open');
+      App.toast('Da tao job', 'success');
+      this.loadJobs();
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  async startJob(id) {
+    try {
+      await API.post('/api/warmup/jobs/' + id + '/start');
+      App.toast('Job da bat dau', 'success');
+      setTimeout(() => this.loadJobs(), 1000);
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  async stopJob(id) {
+    try {
+      await API.post('/api/warmup/jobs/' + id + '/stop');
+      App.toast('Dang dung job...', 'success');
+      setTimeout(() => this.loadJobs(), 2000);
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  async deleteJob(id) {
+    if (!await customConfirm('Xoa job nay?')) return;
+    try {
+      await API.del('/api/warmup/jobs/' + id);
+      App.toast('Da xoa', 'success');
+      this.loadJobs();
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  async viewJobLogs(jobId) {
+    try {
+      const data = await API.get('/api/warmup/jobs/' + jobId + '/logs?limit=50');
+      const logs = data.logs || [];
+      const tbody = document.getElementById('warmup-job-logs-body');
+      if (!logs.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text2);padding:16px">Chua co log</td></tr>';
+      } else {
+        tbody.innerHTML = logs.map(l => {
+          const time = l.posted_at ? l.posted_at.replace('T', ' ').slice(0, 16) : '';
+          const msg = (l.message_sent || '').substring(0, 80);
+          const statusColor = l.status === 'success' ? '#4ade80' : '#f87171';
+          return `<tr>
+            <td style="font-size:.82rem">${time}</td>
+            <td>Acc #${l.account_id}</td>
+            <td style="font-size:.82rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._esc(msg)}</td>
+            <td style="color:${statusColor}">${l.status}${l.error_message ? ' - ' + this._esc(l.error_message.substring(0, 50)) : ''}</td>
+          </tr>`;
+        }).join('');
+      }
+      document.getElementById('warmup-logs-modal').classList.add('open');
+    } catch(e) { App.toast(e.message, 'error'); }
+  },
+
+  // ── Recent Logs (main page) ──
+  async loadRecentLogs() {
+    try {
+      const data = await API.get('/api/warmup/jobs/0/logs?limit=20');
+      // Fallback: load all jobs logs
+      let logs = data.logs || [];
+      if (!logs.length) {
+        // Try loading logs from all jobs
+        for (const j of this._jobs.slice(0, 5)) {
+          const d = await API.get('/api/warmup/jobs/' + j.id + '/logs?limit=10');
+          logs = logs.concat(d.logs || []);
+        }
+        logs.sort((a, b) => (b.posted_at || '').localeCompare(a.posted_at || ''));
+        logs = logs.slice(0, 20);
+      }
+      const tbody = document.getElementById('warmup-log-body');
+      if (!logs.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:16px">Chua co log</td></tr>';
+        return;
+      }
+      tbody.innerHTML = logs.map(l => {
+        const time = l.posted_at ? l.posted_at.replace('T', ' ').slice(0, 16) : '';
+        const msg = (l.message_sent || '').substring(0, 60);
+        const statusColor = l.status === 'success' ? '#4ade80' : '#f87171';
+        return `<tr>
+          <td style="font-size:.82rem">${time}</td>
+          <td>Job #${l.job_id}</td>
+          <td>Acc #${l.account_id}</td>
+          <td style="font-size:.82rem;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._esc(msg)}</td>
+          <td style="color:${statusColor}">${l.status}</td>
+        </tr>`;
+      }).join('');
+    } catch(e) {
+      // Silent fail for initial load
+    }
+  },
+
+  _esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 };

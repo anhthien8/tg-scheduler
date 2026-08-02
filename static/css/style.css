@@ -74,6 +74,17 @@
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --duration: 0.2s;
   --duration-slow: 0.35s;
+
+  /* Fallback / Compatibility Variables */
+  --text-secondary: var(--text2);
+  --text-muted:     var(--text2);
+  --surface:        var(--bg2);
+  --bg-secondary:   var(--bg3);
+  --success:        var(--green);
+  --danger:         var(--red);
+  --danger-bg:      var(--red-dim);
+  --bg1:            var(--bg);
+  --text1:          var(--text);
 }
 
 /* ── Base ────────────────────────────────────────────────────────── */
@@ -441,6 +452,35 @@ tr:hover td {
   background: var(--bg-hover);
 }
 
+/* Fallback styling for classes .data-table and .table used in DOM templates */
+.data-table, .table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.data-table th, .table th {
+  text-align: left;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: 11px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+}
+.data-table td, .table td {
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.data-table tr:hover td, .table tr:hover td {
+  background: var(--bg-hover);
+}
+.data-table tr:last-child td, .table tr:last-child td {
+  border-bottom: none;
+}
+
+
 /* ══ BUTTONS ═════════════════════════════════════════════════════ */
 .btn {
   display: inline-flex;
@@ -531,6 +571,8 @@ tr:hover td {
 
 /* ══ TOGGLE ══════════════════════════════════════════════════════ */
 .toggle {
+  display: inline-block;
+  vertical-align: middle;
   position: relative;
   width: 40px;
   height: 22px;
@@ -1311,4 +1353,223 @@ tr:hover td {
 
 .msg-media-path {
   display: none;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   CHANGELOG PAGE
+   ══════════════════════════════════════════════════════════════════ */
+
+.cl-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 32px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cl-subtitle {
+  color: var(--text2);
+  font-size: 14px;
+  margin-top: 6px;
+}
+
+.cl-current-version {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.cl-cv-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text3);
+  font-weight: 600;
+}
+
+.cl-cv-number {
+  font-size: 28px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+
+/* ── Timeline ──────────────────────────────────────────────────── */
+.cl-timeline {
+  position: relative;
+  padding-left: 28px;
+}
+
+.cl-timeline::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--border) 40%, transparent 100%);
+  border-radius: 2px;
+}
+
+.cl-entry {
+  position: relative;
+  margin-bottom: 24px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 24px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.cl-entry:hover {
+  border-color: var(--border-hover);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+.cl-entry::before {
+  content: '';
+  position: absolute;
+  left: -24px;
+  top: 24px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg3);
+  border: 2px solid var(--text3);
+  z-index: 1;
+}
+
+.cl-entry-latest {
+  border-color: rgba(99, 102, 241, 0.3);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(168, 85, 247, 0.04));
+}
+
+.cl-entry-latest::before {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow), 0 0 16px rgba(99, 102, 241, 0.15);
+}
+
+.cl-entry-latest:hover {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 4px 32px rgba(99, 102, 241, 0.12);
+}
+
+.cl-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cl-version-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cl-version {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  font-family: 'Inter', monospace;
+}
+
+.cl-tag-latest {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), #a855f7);
+  padding: 3px 10px;
+  border-radius: 20px;
+  animation: cl-pulse 2s ease-in-out infinite;
+}
+
+@keyframes cl-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(99, 102, 241, 0.3); }
+  50% { box-shadow: 0 0 12px rgba(99, 102, 241, 0.6); }
+}
+
+.cl-date {
+  font-size: 13px;
+  color: var(--text3);
+  font-weight: 500;
+}
+
+/* ── Change Items ──────────────────────────────────────────────── */
+.cl-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cl-change {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.cl-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cl-badge-new {
+  background: var(--accent-dim);
+  color: var(--accent-text);
+}
+
+.cl-badge-fix {
+  background: var(--red-dim);
+  color: #fca5a5;
+}
+
+.cl-badge-improve {
+  background: var(--orange-dim);
+  color: #fcd34d;
+}
+
+.cl-badge-security {
+  background: var(--green-dim);
+  color: #86efac;
+}
+
+.cl-badge-breaking {
+  background: var(--purple-dim);
+  color: #d8b4fe;
+}
+
+.cl-change-text {
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.5;
+  padding-top: 1px;
+}
+
+/* ── Responsive ────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .cl-header { flex-direction: column; }
+  .cl-current-version { align-items: flex-start; }
+  .cl-entry { padding: 16px; }
+  .cl-entry-header { flex-direction: column; gap: 6px; align-items: flex-start; }
+  .cl-change { flex-direction: column; gap: 6px; }
+  .cl-timeline { padding-left: 22px; }
 }

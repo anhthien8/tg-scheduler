@@ -1,5 +1,5 @@
 /**
- * Analytics, Templates, Auto-Reply, CSV Export — Growth Features Module
+ * Analytics, Templates, Auto-Reply, CSV Export - Growth Features Module
  */
 const Analytics = {
   _overview: null,
@@ -7,7 +7,7 @@ const Analytics = {
   _health: [],
   _campaigns: [],
 
-  // ── Analytics Dashboard ─────────────────────────────────────────────
+  // -- Analytics Dashboard --
   async init() {
     try {
       const [ov, daily, health, camps] = await Promise.all([
@@ -124,7 +124,7 @@ const Analytics = {
     const el = document.getElementById('an-health-list');
     if (!el) return;
     if (!this._health.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🏥</div><div class="empty-state-text">Chưa có dữ liệu</div></div>';
+      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\uD83C\uDFE5</div><div class="empty-state-text">Ch\u01B0a c\u00F3 d\u1EEF li\u1EC7u</div></div>';
       return;
     }
     el.innerHTML = this._health.map(a => {
@@ -138,10 +138,10 @@ const Analytics = {
         </div>
         ${bar}
         <div style="display:flex;gap:12px;margin-top:6px;font-size:11px;color:var(--text2);flex-wrap:wrap">
-          <span>📤 ${a.dm_sent_today || 0}</span>
-          <span>✅ ${(a.success_rate || 0).toFixed(0)}%</span>
-          <span>⚠️ ${a.flood_count || 0}</span>
-          ${a.is_flagged ? '<span style="color:var(--red)" title="Flagged">🚩</span>' : ''}
+          <span>\uD83D\uDCE4 ${a.dm_sent_today || 0}</span>
+          <span>\u2705 ${(a.success_rate || 0).toFixed(0)}%</span>
+          <span>\u26A0\uFE0F ${a.flood_count || 0}</span>
+          ${a.is_flagged ? '<span style="color:var(--red)" title="Flagged">\uD83D\uDEA9</span>' : ''}
         </div>
       </div>`;
     }).join('');
@@ -151,7 +151,7 @@ const Analytics = {
     const el = document.getElementById('an-campaign-list');
     if (!el) return;
     if (!this._campaigns.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><div class="empty-state-text">Chưa có campaign</div></div>';
+      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\uD83D\uDCCB</div><div class="empty-state-text">Ch\u01B0a c\u00F3 campaign</div></div>';
       return;
     }
     el.innerHTML = `<div class="table-wrap"><table>
@@ -166,7 +166,7 @@ const Analytics = {
           <td>${c.failed_count || 0}</td>
           <td>${c.reply_count || 0}</td>
           <td>${rate}%</td>
-          <td><button class="btn btn-ghost btn-sm" onclick="Analytics.exportCampaignLogs(${c.id})">📥 CSV</button></td>
+          <td><button class="btn btn-ghost btn-sm" onclick="Analytics.exportCampaignLogs(${c.id})">\uD83D\uDCE5 CSV</button></td>
         </tr>`;
       }).join('')}</tbody>
     </table></div>`;
@@ -182,7 +182,7 @@ const Analytics = {
 };
 
 
-// ── Template Library ──────────────────────────────────────────────────────────
+// -- Template Library --
 const Templates = {
   _list: [],
   _editing: null,
@@ -198,21 +198,23 @@ const Templates = {
     const el = document.getElementById('tpl-list');
     if (!el) return;
     if (!this._list.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><div class="empty-state-text">Chưa có template</div></div>';
+      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\uD83D\uDCCB</div><div class="empty-state-text">Ch\u01B0a c\u00F3 template</div></div>';
       return;
     }
-    const cats = { crypto: '🪙', finance: '💹', marketing: '📣', business: '💼', general: '📝' };
+    const cats = { crypto: '\uD83E\uDE99', finance: '\uD83D\uDCC8', marketing: '\uD83D\uDCE3', business: '\uD83D\uDCBC', general: '\uD83D\uDCC4' };
     el.innerHTML = `<div class="stats-grid">${this._list.map(t => {
       const msgs = typeof t.messages === 'string' ? JSON.parse(t.messages) : (t.messages || []);
-      const icon = cats[t.category] || '📝';
+      const icon = cats[t.category] || '\uD83D\uDCC4';
       return `<div class="card" style="padding:16px;cursor:pointer" onclick="Templates.use(${t.id})">
         <div style="display:flex;justify-content:space-between;align-items:start">
           <div><span style="font-size:20px">${icon}</span> <strong>${t.name}</strong></div>
-          <div class="btn-group">
-            ${t.is_default ? '<span class="badge badge-purple">Default</span>' : `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();Templates.remove(${t.id})" title="Xoá">🗑</button>`}
+          <div class="btn-group" style="display:flex;gap:4px;align-items:center">
+            ${t.is_default ? '<span class="badge badge-purple">Default</span>' : ''}
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();Templates.openEdit(${t.id})" title="S\u1EEDa">✏️</button>
+            ${!t.is_default ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();Templates.remove(${t.id})" title="Xo\u00E1">\uD83D\uDDD1</button>` : ''}
           </div>
         </div>
-        <div style="color:var(--text2);font-size:12px;margin-top:6px">${t.category} · ${msgs.length} message${msgs.length > 1 ? 's' : ''}</div>
+        <div style="color:var(--text2);font-size:12px;margin-top:6px">${t.category} \u00B7 ${msgs.length} message${msgs.length > 1 ? 's' : ''}</div>
         <div style="margin-top:8px;font-size:12px;color:var(--text3);max-height:60px;overflow:hidden">${msgs[0]?.content?.slice(0, 120) || '(empty)'}</div>
       </div>`;
     }).join('')}</div>`;
@@ -222,22 +224,33 @@ const Templates = {
     const t = this._list.find(x => x.id === id);
     if (!t) return;
     const msgs = typeof t.messages === 'string' ? JSON.parse(t.messages) : (t.messages || []);
-    // Copy to clipboard
     const text = msgs.map(m => m.content).join('\n---\n');
     try {
       await navigator.clipboard.writeText(text);
-      App.showToast('Đã copy template vào clipboard!', 'success');
+      App.toast('\u0110\u00E3 copy template v\u00E0o clipboard!', 'success');
     } catch {
-      App.showToast('Không thể copy. Hãy dùng template thủ công.', 'error');
+      App.toast('Kh\u00F4ng th\u1EC3 copy. H\u00E3y d\u00F9ng template th\u1EE7 c\u00F4ng.', 'error');
     }
   },
 
   openCreate() {
     this._editing = null;
-    document.getElementById('tpl-modal-title').textContent = 'Tạo Template Mới';
+    document.getElementById('tpl-modal-title').textContent = 'T\u1EA1o Template M\u1EDBi';
     document.getElementById('tpl-name').value = '';
     document.getElementById('tpl-category').value = 'general';
     document.getElementById('tpl-content').value = '';
+    document.getElementById('tpl-modal').classList.add('open');
+  },
+
+  openEdit(id) {
+    const t = this._list.find(x => x.id === id);
+    if (!t) return;
+    this._editing = id;
+    const msgs = typeof t.messages === 'string' ? JSON.parse(t.messages) : (t.messages || []);
+    document.getElementById('tpl-modal-title').textContent = 'S\u1EEDa Template: ' + t.name;
+    document.getElementById('tpl-name').value = t.name;
+    document.getElementById('tpl-category').value = t.category || 'general';
+    document.getElementById('tpl-content').value = msgs.map(m => m.content).join('\n---\n');
     document.getElementById('tpl-modal').classList.add('open');
   },
 
@@ -245,102 +258,169 @@ const Templates = {
     const name = document.getElementById('tpl-name').value.trim();
     const category = document.getElementById('tpl-category').value;
     const content = document.getElementById('tpl-content').value.trim();
-    if (!name || !content) { App.showToast('Nhập tên và nội dung', 'error'); return; }
+    if (!name || !content) { App.toast('Nh\u1EADp t\u00EAn v\u00E0 n\u1ED9i dung', 'error'); return; }
     const messages = [{ msg_type: 'text', content }];
     const data = { name, category, messages };
     try {
       if (this._editing) {
         await TemplatesAPI.update(this._editing, data);
-        App.showToast('Template đã cập nhật!', 'success');
+        App.toast('Template \u0111\u00E3 c\u1EADp nh\u1EADt!', 'success');
       } else {
         await TemplatesAPI.create(data);
-        App.showToast('Template đã tạo!', 'success');
+        App.toast('Template \u0111\u00E3 t\u1EA1o!', 'success');
       }
       document.getElementById('tpl-modal').classList.remove('open');
       this.init();
-    } catch (e) { App.showToast(e.message, 'error'); }
+    } catch (e) { App.toast(e.message, 'error'); }
   },
 
   async remove(id) {
-    if (!await customConfirm('Xoá template này?')) return;
+    if (!await customConfirm('Xo\u00E1 template n\u00E0y?')) return;
     try {
       await TemplatesAPI.remove(id);
-      App.showToast('Đã xoá template', 'success');
+      App.toast('\u0110\u00E3 xo\u00E1 template', 'success');
       this.init();
-    } catch (e) { App.showToast(e.message, 'error'); }
+    } catch (e) { App.toast(e.message, 'error'); }
   },
 };
 
 
-// ── Auto-Reply Chatbot ────────────────────────────────────────────────────────
+// -- Auto-Reply Chatbot --
 const AutoReply = {
   _rules: [],
   _editing: null,
+  _accounts: null,
 
   async init() {
     try {
       this._rules = await AutoReplyAPI.getRules();
+      await this._loadAccounts();
       this.render();
     } catch (e) { console.error('AutoReply load error:', e); }
+  },
+
+  async _loadAccounts() {
+    if (this._accounts) return this._accounts;
+    try {
+      const d = await API.getAccounts();
+      this._accounts = d.accounts || [];
+    } catch (e) { this._accounts = []; }
+    return this._accounts;
+  },
+
+  _renderAccountChips(selectedIds = []) {
+    const el = document.getElementById('ar-accounts-list');
+    if (!el || !this._accounts) return;
+    const accounts = this._accounts;
+    if (!accounts.length) {
+      el.innerHTML = '<span style="color:var(--text2);font-size:12px">Ch\u01B0a c\u00F3 t\u00E0i kho\u1EA3n n\u00E0o</span>';
+      return;
+    }
+    el.innerHTML = accounts.map(a => {
+      const name = a.user_info
+        ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ')
+        : a.name;
+      const phone = a.phone || '';
+      const premiumBadge = a.is_premium ? ' \u2B50' : '';
+      const premiumStyle = a.is_premium ? 'border-color:#f59e0b;' : '';
+      const checked = selectedIds.includes(a.id) ? 'checked' : '';
+      const online = a.is_logged_in ? '\uD83D\uDFE2' : '\uD83D\uDD34';
+      return `<label style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--bg2);border-radius:8px;cursor:pointer;border:1px solid var(--border);font-size:13px;${premiumStyle}">
+        <input type="checkbox" class="ar-acc-checkbox" value="${a.id}" ${checked}>
+        <span>${online} ${esc(name || phone)}${premiumBadge}</span>
+      </label>`;
+    }).join('');
   },
 
   render() {
     const el = document.getElementById('ar-rules-list');
     if (!el) return;
     if (!this._rules.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🤖</div><div class="empty-state-text">Chưa có auto-reply rule</div></div>';
+      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\uD83E\uDD16</div><div class="empty-state-text">Ch\u01B0a c\u00F3 auto-reply rule</div></div>';
       return;
     }
+    const accounts = this._accounts || [];
     el.innerHTML = this._rules.map(r => {
       const keywords = typeof r.trigger_keywords === 'string' ? JSON.parse(r.trigger_keywords) : (r.trigger_keywords || []);
       const msgs = typeof r.reply_messages === 'string' ? JSON.parse(r.reply_messages) : (r.reply_messages || []);
+      const accIds = typeof r.account_ids === 'string' ? JSON.parse(r.account_ids) : (r.account_ids || []);
       const active = r.is_active;
+
+      let accLabel = '<span style="color:#a78bfa">T\u1EA5t c\u1EA3 t\u00E0i kho\u1EA3n</span>';
+      if (accIds.length > 0) {
+        const names = accIds.map(id => {
+          const a = accounts.find(x => x.id === id);
+          if (!a) return '#' + id;
+          const n = a.user_info ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ') : a.name;
+          return (a.is_premium ? '\u2B50' : '') + (n || a.phone);
+        });
+        accLabel = esc(names.join(', '));
+      }
+
       return `<div class="card" style="padding:14px;border-left:3px solid ${active ? 'var(--green)' : 'var(--text3)'}">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div>
-            <strong>${r.name}</strong>
+            <strong>${esc(r.name)}</strong>
             <span class="badge ${active ? 'badge-green' : 'badge-gray'}" style="margin-left:8px">${active ? 'Active' : 'Off'}</span>
           </div>
           <div class="btn-group">
-            <button class="btn btn-ghost btn-sm" onclick="AutoReply.toggle(${r.id})">${active ? '⏸' : '▶'}</button>
-            <button class="btn btn-ghost btn-sm" onclick="AutoReply.edit(${r.id})">✏️</button>
-            <button class="btn btn-ghost btn-sm" onclick="AutoReply.remove(${r.id})">🗑</button>
-            <button class="btn btn-ghost btn-sm" onclick="AutoReply.viewLogs(${r.id})">📋</button>
+            <button class="btn btn-ghost btn-sm" onclick="AutoReply.toggle(${r.id})">${active ? '\u23F8' : '\u25B6'}</button>
+            <button class="btn btn-ghost btn-sm" onclick="AutoReply.edit(${r.id})">\u270F\uFE0F</button>
+            <button class="btn btn-ghost btn-sm" onclick="AutoReply.remove(${r.id})">\uD83D\uDDD1</button>
+            <button class="btn btn-ghost btn-sm" onclick="AutoReply.viewLogs(${r.id})">\uD83D\uDCCB</button>
           </div>
         </div>
-        <div style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--text2)">
+        <div style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--text2);flex-wrap:wrap">
           <span>Trigger: <strong>${r.trigger_type}</strong></span>
           ${keywords.length ? `<span>Keywords: ${keywords.slice(0, 3).join(', ')}${keywords.length > 3 ? '...' : ''}</span>` : ''}
           <span>${msgs.length} reply msg${msgs.length > 1 ? 's' : ''}</span>
           <span>Max ${r.max_replies_per_user}/user</span>
         </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text2)">
+          \uD83D\uDC64 ${accLabel}
+        </div>
       </div>`;
     }).join('');
   },
 
-  openCreate() {
+  async openCreate() {
     this._editing = null;
-    document.getElementById('ar-modal-title').textContent = 'Tạo Auto-Reply Rule';
+    document.getElementById('ar-modal-title').textContent = 'T\u1EA1o Auto-Reply Rule';
     document.getElementById('ar-name').value = '';
     document.getElementById('ar-trigger-type').value = 'keyword';
     document.getElementById('ar-keywords').value = '';
     document.getElementById('ar-reply-content').value = '';
     document.getElementById('ar-max-replies').value = '3';
+    const kwGroup = document.getElementById('ar-keywords-group');
+    if (kwGroup) kwGroup.style.display = 'block';
+
+    await this._loadAccounts();
+    this._renderAccountChips([]);
+
     document.getElementById('ar-modal').classList.add('open');
   },
 
-  edit(id) {
+  async edit(id) {
     const r = this._rules.find(x => x.id === id);
     if (!r) return;
     this._editing = id;
     const keywords = typeof r.trigger_keywords === 'string' ? JSON.parse(r.trigger_keywords) : (r.trigger_keywords || []);
     const msgs = typeof r.reply_messages === 'string' ? JSON.parse(r.reply_messages) : (r.reply_messages || []);
-    document.getElementById('ar-modal-title').textContent = 'Sửa Auto-Reply Rule';
+    const accIds = typeof r.account_ids === 'string' ? JSON.parse(r.account_ids) : (r.account_ids || []);
+
+    document.getElementById('ar-modal-title').textContent = 'S\u1EEDa Auto-Reply Rule';
     document.getElementById('ar-name').value = r.name;
     document.getElementById('ar-trigger-type').value = r.trigger_type || 'keyword';
     document.getElementById('ar-keywords').value = keywords.join(', ');
     document.getElementById('ar-reply-content').value = msgs.map(m => m.content).join('\n---\n');
     document.getElementById('ar-max-replies').value = r.max_replies_per_user || 3;
+
+    const kwGroup = document.getElementById('ar-keywords-group');
+    if (kwGroup) kwGroup.style.display = (r.trigger_type === 'any') ? 'none' : 'block';
+
+    await this._loadAccounts();
+    this._renderAccountChips(accIds);
+
     document.getElementById('ar-modal').classList.add('open');
   },
 
@@ -350,47 +430,52 @@ const AutoReply = {
     const keywordsStr = document.getElementById('ar-keywords').value.trim();
     const replyContent = document.getElementById('ar-reply-content').value.trim();
     const maxReplies = parseInt(document.getElementById('ar-max-replies').value) || 3;
-    if (!name) { App.showToast('Nhập tên rule', 'error'); return; }
-    if (!replyContent) { App.showToast('Nhập nội dung reply', 'error'); return; }
+    if (!name) { App.toast('Nh\u1EADp t\u00EAn rule', 'error'); return; }
+    if (!replyContent) { App.toast('Nh\u1EADp n\u1ED9i dung reply', 'error'); return; }
 
     const keywords = keywordsStr ? keywordsStr.split(',').map(k => k.trim()).filter(Boolean) : [];
     const replies = replyContent.split('\n---\n').map(c => ({ msg_type: 'text', content: c.trim(), delay_seconds: 0 }));
+
+    // Collect selected accounts
+    const accCheckboxes = document.querySelectorAll('.ar-acc-checkbox:checked');
+    const accountIds = Array.from(accCheckboxes).map(cb => parseInt(cb.value));
 
     const data = {
       name,
       trigger_type: triggerType,
       trigger_keywords: keywords,
       reply_messages: replies,
-      account_ids: [],
+      account_ids: accountIds,
       max_replies_per_user: maxReplies,
     };
     try {
       if (this._editing) {
         await AutoReplyAPI.updateRule(this._editing, data);
-        App.showToast('Rule đã cập nhật!', 'success');
+        App.toast('Rule \u0111\u00E3 c\u1EADp nh\u1EADt!', 'success');
       } else {
         await AutoReplyAPI.createRule(data);
-        App.showToast('Rule đã tạo!', 'success');
+        App.toast('Rule \u0111\u00E3 t\u1EA1o!', 'success');
       }
       document.getElementById('ar-modal').classList.remove('open');
+      this._accounts = null;
       this.init();
-    } catch (e) { App.showToast(e.message, 'error'); }
+    } catch (e) { App.toast(e.message, 'error'); }
   },
 
   async toggle(id) {
     try {
       await AutoReplyAPI.toggleRule(id);
       this.init();
-    } catch (e) { App.showToast(e.message, 'error'); }
+    } catch (e) { App.toast(e.message, 'error'); }
   },
 
   async remove(id) {
-    if (!await customConfirm('Xoá rule này?')) return;
+    if (!await customConfirm('Xo\u00E1 rule n\u00E0y?')) return;
     try {
       await AutoReplyAPI.deleteRule(id);
-      App.showToast('Đã xoá rule', 'success');
+      App.toast('\u0110\u00E3 xo\u00E1 rule', 'success');
       this.init();
-    } catch (e) { App.showToast(e.message, 'error'); }
+    } catch (e) { App.toast(e.message, 'error'); }
   },
 
   async viewLogs(ruleId) {
@@ -404,8 +489,8 @@ const AutoReply = {
         <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${l.reply_text || ''}</td>
         <td><span class="badge ${l.status === 'success' ? 'badge-green' : 'badge-red'}">${l.status}</span></td>
         <td>${l.sent_at?.slice(0, 16) || ''}</td>
-      </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text2)">Chưa có log</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text2)">Ch\u01B0a c\u00F3 log</td></tr>';
       document.getElementById('ar-logs-modal').classList.add('open');
-    } catch (e) { App.showToast(e.message, 'error'); }
+    } catch (e) { App.toast(e.message, 'error'); }
   },
 };

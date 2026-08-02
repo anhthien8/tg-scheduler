@@ -13,6 +13,7 @@ from telethon import events, errors as tg_errors
 import database as db
 import telegram_client as tg
 import ai_remix as ai_rmx
+import image_randomizer as img_rand
 from telegram_client import _get_entity_safe
 
 logger = logging.getLogger("tg-scheduler.watcher")
@@ -338,6 +339,8 @@ def _translate_dm_error(raw: str) -> str:
         return "Không thể gửi DM cho user này."
     if "banned" in r or "restricted" in r:
         return "Tài khoản gửi DM bị hạn chế."
+    if "join" in r and ("discussion" in r or "group" in r):
+        return "Cần join nhóm thảo luận trước khi gửi DM. Đang tự động join..."
     if "cannot resolve" in r or "min user" in r or "access_hash=0" in r:
         return "Không thể xác định user (min user / chưa tương tác trước). Bỏ qua."
     if "is_premium" in r or "no such column" in r:
@@ -362,8 +365,10 @@ async def _do_send_dm_with_fallback(
     import time as _time_module
     # Load AI remix settings from DB (cached inside _send_dm_with_fallback scope)
     ai_provider = await db.get_setting("ai_provider", None)
-    ai_enabled = ai_provider in ("gemini", "deepseek", "openai", "groq")
+    ai_custom_prompt = await db.get_setting("ai_custom_prompt", None)
+    ai_enabled = ai_provider in ("gemini", "deepseek", "openai", "groq", "openai_compatible")
     ai_keys = []
+    ai_remix_kwargs = {}
     if ai_enabled:
         try:
             raw = await db.get_setting("ai_keys_" + ai_provider, "[]")
@@ -372,6 +377,9 @@ async def _do_send_dm_with_fallback(
             ai_keys = []
         if not ai_keys:
             ai_enabled = False
+        if ai_provider == "openai_compatible":
+            ai_remix_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
+            ai_remix_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
 
     last_error = None
 
@@ -467,6 +475,11 @@ async def _do_send_dm_with_fallback(
             logger.warning(f"[Watcher {watcher_id}] Account {acc_id} in PeerFlood cooldown, skipping")
             continue
 
+        # Skip auto-paused accounts
+        if await db.is_account_paused(acc_id):
+            logger.debug(f"[Watcher {watcher_id}] Skipping paused account {acc_id}")
+            continue
+
         # ── Daily DM limit check ─────────────────────────────────────────────
         limit_reached, dm_count, dm_limit = await db.is_account_dm_limit_reached(acc_id)
         if limit_reached:
@@ -490,7 +503,9 @@ async def _do_send_dm_with_fallback(
                         original_text=msg_to_send["content"],
                         provider=ai_provider,
                         api_keys=ai_keys,
-                        sender_name=username if username and not username.isdigit() else None
+                        sender_name=username if username and not username.isdigit() else None,
+                        custom_instruction=ai_custom_prompt,
+                        **ai_remix_kwargs
                     )
                 elif ai_enabled and msg_to_send.get("content"):
                     # For media messages remix the caption too
@@ -499,7 +514,9 @@ async def _do_send_dm_with_fallback(
                         original_text=msg_to_send["content"],
                         provider=ai_provider,
                         api_keys=ai_keys,
-                        sender_name=username if username and not username.isdigit() else None
+                        sender_name=username if username and not username.isdigit() else None,
+                        custom_instruction=ai_custom_prompt,
+                        **ai_remix_kwargs
                     )
                 await _send_one(client, peer, msg_to_send)
                 await asyncio.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
@@ -562,15 +579,20 @@ async def _do_send_dm_with_fallback(
         except tg_errors.FloodWaitError as e:
             # FloodWait = ACCOUNT-level → try next account, don't penalise user
             last_error = _translate_dm_error(f"FloodWait {e.seconds}s")
-            logger.warning(f"[Watcher {watcher_id}] Account {acc_id} ✗ FloodWait {e.seconds}s, trying next account")
+            if e.seconds > 600:
+                await db.pause_account(acc_id, f"FloodWait {e.seconds}s - auto-paused")
+                logger.warning(f"[Watcher {watcher_id}] Account {acc_id} AUTO-PAUSED: FloodWait {e.seconds}s")
+            else:
+                logger.warning(f"[Watcher {watcher_id}] Account {acc_id} ✗ FloodWait {e.seconds}s, trying next account")
             continue
 
         except tg_errors.PeerFloodError:
-            # PeerFlood = ACCOUNT-level → mark account, try next, don't penalise user
+            # PeerFlood = ACCOUNT-level → mark account, STOP trying same target
+            # (trying multiple accounts for same user = coordinated spam signal)
             last_error = _translate_dm_error("PeerFlood too many DMs from this account")
             _mark_peerflood(acc_id)
-            logger.warning(f"[Watcher {watcher_id}] Account {acc_id} ✗ PeerFlood, blocked for {PEERFLOOD_COOLDOWN_SECS//60} min, trying next")
-            continue
+            logger.warning(f"[Watcher {watcher_id}] Account {acc_id} ✗ PeerFlood, blocked for {PEERFLOOD_COOLDOWN_SECS//60} min. NOT retrying same target.")
+            break  # STOP — don't try other accounts for same target
 
         except ValueError as e:
             # ValueError from get_entity() = "Cannot find any entity corresponding to X"
@@ -599,7 +621,54 @@ async def _do_send_dm_with_fallback(
                 break
             continue
 
+        except tg_errors.UserBannedInChannelError:
+            await db.pause_account(acc_id, "UserBannedInChannel - auto-paused")
+            logger.warning(f"[Watcher {watcher_id}] Account {acc_id} AUTO-PAUSED: UserBannedInChannel")
+            last_error = _translate_dm_error("UserBannedInChannel")
+            continue
+
         except Exception as e:
+            err_str = str(e).lower()
+            
+            # ── Auto-join detection ─────────────────────────────────
+            # "You join the discussion group before commenting" = account not a member
+            if ("join" in err_str and ("discussion" in err_str or "group" in err_str)) or \
+               "chatwriteforbidden" in err_str.replace("_", ""):
+                logger.warning(
+                    f"[Watcher {watcher_id}] Account {acc_id} not in group {group_id} — attempting auto-join..."
+                )
+                # Try to auto-join the group
+                if group_id:
+                    try:
+                        join_result = await tg.join_channel(acc_id, str(group_id))
+                        if join_result.get("success"):
+                            logger.info(
+                                f"[Watcher {watcher_id}] ✓ Account {acc_id} auto-joined group {group_id} "
+                                f"({join_result.get('title', '?')}). Will retry DM on next trigger."
+                            )
+                            last_error = "Đã tự động join nhóm. DM sẽ retry ở lần trigger tiếp theo."
+                            await db.add_watcher_dm_log(
+                                watcher_id, acc_id, user_id, username,
+                                group_id, group_title, matched_keyword, "failed",
+                                last_error
+                            )
+                            # Don't break — try next account which might already be in the group
+                            continue
+                        else:
+                            logger.warning(
+                                f"[Watcher {watcher_id}] Auto-join failed for acc {acc_id}: "
+                                f"{join_result.get('error')}"
+                            )
+                    except Exception as je:
+                        logger.warning(f"[Watcher {watcher_id}] Auto-join exception: {je}")
+                
+                last_error = _translate_dm_error(str(e))
+                await db.add_watcher_dm_log(
+                    watcher_id, acc_id, user_id, username,
+                    group_id, group_title, matched_keyword, "failed", last_error
+                )
+                continue
+            
             # Generic error — log individually and count toward daily failure limit
             last_error = _translate_dm_error(str(e))
             logger.warning(f"[Watcher {watcher_id}] Account {acc_id} ✗ {user_id}: {e}, trying next account")
@@ -642,10 +711,20 @@ async def _send_one(client, peer, msg: dict):
     elif msg_type in ("photo", "video", "document"):
         force_doc = msg_type == "document"
         stream = msg_type == "video"
-        await client.send_file(
-            peer, media_path, caption=content, parse_mode="html",
-            force_document=force_doc, supports_streaming=stream
-        )
+        # Randomize image to change hash (anti-spam fingerprinting)
+        rand_path = None
+        actual_path = media_path
+        if msg_type == "photo" and media_path:
+            rand_path = img_rand.randomize_image(media_path)
+            actual_path = rand_path
+        try:
+            await client.send_file(
+                peer, actual_path, caption=content, parse_mode="html",
+                force_document=force_doc, supports_streaming=stream
+            )
+        finally:
+            if rand_path:
+                img_rand.cleanup_temp_image(rand_path, media_path)
     else:
         raise ValueError(f"Unknown msg_type: {msg_type}")
 
@@ -985,7 +1064,7 @@ async def _preload_dm_history():
     """Load recent successful DMs from DB into _user_dm_sent to persist across restarts."""
     try:
         import aiosqlite, os
-        db_path = os.path.join(os.path.dirname(__file__), "data", "scheduler.db")
+        db_path = db.DB_PATH
         cutoff_secs = USER_DM_COOLDOWN_SECS
         async with aiosqlite.connect(db_path) as conn:
             rows = await conn.execute_fetchall(

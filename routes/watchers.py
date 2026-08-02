@@ -171,15 +171,14 @@ async def get_watcher(watcher_id: int):
 
 @router.put("/{watcher_id}")
 async def update_watcher(watcher_id: int, payload: WatcherPayload):
-    w = await db.get_watcher(watcher_id)
-    if not w:
+    platform = await db.get_watcher_platform(watcher_id)
+    if platform is None:
         raise HTTPException(status_code=404, detail="Watcher not found")
 
     ok = await db.update_watcher(watcher_id, payload.model_dump())
     if not ok:
         raise HTTPException(status_code=404, detail="Watcher not found")
 
-    platform = w.get("platform", "telegram")
     if platform == "telegram":
         await kw.reload_watcher(watcher_id)
     elif platform == "discord":
@@ -194,15 +193,14 @@ async def update_watcher(watcher_id: int, payload: WatcherPayload):
 
 @router.post("/{watcher_id}/toggle")
 async def toggle_watcher(watcher_id: int):
-    w = await db.get_watcher(watcher_id)
-    if not w:
+    platform = await db.get_watcher_platform(watcher_id)
+    if platform is None:
         raise HTTPException(status_code=404, detail="Watcher not found")
 
     result = await db.toggle_watcher(watcher_id)
     if not result:
         raise HTTPException(status_code=404, detail="Watcher not found")
 
-    platform = w.get("platform", "telegram")
     if platform == "telegram":
         await kw.reload_watcher(watcher_id)
     elif platform == "discord":
@@ -217,11 +215,10 @@ async def toggle_watcher(watcher_id: int):
 
 @router.delete("/{watcher_id}")
 async def delete_watcher(watcher_id: int):
-    w = await db.get_watcher(watcher_id)
-    if not w:
+    platform = await db.get_watcher_platform(watcher_id)
+    if platform is None:
         raise HTTPException(status_code=404, detail="Watcher not found")
 
-    platform = w.get("platform", "telegram")
     if platform == "telegram":
         kw.remove_watcher(watcher_id)
     elif platform == "discord":

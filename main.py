@@ -2,8 +2,11 @@
 Main entry point - starts FastAPI + multi-account Telethon + APScheduler.
 """
 import os
+import sys
 import secrets
 import asyncio
+import subprocess
+import signal
 import logging
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -15,15 +18,24 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
+
+class CacheControlledStaticFiles(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "public, max-age=3600"
+        return response
 
 import database as db
 import telegram_client as tg
 import scheduler as sch
 import message_queue as mq
 import keyword_watcher as kw
-from routes import auth, chats, schedules, messages, logs, watchers, settings, blacklist, reactions, inbox, members, analytics
+from routes import auth, chats, schedules, messages, logs, watchers, settings, blacklist, reactions, inbox, members, analytics, proxy, invite
 from routes import discord as discord_routes
+from routes import warmup as warmup_routes
+from routes import ai_followup
 import reaction_watcher as rw
 import dm_reply_tracker as drt
 
@@ -152,6 +164,28 @@ async def lifespan(app: FastAPI):
     sch.start_scheduler()
     await sch.load_all_jobs()
 
+    # Reload scheduled DM campaigns
+    scheduled_campaigns = await db.get_scheduled_campaigns()
+    for sc in scheduled_campaigns:
+        if sc["scheduled_at"] and sc["target_timezone"]:
+            sch.add_campaign_schedule_job(sc["id"], sc["scheduled_at"], sc["target_timezone"])
+    if scheduled_campaigns:
+        logger.info(f"Reloaded {len(scheduled_campaigns)} scheduled DM campaigns")
+
+    # Daily summary notification
+    from daily_summary import send_daily_summary
+    from apscheduler.triggers.cron import CronTrigger
+    summary_time = await db.get_setting("daily_summary_time", "21:00")
+    hour, minute = map(int, summary_time.split(":"))
+    sch.get_scheduler().add_job(
+        send_daily_summary,
+        trigger=CronTrigger(hour=hour, minute=minute, timezone=sch.TZ),
+        id="daily_summary",
+        name="Daily Summary",
+        replace_existing=True,
+    )
+    logger.info(f"Daily summary scheduled at {summary_time}")
+
     # Start message queue worker
     mq.start_worker()
 
@@ -175,6 +209,7 @@ async def lifespan(app: FastAPI):
     await rw.stop_all()
     await drt.stop_reply_tracker()
     await tg.disconnect_all()
+    await db.close_db()
     # Disconnect Discord bots
     try:
         import discord_watcher as dw
@@ -193,7 +228,19 @@ async def lifespan(app: FastAPI):
     logger.info("Goodbye!")
 
 
+class SafeGZipMiddleware(GZipMiddleware):
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            if b"range" in headers:
+                await self.app(scope, receive, send)
+                return
+        await super().__call__(scope, receive, send)
+
+
 app = FastAPI(title="TG Scheduler", lifespan=lifespan)
+
+app.add_middleware(SafeGZipMiddleware, minimum_size=1000)
 
 # ── BONUS: CORS ───────────────────────────────────────────────────────────────
 app.add_middleware(
@@ -219,15 +266,20 @@ app.include_router(inbox.router, dependencies=_auth_dep)
 app.include_router(discord_routes.router, dependencies=_auth_dep)
 app.include_router(members.router, dependencies=_auth_dep)
 app.include_router(analytics.router, dependencies=_auth_dep)
+app.include_router(proxy.router, dependencies=_auth_dep)
+app.include_router(invite.router, dependencies=_auth_dep)
+
+app.include_router(warmup_routes.router, dependencies=_auth_dep)
+app.include_router(ai_followup.router, dependencies=_auth_dep)
 
 # Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
+app.mount("/static", CacheControlledStaticFiles(directory=static_dir), name="static")
 
 
 @app.get("/")
 async def root():
-    return FileResponse(os.path.join(static_dir, "index.html"))
+    return FileResponse(os.path.join(static_dir, "index.html"), headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
 if __name__ == "__main__":

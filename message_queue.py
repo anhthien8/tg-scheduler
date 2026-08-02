@@ -256,7 +256,6 @@ async def queue_worker():
 
         except asyncio.CancelledError:
             logger.info("Queue worker cancelled")
-            q.task_done()
             break
         except Exception as e:
             logger.error(f"Queue worker error: {e}")

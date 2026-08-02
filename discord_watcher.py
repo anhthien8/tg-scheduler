@@ -177,8 +177,9 @@ async def _do_send_dm(
     """Internal: actual DM sending logic with bot rotation fallback."""
     # Load AI remix settings
     ai_provider = await db.get_setting("ai_provider", None)
-    ai_enabled = ai_provider in ("gemini", "deepseek", "openai", "groq")
+    ai_enabled = ai_provider in ("gemini", "deepseek", "openai", "groq", "openai_compatible")
     ai_keys = []
+    ai_remix_kwargs = {}
     if ai_enabled:
         try:
             raw = await db.get_setting("ai_keys_" + ai_provider, "[]")
@@ -187,6 +188,9 @@ async def _do_send_dm(
             ai_keys = []
         if not ai_keys:
             ai_enabled = False
+        if ai_provider == "openai_compatible":
+            ai_remix_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
+            ai_remix_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
 
     last_error = None
     rotated_ids = _next_bot_account(watcher_id, account_ids)
@@ -216,6 +220,7 @@ async def _do_send_dm(
                         provider=ai_provider,
                         api_keys=ai_keys,
                         sender_name=target_username,
+                        **ai_remix_kwargs
                     )
 
                 success = await _adapter.send_dm(

@@ -223,6 +223,51 @@ async def start_client(account_id: int) -> bool:
         return False
 
 
+async def reconnect_with_proxy(account_id: int, proxy_url: str | None) -> bool:
+    """
+    Disconnect existing client and reconnect with a new proxy.
+    Used when proxy is assigned/changed/removed for an account.
+    Returns True if reconnected successfully.
+    """
+    import database as db_mod
+
+    old_client = _clients.get(account_id)
+    if old_client:
+        try:
+            await old_client.disconnect()
+            logger.info(f"Account {account_id}: disconnected for proxy change")
+        except Exception as e:
+            logger.warning(f"Account {account_id}: disconnect error (continuing): {e}")
+
+    # Get account info from DB
+    accounts = await db_mod.get_accounts()
+    acc = next((a for a in accounts if a["id"] == account_id), None)
+    if not acc:
+        logger.error(f"Account {account_id}: not found in DB for reconnect")
+        return False
+
+    try:
+        # Create new client with proxy
+        await create_client(
+            account_id,
+            int(acc["api_id"]),
+            acc["api_hash"],
+            acc["session_name"],
+            proxy_url=proxy_url,
+        )
+        # Start and authorize
+        ok = await start_client(account_id)
+        if ok:
+            proxy_display = proxy_url.split("@")[-1] if proxy_url and "@" in proxy_url else (proxy_url or "direct")
+            logger.info(f"Account {account_id}: ✓ reconnected via {proxy_display}")
+        else:
+            logger.warning(f"Account {account_id}: reconnected but not authorized")
+        return ok
+    except Exception as e:
+        logger.error(f"Account {account_id}: reconnect with proxy failed: {e}")
+        return False
+
+
 async def send_code(account_id: int, phone: str) -> str:
     """Send login code. Returns phone_code_hash."""
     client = _clients.get(account_id)
@@ -357,6 +402,16 @@ async def get_dialogs(account_id: int) -> list:
                 "username": "",
                 "participants_count": entity.participants_count
             })
+        elif isinstance(entity, User):
+            if entity.bot:
+                name = " ".join(filter(None, [entity.first_name, entity.last_name])).strip()
+                result.append({
+                    "chat_id": entity.id,
+                    "chat_title": name or entity.username or f"Bot {entity.id}",
+                    "chat_type": "bot",
+                    "username": entity.username or "",
+                    "participants_count": None
+                })
     return result
 
 
@@ -415,19 +470,29 @@ async def check_accounts_in_groups(account_ids: list[int], group_ids: list[int])
     return {"warnings": warnings, "all_ok": len(warnings) == 0}
 
 async def leave_channel(account_id: int, chat_id: int) -> dict:
-    """Leave (and optionally delete history of) a group or channel."""
+    """Leave (and optionally delete history of) a group, channel, or stop/delete a bot."""
     client = _clients.get(account_id)
     if not client:
         return {"success": False, "error": "Account not found"}
     try:
         from telethon.tl.functions.channels import LeaveChannelRequest
         from telethon.tl.functions.messages import DeleteHistoryRequest
-        from telethon.tl.types import Channel, Chat
+        from telethon.tl.types import Channel, Chat, User
 
         entity = await client.get_entity(chat_id)
 
         if isinstance(entity, Channel):
             await client(LeaveChannelRequest(entity))
+        elif isinstance(entity, User) and entity.bot:
+            # Stop bot (block)
+            from telethon.tl.functions.contacts import BlockRequest
+            try:
+                await client(BlockRequest(id=entity))
+            except Exception as e:
+                logger.warning(f"Failed to block bot {chat_id}: {e}")
+            
+            # Delete bot history
+            await client(DeleteHistoryRequest(peer=entity, max_id=0, revoke=True))
         else:
             # Regular group
             from telethon.tl.functions.messages import DeleteChatUserRequest
@@ -687,15 +752,27 @@ async def deep_crawl_similar_channels(
             except Exception:
                 pass
 
-    # Step 1: Resolve the source channel to get its ID into visited
-    first_aid, first_client = valid_clients[0]
-    try:
-        source_entity = await first_client.get_entity(channel_link)
-        source_id = getattr(source_entity, 'id', None)
-        if source_id:
-            visited.add(source_id)
-    except Exception as e:
-        raise Exception(f"Không thể tìm thấy kênh nguồn '{channel_link}': {str(e)}")
+    # Step 1: Resolve the source channel — try all accounts until one works
+    source_entity = None
+    resolve_errors = []
+    for _aid, _client in valid_clients:
+        try:
+            source_entity = await _client.get_entity(channel_link)
+            source_id = getattr(source_entity, 'id', None)
+            if source_id:
+                visited.add(source_id)
+            logger.info(f"[DeepCrawl] Source resolved via account #{_aid}")
+            break
+        except errors.FloodWaitError as e:
+            resolve_errors.append(f"Account #{_aid}: FloodWait {e.seconds}s")
+            logger.warning(f"[DeepCrawl] Account #{_aid} FloodWait on resolve ({e.seconds}s), trying next...")
+            continue
+        except Exception as e:
+            resolve_errors.append(f"Account #{_aid}: {str(e)[:60]}")
+            continue
+    if not source_entity:
+        all_errors = "; ".join(resolve_errors)
+        raise Exception(f"Không thể resolve kênh nguồn '{channel_link}' trên tất cả tài khoản: {all_errors}")
 
     # Replace the initial queue item with the resolved entity
     queue.clear()
@@ -725,35 +802,109 @@ async def deep_crawl_similar_channels(
         aid, client = _next_client()
         state["current_account"] = f"Account #{aid}"
 
-        # Resolve channel entity
-        try:
+        # Resolve channel entity — with multi-account fallback on FloodWait
+        entity = None
+        async def _try_resolve_with(c):
+            """Try to resolve channel_ref using client c."""
             if isinstance(channel_ref, str):
-                entity = await client.get_entity(channel_ref)
+                return await c.get_entity(channel_ref)
+            elif isinstance(channel_ref, tuple):
+                ch_id_q, ch_hash_q, ch_uname_q = channel_ref
+                if ch_uname_q:
+                    return await c.get_entity(ch_uname_q)
+                elif ch_hash_q:
+                    from telethon.tl.types import InputPeerChannel
+                    peer = InputPeerChannel(channel_id=ch_id_q, access_hash=ch_hash_q)
+                    return await c.get_entity(peer)
+                else:
+                    return None
             else:
-                entity = channel_ref
+                _uname = getattr(channel_ref, 'username', None)
+                _ahash = getattr(channel_ref, 'access_hash', None)
+                _chid = getattr(channel_ref, 'id', None)
+                if _uname:
+                    return await c.get_entity(_uname)
+                elif _chid and _ahash:
+                    from telethon.tl.types import InputPeerChannel
+                    peer = InputPeerChannel(channel_id=_chid, access_hash=_ahash)
+                    return await c.get_entity(peer)
+                return None
+
+        # Try primary account first, then fallback to others on FloodWait
+        try:
+            entity = await _try_resolve_with(client)
+        except errors.FloodWaitError:
+            logger.warning(f"[DeepCrawl] Account #{aid} FloodWait on resolve, trying others...")
+            for _faid, _fclient in valid_clients:
+                if _faid == aid:
+                    continue
+                try:
+                    entity = await _try_resolve_with(_fclient)
+                    if entity:
+                        aid, client = _faid, _fclient  # Switch to this account for recommendations too
+                        state["current_account"] = f"Account #{aid}"
+                        break
+                except errors.FloodWaitError:
+                    continue
+                except Exception:
+                    continue
         except Exception as e:
             state["errors"].append(f"Resolve error at depth {depth}: {str(e)[:80]}")
             continue
 
+        if not entity:
+            state["errors"].append(f"Skip depth {depth}: all accounts flood-limited for resolve")
+            continue
+
         ch_title = getattr(entity, 'title', str(channel_ref))
         state["current_channel"] = ch_title
+        logger.info(f"[DeepCrawl] Depth {depth}: resolved '{ch_title}' (id={getattr(entity, 'id', '?')}) via account #{aid}")
         await _update_progress()
 
-        # Get recommendations for this channel
+        # Get recommendations for this channel — with multi-account fallback
+        res = None
         try:
             res = await client(GetChannelRecommendationsRequest(channel=entity))
             account_request_count[aid] = account_request_count.get(aid, 0) + 1
         except errors.FloodWaitError as e:
-            wait_time = e.seconds + 10
-            logger.warning(f"[DeepCrawl] FloodWait on account {aid}, waiting {wait_time}s")
-            state["errors"].append(f"FloodWait account #{aid}: pause {wait_time}s")
-            await _update_progress()
-            await asyncio.sleep(wait_time)
-            # Re-queue this channel and continue
-            queue.appendleft((channel_ref, depth, parent_title))
-            continue
+            logger.warning(f"[DeepCrawl] FloodWait on GetRecommendations for account #{aid} ({e.seconds}s), trying others...")
+            # Try other accounts
+            for _faid, _fclient in valid_clients:
+                if _faid == aid:
+                    continue
+                try:
+                    # Need to re-resolve entity for the fallback client
+                    _uname = getattr(entity, 'username', None)
+                    _ahash = getattr(entity, 'access_hash', None)
+                    _chid = getattr(entity, 'id', None)
+                    if _uname:
+                        _entity = await _fclient.get_entity(_uname)
+                    elif _chid and _ahash:
+                        from telethon.tl.types import InputPeerChannel
+                        _peer = InputPeerChannel(channel_id=_chid, access_hash=_ahash)
+                        _entity = await _fclient.get_entity(_peer)
+                    else:
+                        continue
+                    res = await _fclient(GetChannelRecommendationsRequest(channel=_entity))
+                    account_request_count[_faid] = account_request_count.get(_faid, 0) + 1
+                    logger.info(f"[DeepCrawl] GetRecommendations succeeded via fallback account #{_faid}")
+                    break
+                except errors.FloodWaitError:
+                    continue
+                except Exception:
+                    continue
+            if res is None:
+                # All accounts flood-limited — wait on the original and re-queue
+                wait_time = min(e.seconds + 10, 120)  # Cap wait at 2 min
+                logger.warning(f"[DeepCrawl] All accounts flood-limited for recommendations, waiting {wait_time}s")
+                state["errors"].append(f"FloodWait all accounts: pause {wait_time}s")
+                await _update_progress()
+                await asyncio.sleep(wait_time)
+                queue.appendleft((channel_ref, depth, parent_title))
+                continue
         except Exception as e:
             state["errors"].append(f"Recommendations error for '{ch_title}': {str(e)[:80]}")
+            logger.warning(f"[DeepCrawl] Recommendations error for '{ch_title}': {e}")
             continue
 
         # Anti-ban: delay after recommendation request
@@ -769,6 +920,7 @@ async def deep_crawl_similar_channels(
 
         # Process each recommended channel
         chats = getattr(res, 'chats', [])
+        logger.info(f"[DeepCrawl] Depth {depth}: '{ch_title}' returned {len(chats)} recommended chats (type={type(res).__name__})")
         state["channels_processed"] += 1
 
         for chat in chats:
@@ -791,11 +943,11 @@ async def deep_crawl_similar_channels(
             description = ""
             contacts = []
             try:
-                # Pick account for full channel fetch (can use same or rotate)
-                full_aid, full_client = _next_client()
-                full_chat = await full_client(GetFullChannelRequest(channel=chat))
+                # MUST use the same client that fetched recommendations
+                # because `chat` object is bound to that client's session
+                full_chat = await client(GetFullChannelRequest(channel=chat))
                 description = getattr(full_chat.full_chat, 'about', '') or ""
-                account_request_count[full_aid] = account_request_count.get(full_aid, 0) + 1
+                account_request_count[aid] = account_request_count.get(aid, 0) + 1
 
                 found = username_regex.findall(description)
                 for u in found:
@@ -830,8 +982,10 @@ async def deep_crawl_similar_channels(
             state["contacts_found"] += len(contacts)
 
             # If we haven't reached max depth, queue this channel for next layer
+            # Store as (id, access_hash, username) tuple to avoid cross-account entity issues
             if depth + 1 < max_depth:
-                queue.append((chat, depth + 1, title))
+                ch_access_hash = getattr(chat, 'access_hash', None) or 0
+                queue.append(((ch_id, ch_access_hash, username), depth + 1, title))
 
             await _update_progress()
 
@@ -844,6 +998,154 @@ async def deep_crawl_similar_channels(
     logger.info(f"[DeepCrawl] Finished. Found {len(all_leads)} unique channels, {state['contacts_found']} contacts across {max_depth} layers.")
     return all_leads
 
+
+
+async def check_spam_status(account_id: int) -> dict:
+    """Check account spam status by messaging @SpamBot.
+
+    Returns dict with keys:
+        status: "free" | "limited" | "unknown"
+        message: Raw SpamBot response text
+        checked_at: ISO timestamp
+    """
+    from datetime import datetime, timezone
+    client = get_client(account_id)
+    if not client or not client.is_connected():
+        return {
+            "status": "unknown",
+            "message": "Tài khoản chưa kết nối",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    try:
+        # Resolve @SpamBot entity
+        spam_bot = await client.get_entity("SpamBot")
+
+        # Send /start command
+        await client.send_message(spam_bot, "/start")
+
+        # Wait for response (SpamBot replies within seconds)
+        await asyncio.sleep(3)
+
+        # Read last message from SpamBot
+        messages = await client.get_messages(spam_bot, limit=1)
+        if not messages:
+            return {
+                "status": "unknown",
+                "message": "Không nhận được phản hồi từ SpamBot",
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        reply_text = messages[0].text or ""
+        reply_lower = reply_text.lower()
+
+        # Parse SpamBot response
+        # SpamBot typically says:
+        #   "Good news, no limits..."  → free
+        #   "Your account is limited..." → limited
+        #   "Unfortunately, ..." → limited
+        if any(kw in reply_lower for kw in [
+            "no limits", "good news", "free",
+            "не ограничен", "нет ограничений",
+            "không bị giới hạn",
+        ]):
+            status = "free"
+        elif any(kw in reply_lower for kw in [
+            "limited", "restrict", "spam",
+            "ограничен", "спам",
+            "giới hạn", "bị hạn chế",
+        ]):
+            status = "limited"
+        else:
+            status = "unknown"
+
+        logger.info(f"[SpamCheck] Account {account_id}: {status} — {reply_text[:80]}")
+        return {
+            "status": status,
+            "message": reply_text[:500],
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.warning(f"[SpamCheck] Account {account_id} error: {e}")
+        return {
+            "status": "unknown",
+            "message": f"Lỗi kiểm tra: {str(e)[:200]}",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+async def invite_to_channel(account_id: int, channel, users) -> dict:
+    """Invite users to a channel/group. Uses InviteToChannelRequest."""
+    client = _clients.get(account_id)
+    if not client:
+        return {"success": False, "error": "Account not found"}
+    try:
+        from telethon.tl.functions.channels import InviteToChannelRequest
+        channel_entity = await client.get_entity(channel)
+        if not isinstance(users, list):
+            users = [users]
+        user_entities = []
+        for u in users:
+            try:
+                ue = await client.get_entity(u)
+                user_entities.append(ue)
+            except Exception as e:
+                logger.warning(f"Cannot resolve user {u}: {e}")
+        if not user_entities:
+            return {"success": False, "error": "No valid users to invite"}
+        result = await client(InviteToChannelRequest(
+            channel=channel_entity,
+            users=user_entities
+        ))
+        return {"success": True, "invited": len(user_entities)}
+    except errors.FloodWaitError:
+        raise
+    except errors.PeerFloodError:
+        raise
+    except errors.UserPrivacyRestrictedError:
+        raise
+    except errors.ChatAdminRequiredError:
+        raise
+    except Exception as e:
+        logger.error(f"Account {account_id}: invite error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+async def export_invite_link(account_id: int, channel) -> dict:
+    """Export an invite link for a channel/group."""
+    client = _clients.get(account_id)
+    if not client:
+        return {"success": False, "error": "Account not found"}
+    try:
+        from telethon.tl.functions.messages import ExportChatInviteRequest
+        entity = await client.get_entity(channel)
+        result = await client(ExportChatInviteRequest(peer=entity))
+        return {"success": True, "link": result.link}
+    except Exception as e:
+        logger.error(f"Account {account_id}: export invite link error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+async def get_channel_info(account_id: int, channel) -> dict:
+    """Get basic info about a channel/group."""
+    client = _clients.get(account_id)
+    if not client:
+        return {"success": False, "error": "Account not found"}
+    try:
+        entity = await client.get_entity(channel)
+        info = {
+            "success": True,
+            "id": entity.id,
+            "title": getattr(entity, "title", str(entity.id)),
+            "username": getattr(entity, "username", None),
+            "is_channel": isinstance(entity, Channel) and entity.broadcast,
+            "is_group": isinstance(entity, Channel) and entity.megagroup,
+            "participants_count": getattr(entity, "participants_count", None),
+        }
+        return info
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 async def disconnect_all():

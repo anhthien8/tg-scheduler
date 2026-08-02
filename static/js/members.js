@@ -5,15 +5,84 @@
 const Members = {
   _scrapeJobs: [],
   _campaigns: [],
+  _inviteCampaigns: [],
   _accounts: [],
   _groupsCache: {},
+  _lastCampaignsUpdate: null,
+  _lastInviteCampaignsUpdate: null,
+  _campaignPollInterval: null,
+  _inviteCampaignPollInterval: null,
+  _deepCrawlPollInterval: 3000,
+  _deepCrawlPrevState: null,
+  _editingInviteCampaignId: null,
 
   // ── Init: load data when navigating to members page ──
   async init() {
+    this._lastCampaignsUpdate = null;
+    this._lastInviteCampaignsUpdate = null;
+    if (this._campaignPollInterval) {
+      clearInterval(this._campaignPollInterval);
+      this._campaignPollInterval = null;
+    }
+    if (this._inviteCampaignPollInterval) {
+      clearInterval(this._inviteCampaignPollInterval);
+      this._inviteCampaignPollInterval = null;
+    }
     await Promise.all([
       this.loadScrapeJobs(),
       this.loadCampaigns(),
+      this.loadInviteCampaigns(),
     ]);
+    if (this._campaigns.some(c => c.status === 'running')) {
+      this._pollCampaign();
+    }
+    if (this._inviteCampaigns.some(c => c.status === 'running')) {
+      this._pollInviteCampaign();
+    }
+
+    // Restore deep crawl polling and UI state on page refresh if active
+    if (!this._deepCrawlPolling) {
+      try {
+        const res = await fetch('/api/members/deep-crawl/status');
+        if (res.ok) {
+          const s = await res.json();
+          if (s.status === 'running') {
+            this._deepCrawlPolling = true;
+            this._deepCrawlPollInterval = 3000;
+            this._deepCrawlPrevState = null;
+
+            // Auto-switch to "Similar Channels" tab
+            const simTab = document.getElementById('members-tab-similar');
+            if (simTab) simTab.click();
+
+            const btn = document.getElementById('sim-btn-search');
+            const stopBtn = document.getElementById('sim-btn-stop');
+            const progressPanel = document.getElementById('sim-progress-panel');
+            if (btn) {
+              btn.disabled = true;
+              btn.textContent = '⏳ Đang Deep Crawl...';
+            }
+            if (stopBtn) stopBtn.classList.remove('hidden');
+            if (progressPanel) progressPanel.classList.remove('hidden');
+
+            // Immediately render current server state before starting poll
+            this._renderDeepCrawlProgressFromState(s);
+
+            this._pollDeepCrawlProgress();
+          } else if (s.status === 'completed' || s.status === 'stopped') {
+            // Crawl finished while tab was closed — show results
+            const simTab = document.getElementById('members-tab-similar');
+            if (simTab) simTab.click();
+            const progressPanel = document.getElementById('sim-progress-panel');
+            if (progressPanel) progressPanel.classList.remove('hidden');
+            this._renderDeepCrawlProgressFromState(s);
+            await this._fetchDeepCrawlResults();
+          }
+        }
+      } catch (e) {
+        console.error('Error restoring deep crawl status:', e);
+      }
+    }
   },
 
   // ── Account dropdown populate ──
@@ -122,6 +191,190 @@ const Members = {
     }
   },
 
+  // ── Scrape Mode Tab Switching ──
+  switchScrapeMode(mode) {
+    document.querySelectorAll('.ms-scrape-mode-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+      if (btn.dataset.mode !== mode) btn.classList.add('btn-ghost');
+      else btn.classList.remove('btn-ghost');
+    });
+    const singleMode = document.getElementById('ms-scrape-single-mode');
+    const batchMode = document.getElementById('ms-scrape-batch-mode');
+    if (mode === 'batch') {
+      singleMode.classList.add('hidden');
+      batchMode.classList.remove('hidden');
+      // Sync account dropdown
+      const batchAccSel = document.getElementById('ms-batch-account');
+      const mainAccSel = document.getElementById('ms-account-select');
+      if (batchAccSel && mainAccSel) batchAccSel.innerHTML = mainAccSel.innerHTML;
+    } else {
+      singleMode.classList.remove('hidden');
+      batchMode.classList.add('hidden');
+    }
+  },
+
+  // ── Resolve Channel Links ──
+  async resolveChannelLinks() {
+    const textarea = document.getElementById('ms-batch-links');
+    const accountId = parseInt(document.getElementById('ms-batch-account').value);
+    if (!textarea || !accountId) {
+      App.toast('Chọn tài khoản và nhập link channel', 'error');
+      return;
+    }
+
+    const lines = textarea.value.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) {
+      App.toast('Nhập ít nhất 1 link channel', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('ms-btn-resolve');
+    btn.disabled = true;
+    btn.textContent = '⏳ Đang kiểm tra...';
+
+    try {
+      const r = await MembersAPI.resolveChannels({
+        account_id: accountId,
+        channels: lines,
+      });
+
+      const results = r.results || [];
+      this._batchResolvedChannels = results;
+
+      const previewDiv = document.getElementById('ms-batch-preview');
+      const tbody = document.getElementById('ms-batch-preview-tbody');
+      previewDiv.classList.remove('hidden');
+
+      tbody.innerHTML = results.map((ch, i) => {
+        const statusBadge = ch.success
+          ? '<span class="badge badge-green">✅ OK</span>'
+          : `<span class="badge" style="background:var(--danger-bg);color:var(--danger)">❌ ${esc(ch.error || 'Lỗi')}</span>`;
+        return `<tr>
+          <td>${i + 1}</td>
+          <td style="font-family:monospace;font-size:12px">${esc(ch.username || ch.input)}</td>
+          <td>${ch.success ? esc(ch.title || '') : '—'}</td>
+          <td>${ch.success ? `<span class="badge badge-blue">${ch.participants_count || '?'}</span>` : '—'}</td>
+          <td>${statusBadge}</td>
+        </tr>`;
+      }).join('');
+
+      // Enable batch scrape if at least 1 resolved
+      const hasValid = results.some(r => r.success);
+      document.getElementById('ms-btn-batch-scrape').disabled = !hasValid;
+
+      if (hasValid) {
+        const validCount = results.filter(r => r.success).length;
+        App.toast(`Đã xác minh ${validCount}/${results.length} channel`, 'success');
+      } else {
+        App.toast('Không có channel nào hợp lệ', 'error');
+      }
+    } catch (e) {
+      App.toast(e.message || 'Lỗi kiểm tra channels', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔍 Kiểm tra';
+    }
+  },
+
+  // ── Start Batch Scrape ──
+  async startBatchScrape() {
+    const accountId = parseInt(document.getElementById('ms-batch-account').value);
+    const textarea = document.getElementById('ms-batch-links');
+    const method = document.getElementById('ms-batch-method').value;
+    const filterDays = document.getElementById('ms-batch-filter').value;
+
+    const lines = textarea.value.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length || !accountId) {
+      App.toast('Nhập link channel và chọn tài khoản', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('ms-btn-batch-scrape');
+    btn.disabled = true;
+    btn.textContent = '⏳ Đang khởi tạo...';
+
+    try {
+      const r = await MembersAPI.batchScrape({
+        account_id: accountId,
+        channels: lines,
+        filter_active_days: filterDays ? parseInt(filterDays) : null,
+        exclude_bots: true,
+        scrape_method: method,
+      });
+
+      App.toast(r.message || 'Đã bắt đầu cào hàng loạt!', 'success');
+
+      // Show progress panel
+      document.getElementById('ms-batch-progress').classList.remove('hidden');
+      document.getElementById('ms-batch-preview').classList.add('hidden');
+
+      // Start polling
+      this._pollBatchProgress(r.batch_job_id);
+    } catch (e) {
+      App.toast(e.message || 'Lỗi bắt đầu cào', 'error');
+      btn.disabled = false;
+      btn.textContent = '🚀 Bắt đầu cào hàng loạt';
+    }
+  },
+
+  // ── Poll Batch Progress ──
+  _batchPollTimer: null,
+  async _pollBatchProgress(batchJobId) {
+    const poll = async () => {
+      try {
+        const r = await MembersAPI.getBatchProgress(batchJobId);
+
+        // Update stats badges
+        document.getElementById('ms-batch-stat-total').textContent = `${r.total_channels} channels`;
+        document.getElementById('ms-batch-stat-done').textContent = `${r.done} xong`;
+        document.getElementById('ms-batch-stat-running').textContent = `${r.running} đang chạy`;
+        document.getElementById('ms-batch-stat-errors').textContent = `${r.errors} lỗi`;
+        document.getElementById('ms-batch-stat-members').textContent = r.total_members;
+
+        // Update progress table
+        const tbody = document.getElementById('ms-batch-progress-tbody');
+        tbody.innerHTML = (r.channels || []).map((ch, i) => {
+          let statusBadge;
+          switch (ch.status) {
+            case 'done':
+              statusBadge = '<span class="badge badge-green">✅ Xong</span>'; break;
+            case 'running':
+              statusBadge = '<span class="badge badge-yellow">⏳ Đang cào...</span>'; break;
+            case 'error':
+              statusBadge = '<span class="badge" style="background:var(--danger-bg);color:var(--danger)">❌ Lỗi</span>'; break;
+            default:
+              statusBadge = '<span class="badge">⏸ Chờ</span>';
+          }
+          return `<tr>
+            <td>${i + 1}</td>
+            <td>${esc(ch.channel_title || ch.channel_username)}</td>
+            <td>${statusBadge}</td>
+            <td>${ch.member_count > 0 ? `<span class="badge badge-blue">${ch.member_count}</span>` : '—'}</td>
+            <td style="font-size:12px;color:var(--text2)">${ch.error_message ? esc(ch.error_message).substring(0, 50) : '—'}</td>
+          </tr>`;
+        }).join('');
+
+        // Stop polling when done
+        if (r.status === 'done') {
+          clearInterval(this._batchPollTimer);
+          this._batchPollTimer = null;
+          const btn = document.getElementById('ms-btn-batch-scrape');
+          btn.disabled = false;
+          btn.textContent = '🚀 Bắt đầu cào hàng loạt';
+          App.toast(`Hoàn tất! ${r.total_members} members từ ${r.done} channels (đã loại trùng)`, 'success');
+          // Reload scrape jobs to show the new batch job
+          this.loadScrapeJobs();
+        }
+      } catch (e) {
+        console.error('Batch poll error:', e);
+      }
+    };
+
+    // Poll immediately then every 5 seconds
+    await poll();
+    this._batchPollTimer = setInterval(poll, 5000);
+  },
+
   // ── Load Scrape Jobs ──
   async loadScrapeJobs() {
     try {
@@ -221,8 +474,34 @@ const Members = {
 
   async loadCampaigns() {
     try {
-      const d = await MembersAPI.getCampaigns();
-      this._campaigns = d.campaigns || [];
+      const d = await MembersAPI.getCampaigns(this._lastCampaignsUpdate);
+      const newCampaigns = d.campaigns || [];
+      
+      if (!this._campaigns) {
+        this._campaigns = [];
+      }
+
+      if (this._lastCampaignsUpdate === null) {
+        this._campaigns = newCampaigns;
+      } else if (newCampaigns.length > 0) {
+        newCampaigns.forEach(newC => {
+          const idx = this._campaigns.findIndex(c => c.id === newC.id);
+          if (idx !== -1) {
+            this._campaigns[idx] = newC;
+          } else {
+            this._campaigns.push(newC);
+          }
+        });
+        this._campaigns.sort((a, b) => b.id - a.id);
+      }
+
+      if (this._campaigns.length > 0) {
+        const timestamps = this._campaigns.map(c => c.updated_at).filter(Boolean);
+        if (timestamps.length > 0) {
+          this._lastCampaignsUpdate = timestamps.reduce((max, t) => t > max ? t : max, timestamps[0]);
+        }
+      }
+
       this._renderCampaigns();
     } catch (e) {
       console.error('Load campaigns error:', e);
@@ -246,7 +525,19 @@ const Members = {
     }
     if (empty) empty.classList.add('hidden');
 
-    tbody.innerHTML = campaigns.map((c, i) => {
+    // Remove rows no longer in state
+    const campaignIdsInState = new Set(campaigns.map(c => c.id));
+    Array.from(tbody.children).forEach(row => {
+      const idAttr = row.getAttribute('data-id');
+      if (idAttr) {
+        const cid = parseInt(idAttr);
+        if (!campaignIdsInState.has(cid)) {
+          row.remove();
+        }
+      }
+    });
+
+    campaigns.forEach((c, i) => {
       const statusBadge = this._statusBadge(c.status);
       const total = c.total_targets || 0;
       const sent = c.sent_count || 0;
@@ -257,16 +548,31 @@ const Members = {
       let actions = '';
       if (c.status === 'draft' || c.status === 'paused' || c.status === 'error') {
         actions += `<button class="btn btn-primary btn-sm" onclick="Members.startCampaign(${c.id})">▶ Chạy</button>`;
+        actions += `<button class="btn btn-ghost btn-sm" onclick="Members.editCampaignMessages(${c.id})" title="Sửa tin nhắn">✏️</button>`;
       }
       if (c.status === 'running') {
         actions += `<button class="btn btn-danger btn-sm" onclick="Members.stopCampaign(${c.id})">⏸ Dừng</button>`;
       }
+      if (c.status === 'scheduled') {
+        actions += `<button class="btn btn-ghost btn-sm" onclick="Members.cancelSchedule(${c.id})" style="color:var(--danger)">Hủy lịch</button>`;
+      }
+      actions += `<button class="btn btn-ghost btn-sm" onclick="Members.cloneCampaign(${c.id})" title="Nhân bản (Clone) chiến dịch">📑</button>`;
       actions += `<button class="btn btn-ghost btn-sm" onclick="Members.viewCampaignLogs(${c.id},'${esc(c.name)}')">📋</button>`;
       actions += `<button class="btn btn-danger btn-sm" onclick="Members.deleteCampaign(${c.id})">🗑</button>`;
 
-      return `<tr>
+      let scheduleInfo = '';
+      if (c.status === 'scheduled' && c.scheduled_at) {
+        const time = new Date(c.scheduled_at + 'Z').toLocaleString('vi-VN');
+        const tz = c.target_timezone ? `<br><small style="color:var(--text2)">${Members._tzLabel(c.target_timezone)}</small>` : '';
+        scheduleInfo = `<div style="font-size:11px;margin-top:4px;color:var(--accent)">⏰ ${time}${tz}</div>`;
+      }
+
+      const rowHtml = `
         <td>${i + 1}</td>
-        <td>${esc(c.name)}</td>
+        <td>
+          ${esc(c.name)}
+          ${scheduleInfo}
+        </td>
         <td style="font-size:12px">${esc(c.scrape_job_id.substring(0, 20))}...</td>
         <td>${statusBadge}</td>
         <td>
@@ -281,8 +587,32 @@ const Members = {
           </div>
         </td>
         <td><div class="btn-group">${actions}</div></td>
-      </tr>`;
-    }).join('');
+      `;
+
+      let existingRow = tbody.querySelector(`tr[data-id="${c.id}"]`);
+      if (existingRow) {
+        const existingIdx = parseInt(existingRow.getAttribute('data-index'));
+        if (existingIdx !== (i + 1) || existingRow.getAttribute('data-updated-at') !== c.updated_at || existingRow.getAttribute('data-status') !== c.status) {
+          existingRow.innerHTML = rowHtml;
+          existingRow.setAttribute('data-updated-at', c.updated_at);
+          existingRow.setAttribute('data-status', c.status);
+          existingRow.setAttribute('data-index', i + 1);
+        }
+      } else {
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-id', c.id);
+        tr.setAttribute('data-updated-at', c.updated_at);
+        tr.setAttribute('data-status', c.status);
+        tr.setAttribute('data-index', i + 1);
+        tr.innerHTML = rowHtml;
+        
+        if (tbody.children.length === 0 || i >= tbody.children.length) {
+          tbody.appendChild(tr);
+        } else {
+          tbody.insertBefore(tr, tbody.children[i]);
+        }
+      }
+    });
   },
 
   _statusBadge(status) {
@@ -292,6 +622,7 @@ const Members = {
       paused: '<span class="badge" style="background:#f59e0b">⏸ Paused</span>',
       completed: '<span class="badge badge-green">✅ Done</span>',
       error: '<span class="badge badge-red">❌ Error</span>',
+      scheduled: '<span class="badge" style="background:#8b5cf6">⏰ Scheduled</span>',
     };
     return map[status] || `<span class="badge">${status}</span>`;
   },
@@ -301,6 +632,7 @@ const Members = {
     try {
       const r = await MembersAPI.startCampaign(id);
       App.toast(r.message || 'Campaign đã chạy!', 'success');
+      this._lastCampaignsUpdate = null;
       this.loadCampaigns();
       // Auto-refresh while running
       this._pollCampaign(id);
@@ -313,6 +645,7 @@ const Members = {
     try {
       await MembersAPI.stopCampaign(id);
       App.toast('Campaign đã dừng', 'success');
+      this._lastCampaignsUpdate = null;
       this.loadCampaigns();
     } catch (e) {
       App.toast(e.message, 'error');
@@ -324,27 +657,241 @@ const Members = {
     try {
       await MembersAPI.deleteCampaign(id);
       App.toast('Đã xóa', 'success');
+      this._lastCampaignsUpdate = null;
       this.loadCampaigns();
     } catch (e) {
       App.toast(e.message, 'error');
     }
   },
 
+  async cancelSchedule(id) {
+    if (!confirm('Bạn có chắc muốn hủy lịch chạy campaign này không? Campaign sẽ chuyển về trạng thái Draft.')) return;
+    try {
+      await MembersAPI.cancelSchedule(id);
+      App.toast('Đã hủy lịch thành công', 'success');
+      this._lastCampaignsUpdate = null;
+      this.loadCampaigns();
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+  },
+
+  _tzLabel(tz) {
+    const map = {
+      'Asia/Ho_Chi_Minh': '🇻🇳 VN',
+      'Asia/Singapore': '🇸🇬 SG/MY',
+      'Asia/Hong_Kong': '🇭🇰 HK',
+      'Asia/Tokyo': '🇯🇵 JP',
+      'Asia/Seoul': '🇰🇷 KR',
+      'Asia/Kolkata': '🇮🇳 IN',
+      'Asia/Dubai': '🇦🇪 AE',
+      'Europe/Istanbul': '🇹🇷 TR',
+      'Europe/London': '🇬🇧 UK',
+      'Europe/Berlin': '🇩🇪 EU',
+      'America/New_York': '🇺🇸 US-E',
+      'America/Los_Angeles': '🇺🇸 US-W',
+      'America/Sao_Paulo': '🇧🇷 BR',
+      'Africa/Lagos': '🇳🇬 NG',
+      'Australia/Sydney': '🇦🇺 AU'
+    };
+    return map[tz] || tz;
+  },
+
   _pollCampaign(id) {
-    const poll = setInterval(async () => {
+    if (this._campaignPollInterval) return;
+
+    this._campaignPollInterval = setInterval(async () => {
       try {
-        const d = await MembersAPI.getCampaign(id);
-        const c = d.campaign;
-        if (!c || c.status !== 'running') {
-          clearInterval(poll);
-          this.loadCampaigns();
-          return;
+        await this.loadCampaigns();
+        
+        const hasRunning = this._campaigns.some(c => c.status === 'running');
+        if (!hasRunning) {
+          clearInterval(this._campaignPollInterval);
+          this._campaignPollInterval = null;
         }
-        this.loadCampaigns();
       } catch (e) {
-        clearInterval(poll);
+        clearInterval(this._campaignPollInterval);
+        this._campaignPollInterval = null;
       }
-    }, 10000); // Poll every 10s
+    }, 10000);
+  },
+
+  // ── Edit Campaign Messages ──
+  _editingCampaignId: null,
+
+  async editCampaignMessages(id) {
+    try {
+      const d = await MembersAPI.getCampaign(id);
+      const c = d.campaign;
+      if (!c) { App.toast('Campaign không tồn tại', 'error'); return; }
+      if (!['draft', 'paused', 'error'].includes(c.status)) {
+        App.toast('Chỉ sửa được khi campaign đang tạm dừng', 'error');
+        return;
+      }
+
+      this._editingCampaignId = id;
+
+      // Set modal title to edit mode
+      document.getElementById('campaign-modal-title').textContent = `✏️ Sửa Campaign: ${c.name}`;
+
+      // Fill in settings
+      document.getElementById('cmp-name').value = c.name;
+      document.getElementById('cmp-name').disabled = true; // Can't change name
+      document.getElementById('cmp-delay-min').value = c.delay_min || 30;
+      document.getElementById('cmp-delay-max').value = c.delay_max || 90;
+      document.getElementById('cmp-daily-limit-premium').value = c.daily_limit_premium || 60;
+      document.getElementById('cmp-daily-limit-normal').value = c.daily_limit_normal || 10;
+      document.getElementById('cmp-ai-remix').checked = !!c.use_ai_remix;
+      const excludePrevEl = document.getElementById('cmp-exclude-previous');
+      if (excludePrevEl) {
+        excludePrevEl.checked = c.exclude_previous_dms !== undefined ? !!c.exclude_previous_dms : true;
+      }
+
+      // Hide scrape job selector (can't change target)
+      const jobSel = document.getElementById('cmp-scrape-job');
+      jobSel.innerHTML = `<option value="${esc(c.scrape_job_id)}" selected>${esc(c.scrape_job_id.substring(0, 30))}...</option>`;
+      jobSel.disabled = true;
+
+      // Load accounts & mark sender accounts
+      const now = Date.now();
+      if (!this._accounts?.length || !this._accountsCachedAt || (now - this._accountsCachedAt) > 30000) {
+        try {
+          const ad = await API.getAccounts();
+          this._accounts = ad.accounts || [];
+          this._accountsCachedAt = now;
+        } catch (e) {}
+      }
+
+      const sortedAccounts = [...this._accounts].sort((a, b) => (b.is_premium || 0) - (a.is_premium || 0));
+      const accDiv = document.getElementById('cmp-accounts-list');
+      accDiv.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;width:100%;flex-wrap:wrap">
+          <button type="button" class="btn btn-ghost btn-sm cmp-acc-filter active" data-filter="all" onclick="Members.filterCampaignAccounts('all')" style="font-size:12px">Tất cả (${sortedAccounts.length})</button>
+          <button type="button" class="btn btn-ghost btn-sm cmp-acc-filter" data-filter="premium" onclick="Members.filterCampaignAccounts('premium')" style="font-size:12px">⭐ Premium (${sortedAccounts.filter(a=>a.is_premium).length})</button>
+          <span style="flex:1"></span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(true)" style="font-size:11px;color:var(--accent);padding:2px 8px" title="Chọn tất cả">☑ Chọn hết</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="Members.selectPremiumOnly()" style="font-size:11px;color:#f59e0b;padding:2px 8px" title="Chỉ chọn Premium">⭐ Chọn Premium</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(false)" style="font-size:11px;color:var(--danger);padding:2px 8px" title="Bỏ chọn tất cả">☐ Bỏ hết</button>
+        </div>
+        <div id="cmp-accounts-chips" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+      `;
+      this._sortedCampaignAccounts = sortedAccounts;
+
+      // Render account chips, pre-check sender accounts
+      const senderIds = c.sender_account_ids || [];
+      const container = document.getElementById('cmp-accounts-chips');
+      container.innerHTML = sortedAccounts.map(a => {
+        const name = a.user_info
+          ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ')
+          : a.name;
+        const phone = a.phone || '';
+        const premiumBadge = a.is_premium ? '⭐ ' : '';
+        const premiumStyle = a.is_premium ? 'border-color:#f59e0b;' : '';
+        const checked = senderIds.includes(a.id) ? 'checked' : '';
+        return `<label style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg2);border-radius:8px;cursor:pointer;border:1px solid var(--border);font-size:13px;${premiumStyle}" data-premium="${a.is_premium ? 1 : 0}">
+          <input type="checkbox" class="cmp-acc-checkbox" value="${a.id}" ${checked}>
+          <span>${premiumBadge}${esc(name || phone)}</span>
+        </label>`;
+      }).join('');
+
+      // Fill messages
+      const msgList = document.getElementById('cmp-messages-list');
+      msgList.innerHTML = '';
+      const messages = c.messages || [];
+      if (messages.length === 0) {
+        this.addCampaignMessage();
+      } else {
+        messages.forEach((msg, i) => {
+          this.addCampaignMessage();
+          const items = msgList.querySelectorAll('.cmp-msg-item');
+          const item = items[items.length - 1];
+          const textarea = item.querySelector('.cmp-msg-content');
+          if (textarea) textarea.value = msg.content || '';
+
+          // Restore media if present
+          if (msg.media_path) {
+            const mediaPathInput = item.querySelector('.cmp-msg-media-path');
+            const mediaTypeInput = item.querySelector('.cmp-msg-media-type');
+            const previewDiv = item.querySelector('.cmp-msg-media-preview');
+            if (mediaPathInput) mediaPathInput.value = msg.media_path;
+            if (mediaTypeInput) mediaTypeInput.value = msg.msg_type || 'text';
+            if (previewDiv) {
+              const fname = msg.media_path.split('/').pop().split('\\').pop();
+              previewDiv.style.display = 'flex';
+              previewDiv.innerHTML = `
+                <span style="font-size:18px">${msg.msg_type === 'photo' ? '🖼️' : msg.msg_type === 'video' ? '🎬' : '📄'}</span>
+                <span style="font-size:12px;color:var(--text1)">${esc(fname)}</span>
+                <button class="btn btn-ghost btn-sm" onclick="Members.removeMsgMedia(this)" style="font-size:11px;padding:2px 6px;color:var(--danger)">✕</button>
+              `;
+            }
+          }
+        });
+      }
+
+      // Change save button behavior
+      const saveBtn = document.querySelector('#campaign-modal .btn-primary[onclick*="saveCampaign"]');
+      if (saveBtn) {
+        saveBtn.setAttribute('onclick', 'Members.saveEditedCampaign()');
+        saveBtn.textContent = '💾 Lưu thay đổi';
+      }
+
+      document.getElementById('campaign-modal').classList.add('open');
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+  },
+
+  async saveEditedCampaign() {
+    const id = this._editingCampaignId;
+    if (!id) { App.toast('Lỗi: không có campaign để sửa', 'error'); return; }
+
+    const delayMin = parseInt(document.getElementById('cmp-delay-min').value) || 30;
+    const delayMax = parseInt(document.getElementById('cmp-delay-max').value) || 90;
+    const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit-premium').value) || 60;
+    const dailyLimitNormal = parseInt(document.getElementById('cmp-daily-limit-normal').value) || 10;
+    const useAi = document.getElementById('cmp-ai-remix').checked;
+    const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
+
+    // Collect sender accounts
+    const accCheckboxes = document.querySelectorAll('.cmp-acc-checkbox:checked');
+    const senderIds = Array.from(accCheckboxes).map(cb => parseInt(cb.value));
+    if (!senderIds.length) { App.toast('Chọn ít nhất 1 tài khoản gửi', 'error'); return; }
+
+    // Collect messages
+    const msgItems = document.querySelectorAll('.cmp-msg-item');
+    const messages = [];
+    msgItems.forEach((item, i) => {
+      const content = item.querySelector('.cmp-msg-content')?.value.trim() || '';
+      const mediaPath = item.querySelector('.cmp-msg-media-path')?.value || '';
+      const mediaType = item.querySelector('.cmp-msg-media-type')?.value || 'text';
+      if (content || mediaPath) {
+        messages.push({
+          msg_order: i,
+          msg_type: mediaPath ? mediaType : 'text',
+          content,
+          media_path: mediaPath || undefined
+        });
+      }
+    });
+    if (!messages.length) { App.toast('Thêm ít nhất 1 tin nhắn', 'error'); return; }
+
+    try {
+      await MembersAPI.updateCampaignMessages(id, {
+        messages,
+        delay_min: delayMin,
+        delay_max: delayMax,
+        daily_limit_premium: dailyLimitPremium,
+        daily_limit_normal: dailyLimitNormal,
+        use_ai_remix: useAi,
+        exclude_previous_dms: excludePrev,
+      });
+      App.toast('✅ Đã cập nhật tin nhắn campaign!', 'success');
+      this._editingCampaignId = null;
+      this.closeCampaignModal();
+      this.loadCampaigns();
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
   },
 
   // ── Campaign Logs ──
@@ -370,7 +917,7 @@ const Members = {
         const time = l.sent_at ? new Date(l.sent_at + 'Z').toLocaleString('vi-VN') : '—';
         return `<tr>
           <td>${l.target_username ? '@' + esc(l.target_username) : l.target_user_id}</td>
-          <td>${l.account_id || '—'}</td>
+          <td>${l.account_name ? esc(l.account_name) : (l.account_id || '—')}</td>
           <td>${statusBadge}</td>
           <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(l.error_message || '')}</td>
           <td style="font-size:12px;color:var(--text2)">${time}</td>
@@ -394,9 +941,20 @@ const Members = {
     document.getElementById('cmp-name').value = '';
     document.getElementById('cmp-delay-min').value = '30';
     document.getElementById('cmp-delay-max').value = '90';
-    document.getElementById('cmp-daily-limit').value = '30';
+    document.getElementById('cmp-daily-limit-premium').value = '60';
+    document.getElementById('cmp-daily-limit-normal').value = '10';
     document.getElementById('cmp-ai-remix').checked = false;
+    const excludePrevEl = document.getElementById('cmp-exclude-previous');
+    if (excludePrevEl) excludePrevEl.checked = true;
     document.getElementById('cmp-messages-list').innerHTML = '';
+
+    const schedToggle = document.getElementById('cmp-schedule-toggle');
+    if (schedToggle) {
+      schedToggle.checked = false;
+      this.toggleScheduleSection();
+    }
+    const schedAt = document.getElementById('cmp-scheduled-at');
+    if (schedAt) schedAt.value = '';
 
     // Populate scrape jobs dropdown
     const jobSel = document.getElementById('cmp-scrape-job');
@@ -409,21 +967,34 @@ const Members = {
     }
 
     // Populate accounts as checkboxes
-    try {
-      const d = await API.getAccounts();
-      this._accounts = d.accounts || [];
-    } catch (e) {}
+    // Use cached accounts if fresh (< 30s old)
+    const now = Date.now();
+    if (!this._accounts?.length || !this._accountsCachedAt || (now - this._accountsCachedAt) > 30000) {
+      try {
+        const d = await API.getAccounts();
+        this._accounts = d.accounts || [];
+        this._accountsCachedAt = now;
+      } catch (e) {}
+    }
+
+    // Sort: premium first
+    const sortedAccounts = [...this._accounts].sort((a, b) => (b.is_premium || 0) - (a.is_premium || 0));
+
     const accDiv = document.getElementById('cmp-accounts-list');
-    accDiv.innerHTML = this._accounts.map(a => {
-      const name = a.user_info
-        ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ')
-        : a.name;
-      const phone = a.phone || '';
-      return `<label style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg2);border-radius:8px;cursor:pointer;border:1px solid var(--border);font-size:13px">
-        <input type="checkbox" class="cmp-acc-checkbox" value="${a.id}" checked>
-        <span>${esc(name || phone)}</span>
-      </label>`;
-    }).join('');
+    // Add filter toggle
+    accDiv.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;width:100%;flex-wrap:wrap">
+        <button type="button" class="btn btn-ghost btn-sm cmp-acc-filter active" data-filter="all" onclick="Members.filterCampaignAccounts('all')" style="font-size:12px">Tất cả (${sortedAccounts.length})</button>
+        <button type="button" class="btn btn-ghost btn-sm cmp-acc-filter" data-filter="premium" onclick="Members.filterCampaignAccounts('premium')" style="font-size:12px">⭐ Premium (${sortedAccounts.filter(a=>a.is_premium).length})</button>
+        <span style="flex:1"></span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(true)" style="font-size:11px;color:var(--accent);padding:2px 8px" title="Chọn tất cả">☑ Chọn hết</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.selectPremiumOnly()" style="font-size:11px;color:#f59e0b;padding:2px 8px" title="Chỉ chọn Premium">⭐ Chọn Premium</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(false)" style="font-size:11px;color:var(--danger);padding:2px 8px" title="Bỏ chọn tất cả">☐ Bỏ hết</button>
+      </div>
+      <div id="cmp-accounts-chips" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+    `;
+    this._sortedCampaignAccounts = sortedAccounts;
+    this._renderCampaignAccountChips(sortedAccounts);
 
     // Add one empty message by default
     this.addCampaignMessage();
@@ -433,6 +1004,97 @@ const Members = {
 
   closeCampaignModal() {
     document.getElementById('campaign-modal').classList.remove('open');
+    
+    const schedToggle = document.getElementById('cmp-schedule-toggle');
+    if (schedToggle) {
+      schedToggle.checked = false;
+      this.toggleScheduleSection();
+    }
+    const schedAt = document.getElementById('cmp-scheduled-at');
+    if (schedAt) schedAt.value = '';
+
+    // Reset edit mode state
+    if (this._editingCampaignId) {
+      this._editingCampaignId = null;
+      document.getElementById('cmp-name').disabled = false;
+      document.getElementById('cmp-scrape-job').disabled = false;
+      const saveBtn = document.querySelector('#campaign-modal .btn-primary[onclick*="saveEditedCampaign"]');
+      if (saveBtn) {
+        saveBtn.setAttribute('onclick', 'Members.saveCampaign()');
+        saveBtn.textContent = '🚀 Tạo Campaign';
+      }
+    }
+  },
+
+  _renderCampaignAccountChips(accounts) {
+    const container = document.getElementById('cmp-accounts-chips');
+    if (!container) return;
+    container.innerHTML = accounts.map(a => {
+      const name = a.user_info
+        ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ')
+        : a.name;
+      const phone = a.phone || '';
+      const premiumBadge = a.is_premium ? '⭐ ' : '';
+      const premiumStyle = a.is_premium ? 'border-color:#f59e0b;' : '';
+      return `<label style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg2);border-radius:8px;cursor:pointer;border:1px solid var(--border);font-size:13px;${premiumStyle}" data-premium="${a.is_premium ? 1 : 0}">
+        <input type="checkbox" class="cmp-acc-checkbox" value="${a.id}" checked>
+        <span>${premiumBadge}${esc(name || phone)}</span>
+      </label>`;
+    }).join('');
+  },
+
+  filterCampaignAccounts(filter) {
+    // Update active button
+    document.querySelectorAll('.cmp-acc-filter').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.filter === filter);
+      btn.style.background = btn.dataset.filter === filter ? 'var(--primary)' : '';
+      btn.style.color = btn.dataset.filter === filter ? '#fff' : '';
+    });
+    const accounts = filter === 'premium'
+      ? this._sortedCampaignAccounts.filter(a => a.is_premium)
+      : this._sortedCampaignAccounts;
+    this._renderCampaignAccountChips(accounts);
+  },
+
+  toggleAllCampaignAccounts(check) {
+    const chips = document.getElementById('cmp-accounts-chips');
+    if (!chips) return;
+    chips.querySelectorAll('.cmp-acc-checkbox').forEach(cb => {
+      cb.checked = check;
+    });
+  },
+
+  selectPremiumOnly() {
+    const chips = document.getElementById('cmp-accounts-chips');
+    if (!chips) return;
+    chips.querySelectorAll('label[data-premium]').forEach(label => {
+      const cb = label.querySelector('.cmp-acc-checkbox');
+      if (!cb) return;
+      cb.checked = label.dataset.premium === '1';
+    });
+  },
+
+  loadOutreachTemplate(type) {
+    const msgList = document.getElementById('cmp-messages-list');
+    if (!msgList) return;
+    
+    let text = '';
+    if (type === 'crypto') {
+      text = "Bác ơi, cho em hỏi bên bác có đang trade mảng Web3/Crypto không nhỉ? Em muốn hỏi kinh nghiệm chút với ạ...";
+    } else if (type === 'networking') {
+      text = "Chào bác, em thấy bác trong nhóm Telegram chung, cho em nhắn tin kết nối trao đổi chút chuyên môn công việc được không ạ?";
+    }
+
+    if (!msgList.children.length) {
+      this.addCampaignMessage();
+    }
+
+    const firstTextarea = msgList.querySelector('.cmp-msg-content');
+    if (firstTextarea) {
+      firstTextarea.value = text;
+      this.updateMsgCharCounter(firstTextarea);
+      App.toast('✨ Đã tải mẫu kịch bản outreach!', 'success');
+    }
   },
 
   addCampaignMessage() {
@@ -444,7 +1106,11 @@ const Members = {
     div.innerHTML = `
       <span style="color:var(--text2);font-size:12px;margin-top:10px">#${idx + 1}</span>
       <div style="flex:1;display:flex;flex-direction:column;gap:6px">
-        <textarea class="form-input cmp-msg-content" rows="3" style="width:100%" placeholder="Nội dung tin nhắn... Dùng {name} để chèn tên user"></textarea>
+        <textarea class="form-input cmp-msg-content" rows="5" style="width:100%;min-height:120px;resize:vertical" placeholder="Nội dung tin nhắn... Dùng {name} để chèn tên user" oninput="Members.updateMsgCharCounter(this)"></textarea>
+        <div class="cmp-msg-char-counter" style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text2)">
+          <span class="cmp-char-count">0 ký tự</span>
+          <span class="cmp-caption-warn" style="display:none;color:#f59e0b;font-weight:600">⚠️ Caption ảnh/video tối đa 1024 ký tự!</span>
+        </div>
         <!-- Image attachment row -->
         <div class="cmp-msg-media-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <input type="file" class="cmp-msg-file-input" accept="image/*,video/*,.pdf,.doc,.docx" style="display:none" onchange="Members.handleMsgFileUpload(this)">
@@ -528,6 +1194,10 @@ const Members = {
       previewDiv.style.display = 'flex';
 
       App.toast(`Đã tải lên: ${d.original_name}`, 'success');
+
+      // Update char counter to show caption warning
+      const textarea = msgItem.querySelector('.cmp-msg-content');
+      if (textarea) Members.updateMsgCharCounter(textarea);
     } catch (e) {
       previewDiv.innerHTML = `<span style="font-size:12px;color:var(--danger)">❌ ${esc(e.message)}</span>`;
       App.toast(e.message, 'error');
@@ -546,6 +1216,50 @@ const Members = {
     if (previewDiv) { previewDiv.style.display = 'none'; previewDiv.innerHTML = ''; }
     if (mediaPathInput) mediaPathInput.value = '';
     if (mediaTypeInput) mediaTypeInput.value = 'text';
+    // Update char counter (caption warning no longer needed)
+    const textarea = msgItem.querySelector('.cmp-msg-content');
+    if (textarea) Members.updateMsgCharCounter(textarea);
+  },
+
+  updateMsgCharCounter(textarea) {
+    const msgItem = textarea.closest('.cmp-msg-item');
+    if (!msgItem) return;
+    const len = textarea.value.length;
+    const countEl = msgItem.querySelector('.cmp-char-count');
+    const warnEl = msgItem.querySelector('.cmp-caption-warn');
+    const mediaType = (msgItem.querySelector('.cmp-msg-media-type') || {}).value || 'text';
+    const hasMedia = mediaType !== 'text';
+
+    if (countEl) {
+      countEl.textContent = len + ' ký tự';
+      if (hasMedia && len > 1024) {
+        countEl.style.color = '#ef4444';
+        countEl.style.fontWeight = '600';
+      } else if (hasMedia && len > 900) {
+        countEl.style.color = '#f59e0b';
+        countEl.style.fontWeight = '600';
+      } else {
+        countEl.style.color = 'var(--text2)';
+        countEl.style.fontWeight = 'normal';
+      }
+    }
+    if (warnEl) {
+      if (hasMedia) {
+        warnEl.style.display = 'inline';
+        if (len > 1024) {
+          warnEl.textContent = `🚫 Vượt ${len - 1024} ký tự! Caption ảnh/video tối đa 1024.`;
+          warnEl.style.color = '#ef4444';
+        } else if (len > 900) {
+          warnEl.textContent = `⚠️ Còn ${1024 - len} ký tự. Caption ảnh/video tối đa 1024.`;
+          warnEl.style.color = '#f59e0b';
+        } else {
+          warnEl.textContent = `📝 Caption ảnh/video tối đa 1024 ký tự (còn ${1024 - len})`;
+          warnEl.style.color = 'var(--text2)';
+        }
+      } else {
+        warnEl.style.display = 'none';
+      }
+    }
   },
 
   async saveCampaign() {
@@ -553,11 +1267,19 @@ const Members = {
     const jobId = document.getElementById('cmp-scrape-job').value;
     const delayMin = parseInt(document.getElementById('cmp-delay-min').value) || 30;
     const delayMax = parseInt(document.getElementById('cmp-delay-max').value) || 90;
-    const dailyLimit = parseInt(document.getElementById('cmp-daily-limit').value) || 30;
+    const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit-premium').value) || 60;
+    const dailyLimitNormal = parseInt(document.getElementById('cmp-daily-limit-normal').value) || 10;
     const useAi = document.getElementById('cmp-ai-remix').checked;
+    const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
+
+    // --- NEW SCHEDULE FIELDS ---
+    const scheduleEnabled = document.getElementById('cmp-schedule-toggle')?.checked || false;
+    const scheduledAt = document.getElementById('cmp-scheduled-at')?.value;
+    const targetTimezone = document.getElementById('cmp-target-timezone')?.value;
 
     if (!name) { App.toast('Nhập tên campaign', 'error'); return; }
     if (!jobId) { App.toast('Chọn nguồn members', 'error'); return; }
+    if (scheduleEnabled && !scheduledAt) { App.toast('Vui lòng chọn ngày giờ chạy', 'error'); return; }
 
     // Collect sender accounts
     const accCheckboxes = document.querySelectorAll('.cmp-acc-checkbox:checked');
@@ -591,14 +1313,79 @@ const Members = {
         messages,
         delay_min: delayMin,
         delay_max: delayMax,
-        daily_limit: dailyLimit,
+        daily_limit_premium: dailyLimitPremium,
+        daily_limit_normal: dailyLimitNormal,
         use_ai_remix: useAi,
+        exclude_previous_dms: excludePrev,
+        // --- NEW FIELDS ---
+        schedule_enabled: scheduleEnabled,
+        scheduled_at: scheduleEnabled ? scheduledAt : undefined,
+        target_timezone: scheduleEnabled ? targetTimezone : undefined,
       });
-      App.toast(`Campaign tạo thành công! (${r.total_targets} targets)`, 'success');
+      
+      // Update success message
+      if (scheduleEnabled) {
+        App.toast(`Đã lên lịch campaign! (${r.total_targets} targets)`, 'success');
+      } else {
+        App.toast(`Campaign tạo thành công! (${r.total_targets} targets)`, 'success');
+      }
+      
       this.closeCampaignModal();
       this.loadCampaigns();
     } catch (e) {
       App.toast(e.message, 'error');
+    }
+  },
+
+  toggleScheduleSection() {
+    const enabled = document.getElementById('cmp-schedule-toggle').checked;
+    const fields = document.getElementById('cmp-schedule-fields');
+    if (enabled) {
+      fields.style.display = 'block';
+      // Auto-set target timezone to system timezone if not set
+      const tzSelect = document.getElementById('cmp-target-timezone');
+      if (tzSelect && !tzSelect.value) {
+        tzSelect.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      }
+    } else {
+      fields.style.display = 'none';
+    }
+  },
+
+  async cloneCampaign(campaignId) {
+    const c = this._campaigns.find(x => x.id === campaignId);
+    if (!c) {
+      App.toast('Không tìm thấy campaign', 'error');
+      return;
+    }
+
+    const successCount = c.sent_count || 0;
+    const failedCount = c.failed_count || 0;
+    const totalExcluded = successCount + failedCount;
+    const remaining = Math.max(0, (c.total_targets || 0) - totalExcluded);
+
+    const confirmMsg = `📑 Nhân bản chiến dịch "${c.name}"?\n\n` +
+      `✅ Thành công: ${successCount}\n` +
+      `❌ Lỗi: ${failedCount}\n` +
+      `━━━━━━━━━━━━━━━━━\n` +
+      `🚫 Loại trừ: ${totalExcluded} member\n` +
+      `👥 Còn lại sẽ DM: ~${remaining} member\n\n` +
+      `Chiến dịch mới sẽ chỉ DM những member chưa từng liên hệ.`;
+
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      const res = await API.cloneCampaign(campaignId, {
+        name: `${c.name} - Clone`,
+        exclude_source_results: true
+      });
+      App.toast(
+        `✅ Đã nhân bản! Campaign #${res.campaign_id} — ${res.total_targets} member (loại trừ ${res.excluded_count || 0})`,
+        'success'
+      );
+      await this.loadCampaigns();
+    } catch (e) {
+      App.toast(`Lỗi clone: ${e.message}`, 'error');
     }
   },
 
@@ -738,9 +1525,21 @@ const Members = {
       const d = await res.json();
       if (!res.ok) throw new Error(d.detail || 'Không thể bắt đầu deep crawl');
 
+      // Handle queued response
+      if (d.queued) {
+        App.toast(`📥 ${d.message}`, 'info');
+        btn.disabled = false;
+        btn.textContent = '🚀 Thêm vào Queue';
+        // Refresh queue display via next poll
+        return;
+      }
+
       App.toast(d.message, 'success');
       btn.textContent = '⏳ Đang Deep Crawl...';
 
+      // Reset backoff state
+      this._deepCrawlPollInterval = 3000;
+      this._deepCrawlPrevState = null;
       // Start polling progress
       this._deepCrawlPolling = true;
       this._pollDeepCrawlProgress();
@@ -753,6 +1552,122 @@ const Members = {
     }
   },
 
+  // ── Render progress panel from a state object (used by restore + poll) ──
+  _renderDeepCrawlProgressFromState(s) {
+    const el = (id) => document.getElementById(id);
+    const depthEl = el('sim-prog-depth');
+    const foundEl = el('sim-prog-found');
+    const processedEl = el('sim-prog-processed');
+    const contactsEl = el('sim-prog-contacts');
+    const queueEl = el('sim-prog-queue');
+    const accountEl = el('sim-prog-account');
+    const channelEl = el('sim-prog-channel');
+    const statusEl = el('sim-progress-status');
+    const barEl = el('sim-progress-bar');
+    const errorsEl = el('sim-progress-errors');
+
+    if (depthEl) depthEl.textContent = `${s.current_depth}/${s.max_depth}`;
+    if (foundEl) foundEl.textContent = s.channels_found;
+    if (processedEl) processedEl.textContent = s.channels_processed;
+    if (contactsEl) contactsEl.textContent = s.contacts_found;
+    if (queueEl) queueEl.textContent = s.queue_remaining;
+    if (accountEl) accountEl.textContent = s.current_account || '—';
+    if (channelEl) channelEl.textContent = s.current_channel || '—';
+
+    const totalWork = s.channels_processed + s.queue_remaining;
+    const pct = totalWork > 0 ? Math.min(95, (s.channels_processed / totalWork) * 100) : 0;
+    if (barEl) barEl.style.width = `${pct}%`;
+
+    if (statusEl) {
+      const statusMap = {
+        idle: { text: 'Chờ lệnh', bg: 'var(--text2)' },
+        running: { text: 'Running', bg: 'var(--accent)' },
+        completed: { text: 'Hoàn thành ✓', bg: 'var(--success)' },
+        stopped: { text: 'Đã dừng', bg: 'var(--warning)' },
+        error: { text: 'Lỗi', bg: 'var(--danger)' },
+      };
+      const info = statusMap[s.status] || statusMap.running;
+      statusEl.textContent = info.text;
+      statusEl.style.background = info.bg;
+    }
+
+    if (errorsEl) {
+      if (s.errors && s.errors.length > 0) {
+        errorsEl.classList.remove('hidden');
+        errorsEl.innerHTML = s.errors.slice(-10).map(e => `<div>⚠️ ${typeof esc === 'function' ? esc(e) : e}</div>`).join('');
+      } else {
+        errorsEl.classList.add('hidden');
+        errorsEl.innerHTML = '';
+      }
+    }
+
+    // ── Render Queue Panel ──
+    this._renderQueuePanel(s.queue || [], s.queue_count || 0);
+  },
+
+  _renderQueuePanel(queue, count) {
+    let panel = document.getElementById('deep-crawl-queue-panel');
+    if (count === 0 && !queue.length) {
+      if (panel) panel.classList.add('hidden');
+      return;
+    }
+    // Create panel if not exists
+    if (!panel) {
+      const progressPanel = document.getElementById('sim-progress-panel');
+      if (!progressPanel) return;
+      panel = document.createElement('div');
+      panel.id = 'deep-crawl-queue-panel';
+      panel.className = 'card';
+      panel.style.cssText = 'margin-top:12px; padding:12px 16px; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,0.03);';
+      progressPanel.parentNode.insertBefore(panel, progressPanel.nextSibling);
+    }
+    panel.classList.remove('hidden');
+
+    let html = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">`;
+    html += `<span style="font-weight:600; color:var(--text1)">📥 Hàng đợi chờ (${count})</span>`;
+    if (count > 0) {
+      html += `<button onclick="Members._clearQueue()" class="btn btn-small btn-danger" style="font-size:12px; padding:2px 10px;">Xóa tất cả</button>`;
+    }
+    html += `</div>`;
+
+    if (queue.length) {
+      html += `<div style="display:flex; flex-direction:column; gap:6px;">`;
+      queue.forEach((q, i) => {
+        const link = q.channel_link.length > 35 ? q.channel_link.substring(0, 35) + '...' : q.channel_link;
+        html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:rgba(255,255,255,0.04); border-radius:6px; font-size:13px;">`;
+        html += `<span><span style="color:var(--accent); font-weight:600;">#${i + 1}</span> ${link} <span style="color:var(--text2);">(depth ${q.max_depth})</span></span>`;
+        html += `<button onclick="Members._removeQueueItem(${i})" style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:14px; padding:2px 6px;" title="Xóa">❌</button>`;
+        html += `</div>`;
+      });
+      html += `</div>`;
+    }
+    panel.innerHTML = html;
+  },
+
+  async _removeQueueItem(index) {
+    try {
+      const res = await fetch(`/api/members/deep-crawl/queue/${index}`, { method: 'DELETE' });
+      const d = await res.json();
+      if (res.ok) {
+        App.toast(`Đã xóa ${d.removed} khỏi hàng đợi`, 'success');
+      }
+    } catch (e) {
+      App.toast('Lỗi xóa queue item', 'error');
+    }
+  },
+
+  async _clearQueue() {
+    if (!confirm('Xóa tất cả items trong hàng đợi?')) return;
+    try {
+      await fetch('/api/members/deep-crawl/queue', { method: 'DELETE' });
+      App.toast('Đã xóa hàng đợi', 'success');
+      const panel = document.getElementById('deep-crawl-queue-panel');
+      if (panel) panel.classList.add('hidden');
+    } catch (e) {
+      App.toast('Lỗi xóa queue', 'error');
+    }
+  },
+
   // ── Poll Progress (every 3s) ──
   _deepCrawlPolling: false,
   async _pollDeepCrawlProgress() {
@@ -760,79 +1675,90 @@ const Members = {
 
     try {
       const res = await fetch('/api/members/deep-crawl/status');
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
       const s = await res.json();
 
-      // Update progress UI
-      const el = (id) => document.getElementById(id);
-      const depthEl = el('sim-prog-depth');
-      const foundEl = el('sim-prog-found');
-      const processedEl = el('sim-prog-processed');
-      const contactsEl = el('sim-prog-contacts');
-      const queueEl = el('sim-prog-queue');
-      const accountEl = el('sim-prog-account');
-      const channelEl = el('sim-prog-channel');
-      const statusEl = el('sim-progress-status');
-      const barEl = el('sim-progress-bar');
-      const errorsEl = el('sim-progress-errors');
+      // Update progress UI using shared helper
+      this._renderDeepCrawlProgressFromState(s);
 
-      if (depthEl) depthEl.textContent = `${s.current_depth}/${s.max_depth}`;
-      if (foundEl) foundEl.textContent = s.channels_found;
-      if (processedEl) processedEl.textContent = s.channels_processed;
-      if (contactsEl) contactsEl.textContent = s.contacts_found;
-      if (queueEl) queueEl.textContent = s.queue_remaining;
-      if (accountEl) accountEl.textContent = s.current_account || '—';
-      if (channelEl) channelEl.textContent = s.current_channel || '—';
+      // Check if done or idle
+      if (s.status === 'completed' || s.status === 'stopped' || s.status === 'error' || s.status === 'idle') {
+        const barEl = document.getElementById('sim-progress-bar');
+        if (barEl) barEl.style.width = s.status === 'completed' ? '100%' : '0%';
 
-      // Progress bar: estimate based on processed vs total queue
-      const totalWork = s.channels_processed + s.queue_remaining;
-      const pct = totalWork > 0 ? Math.min(95, (s.channels_processed / totalWork) * 100) : 0;
-      if (barEl) barEl.style.width = `${pct}%`;
-
-      // Status badge
-      if (statusEl) {
-        const statusMap = {
-          running: { text: 'Running', bg: 'var(--accent)' },
-          completed: { text: 'Hoàn thành ✓', bg: 'var(--success)' },
-          stopped: { text: 'Đã dừng', bg: 'var(--warning)' },
-          error: { text: 'Lỗi', bg: 'var(--danger)' },
-        };
-        const info = statusMap[s.status] || statusMap.running;
-        statusEl.textContent = info.text;
-        statusEl.style.background = info.bg;
-      }
-
-      // Errors log
-      if (errorsEl && s.errors && s.errors.length > 0) {
-        errorsEl.classList.remove('hidden');
-        errorsEl.innerHTML = s.errors.slice(-10).map(e => `<div>⚠️ ${esc(e)}</div>`).join('');
-      }
-
-      // Check if done
-      if (s.status === 'completed' || s.status === 'stopped' || s.status === 'error') {
-        this._deepCrawlPolling = false;
-        if (barEl) barEl.style.width = '100%';
-
-        // Fetch full results
-        await this._fetchDeepCrawlResults();
-
-        const btn = document.getElementById('sim-btn-search');
-        const stopBtn = document.getElementById('sim-btn-stop');
-        if (btn) { btn.disabled = false; btn.textContent = '🚀 Bắt đầu Deep Crawl'; }
-        if (stopBtn) stopBtn.classList.add('hidden');
+        // Fetch full results if it was a real execution
+        if (s.status === 'completed' || s.status === 'stopped') {
+          await this._fetchDeepCrawlResults();
+        }
 
         if (s.status === 'completed') {
           App.toast(`Deep Crawl hoàn thành! Tìm thấy ${s.channels_found} kênh, ${s.contacts_found} contacts.`, 'success');
         } else if (s.status === 'stopped') {
           App.toast(`Deep Crawl đã dừng. Thu thập được ${s.channels_found} kênh.`, 'warning');
         }
+
+        // If queue has items, keep polling — backend will auto-start next
+        const queueCount = s.queue_count || 0;
+        if (queueCount > 0 && s.status !== 'idle') {
+          const btn = document.getElementById('sim-btn-search');
+          if (btn) btn.textContent = `⏳ Chờ tiếp tục (${queueCount} trong queue)...`;
+          this._deepCrawlPollInterval = 3000;
+          setTimeout(() => this._pollDeepCrawlProgress(), 3000);
+          return;
+        }
+
+        // All done — reset UI
+        this._deepCrawlPolling = false;
+        const btn = document.getElementById('sim-btn-search');
+        const stopBtn = document.getElementById('sim-btn-stop');
+        const progressPanel = document.getElementById('sim-progress-panel');
+        if (btn) { btn.disabled = false; btn.textContent = '🚀 Bắt đầu Deep Crawl'; }
+        if (stopBtn) stopBtn.classList.add('hidden');
+        if (s.status === 'idle' && progressPanel) progressPanel.classList.add('hidden');
         return;
       }
 
-      // Continue polling
-      setTimeout(() => this._pollDeepCrawlProgress(), 3000);
+      // Exponential Backoff calculation
+      let hasProgress = false;
+      if (this._deepCrawlPrevState) {
+        if (
+          s.channels_found !== this._deepCrawlPrevState.channels_found ||
+          s.channels_processed !== this._deepCrawlPrevState.channels_processed ||
+          s.contacts_found !== this._deepCrawlPrevState.contacts_found ||
+          s.queue_remaining !== this._deepCrawlPrevState.queue_remaining ||
+          s.current_depth !== this._deepCrawlPrevState.current_depth ||
+          s.current_channel !== this._deepCrawlPrevState.current_channel ||
+          s.status !== this._deepCrawlPrevState.status
+        ) {
+          hasProgress = true;
+        }
+      } else {
+        hasProgress = true; // Set to true on first successful poll
+      }
+
+      if (hasProgress) {
+        this._deepCrawlPollInterval = 3000; // Reset to 3s
+      } else {
+        this._deepCrawlPollInterval = Math.min(30000, this._deepCrawlPollInterval * 1.5);
+      }
+
+      this._deepCrawlPrevState = {
+        channels_found: s.channels_found,
+        channels_processed: s.channels_processed,
+        contacts_found: s.contacts_found,
+        queue_remaining: s.queue_remaining,
+        current_depth: s.current_depth,
+        current_channel: s.current_channel,
+        status: s.status
+      };
+
+      setTimeout(() => this._pollDeepCrawlProgress(), this._deepCrawlPollInterval);
     } catch (e) {
-      // Retry on network error
-      setTimeout(() => this._pollDeepCrawlProgress(), 5000);
+      // Back off on network or parsing error
+      this._deepCrawlPollInterval = Math.min(30000, this._deepCrawlPollInterval * 1.5);
+      setTimeout(() => this._pollDeepCrawlProgress(), this._deepCrawlPollInterval);
     }
   },
 
@@ -1137,10 +2063,657 @@ const Members = {
         throw new Error(d.detail || 'Không thể import contact');
       }
 
-      App.toast(`Đã import thành công ${d.count} contact vào job "${jobId}"!`, 'success');
+      let msg = `Imported ${d.count} contact vào job "${jobId}"`;
+      if (d.skipped_dmd > 0) {
+        msg += ` | Bỏ qua ${d.skipped_dmd} contact đã DM trước đó`;
+      }
+      App.toast(msg, 'success');
       this.loadScrapeJobs();
     } catch (e) {
       App.toast(e.message, 'error');
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // INVITE CAMPAIGNS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  switchCampaignTab(tab) {
+    document.querySelectorAll('.ms-campaign-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+      if (btn.dataset.tab === tab) {
+        btn.classList.remove('btn-ghost');
+      } else {
+        btn.classList.add('btn-ghost');
+      }
+    });
+    const dmSection = document.getElementById('ms-dm-campaigns-section');
+    const invSection = document.getElementById('ms-invite-campaigns-section');
+    const dmBtn = document.getElementById('ms-btn-create-dm-campaign');
+    const invBtn = document.getElementById('ms-btn-create-invite-campaign');
+    if (tab === 'dm') {
+      dmSection.classList.remove('hidden');
+      invSection.classList.add('hidden');
+      dmBtn.classList.remove('hidden');
+      invBtn.classList.add('hidden');
+    } else {
+      invSection.classList.remove('hidden');
+      dmSection.classList.add('hidden');
+      invBtn.classList.remove('hidden');
+      dmBtn.classList.add('hidden');
+      this.loadInviteCampaigns();
+    }
+  },
+
+  async loadInviteCampaigns() {
+    try {
+      const d = await InviteAPI.getCampaigns(this._lastInviteCampaignsUpdate);
+      const newCampaigns = d.campaigns || [];
+
+      if (this._lastInviteCampaignsUpdate === null) {
+        this._inviteCampaigns = newCampaigns;
+      } else if (newCampaigns.length > 0) {
+        newCampaigns.forEach(newC => {
+          const idx = this._inviteCampaigns.findIndex(c => c.id === newC.id);
+          if (idx !== -1) {
+            this._inviteCampaigns[idx] = newC;
+          } else {
+            this._inviteCampaigns.push(newC);
+          }
+        });
+        this._inviteCampaigns.sort((a, b) => b.id - a.id);
+      }
+
+      if (this._inviteCampaigns.length > 0) {
+        const timestamps = this._inviteCampaigns.map(c => c.updated_at).filter(Boolean);
+        if (timestamps.length > 0) {
+          this._lastInviteCampaignsUpdate = timestamps.reduce((max, t) => t > max ? t : max, timestamps[0]);
+        }
+      }
+
+      this._renderInviteCampaigns();
+    } catch (e) {
+      console.error('Load invite campaigns error:', e);
+    }
+  },
+
+  _renderInviteCampaigns() {
+    const tbody = document.getElementById('ms-invite-campaigns-tbody');
+    const empty = document.getElementById('ms-invite-campaigns-empty');
+    if (!tbody) return;
+
+    const campaigns = this._inviteCampaigns;
+
+    if (!campaigns.length) {
+      tbody.innerHTML = '';
+      if (empty) empty.classList.remove('hidden');
+      return;
+    }
+    if (empty) empty.classList.add('hidden');
+
+    // Remove rows no longer in state
+    const campaignIdsInState = new Set(campaigns.map(c => c.id));
+    Array.from(tbody.children).forEach(row => {
+      const idAttr = row.getAttribute('data-id');
+      if (idAttr) {
+        const cid = parseInt(idAttr);
+        if (!campaignIdsInState.has(cid)) {
+          row.remove();
+        }
+      }
+    });
+
+    campaigns.forEach((c, i) => {
+      const statusBadge = this._statusBadge(c.status);
+      const total = c.total_targets || 0;
+      const sent = c.sent_count || 0;
+      const failed = c.failed_count || 0;
+      const skipped = c.skipped_count || 0;
+      const progress = total > 0 ? Math.round(((sent + failed + skipped) / total) * 100) : 0;
+      const modeBadge = c.invite_mode === 'dm_link'
+        ? '<span class="badge" style="background:#8b5cf6">💬 DM Link</span>'
+        : '<span class="badge badge-blue">👥 Direct</span>';
+
+      let actions = '';
+      if (c.status === 'draft' || c.status === 'paused' || c.status === 'error') {
+        actions += `<button class="btn btn-primary btn-sm" onclick="Members.startInviteCampaign(${c.id})">▶ Chạy</button>`;
+        actions += `<button class="btn btn-ghost btn-sm" onclick="Members.openEditInviteCampaign(${c.id})" title="Sửa">✏️</button>`;
+      }
+      if (c.status === 'running') {
+        actions += `<button class="btn btn-danger btn-sm" onclick="Members.stopInviteCampaign(${c.id})">⏸ Dừng</button>`;
+      }
+      actions += `<button class="btn btn-ghost btn-sm" onclick="Members.viewInviteCampaignLogs(${c.id},'${esc(c.name)}')">📋</button>`;
+      actions += `<button class="btn btn-danger btn-sm" onclick="Members.deleteInviteCampaign(${c.id})">🗑</button>`;
+
+      const targetGroup = c.target_group_title || c.target_group || '—';
+
+      const rowHtml = `
+        <td>${i + 1}</td>
+        <td>${esc(c.name)}</td>
+        <td style="font-size:12px">${esc((c.scrape_job_id || '').substring(0, 20))}...</td>
+        <td style="font-size:12px">${esc(targetGroup)}</td>
+        <td>${modeBadge}</td>
+        <td>${statusBadge}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="flex:1;background:var(--bg2);border-radius:4px;height:8px;overflow:hidden">
+              <div style="width:${progress}%;height:100%;background:var(--accent);transition:width .3s"></div>
+            </div>
+            <span style="font-size:12px;color:var(--text2)">${sent}/${total}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">
+            ✅${sent} ❌${failed} ⏭${skipped}
+          </div>
+        </td>
+        <td><div class="btn-group">${actions}</div></td>
+      `;
+
+      let existingRow = tbody.querySelector(`tr[data-id="${c.id}"]`);
+      if (existingRow) {
+        const existingIdx = parseInt(existingRow.getAttribute('data-index'));
+        if (existingIdx !== (i + 1) || existingRow.getAttribute('data-updated-at') !== c.updated_at || existingRow.getAttribute('data-status') !== c.status) {
+          existingRow.innerHTML = rowHtml;
+          existingRow.setAttribute('data-updated-at', c.updated_at);
+          existingRow.setAttribute('data-status', c.status);
+          existingRow.setAttribute('data-index', i + 1);
+        }
+      } else {
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-id', c.id);
+        tr.setAttribute('data-updated-at', c.updated_at);
+        tr.setAttribute('data-status', c.status);
+        tr.setAttribute('data-index', i + 1);
+        tr.innerHTML = rowHtml;
+        
+        if (tbody.children.length === 0 || i >= tbody.children.length) {
+          tbody.appendChild(tr);
+        } else {
+          tbody.insertBefore(tr, tbody.children[i]);
+        }
+      }
+    });
+  },
+
+  // ── Invite Campaign Actions ──
+  async startInviteCampaign(id) {
+    try {
+      const r = await InviteAPI.startCampaign(id);
+      App.toast(r.message || 'Invite campaign đã chạy!', 'success');
+      this._lastInviteCampaignsUpdate = null;
+      this.loadInviteCampaigns();
+      this._pollInviteCampaign();
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+  },
+
+  async stopInviteCampaign(id) {
+    try {
+      await InviteAPI.stopCampaign(id);
+      App.toast('Invite campaign đã dừng', 'success');
+      this._lastInviteCampaignsUpdate = null;
+      this.loadInviteCampaigns();
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+  },
+
+  async deleteInviteCampaign(id) {
+    if (!confirm('Xóa invite campaign này? Sẽ xóa cả logs.')) return;
+    try {
+      await InviteAPI.deleteCampaign(id);
+      App.toast('Đã xóa', 'success');
+      this._inviteCampaigns = this._inviteCampaigns.filter(c => c.id !== id);
+      this._lastInviteCampaignsUpdate = null;
+      this.loadInviteCampaigns();
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+  },
+
+  _pollInviteCampaign() {
+    if (this._inviteCampaignPollInterval) return;
+
+    this._inviteCampaignPollInterval = setInterval(async () => {
+      try {
+        await this.loadInviteCampaigns();
+        
+        const hasRunning = this._inviteCampaigns.some(c => c.status === 'running');
+        if (!hasRunning) {
+          clearInterval(this._inviteCampaignPollInterval);
+          this._inviteCampaignPollInterval = null;
+        }
+      } catch (e) {
+        clearInterval(this._inviteCampaignPollInterval);
+        this._inviteCampaignPollInterval = null;
+      }
+    }, 10000);
+  },
+
+  // ── Invite Campaign Logs ──
+  async viewInviteCampaignLogs(id, name) {
+    document.getElementById('invite-campaign-logs-title').textContent = `Logs: ${name}`;
+    const tbody = document.getElementById('invite-campaign-logs-tbody');
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">⏳ Đang tải...</td></tr>';
+    document.getElementById('invite-campaign-logs-modal').classList.add('open');
+
+    try {
+      const d = await InviteAPI.getCampaignLogs(id);
+      const logs = d.logs || [];
+      if (!logs.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2)">Chưa có logs</td></tr>';
+        return;
+      }
+      tbody.innerHTML = logs.map(l => {
+        const statusBadge = l.status === 'success'
+          ? '<span class="badge badge-green">✅</span>'
+          : l.status === 'skipped'
+            ? '<span class="badge" style="background:#f59e0b">⏭</span>'
+            : '<span class="badge badge-red">❌</span>';
+        const time = l.sent_at ? new Date(l.sent_at + 'Z').toLocaleString('vi-VN') : '—';
+        return `<tr>
+          <td>${l.target_username ? '@' + esc(l.target_username) : l.target_user_id}</td>
+          <td>${l.account_name ? esc(l.account_name) : (l.account_id || '—')}</td>
+          <td>${statusBadge}</td>
+          <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(l.error_message || '')}</td>
+          <td style="font-size:12px;color:var(--text2)">${time}</td>
+        </tr>`;
+      }).join('');
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" style="color:var(--danger)">${esc(e.message)}</td></tr>`;
+    }
+  },
+
+  closeInviteCampaignLogs() {
+    document.getElementById('invite-campaign-logs-modal').classList.remove('open');
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // INVITE CAMPAIGN MODAL
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  onInviteModeChange() {
+    const mode = document.querySelector('input[name="inv-mode"]:checked')?.value;
+    const dmGroup = document.getElementById('inv-dm-message-group');
+    if (mode === 'dm_link') {
+      dmGroup.classList.remove('hidden');
+    } else {
+      dmGroup.classList.add('hidden');
+    }
+  },
+
+  onInviteScheduleToggle() {
+    const enabled = document.getElementById('inv-schedule-enabled').checked;
+    const opts = document.getElementById('inv-schedule-options');
+    if (enabled) {
+      opts.classList.remove('hidden');
+    } else {
+      opts.classList.add('hidden');
+    }
+  },
+
+  async resolveInviteGroup() {
+    const input = document.getElementById('inv-target-group').value.trim();
+    if (!input) { App.toast('Nhập link hoặc username nhóm', 'error'); return; }
+
+    const btn = document.getElementById('inv-resolve-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Đang kiểm tra...';
+
+    try {
+      const d = await InviteAPI.resolveGroup(input);
+      const info = d.group || d;
+      document.getElementById('inv-target-group-id').value = info.id || info.group_id || '';
+      document.getElementById('inv-target-group-title').value = info.title || info.name || '';
+      
+      const infoDiv = document.getElementById('inv-group-info');
+      const infoText = document.getElementById('inv-group-info-text');
+      infoDiv.classList.remove('hidden');
+      infoText.innerHTML = `✅ <strong>${esc(info.title || info.name || 'Unknown')}</strong> — ${info.members_count || info.participants_count || '?'} members`;
+    } catch (e) {
+      App.toast(e.message || 'Không thể kiểm tra nhóm', 'error');
+      document.getElementById('inv-group-info').classList.add('hidden');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔍 Kiểm tra';
+    }
+  },
+
+  async openInviteCampaignModal() {
+    this._editingInviteCampaignId = null;
+    document.getElementById('invite-campaign-modal-title').textContent = 'Tạo Invite Campaign';
+    document.getElementById('inv-name').value = '';
+    document.getElementById('inv-name').disabled = false;
+    document.getElementById('inv-target-group').value = '';
+    document.getElementById('inv-target-group-id').value = '';
+    document.getElementById('inv-target-group-title').value = '';
+    document.getElementById('inv-group-info').classList.add('hidden');
+    document.getElementById('inv-delay-min').value = '45';
+    document.getElementById('inv-delay-max').value = '120';
+    document.getElementById('inv-daily-limit').value = '50';
+    document.getElementById('inv-dm-message').value = '';
+    document.getElementById('inv-dm-message-group').classList.add('hidden');
+    document.getElementById('inv-schedule-enabled').checked = false;
+    document.getElementById('inv-schedule-options').classList.add('hidden');
+    document.getElementById('inv-schedule-time').value = '09:00';
+    document.getElementById('inv-schedule-days').value = '7';
+
+    // Reset invite mode to direct
+    document.querySelectorAll('input[name="inv-mode"]').forEach(r => r.checked = r.value === 'direct');
+
+    // Populate scrape jobs dropdown
+    const jobSel = document.getElementById('inv-scrape-job');
+    jobSel.disabled = false;
+    if (this._scrapeJobs.length) {
+      jobSel.innerHTML = this._scrapeJobs.map(j =>
+        `<option value="${esc(j.scrape_job_id)}">${esc(j.group_title || j.group_id)} (${j.member_count} members)</option>`
+      ).join('');
+    } else {
+      jobSel.innerHTML = '<option value="">Chưa có dữ liệu cào</option>';
+    }
+
+    // Populate accounts
+    await this._populateInviteAccounts();
+
+    // Reset save button
+    const saveBtn = document.getElementById('inv-save-btn');
+    saveBtn.setAttribute('onclick', 'Members.saveInviteCampaign()');
+    saveBtn.textContent = '🚀 Tạo Campaign';
+
+    document.getElementById('invite-campaign-modal').classList.add('open');
+  },
+
+  async _populateInviteAccounts(selectedIds = null) {
+    const now = Date.now();
+    if (!this._accounts?.length || !this._accountsCachedAt || (now - this._accountsCachedAt) > 30000) {
+      try {
+        const d = await API.getAccounts();
+        this._accounts = d.accounts || [];
+        this._accountsCachedAt = now;
+      } catch (e) {}
+    }
+
+    const sortedAccounts = [...this._accounts].sort((a, b) => (b.is_premium || 0) - (a.is_premium || 0));
+    const accDiv = document.getElementById('inv-accounts-list');
+    accDiv.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;width:100%;flex-wrap:wrap">
+        <button type="button" class="btn btn-ghost btn-sm inv-acc-filter active" data-filter="all" onclick="Members.filterInviteAccounts('all')" style="font-size:12px">Tất cả (${sortedAccounts.length})</button>
+        <button type="button" class="btn btn-ghost btn-sm inv-acc-filter" data-filter="premium" onclick="Members.filterInviteAccounts('premium')" style="font-size:12px">⭐ Premium (${sortedAccounts.filter(a=>a.is_premium).length})</button>
+        <span style="flex:1"></span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllInviteAccounts(true)" style="font-size:11px;color:var(--accent);padding:2px 8px" title="Chọn tất cả">☑ Chọn hết</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.selectInvitePremiumOnly()" style="font-size:11px;color:#f59e0b;padding:2px 8px" title="Chỉ chọn Premium">⭐ Chọn Premium</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllInviteAccounts(false)" style="font-size:11px;color:var(--danger);padding:2px 8px" title="Bỏ chọn tất cả">☐ Bỏ hết</button>
+      </div>
+      <div id="inv-accounts-chips" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+    `;
+    this._sortedInviteAccounts = sortedAccounts;
+    this._renderInviteAccountChips(sortedAccounts, selectedIds);
+  },
+
+  _renderInviteAccountChips(accounts, selectedIds = null) {
+    const container = document.getElementById('inv-accounts-chips');
+    if (!container) return;
+    container.innerHTML = accounts.map(a => {
+      const name = a.user_info
+        ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ')
+        : a.name;
+      const phone = a.phone || '';
+      const premiumBadge = a.is_premium ? '⭐ ' : '';
+      const premiumStyle = a.is_premium ? 'border-color:#f59e0b;' : '';
+      const checked = selectedIds ? (selectedIds.includes(a.id) ? 'checked' : '') : 'checked';
+      return `<label style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg2);border-radius:8px;cursor:pointer;border:1px solid var(--border);font-size:13px;${premiumStyle}" data-premium="${a.is_premium ? 1 : 0}">
+        <input type="checkbox" class="inv-acc-checkbox" value="${a.id}" ${checked}>
+        <span>${premiumBadge}${esc(name || phone)}</span>
+      </label>`;
+    }).join('');
+  },
+
+  filterInviteAccounts(filter) {
+    document.querySelectorAll('.inv-acc-filter').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.filter === filter);
+      btn.style.background = btn.dataset.filter === filter ? 'var(--primary)' : '';
+      btn.style.color = btn.dataset.filter === filter ? '#fff' : '';
+    });
+    const accounts = filter === 'premium'
+      ? this._sortedInviteAccounts.filter(a => a.is_premium)
+      : this._sortedInviteAccounts;
+    this._renderInviteAccountChips(accounts);
+  },
+
+  toggleAllInviteAccounts(check) {
+    const chips = document.getElementById('inv-accounts-chips');
+    if (!chips) return;
+    chips.querySelectorAll('.inv-acc-checkbox').forEach(cb => {
+      cb.checked = check;
+    });
+  },
+
+  selectInvitePremiumOnly() {
+    const chips = document.getElementById('inv-accounts-chips');
+    if (!chips) return;
+    chips.querySelectorAll('label[data-premium]').forEach(label => {
+      const cb = label.querySelector('.inv-acc-checkbox');
+      if (!cb) return;
+      cb.checked = label.dataset.premium === '1';
+    });
+  },
+
+  closeInviteCampaignModal() {
+    document.getElementById('invite-campaign-modal').classList.remove('open');
+    this._editingInviteCampaignId = null;
+  },
+
+  async saveInviteCampaign() {
+    const name = document.getElementById('inv-name').value.trim();
+    const jobId = document.getElementById('inv-scrape-job').value;
+    const targetGroup = document.getElementById('inv-target-group').value.trim();
+    const targetGroupId = document.getElementById('inv-target-group-id').value;
+    const targetGroupTitle = document.getElementById('inv-target-group-title').value;
+    const inviteMode = document.querySelector('input[name="inv-mode"]:checked')?.value || 'direct';
+    const dmMessage = document.getElementById('inv-dm-message').value.trim();
+    const delayMin = parseInt(document.getElementById('inv-delay-min').value) || 45;
+    const delayMax = parseInt(document.getElementById('inv-delay-max').value) || 120;
+    const dailyLimit = parseInt(document.getElementById('inv-daily-limit').value) || 50;
+
+    if (!name) { App.toast('Nhập tên campaign', 'error'); return; }
+    if (!jobId) { App.toast('Chọn nguồn members', 'error'); return; }
+    if (!targetGroup && !targetGroupId) { App.toast('Nhập nhóm/kênh đích', 'error'); return; }
+    if (inviteMode === 'dm_link' && !dmMessage) { App.toast('Nhập nội dung DM khi chọn chế độ DM Link', 'error'); return; }
+
+    // Collect sender accounts
+    const accCheckboxes = document.querySelectorAll('.inv-acc-checkbox:checked');
+    const senderIds = Array.from(accCheckboxes).map(cb => parseInt(cb.value));
+    if (!senderIds.length) { App.toast('Chọn ít nhất 1 tài khoản', 'error'); return; }
+
+    // Schedule
+    const scheduleEnabled = document.getElementById('inv-schedule-enabled').checked;
+    const scheduleTime = document.getElementById('inv-schedule-time').value;
+    const scheduleDays = parseInt(document.getElementById('inv-schedule-days').value) || 7;
+
+    const data = {
+      name,
+      scrape_job_id: jobId,
+      target_group: targetGroup || targetGroupId,
+      target_group_id: targetGroupId || undefined,
+      target_group_title: targetGroupTitle || undefined,
+      invite_mode: inviteMode,
+      dm_message: inviteMode === 'dm_link' ? dmMessage : undefined,
+      sender_account_ids: senderIds,
+      delay_min: delayMin,
+      delay_max: delayMax,
+      daily_limit: dailyLimit,
+      schedule_enabled: scheduleEnabled,
+      schedule_time: scheduleEnabled ? scheduleTime : undefined,
+      schedule_days: scheduleEnabled ? scheduleDays : undefined,
+    };
+
+    try {
+      const r = await InviteAPI.createCampaign(data);
+      App.toast(`Invite campaign tạo thành công! (${r.total_targets || 0} targets)`, 'success');
+      this.closeInviteCampaignModal();
+      this._lastInviteCampaignsUpdate = null;
+      this.loadInviteCampaigns();
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+  },
+
+  async openEditInviteCampaign(id) {
+    try {
+      const d = await InviteAPI.getCampaign(id);
+      const c = d.campaign;
+      if (!c) { App.toast('Campaign không tồn tại', 'error'); return; }
+      if (!['draft', 'paused', 'error'].includes(c.status)) {
+        App.toast('Chỉ sửa được khi campaign đang tạm dừng', 'error');
+        return;
+      }
+
+      this._editingInviteCampaignId = id;
+
+      document.getElementById('invite-campaign-modal-title').textContent = `✏️ Sửa Invite Campaign: ${c.name}`;
+      document.getElementById('inv-name').value = c.name;
+      document.getElementById('inv-name').disabled = true;
+
+      // Scrape job (locked)
+      const jobSel = document.getElementById('inv-scrape-job');
+      jobSel.innerHTML = `<option value="${esc(c.scrape_job_id)}" selected>${esc((c.scrape_job_id || '').substring(0, 30))}...</option>`;
+      jobSel.disabled = true;
+
+      // Target group
+      document.getElementById('inv-target-group').value = c.target_group || '';
+      document.getElementById('inv-target-group-id').value = c.target_group_id || '';
+      document.getElementById('inv-target-group-title').value = c.target_group_title || '';
+      if (c.target_group_title) {
+        const infoDiv = document.getElementById('inv-group-info');
+        const infoText = document.getElementById('inv-group-info-text');
+        infoDiv.classList.remove('hidden');
+        infoText.innerHTML = `✅ <strong>${esc(c.target_group_title)}</strong>`;
+      }
+
+      // Mode
+      document.querySelectorAll('input[name="inv-mode"]').forEach(r => r.checked = r.value === (c.invite_mode || 'direct'));
+      this.onInviteModeChange();
+      if (c.invite_mode === 'dm_link' && c.dm_message) {
+        document.getElementById('inv-dm-message').value = c.dm_message;
+      }
+
+      // Settings
+      document.getElementById('inv-delay-min').value = c.delay_min || 45;
+      document.getElementById('inv-delay-max').value = c.delay_max || 120;
+      document.getElementById('inv-daily-limit').value = c.daily_limit || 50;
+
+      // Schedule
+      document.getElementById('inv-schedule-enabled').checked = !!c.schedule_enabled;
+      this.onInviteScheduleToggle();
+      if (c.schedule_time) document.getElementById('inv-schedule-time').value = c.schedule_time;
+      if (c.schedule_days) document.getElementById('inv-schedule-days').value = c.schedule_days;
+
+      // Accounts
+      await this._populateInviteAccounts(c.sender_account_ids || []);
+
+      // Change save button to edit mode
+      const saveBtn = document.getElementById('inv-save-btn');
+      saveBtn.setAttribute('onclick', 'Members.saveEditedInviteCampaign()');
+      saveBtn.textContent = '💾 Lưu thay đổi';
+
+      document.getElementById('invite-campaign-modal').classList.add('open');
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+  },
+
+  async saveEditedInviteCampaign() {
+    const id = this._editingInviteCampaignId;
+    if (!id) { App.toast('Lỗi: không có campaign để sửa', 'error'); return; }
+
+    const targetGroup = document.getElementById('inv-target-group').value.trim();
+    const targetGroupId = document.getElementById('inv-target-group-id').value;
+    const targetGroupTitle = document.getElementById('inv-target-group-title').value;
+    const inviteMode = document.querySelector('input[name="inv-mode"]:checked')?.value || 'direct';
+    const dmMessage = document.getElementById('inv-dm-message').value.trim();
+    const delayMin = parseInt(document.getElementById('inv-delay-min').value) || 45;
+    const delayMax = parseInt(document.getElementById('inv-delay-max').value) || 120;
+    const dailyLimit = parseInt(document.getElementById('inv-daily-limit').value) || 50;
+
+    const accCheckboxes = document.querySelectorAll('.inv-acc-checkbox:checked');
+    const senderIds = Array.from(accCheckboxes).map(cb => parseInt(cb.value));
+    if (!senderIds.length) { App.toast('Chọn ít nhất 1 tài khoản', 'error'); return; }
+
+    const scheduleEnabled = document.getElementById('inv-schedule-enabled').checked;
+    const scheduleTime = document.getElementById('inv-schedule-time').value;
+    const scheduleDays = parseInt(document.getElementById('inv-schedule-days').value) || 7;
+
+    try {
+      await InviteAPI.updateCampaign(id, {
+        target_group: targetGroup || targetGroupId,
+        target_group_id: targetGroupId || undefined,
+        target_group_title: targetGroupTitle || undefined,
+        invite_mode: inviteMode,
+        dm_message: inviteMode === 'dm_link' ? dmMessage : undefined,
+        sender_account_ids: senderIds,
+        delay_min: delayMin,
+        delay_max: delayMax,
+        daily_limit: dailyLimit,
+        schedule_enabled: scheduleEnabled,
+        schedule_time: scheduleEnabled ? scheduleTime : undefined,
+        schedule_days: scheduleEnabled ? scheduleDays : undefined,
+      });
+      App.toast('✅ Đã cập nhật invite campaign!', 'success');
+      this._editingInviteCampaignId = null;
+      this.closeInviteCampaignModal();
+      this._lastInviteCampaignsUpdate = null;
+      this.loadInviteCampaigns();
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SPAM CHECK
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _spamBadgeHtml(status, message) {
+    const map = {
+      free: { text: '✅ Sạch', bg: 'rgba(34,197,94,.18)', border: 'rgba(34,197,94,.5)', color: '#4ade80' },
+      limited: { text: '🚫 Bị giới hạn', bg: 'rgba(239,68,68,.18)', border: 'rgba(239,68,68,.5)', color: '#f87171' },
+      unknown: { text: '⚠️ Không rõ', bg: 'rgba(245,158,11,.18)', border: 'rgba(245,158,11,.5)', color: '#fbbf24' },
+    };
+    const info = map[status] || map.unknown;
+    return `<span style="background:${info.bg};border:1px solid ${info.border};border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:${info.color}" title="${esc(message || '')}">${info.text}</span>`;
+  },
+
+  async checkAllAccountsSpam() {
+    const btn = document.getElementById('btn-spam-check');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang kiểm tra...'; }
+
+    try {
+      const res = await fetch('/api/members/accounts/spam-check-all', {
+        method: 'POST',
+        headers: API.getHeaders()
+      });
+      let d = {};
+      try {
+        d = await res.json();
+      } catch (jsonErr) {
+        throw new Error(`Server gặp lỗi HTTP ${res.status}`);
+      }
+      if (!res.ok) throw new Error(d.detail || `Lỗi kiểm tra spam (HTTP ${res.status})`);
+
+      const results = d.results || [];
+      results.forEach(r => {
+        const card = document.querySelector(`.account-card[data-account-id="${r.account_id}"]`);
+        if (!card) return;
+        const slot = card.querySelector('.spam-badge-slot');
+        if (slot) slot.innerHTML = this._spamBadgeHtml(r.status, r.message);
+      });
+
+      const freeCount = results.filter(r => r.status === 'free').length;
+      const limitedCount = results.filter(r => r.status === 'limited').length;
+      App.toast(`Spam check: ${freeCount} sạch, ${limitedCount} bị giới hạn`, freeCount > 0 && limitedCount === 0 ? 'success' : 'warning');
+    } catch (e) {
+      App.toast(e.message || 'Lỗi kiểm tra spam', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '🛡️ Kiểm tra Spam'; }
     }
   },
 };
