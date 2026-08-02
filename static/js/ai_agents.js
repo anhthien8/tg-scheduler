@@ -273,5 +273,39 @@ const AIAgents = {
         btn.innerHTML = '🚀 Chạy Test lại';
       }
     }
-  }
+  },
+
+  async populateAgentDropdown(elementId = 'cmp-ai-agent', selectedId = null) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+
+    if (this._agents.length === 0) {
+      try {
+        const res = await AIAgentsAPI.getAll();
+        this._agents = res.agents || [];
+      } catch (e) {
+        console.error('Failed to load agents for dropdown:', e);
+      }
+    }
+
+    let html = '<option value="">-- Dùng cài đặt AI chung hệ thống --</option>';
+    for (const agent of this._agents) {
+      const isSelected = selectedId && (agent.id == selectedId) ? 'selected' : '';
+      html += `<option value="${agent.id}" ${isSelected}>${agent.avatar_emoji || '🤖'} ${this._esc(agent.name)}</option>`;
+    }
+    el.innerHTML = html;
+  },
+
+  async getAgentsForDropdown() {
+    if (this._agents.length === 0) {
+      try {
+        const res = await AIAgentsAPI.getAll();
+        this._agents = res.agents || [];
+      } catch (e) {
+        console.error('Failed to get agents for dropdown:', e);
+      }
+    }
+    return this._agents;
+  },
+
 };

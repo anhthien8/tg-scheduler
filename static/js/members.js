@@ -744,10 +744,8 @@ const Members = {
       (document.getElementById('cmp-daily-limit-normal') || me_dummy).value = c.daily_limit_normal || 10;
       (document.getElementById('cmp-ai-remix') || me_dummy).checked = !!c.use_ai_remix;
       // Populate AI Agent dropdown if available
-      if (typeof AIAgents !== 'undefined') {
-        AIAgents.getAgentsForDropdown().then(() => {
-          AIAgents.populateAgentDropdown('cmp-ai-agent', c.ai_agent_id || null);
-        });
+      if (typeof AIAgents !== 'undefined' && AIAgents.populateAgentDropdown) {
+        AIAgents.populateAgentDropdown('cmp-ai-agent', c.ai_agent_id || null);
       }
       const excludePrevEl = document.getElementById('cmp-exclude-previous');
       if (excludePrevEl) {
