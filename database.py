@@ -16,7 +16,7 @@ DB_DIR = os.getenv("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 DB_PATH = os.path.join(DB_DIR, "scheduler.db")
 
 class ConnectionPool:
-    def __init__(self, db_path: str, max_connections: int = 10, timeout: float = 5.0):
+    def __init__(self, db_path: str, max_connections: int = 10, timeout: float = 10.0):
         self.db_path = db_path
         self.max_connections = max_connections
         self.timeout = timeout
@@ -30,6 +30,7 @@ class ConnectionPool:
         initialized = False
         try:
             await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA synchronous=NORMAL")
             await conn.execute("PRAGMA foreign_keys=ON")
             await conn.execute(f"PRAGMA busy_timeout={int(self.timeout * 1000)}")
             initialized = True

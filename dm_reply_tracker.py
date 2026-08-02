@@ -194,10 +194,10 @@ def _make_handler(account_id: int):
                                 max_replies_val = agent_config.get("max_replies", 10)
 
                                 if needs_handover:
-                                    logger.info("[AIFollowUp] Handover keyword matched for user %d — setting status to 'needs_human'", sender_id)
+                                    logger.warning("[AIFollowUp] 🚨 [ADMIN ALERT] Handover keyword matched for user %d (acc=%d) — setting status to 'needs_human'", sender_id, account_id)
                                     await db.update_followup_chat_status(account_id, sender_id, "needs_human")
                                 elif chat.get("reply_count", 0) >= max_replies_val:
-                                    logger.info("[AIFollowUp] Max replies (%d) reached for user %d — setting status to 'needs_human'", max_replies_val, sender_id)
+                                    logger.warning("[AIFollowUp] 🚨 [ADMIN ALERT] Max replies (%d) reached for user %d (acc=%d) — setting status to 'needs_human'", max_replies_val, sender_id, account_id)
                                     await db.update_followup_chat_status(account_id, sender_id, "needs_human")
                                 else:
                                     # Load global provider & keys
@@ -244,10 +244,12 @@ def _make_handler(account_id: int):
                                         )
 
                                     if ai_keys:
-                                        history = chat.get("history", [])
+                                        # Sliding Window Context: Limit history to last 10 messages to optimize token budget & avoid drift
+                                        full_history = chat.get("history", [])
+                                        history = full_history[-10:] if len(full_history) > 10 else full_history
                                         logger.info(
-                                            "[AIFollowUp] 🤖 Generating AI reply using Agent '%s' for campaign #%s (user %d)...",
-                                            agent_config['name'], target_campaign_id, sender_id
+                                            "[AIFollowUp] 🤖 Generating AI reply using Agent '%s' for campaign #%s (user %d, history_len=%d)...",
+                                            agent_config['name'], target_campaign_id, sender_id, len(history)
                                         )
                                         try:
                                             ai_reply = await ai_rmx.generate_chat_response(history, combined_prompt, ai_provider, ai_keys, **kwargs)

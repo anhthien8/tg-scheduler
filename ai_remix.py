@@ -45,7 +45,7 @@ def _parse_openai_compatible_json(raw: str) -> dict:
 
 _rr_index = {}
 _key_cooldown = {}
-_KEY_FAIL_COOLDOWN = 60
+_KEY_FAIL_COOLDOWN = 300  # 5 minutes circuit breaker cooldown for failing/rate-limited keys
 
 
 def _next_key(keys, provider):
