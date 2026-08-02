@@ -167,25 +167,45 @@ const API = {
 
 
 // ── Generic REST helpers ─────────────────────────────────────────────────────
+async function parseApiResponse(r) {
+  const text = await r.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    if (!r.ok) {
+      throw new Error(`Lỗi máy chủ (${r.status} ${r.statusText})`);
+    }
+    throw new Error(`Phản hồi máy chủ không hợp lệ`);
+  }
+
+  if (!r.ok) {
+    const errMsg = data.detail || data.error || data.message || `Lỗi máy chủ (${r.status})`;
+    throw new Error(errMsg);
+  }
+
+  return data;
+}
+
 async function apiGet(path) {
   const headers = API.getHeaders();
   const r = await fetch(path, { headers });
-  return r.json();
+  return parseApiResponse(r);
 }
 async function apiPost(path, body) {
   const headers = { ...API.getHeaders(), 'Content-Type': 'application/json' };
   const r = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
-  return r.json();
+  return parseApiResponse(r);
 }
 async function apiPut(path, body) {
   const headers = { ...API.getHeaders(), 'Content-Type': 'application/json' };
   const r = await fetch(path, { method: 'PUT', headers, body: JSON.stringify(body) });
-  return r.json();
+  return parseApiResponse(r);
 }
 async function apiDelete(path) {
   const headers = API.getHeaders();
   const r = await fetch(path, { method: 'DELETE', headers });
-  return r.json();
+  return parseApiResponse(r);
 }
 
 

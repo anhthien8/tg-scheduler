@@ -2539,7 +2539,8 @@ async def get_scheduled_campaigns() -> list:
 
 
 async def update_dm_campaign_status(campaign_id: int, status: str,
-                                     sent: int = None, failed: int = None, skipped: int = None):
+                                     sent: int = None, failed: int = None, skipped: int = None,
+                                     ai_agent_id: int = None):
     async with get_db() as db:
         updates = ["status = ?", "updated_at = datetime('now')"]
         params = [status]
@@ -2591,6 +2592,9 @@ async def update_dm_campaign_messages(campaign_id: int, messages: list,
         if exclude_previous_dms is not None:
             updates.append("exclude_previous_dms = ?")
             params.append(1 if exclude_previous_dms else 0)
+        if ai_agent_id is not None:
+            updates.append("ai_agent_id = ?")
+            params.append(ai_agent_id if ai_agent_id != 0 else None)
         params.append(campaign_id)
         await db.execute(
             f"UPDATE dm_campaigns SET {', '.join(updates)} WHERE id = ?",
