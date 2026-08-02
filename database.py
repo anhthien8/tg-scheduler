@@ -652,6 +652,28 @@ async def init_db():
             ON ai_followup_chats(account_id, user_id)
         """)
 
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS ai_agents (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL,
+                description     TEXT DEFAULT '',
+                avatar_emoji    TEXT DEFAULT '🤖',
+                provider        TEXT DEFAULT 'gemini',
+                model           TEXT DEFAULT '',
+                base_url        TEXT DEFAULT '',
+                api_keys_json   TEXT DEFAULT '[]',
+                system_prompt   TEXT DEFAULT '',
+                remix_instruction TEXT DEFAULT '',
+                knowledge_base  TEXT DEFAULT '',
+                handover_keywords TEXT DEFAULT '[]',
+                max_replies     INTEGER DEFAULT 10,
+                tone            TEXT DEFAULT 'friendly',
+                is_active       INTEGER DEFAULT 1,
+                created_at      TEXT DEFAULT (datetime('now')),
+                updated_at      TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
         # ── Invite Campaigns ─────────────────────────────────────────────────
         await db.execute("""
             CREATE TABLE IF NOT EXISTS invite_campaigns (
@@ -796,6 +818,10 @@ async def init_db():
         # ══════════════════════════════════════════════════════════════
 
         # Add template_variant tracking to campaign logs
+        try:
+            await db.execute("ALTER TABLE dm_campaigns ADD COLUMN ai_agent_id INTEGER DEFAULT NULL")
+        except Exception:
+            pass  # Column already exists
         try:
             await db.execute("ALTER TABLE dm_campaign_logs ADD COLUMN template_variant_id INTEGER")
         except Exception:
@@ -2440,8 +2466,8 @@ async def create_dm_campaign(data: dict) -> int:
             (name, scrape_job_id, sender_account_ids, messages,
              delay_min, delay_max, daily_limit_premium, daily_limit_normal,
              use_ai_remix, exclude_previous_dms, total_targets, status,
-             scheduled_at, target_timezone)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             scheduled_at, target_timezone, ai_agent_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["name"], data["scrape_job_id"],
             json.dumps(data.get("sender_account_ids", [])),
@@ -2455,6 +2481,7 @@ async def create_dm_campaign(data: dict) -> int:
             data.get("status", "draft"),
             data.get("scheduled_at"),
             data.get("target_timezone"),
+            data.get("ai_agent_id"),
         ))
         await db.commit()
         return cursor.lastrowid
@@ -2525,6 +2552,9 @@ async def update_dm_campaign_status(campaign_id: int, status: str,
         if skipped is not None:
             updates.append("skipped_count = ?")
             params.append(skipped)
+        if ai_agent_id is not None:
+            updates.append('ai_agent_id = ?')
+            params.append(ai_agent_id if ai_agent_id != 0 else None)
         params.append(campaign_id)
         await db.execute(
             f"UPDATE dm_campaigns SET {', '.join(updates)} WHERE id = ?",
@@ -2537,7 +2567,8 @@ async def update_dm_campaign_messages(campaign_id: int, messages: list,
                                        daily_limit_premium: int = None,
                                        daily_limit_normal: int = None,
                                        use_ai_remix: bool = None,
-                                       exclude_previous_dms: bool = None):
+                                       exclude_previous_dms: bool = None,
+                                       ai_agent_id: int = None):
     """Update campaign messages and settings (only when paused/draft)."""
     async with get_db() as db:
         updates = ["messages = ?", "updated_at = datetime('now')"]
@@ -3674,3 +3705,134 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
         return rows
 
 
+# ── AI Agents CRUD ────────────────────────────────────────────────────────
+async def get_all_ai_agents(active_only=True) -> list:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        if active_only:
+            cursor = await db.execute("SELECT * FROM ai_agents WHERE is_active = 1 ORDER BY created_at DESC")
+        else:
+            cursor = await db.execute("SELECT * FROM ai_agents ORDER BY created_at DESC")
+        rows = [dict(row) for row in await cursor.fetchall()]
+        for r in rows:
+            try:
+                r["api_keys_json"] = json.loads(r.get("api_keys_json", "[]"))
+            except Exception:
+                r["api_keys_json"] = []
+            try:
+                r["handover_keywords"] = json.loads(r.get("handover_keywords", "[]"))
+            except Exception:
+                r["handover_keywords"] = []
+        return rows
+
+
+async def get_ai_agent(agent_id: int) -> dict | None:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM ai_agents WHERE id = ?", (agent_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        r = dict(row)
+        try:
+            r["api_keys_json"] = json.loads(r.get("api_keys_json", "[]"))
+        except Exception:
+            r["api_keys_json"] = []
+        try:
+            r["handover_keywords"] = json.loads(r.get("handover_keywords", "[]"))
+        except Exception:
+            r["handover_keywords"] = []
+        return r
+
+
+async def create_ai_agent(data: dict) -> int:
+    async with get_db() as db:
+        cursor = await db.execute("""
+            INSERT INTO ai_agents
+            (name, description, avatar_emoji, provider, model, base_url,
+             api_keys_json, system_prompt, remix_instruction, knowledge_base,
+             handover_keywords, max_replies, tone)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data["name"],
+            data.get("description", ""),
+            data.get("avatar_emoji", "🤖"),
+            data.get("provider", "gemini"),
+            data.get("model", ""),
+            data.get("base_url", ""),
+            json.dumps(data.get("api_keys_json", [])),
+            data.get("system_prompt", ""),
+            data.get("remix_instruction", ""),
+            data.get("knowledge_base", ""),
+            json.dumps(data.get("handover_keywords", [])),
+            data.get("max_replies", 10),
+            data.get("tone", "friendly"),
+        ))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def update_ai_agent(agent_id: int, data: dict) -> bool:
+    async with get_db() as db:
+        fields = []
+        values = []
+        allowed = ["name", "description", "avatar_emoji", "provider", "model",
+                   "base_url", "system_prompt", "remix_instruction",
+                   "knowledge_base", "tone", "max_replies", "is_active"]
+        for key in allowed:
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+        if "api_keys_json" in data:
+            fields.append("api_keys_json = ?")
+            values.append(json.dumps(data["api_keys_json"]) if isinstance(data["api_keys_json"], list) else data["api_keys_json"])
+        if "handover_keywords" in data:
+            fields.append("handover_keywords = ?")
+            values.append(json.dumps(data["handover_keywords"]) if isinstance(data["handover_keywords"], list) else data["handover_keywords"])
+        if not fields:
+            return False
+        fields.append("updated_at = datetime('now')")
+        values.append(agent_id)
+        await db.execute(f"UPDATE ai_agents SET {', '.join(fields)} WHERE id = ?", values)
+        await db.commit()
+        return True
+
+
+async def delete_ai_agent(agent_id: int) -> bool:
+    """Soft delete - set is_active = 0"""
+    async with get_db() as db:
+        await db.execute("UPDATE ai_agents SET is_active = 0, updated_at = datetime('now') WHERE id = ?", (agent_id,))
+        await db.commit()
+        return True
+
+
+async def duplicate_ai_agent(agent_id: int) -> int | None:
+    agent = await get_ai_agent(agent_id)
+    if not agent:
+        return None
+    new_data = {
+        "name": f"{agent['name']} - Copy",
+        "description": agent.get("description", ""),
+        "avatar_emoji": agent.get("avatar_emoji", "🤖"),
+        "provider": agent.get("provider", "gemini"),
+        "model": agent.get("model", ""),
+        "base_url": agent.get("base_url", ""),
+        "api_keys_json": agent.get("api_keys_json", []),
+        "system_prompt": agent.get("system_prompt", ""),
+        "remix_instruction": agent.get("remix_instruction", ""),
+        "knowledge_base": agent.get("knowledge_base", ""),
+        "handover_keywords": agent.get("handover_keywords", []),
+        "max_replies": agent.get("max_replies", 10),
+        "tone": agent.get("tone", "friendly"),
+    }
+    return await create_ai_agent(new_data)
+
+
+async def count_campaigns_by_agent(agent_id: int) -> int:
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM dm_campaigns WHERE ai_agent_id = ? AND status IN ('running', 'draft', 'scheduled')",
+            (agent_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0

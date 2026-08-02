@@ -176,13 +176,7 @@ def _make_handler(account_id: int):
                         logger.info("[AIFollowUp] Max replies (%d) reached for user %d — setting status to 'needs_human'", max_replies, sender_id)
                         await db.update_followup_chat_status(account_id, sender_id, "needs_human")
                     else:
-                        # Prepare system prompt + KB
-                        sys_prompt = await db.get_setting("ai_followup_system_prompt", "")
-                        kb = await db.get_setting("ai_followup_knowledge_base", "")
-                        combined_prompt = sys_prompt
-                        if kb and kb.strip():
-                            combined_prompt += "\n\n--- KNOWLEDGE BASE ---\n" + kb.strip()
-
+                        # Prepare system prompt + KB (Global provider/keys, Agent-specific prompts)
                         async def _load_provider_keys(prov):
                             if not prov:
                                 return []
@@ -195,7 +189,6 @@ def _make_handler(account_id: int):
                         ai_provider = await db.get_setting("ai_provider", "gemini")
                         ai_keys = await _load_provider_keys(ai_provider)
 
-                        # Auto-fallback to any provider with keys if selected provider has no keys
                         if not ai_keys:
                             all_providers = ["gemini", "groq", "openai", "deepseek", "openai_compatible"]
                             for alt_prov in all_providers:
@@ -209,6 +202,36 @@ def _make_handler(account_id: int):
                                     ai_keys = alt_keys
                                     break
 
+                        kwargs = {}
+                        if ai_provider == "openai_compatible":
+                            kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
+                            kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
+
+                        # Check if this chat's campaign has an AI Agent
+                        agent_config = None
+                        chat_campaign_id = chat.get("campaign_id")
+                        if chat_campaign_id:
+                            cmp = await db.get_dm_campaign(chat_campaign_id)
+                            if cmp and cmp.get("ai_agent_id"):
+                                agent_config = await db.get_ai_agent(cmp["ai_agent_id"])
+
+                        if agent_config:
+                            sys_prompt = agent_config.get("system_prompt", "")
+                            kb = agent_config.get("knowledge_base", "")
+                            max_replies_val = agent_config.get("max_replies", 10)
+                            if chat.get("reply_count", 0) >= max_replies_val:
+                                logger.info("[AIFollowUp] Agent max replies (%d) reached for user %d", max_replies_val, sender_id)
+                                await db.update_followup_chat_status(account_id, sender_id, "needs_human")
+                                return
+                            logger.info("[AIFollowUp] 🤖 Using AI Agent '%s' for user %d", agent_config['name'], sender_id)
+                        else:
+                            sys_prompt = await db.get_setting("ai_followup_system_prompt", "")
+                            kb = await db.get_setting("ai_followup_knowledge_base", "")
+
+                        combined_prompt = sys_prompt
+                        if kb and kb.strip():
+                            combined_prompt += "\n\n--- KNOWLEDGE BASE ---\n" + kb.strip()
+
                         if not ai_keys:
                             logger.warning(
                                 "[AIFollowUp] ⚠️ Không thể tạo phản hồi AI cho user %d: Chưa có API Key nào được cài đặt!",
@@ -218,7 +241,7 @@ def _make_handler(account_id: int):
                         if ai_keys:
                             history = chat.get("history", [])
                             try:
-                                ai_reply = await ai_rmx.generate_chat_response(history, combined_prompt, ai_provider, ai_keys)
+                                ai_reply = await ai_rmx.generate_chat_response(history, combined_prompt, ai_provider, ai_keys, **kwargs)
                             except Exception as ex_gen:
                                 logger.error("[AIFollowUp] AI generate_chat_response error for user %d: %s", sender_id, ex_gen)
                                 ai_reply = None

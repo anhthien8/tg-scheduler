@@ -61,6 +61,7 @@ class CampaignCreate(BaseModel):
     exclude_previous_dms: bool = True
     scheduled_at: str | None = None       # ISO datetime: "2026-07-24 09:00"
     target_timezone: str | None = None    # IANA: "America/New_York"
+    ai_agent_id: int | None = None
 
 
 class CampaignUpdateMessages(BaseModel):
@@ -71,6 +72,7 @@ class CampaignUpdateMessages(BaseModel):
     daily_limit_normal: Optional[int] = None
     use_ai_remix: Optional[bool] = None
     exclude_previous_dms: Optional[bool] = None
+    ai_agent_id: Optional[int] = None
 
 
 class CampaignCloneRequest(BaseModel):
@@ -1278,6 +1280,7 @@ async def update_campaign_messages(campaign_id: int, req: CampaignUpdateMessages
         daily_limit_normal=req.daily_limit_normal,
         use_ai_remix=req.use_ai_remix,
         exclude_previous_dms=req.exclude_previous_dms,
+        ai_agent_id=req.ai_agent_id,
     )
     return {"status": "updated", "message": "Đã cập nhật tin nhắn campaign"}
 
@@ -1353,12 +1356,13 @@ async def _run_campaign(campaign_id: int):
         else:
             messages_variants = messages
 
-        # Load AI settings if enabled
+        # Load AI settings - global provider/keys + agent-specific remix instruction
         ai_provider = None
         ai_keys = []
         ai_remix_kwargs = {}
         ai_custom_prompt = None
         if use_ai:
+            # 1. Global settings for provider and keys
             ai_provider = await db.get_setting("ai_provider", None)
             ai_custom_prompt = await db.get_setting("ai_custom_prompt", None)
 
@@ -1374,7 +1378,6 @@ async def _run_campaign(campaign_id: int):
             if ai_provider:
                 ai_keys = await _load_provider_keys(ai_provider)
 
-            # Auto-fallback to any provider with keys if current provider has no keys
             if not ai_keys:
                 all_providers = ["gemini", "groq", "openai", "deepseek", "openai_compatible"]
                 for alt_prov in all_providers:
@@ -1392,8 +1395,20 @@ async def _run_campaign(campaign_id: int):
                 ai_remix_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
                 ai_remix_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
 
+            # 2. Check for AI Agent override for remix prompt
+            agent_id = campaign.get("ai_agent_id")
+            if agent_id:
+                agent = await db.get_ai_agent(agent_id)
+                if agent:
+                    agent_remix = agent.get("remix_instruction", "")
+                    if agent_remix and agent_remix.strip():
+                        ai_custom_prompt = agent_remix.strip()
+                    logger.info(f"[Campaign {campaign_id}] 🤖 Using AI Agent '{agent['name']}' prompt instruction")
+                else:
+                    logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Agent #{agent_id} not found")
+
             if not ai_keys:
-                logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix BẬT nhưng không tìm thấy API Key nào cho bất kỳ nhà cung cấp nào!")
+                logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix BẬT nhưng không tìm thấy API Key nào!")
 
         # Get already-sent user IDs for this campaign
         existing_logs = await db.get_dm_campaign_logs(campaign_id, limit=50000)

@@ -743,6 +743,12 @@ const Members = {
       (document.getElementById('cmp-daily-limit-premium') || me_dummy).value = c.daily_limit_premium || 60;
       (document.getElementById('cmp-daily-limit-normal') || me_dummy).value = c.daily_limit_normal || 10;
       (document.getElementById('cmp-ai-remix') || me_dummy).checked = !!c.use_ai_remix;
+      // Populate AI Agent dropdown if available
+      if (typeof AIAgents !== 'undefined') {
+        AIAgents.getAgentsForDropdown().then(() => {
+          AIAgents.populateAgentDropdown('cmp-ai-agent', c.ai_agent_id || null);
+        });
+      }
       const excludePrevEl = document.getElementById('cmp-exclude-previous');
       if (excludePrevEl) {
         excludePrevEl.checked = c.exclude_previous_dms !== undefined ? !!c.exclude_previous_dms : true;
@@ -851,6 +857,8 @@ const Members = {
     const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit-premium')?.value) || 60;
     const dailyLimitNormal = parseInt(document.getElementById('cmp-daily-limit-normal')?.value) || 10;
     const useAi = document.getElementById('cmp-ai-remix')?.checked;
+    const agentIdVal = document.getElementById('cmp-ai-agent')?.value;
+    const aiAgentId = agentIdVal ? parseInt(agentIdVal) : null;
     const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
 
     // Collect sender accounts
@@ -884,6 +892,7 @@ const Members = {
         daily_limit_premium: dailyLimitPremium,
         daily_limit_normal: dailyLimitNormal,
         use_ai_remix: useAi,
+        ai_agent_id: aiAgentId,
         exclude_previous_dms: excludePrev,
       });
       App.toast('✅ Đã cập nhật tin nhắn campaign!', 'success');
@@ -1271,6 +1280,8 @@ const Members = {
     const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit-premium')?.value) || 60;
     const dailyLimitNormal = parseInt(document.getElementById('cmp-daily-limit-normal')?.value) || 10;
     const useAi = document.getElementById('cmp-ai-remix')?.checked;
+    const agentIdVal2 = document.getElementById('cmp-ai-agent')?.value;
+    const aiAgentId = agentIdVal2 ? parseInt(agentIdVal2) : null;
     const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
 
     // --- NEW SCHEDULE FIELDS ---
@@ -1317,6 +1328,7 @@ const Members = {
         daily_limit_premium: dailyLimitPremium,
         daily_limit_normal: dailyLimitNormal,
         use_ai_remix: useAi,
+        ai_agent_id: aiAgentId,
         exclude_previous_dms: excludePrev,
         // --- NEW FIELDS ---
         schedule_enabled: scheduleEnabled,

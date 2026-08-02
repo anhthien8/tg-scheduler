@@ -1573,3 +1573,136 @@ tr:hover td {
   .cl-change { flex-direction: column; gap: 6px; }
   .cl-timeline { padding-left: 22px; }
 }
+
+/* ══ AI Agents Cards ══════════════════════════════════════════════ */
+.ai-agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 16px;
+}
+
+.ai-agent-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.ai-agent-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--success));
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.ai-agent-card:hover {
+  border-color: var(--border-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+
+.ai-agent-card:hover::before { opacity: 1; }
+
+.ai-agent-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ai-agent-avatar {
+  font-size: 32px;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg3);
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+
+.ai-agent-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-agent-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-agent-provider {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.ai-agent-status {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg3);
+  color: var(--text2);
+  white-space: nowrap;
+}
+
+.ai-agent-status.active {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success);
+}
+
+.ai-agent-desc {
+  font-size: 13px;
+  color: var(--text2);
+  margin-bottom: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ai-agent-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.ai-agent-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ai-agent-actions .btn-sm {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+
+.ai-agent-actions .btn-danger {
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.ai-agent-actions .btn-danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.page-subtitle {
+  font-size: 14px;
+  color: var(--text2);
+}

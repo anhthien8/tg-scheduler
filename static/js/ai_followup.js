@@ -46,8 +46,8 @@ const AIFollowUp = {
 
   async saveSettings() {
     const enabled = document.getElementById('aifu-enabled')?.checked || false;
-    const system_prompt = document.getElementById('aifu-sys-prompt')?.value.trim() || '';
-    const knowledge_base = document.getElementById('aifu-kb')?.value.trim() || '';
+    const system_prompt = (document.getElementById('aifu-sys-prompt')?.value || "").trim() || '';
+    const knowledge_base = (document.getElementById('aifu-kb')?.value || "").trim() || '';
     const max_replies_per_user = parseInt(document.getElementById('aifu-max-replies')?.value || '5', 10);
     const handover_raw = document.getElementById('aifu-handover-kw')?.value || '';
     const handover_keywords = handover_raw.split(',').map(s => s.trim()).filter(Boolean);

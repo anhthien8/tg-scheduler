@@ -10,7 +10,7 @@ function debounce(func, delay = 250) {
 }
 
 function accDisplayName(a){if(!a)return'?';const ui=a.user_info;if(ui&&(ui.first_name||ui.last_name)){return[ui.first_name,ui.last_name].filter(Boolean).join(' ');}return a.name||'?';}
-function customConfirm(msg){return new Promise(r=>{const o=document.getElementById('confirm-modal');(document.getElementById('confirm-msg') || me_dummy).textContent = msg;o.classList.add('open');document.getElementById('confirm-yes').onclick=()=>{o.classList.remove('open');r(true)};document.getElementById('confirm-no').onclick=()=>{o.classList.remove('open');r(false)}})}
+function customConfirm(msg){return new Promise(r=>{const o=document.getElementById('confirm-modal');(document.getElementById('confirm-msg') || me_dummy).textContent = msg;o.classList.add('open');(document.getElementById('confirm-yes') || document.createElement("div")).onclick=()=>{o.classList.remove('open');r(true)};(document.getElementById('confirm-no') || document.createElement("div")).onclick=()=>{o.classList.remove('open');r(false)}})}
 
 const App={currentPage:'dashboard',chats:[],schedules:[],accounts:[],phoneCodeHash:'',loginAccountId:null,loginPhone:'',logOffset:0,logLimit:30,
 
@@ -20,7 +20,7 @@ try{const a=await API.getAccounts();App._accounts=a.accounts||[];if(a.accounts&&
 
 this.showLogin()},
 
-toast(m,t='info'){const e=document.createElement('div');e.className=`toast ${t}`;e.textContent=m;document.getElementById('toasts').appendChild(e);setTimeout(()=>e.remove(),4000)},
+toast(m,t='info'){const e=document.createElement('div');e.className=`toast ${t}`;e.textContent=m;(document.getElementById('toasts') || document.createElement("div")).appendChild(e);setTimeout(()=>e.remove(),4000)},
 
 toggleSidebar(){const sb=document.getElementById('sidebar');const ov=document.getElementById('sidebar-overlay');if(sb){sb.classList.toggle('open');}if(ov){ov.classList.toggle('open');}},
 
@@ -33,7 +33,7 @@ if(user){const n=[user.first_name,user.last_name].filter(Boolean).join(' ');(doc
 
 this.navigate('dashboard');document.querySelectorAll('.day-btn').forEach(b=>b.addEventListener('click',()=>b.classList.toggle('active')))},
 
-async addFirstAccount(){const name=document.getElementById('setup-name')?.value.trim();const apiId=document.getElementById('setup-api-id')?.value.trim();const apiHash=document.getElementById('setup-api-hash')?.value.trim();const phone=document.getElementById('setup-phone')?.value.trim();
+async addFirstAccount(){const name=(document.getElementById('setup-name')?.value || "").trim();const apiId=(document.getElementById('setup-api-id')?.value || "").trim();const apiHash=(document.getElementById('setup-api-hash')?.value || "").trim();const phone=(document.getElementById('setup-phone')?.value || "").trim();
 
 if(!name||!apiId||!apiHash||!phone)return this.toast('Điền đầy đủ thông tin','error');
 
@@ -47,7 +47,7 @@ const c=await API.sendCode(phone,r.account_id);this.phoneCodeHash=c.phone_code_h
 
 btn.disabled=false;btn.textContent='Thêm tài khoản'},
 
-async verifyFirstAccount(){const code=document.getElementById('login-code')?.value.trim();if(!code)return this.toast('Nhập mã OTP','error');
+async verifyFirstAccount(){const code=(document.getElementById('login-code')?.value || "").trim();if(!code)return this.toast('Nhập mã OTP','error');
 
 try{const r=await API.verify(this.loginPhone,code,this.phoneCodeHash,this.loginAccountId);
 
@@ -57,7 +57,7 @@ this.toast('Đăng nhập thành công!','success');this.showDashboard(r)}catch(
 
 if(e.message.includes('2FA')){(document.getElementById('login-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('login-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden')}else this.toast(e.message,'error')}},
 
-async verify2FAFirst(){const pw=document.getElementById('login-password')?.value;try{const r=await API.verify(this.loginPhone,document.getElementById('login-code')?.value.trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('Đăng nhập thành công!','success');this.showDashboard(r)}catch(e){this.toast(e.message,'error')}},
+async verify2FAFirst(){const pw=document.getElementById('login-password')?.value;try{const r=await API.verify(this.loginPhone,(document.getElementById('login-code')?.value || "").trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('Đăng nhập thành công!','success');this.showDashboard(r)}catch(e){this.toast(e.message,'error')}},
 
 navigate(page){this.currentPage=page;try{if(page==='channels'){this._populateChAccountSelect();}}catch(e){console.error('channels populate error:',e);}try{if(page==='members'){Members.populateAccounts();}}catch(e){console.error('members populate error:',e);}document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
 // Close sidebar on mobile after navigation
@@ -99,6 +99,15 @@ if(page==='discord'){
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
   (document.getElementById('view-discord')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   Discord.init();
+  return;
+}
+
+// AI Agents Management Page
+if(page==='ai-agents'){
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  const agentsView = document.getElementById('view-ai-agents');
+  if(agentsView) agentsView.classList.remove('hidden');
+  AIAgents.init();
   return;
 }
 
@@ -575,7 +584,7 @@ if(page==='dashboard')this.loadDashboard();else if(page==='schedules')this.loadS
 
 async loadDashboard(){try{const[stats,sd]=await Promise.all([API.getStats(),API.getSchedules({active_only: true, limit: 10})]);
 
-(document.getElementById('stat-accounts') || me_dummy).textContent = stats.total_accounts;document.getElementById('stat-active').textContent=stats.active_schedules;document.getElementById('stat-total').textContent=stats.total_schedules;document.getElementById('stat-today').textContent=stats.today;document.getElementById('stat-success').textContent=stats.success;document.getElementById('stat-failed').textContent=stats.failed;
+(document.getElementById('stat-accounts') || me_dummy).textContent = stats.total_accounts;(document.getElementById('stat-active') || document.createElement("div")).textContent=stats.active_schedules;(document.getElementById('stat-total') || document.createElement("div")).textContent=stats.total_schedules;(document.getElementById('stat-today') || document.createElement("div")).textContent=stats.today;(document.getElementById('stat-success') || document.createElement("div")).textContent=stats.success;(document.getElementById('stat-failed') || document.createElement("div")).textContent=stats.failed;
 
 const active=sd.schedules.filter(s=>s.next_run);const tbody=document.getElementById('upcoming-body');
 
@@ -612,15 +621,15 @@ async addBlacklist(userId,username,reason){try{await fetch('/api/blacklist',{met
 
 async removeBlacklist(id){if(!await customConfirm('Xóa user này khỏi blacklist?'))return;try{await fetch(`/api/blacklist/${id}`,{method:'DELETE'});this.toast('Đã xóa khỏi blacklist','success');this.loadBlacklist();}catch(e){this.toast(e.message,'error')}},
 
-async addAccount(){const phone=document.getElementById('acc-phone')?.value.trim();if(!phone)return this.toast('Nhập số điện thoại','error');const proxyUrl=document.getElementById('acc-proxy')?.value?.trim()||null;try{const r=await API.addAccount({phone,proxy_url:proxyUrl||null});this.loginAccountId=r.account_id;this.loginPhone=phone;const c=await API.sendCode(phone,r.account_id);this.phoneCodeHash=c.phone_code_hash;(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');this.toast('OTP đã gửi','success')}catch(e){this.toast(e.message||String(e),'error')}},
+async addAccount(){const phone=(document.getElementById('acc-phone')?.value || "").trim();if(!phone)return this.toast('Nhập số điện thoại','error');const proxyUrl=(document.getElementById('acc-proxy')?.value || "").trim()||null;try{const r=await API.addAccount({phone,proxy_url:proxyUrl||null});this.loginAccountId=r.account_id;this.loginPhone=phone;const c=await API.sendCode(phone,r.account_id);this.phoneCodeHash=c.phone_code_hash;(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');this.toast('OTP đã gửi','success')}catch(e){this.toast(e.message||String(e),'error')}},
 
-async verifyAccount(){const code=document.getElementById('acc-code')?.value.trim();if(!code)return this.toast('Nhập OTP','error');
+async verifyAccount(){const code=(document.getElementById('acc-code')?.value || "").trim();if(!code)return this.toast('Nhập OTP','error');
 
 try{const r=await API.verify(this.loginPhone,code,this.phoneCodeHash,this.loginAccountId);if(r.needs_password){(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');return}
 
 this.toast('Đăng nhập thành công!','success');this.closeAccountModal();this.loadAccounts()}catch(e){if(e.message.includes('2FA')){(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden')}else this.toast(e.message,'error')}},
 
-async verify2FAAccount(){const pw=document.getElementById('acc-password')?.value;try{await API.verify(this.loginPhone,document.getElementById('acc-code')?.value.trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('OK!','success');this.closeAccountModal();this.loadAccounts()}catch(e){this.toast(e.message,'error')}},
+async verify2FAAccount(){const pw=document.getElementById('acc-password')?.value;try{await API.verify(this.loginPhone,(document.getElementById('acc-code')?.value || "").trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('OK!','success');this.closeAccountModal();this.loadAccounts()}catch(e){this.toast(e.message,'error')}},
 
 async loginAccount(id,phone){this.loginAccountId=id;this.loginPhone=phone;try{const c=await API.sendCode(phone,id);this.phoneCodeHash=c.phone_code_hash;this.openAddAccountModal();(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');this.toast('OTP đã gửi','success')}catch(e){this.toast(e.message,'error')}},
 
@@ -717,13 +726,13 @@ async previewSchedule(id){try{const r=await API.previewSchedule(id);this.toast(r
 
 async resetCount(id){try{await API.resetCount(id);this.toast('Đã reset','success');this.loadSchedules()}catch(e){this.toast(e.message,'error')}},
 
-async openCreateModal(){(document.getElementById('modal-title') || me_dummy).textContent = 'Tạo lịch gửi';document.getElementById('edit-schedule-id').value='';document.getElementById('sch-name').value='';document.getElementById('sch-type').value='daily';document.getElementById('sch-time').value='08:00';document.getElementById('sch-day-of-month').value='1';document.getElementById('sch-once-date').value='';document.getElementById('sch-max-sends').value='';document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('active'));document.getElementById('messages-list').innerHTML='';
+async openCreateModal(){(document.getElementById('modal-title') || me_dummy).textContent = 'Tạo lịch gửi';(document.getElementById('edit-schedule-id') || document.createElement("div")).value='';(document.getElementById('sch-name') || document.createElement("div")).value='';(document.getElementById('sch-type') || document.createElement("div")).value='daily';(document.getElementById('sch-time') || document.createElement("div")).value='08:00';(document.getElementById('sch-day-of-month') || document.createElement("div")).value='1';(document.getElementById('sch-once-date') || document.createElement("div")).value='';(document.getElementById('sch-max-sends') || document.createElement("div")).value='';document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('active'));(document.getElementById('messages-list') || document.createElement("div")).innerHTML='';
 
 this.onScheduleTypeChange();await this.loadAccountSelector();await this.loadChatList();
 
 document.querySelectorAll('#chat-list input[type="checkbox"]').forEach(c=>c.checked=false);(document.getElementById('schedule-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
 
-async editSchedule(id){try{const s=await API.getSchedule(id);(document.getElementById('modal-title') || me_dummy).textContent = 'Sửa lịch gửi';document.getElementById('edit-schedule-id').value=s.id;document.getElementById('sch-name').value=s.name;document.getElementById('sch-type').value=s.schedule_type;document.getElementById('sch-time').value=s.time_of_day;document.getElementById('sch-day-of-month').value=s.day_of_month||1;document.getElementById('sch-once-date').value=s.once_date||'';document.getElementById('sch-max-sends').value=s.max_sends||'';
+async editSchedule(id){try{const s=await API.getSchedule(id);(document.getElementById('modal-title') || me_dummy).textContent = 'Sửa lịch gửi';(document.getElementById('edit-schedule-id') || document.createElement("div")).value=s.id;(document.getElementById('sch-name') || document.createElement("div")).value=s.name;(document.getElementById('sch-type') || document.createElement("div")).value=s.schedule_type;(document.getElementById('sch-time') || document.createElement("div")).value=s.time_of_day;(document.getElementById('sch-day-of-month') || document.createElement("div")).value=s.day_of_month||1;(document.getElementById('sch-once-date') || document.createElement("div")).value=s.once_date||'';(document.getElementById('sch-max-sends') || document.createElement("div")).value=s.max_sends||'';
 
 document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('active'));if(s.days_of_week)s.days_of_week.split(',').forEach(d=>{const btn=document.querySelector(`.day-btn[data-day="${d.trim()}"]`);if(btn)btn.classList.add('active')});
 
@@ -769,7 +778,7 @@ addPollOption(btn){const c=btn.previousElementSibling;const n=c.children.length;
 
 async handleFileUpload(input){const file=input.files[0];if(!file)return;try{const r=await API.upload(file);input.parentElement.querySelector('.msg-media-path').value=r.path;const ex=input.parentElement.querySelector('small');if(ex)ex.remove();const s=document.createElement('small');s.style.color='var(--green)';s.textContent=`✓ ${r.original_name}`;input.parentElement.appendChild(s);this.toast('Uploaded','success')}catch(e){this.toast('Upload lỗi: '+e.message,'error')}},
 
-async saveSchedule(){const editId=document.getElementById('edit-schedule-id')?.value;const name=document.getElementById('sch-name')?.value.trim();const type=document.getElementById('sch-type')?.value;const time=document.getElementById('sch-time')?.value;const accountId=parseInt(document.getElementById('sch-account')?.value);const maxSendsVal=document.getElementById('sch-max-sends')?.value.trim();const maxSends=maxSendsVal?parseInt(maxSendsVal):null;
+async saveSchedule(){const editId=document.getElementById('edit-schedule-id')?.value;const name=(document.getElementById('sch-name')?.value || "").trim();const type=document.getElementById('sch-type')?.value;const time=document.getElementById('sch-time')?.value;const accountId=parseInt(document.getElementById('sch-account')?.value);const maxSendsVal=(document.getElementById('sch-max-sends')?.value || "").trim();const maxSends=maxSendsVal?parseInt(maxSendsVal):null;
 
 if(!name)return this.toast('Nhập tên lịch','error');if(!time)return this.toast('Chọn giờ','error');
 
@@ -1077,7 +1086,7 @@ async saveWatcher(){
 
   const editId=document.getElementById('edit-watcher-id')?.value;
 
-  const name=document.getElementById('w-name')?.value.trim();
+  const name=(document.getElementById('w-name')?.value || "").trim();
 
   const cooldown=parseInt(document.getElementById('w-cooldown')?.value)||24;
 
@@ -1103,7 +1112,7 @@ async saveWatcher(){
 
   const dmOnce=document.getElementById('w-dm-once')?.checked;
   const replyInGroup=document.getElementById('w-reply-in-group')?.checked;
-  const groupReplyText=document.getElementById('w-group-reply-text')?.value.trim()||'Check my DM 😊';
+  const groupReplyText=(document.getElementById('w-group-reply-text')?.value || "").trim()||'Check my DM 😊';
 
   const payload={name,sender_account_ids:accIds,keywords:this._watcherKeywords,excluded_usernames:this._watcherExcludes,group_ids:[...this._watcherSelectedGroups],cooldown_hours:cooldown,dm_once:dmOnce,reply_in_group:replyInGroup,group_reply_text:groupReplyText,is_active:1,messages};
 
@@ -1514,7 +1523,7 @@ async sendTestDM(){
 
   const wId=document.getElementById('test-dm-watcher-id')?.value;
 
-  const target=document.getElementById('test-dm-target')?.value.trim();
+  const target=(document.getElementById('test-dm-target')?.value || "").trim();
 
   if(!target)return this.toast('Nhập username hoặc User ID','error');
 
@@ -1613,7 +1622,7 @@ App.getOaiCompatModel = function() {
 
 // Fetch available models from OpenAI-compatible API
 App.fetchOaiModels = async function() {
-  const baseUrl = document.getElementById('oai-compat-base-url')?.value.trim();
+  const baseUrl = (document.getElementById('oai-compat-base-url')?.value || "").trim();
   const statusEl = document.getElementById('oai-models-status');
   const selectEl = document.getElementById('oai-compat-model-select');
   const inputEl = document.getElementById('oai-compat-model');
@@ -1762,7 +1771,7 @@ App.saveSettings = async function() {
   if (provider === 'openai'   && openaiKeys.length   === 0) { App.toast('Them it nhat 1 OpenAI API Key', 'error'); return; }
   if (provider === 'groq'     && groqKeys.length     === 0) { App.toast('Them it nhat 1 Groq API Key', 'error'); return; }
   if (provider === 'openai_compatible') {
-    const baseUrl = document.getElementById('oai-compat-base-url')?.value.trim();
+    const baseUrl = (document.getElementById('oai-compat-base-url')?.value || "").trim();
     const model = App.getOaiCompatModel();
     if (!baseUrl) { App.toast('Nhap Base URL cho OpenAI Compatible', 'error'); return; }
     if (!model) { App.toast('Nhap Model Name cho OpenAI Compatible', 'error'); return; }
@@ -1780,7 +1789,7 @@ App.saveSettings = async function() {
       API.setSetting('ai_keys_openai',   JSON.stringify(openaiKeys)),
       API.setSetting('ai_keys_groq',     JSON.stringify(groqKeys)),
       API.setSetting('ai_keys_openai_compatible', JSON.stringify(oaiCompatKeys)),
-      API.setSetting('ai_oai_compat_base_url', document.getElementById('oai-compat-base-url')?.value.trim()),
+      API.setSetting('ai_oai_compat_base_url', (document.getElementById('oai-compat-base-url')?.value || "").trim()),
       API.setSetting('ai_oai_compat_model', App.getOaiCompatModel()),
       API.setSetting('ai_custom_prompt', customPromptVal)
     ]);
@@ -1833,7 +1842,7 @@ App.testAiRemix = async function() {
   try {
     const body = { provider: provider, keys: keys, text: sampleText };
     if (provider === 'openai_compatible') {
-      body.base_url = document.getElementById('oai-compat-base-url')?.value.trim();
+      body.base_url = (document.getElementById('oai-compat-base-url')?.value || "").trim();
       body.model = App.getOaiCompatModel();
     }
     const resp = await fetch('/api/settings/test-remix', {
@@ -2585,7 +2594,7 @@ const Reactions = (() => {
   }
 
   async function addTarget() {
-    const link = document.getElementById('rt-link')?.value.trim();
+    const link = (document.getElementById('rt-link')?.value || "").trim();
     const delayMin = parseInt(document.getElementById('rt-delay-min')?.value) || 5;
     const delayMax = parseInt(document.getElementById('rt-delay-max')?.value) || 30;
     const viewEnabled = document.getElementById('rt-view-enabled')?.checked ? 1 : 0;
@@ -2932,7 +2941,7 @@ App.switchProxyTab = function(tab) {
 };
 
 App.fetchWebshare = async function() {
-  const apiKey = document.getElementById('webshare-api-key')?.value.trim();
+  const apiKey = (document.getElementById('webshare-api-key')?.value || "").trim();
   if (!apiKey) { App.toast('Nhập Webshare API Key', 'error'); return; }
   const proxyType = document.getElementById('webshare-proxy-type')?.value;
   const btn = document.getElementById('btn-fetch-webshare');
@@ -2972,7 +2981,7 @@ App.fetchWebshare = async function() {
 };
 
 App.importProxyList = async function() {
-  const rawText = document.getElementById('proxy-paste-input')?.value.trim();
+  const rawText = (document.getElementById('proxy-paste-input')?.value || "").trim();
   if (!rawText) { App.toast('Paste proxy list vào textarea', 'error'); return; }
   const scheme = document.getElementById('paste-default-scheme')?.value;
   const btn = document.getElementById('btn-import-proxies');
@@ -3169,15 +3178,15 @@ const Warmup = {
   },
 
   async saveGroup() {
-    const name = document.getElementById('wg-name')?.value.trim();
-    const chatId = document.getElementById('wg-chat-id')?.value.trim();
+    const name = (document.getElementById('wg-name')?.value || "").trim();
+    const chatId = (document.getElementById('wg-chat-id')?.value || "").trim();
     if (!name || !chatId) { App.toast('Nhap ten va chat ID', 'error'); return; }
     try {
       await API.post('/api/warmup/groups', {
         name,
         chat_id: chatId,
-        chat_title: document.getElementById('wg-chat-title')?.value.trim(),
-        chat_username: document.getElementById('wg-chat-username')?.value.trim()
+        chat_title: (document.getElementById('wg-chat-title')?.value || "").trim(),
+        chat_username: (document.getElementById('wg-chat-username')?.value || "").trim()
       });
       (document.getElementById('warmup-group-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
       App.toast('Da them nhom', 'success');
@@ -3233,7 +3242,7 @@ const Warmup = {
   },
 
   async saveScript() {
-    const content = document.getElementById('ws-content')?.value.trim();
+    const content = (document.getElementById('ws-content')?.value || "").trim();
     if (!content) { App.toast('Nhap noi dung', 'error'); return; }
     try {
       await API.post('/api/warmup/groups/' + this._selectedGroupId + '/scripts', {

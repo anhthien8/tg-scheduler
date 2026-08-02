@@ -256,9 +256,9 @@ const Templates = {
   },
 
   async save() {
-    const name = document.getElementById('tpl-name')?.value.trim();
+    const name = (document.getElementById('tpl-name')?.value || "").trim();
     const category = document.getElementById('tpl-category')?.value;
-    const content = document.getElementById('tpl-content')?.value.trim();
+    const content = (document.getElementById('tpl-content')?.value || "").trim();
     if (!name || !content) { App.toast('Nh\u1EADp t\u00EAn v\u00E0 n\u1ED9i dung', 'error'); return; }
     const messages = [{ msg_type: 'text', content }];
     const data = { name, category, messages };
@@ -426,10 +426,10 @@ const AutoReply = {
   },
 
   async save() {
-    const name = document.getElementById('ar-name')?.value.trim();
+    const name = (document.getElementById('ar-name')?.value || "").trim();
     const triggerType = document.getElementById('ar-trigger-type')?.value;
-    const keywordsStr = document.getElementById('ar-keywords')?.value.trim();
-    const replyContent = document.getElementById('ar-reply-content')?.value.trim();
+    const keywordsStr = (document.getElementById('ar-keywords')?.value || "").trim();
+    const replyContent = (document.getElementById('ar-reply-content')?.value || "").trim();
     const maxReplies = parseInt(document.getElementById('ar-max-replies')?.value) || 3;
     if (!name) { App.toast('Nh\u1EADp t\u00EAn rule', 'error'); return; }
     if (!replyContent) { App.toast('Nh\u1EADp n\u1ED9i dung reply', 'error'); return; }

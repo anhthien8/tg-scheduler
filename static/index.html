@@ -119,6 +119,12 @@
           👥 Cào & DM
         </div>
 
+        <!-- AI Agents -->
+        <div class="nav-section">AI Agents</div>
+        <div class="nav-item" data-page="ai-agents" onclick="App.navigate('ai-agents')">
+          🤖 AI Agents
+        </div>
+
         <!-- Growth Features -->
         <div class="nav-section">Growth</div>
         <div class="nav-item" data-page="analytics" onclick="App.navigate('analytics')">
@@ -700,6 +706,96 @@
           </div>
         </div>
       </div>
+      <!-- ══ AI Agents Management View ══ -->
+      <div id="view-ai-agents" class="hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+          <div>
+            <h2 class="page-title" style="margin-bottom:4px">🤖 AI Agents</h2>
+            <p class="page-subtitle" style="margin:0;color:var(--text2)">Quản lý các AI BD Agent — mỗi agent có prompt, provider và knowledge base riêng</p>
+          </div>
+          <button class="btn btn-primary" onclick="AIAgents.openForm()">➕ Tạo AI Agent</button>
+        </div>
+        <div id="ai-agents-list"></div>
+      </div>
+
+      <!-- AI Agent Create/Edit Modal -->
+      <div id="ai-agent-modal" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
+        <div style="background:var(--bg2);border-radius:16px;padding:28px;max-width:800px;width:100%;max-height:90vh;overflow-y:auto;border:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+            <h3 id="ai-agent-modal-title" style="margin:0">➕ Tạo AI Agent mới</h3>
+            <button onclick="AIAgents.closeForm()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2)">✕</button>
+          </div>
+
+          <!-- Row 1: Basic Info -->
+          <div style="display:grid;grid-template-columns:60px 1fr 1fr;gap:12px;margin-bottom:16px">
+            <div>
+              <label class="form-label">Emoji</label>
+              <input type="text" id="agent-emoji" class="form-input" value="🤖" style="text-align:center;font-size:24px;padding:6px">
+            </div>
+            <div>
+              <label class="form-label">Tên Agent *</label>
+              <input type="text" id="agent-name" class="form-input" placeholder="VD: AI BD Weex">
+            </div>
+            <div>
+              <label class="form-label">Mô tả</label>
+              <input type="text" id="agent-description" class="form-input" placeholder="Mô tả ngắn gọn về agent">
+            </div>
+          </div>
+
+          <div style="font-size:12px;color:var(--text2);background:var(--bg3);padding:10px 14px;border-radius:8px;margin-bottom:16px;display:flex;align-items:center;gap:8px">
+            <span>ℹ️</span>
+            <span>Agent sẽ tự động sử dụng AI Provider & API Key được cấu hình chung trong mục <strong>Cài đặt AI</strong>.</span>
+          </div>
+
+          <!-- Row 3: Prompts (Main Feature) -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <div>
+              <label class="form-label" style="font-weight:600">📝 Remix Instruction (Outreach DM)</label>
+              <textarea id="agent-remix-instruction" class="form-input" rows="5" placeholder="Hướng dẫn AI cách viết lại tin nhắn outreach DM...&#10;VD: Viết lại tin nhắn như một BD chuyên nghiệp về crypto exchange Weex..."></textarea>
+              <div style="font-size:11px;color:var(--text2);margin-top:4px">AI sẽ dùng instruction này để viết lại (remix) tin nhắn DM outreach gửi đi.</div>
+            </div>
+            <div>
+              <label class="form-label" style="font-weight:600">🎯 System Prompt (Auto-Reply)</label>
+              <textarea id="agent-system-prompt" class="form-input" rows="5" placeholder="Nhập vai AI chuyên gia tư vấn...&#10;VD: Bạn là BD của sàn Weex, xưng 'mình', gọi khách là 'bạn'..."></textarea>
+              <div style="font-size:11px;color:var(--text2);margin-top:4px">Prompt này dùng khi AI tự động reply khách hàng sau khi họ trả lời DM.</div>
+            </div>
+          </div>
+
+          <!-- Row 4: Knowledge Base -->
+          <div style="margin-bottom:16px">
+            <label class="form-label" style="font-weight:600">📚 Knowledge Base</label>
+            <textarea id="agent-knowledge-base" class="form-input" rows="5" placeholder="Thông tin sản phẩm, bảng giá, FAQ, link đăng ký, ưu đãi...&#10;AI sẽ sử dụng thông tin này để trả lời thắc mắc khách hàng."></textarea>
+          </div>
+
+          <!-- Row 5: Behavior -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+            <div>
+              <label class="form-label">🔑 Handover Keywords</label>
+              <input type="text" id="agent-handover-keywords" class="form-input" placeholder="gặp admin, tư vấn viên, số điện thoại">
+              <div style="font-size:11px;color:var(--text2);margin-top:4px">Cách nhau bằng dấu phẩy. Khi khách nhắn keyword này → chuyển cho người thật.</div>
+            </div>
+            <div>
+              <label class="form-label">💬 Max Replies</label>
+              <input type="number" id="agent-max-replies" class="form-input" min="1" max="50" value="10">
+              <div style="font-size:11px;color:var(--text2);margin-top:4px">Tối đa số lượt AI tự trả lời trước khi dừng.</div>
+            </div>
+            <div>
+              <label class="form-label">🎭 Tone</label>
+              <select id="agent-tone" class="form-input">
+                <option value="friendly">😊 Friendly</option>
+                <option value="professional">💼 Professional</option>
+                <option value="casual">😎 Casual</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div style="display:flex;justify-content:flex-end;gap:12px">
+            <button class="btn btn-outline" onclick="AIAgents.closeForm()">Huỷ</button>
+            <button class="btn btn-primary" onclick="AIAgents.saveAgent()">💾 Lưu Agent</button>
+          </div>
+        </div>
+      </div>
 
       <!-- ══ Members / Scraping / DM Campaign View ══ -->
       <div id="view-members" class="hidden">
@@ -1012,6 +1108,13 @@
               </label>
               <span style="font-size:13px;color:var(--text2)">Bật AI cá nhân hóa</span>
             </div>
+          </div>
+          <div class="form-group" style="flex:1">
+            <label class="form-label">🤖 AI Agent</label>
+            <select id="cmp-ai-agent" class="form-input" style="margin-top:4px">
+              <option value="">-- Không dùng AI Agent --</option>
+            </select>
+            <div style="font-size:11px;color:var(--text2);margin-top:4px">Chọn AI Agent để dùng prompt riêng cho chiến dịch này</div>
           </div>
         </div>
       </div>
@@ -1358,11 +1461,12 @@
     </div>
   </div>
 
-  <script src="/static/js/api.js?v=203"></script>
-  <script src="/static/js/discord.js?v=203"></script>
-  <script src="/static/js/members.js?v=203"></script>
-  <script src="/static/js/analytics.js?v=203"></script>
-  <script src="/static/js/app.js?v=203"></script>
+  <script src="/static/js/api.js?v=206"></script>
+  <script src="/static/js/discord.js?v=206"></script>
+  <script src="/static/js/members.js?v=206"></script>
+  <script src="/static/js/analytics.js?v=206"></script>
+  <script src="/static/js/ai_agents.js?v=206"></script>
+  <script src="/static/js/app.js?v=206"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">
