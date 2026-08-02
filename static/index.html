@@ -433,7 +433,8 @@
                 <option value="gemini">✨ Gemini (Google)</option>
                 <option value="deepseek">🔵 DeepSeek</option>
                 <option value="openai">🟢 OpenAI (ChatGPT)</option>
-              <option value="groq">⚡ Groq (Llama 3.3 70B)</option>
+                <option value="groq">⚡ Groq (Llama 3.3 70B)</option>
+                <option value="openai_compatible">🔌 9Router / OpenAI Compatible</option>
               </select>
             </div>
           </div>
@@ -487,6 +488,41 @@
               </p>
               <div id="groq-keys-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
               <button class="btn btn-ghost btn-sm" onclick="App.addAiKeyRow('groq')">+ Thêm Groq API Key</button>
+            </div>
+          </div>
+
+          <!-- OpenAI Compatible / 9Router Section -->
+          <div id="ai-openai_compatible-section" class="card hidden" style="margin-bottom:20px;padding:20px">
+            <div class="form-group">
+              <label class="form-label" style="font-size:15px;font-weight:600">🔌 9Router / OpenAI Compatible Config</label>
+              <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+                Kết nối tới <strong>9Router</strong> hoặc bất kỳ AI API tương thích OpenAI nào (OpenAI, Local AI, vLLM, LM Studio...).
+              </p>
+
+              <div style="margin-bottom:12px">
+                <label class="form-label" style="font-size:13px">Base URL Endpoint</label>
+                <input type="text" class="form-input" id="oai-compat-base-url" placeholder="VD: https://api.9router.com/v1" style="font-family:monospace;font-size:13px">
+                <p class="form-hint">Mặc định 9Router: <code>https://api.9router.com/v1</code> hoặc <code>http://localhost:1234/v1</code></p>
+              </div>
+
+              <div style="margin-bottom:12px">
+                <label class="form-label" style="font-size:13px">Model Name</label>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+                  <input type="text" class="form-input" id="oai-compat-model" placeholder="VD: gemini-2.5-flash hoặc gpt-4o" style="flex:1;font-family:monospace;font-size:13px">
+                  <button class="btn btn-ghost btn-sm" id="oai-load-models-btn" onclick="App.fetchOaiModels()">🔄 Tải danh sách Model</button>
+                </div>
+                <select id="oai-compat-model-select" class="form-select hidden" style="font-size:13px;margin-bottom:6px" onchange="if(this.value) (document.getElementById('oai-compat-model') || me_dummy).value = this.value">
+                  <option value="">-- Chọn Model từ list --</option>
+                </select>
+                <p id="oai-models-status" style="font-size:12px;color:var(--text2)"></p>
+              </div>
+
+              <div style="margin-bottom:10px">
+                <label class="form-label" style="font-size:13px">API Keys (Round-Robin)</label>
+                <p style="font-size:12px;color:var(--text2);margin-bottom:8px">Thêm 1 hoặc nhiều API Key từ 9Router (ví dụ: <code>9r-xxxx</code>):</p>
+                <div id="openai_compatible-keys-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+                <button class="btn btn-ghost btn-sm" onclick="App.addAiKeyRow('openai_compatible')">+ Thêm API Key</button>
+              </div>
             </div>
           </div>
 
