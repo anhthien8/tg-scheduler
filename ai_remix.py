@@ -6,6 +6,7 @@ import logging
 import httpx
 import json
 import time
+import re
 
 logger = logging.getLogger("tg-scheduler.ai_remix")
 
@@ -18,6 +19,13 @@ def _parse_openai_compatible_json(raw: str) -> dict:
     try:
         return json.loads(raw_str)
     except json.JSONDecodeError:
+        pass
+
+    # Try fixing common malformed JSON from local proxies (e.g. unquoted choice strings like "choices":claude-opus-4.7)
+    fixed = re.sub(r'"choices"\s*:\s*([a-zA-Z0-9_.-]+)', r'"choices_model":"\1","choices":[]', raw_str)
+    try:
+        return json.loads(fixed)
+    except Exception:
         pass
 
     for line in raw_str.splitlines():
@@ -39,6 +47,10 @@ def _parse_openai_compatible_json(raw: str) -> dict:
                 return json.loads(candidate)
             except json.JSONDecodeError:
                 pass
+
+    content_match = re.search(r'"content"\s*:\s*"([^"]+)"', raw_str)
+    if content_match:
+        return {"choices": [{"message": {"content": content_match.group(1)}}]}
 
     raise ValueError(f"Cannot parse API response: {raw_str[:200]}")
 
@@ -354,6 +366,29 @@ async def generate_chat_response(
                     return await _call_chat_provider(provider, key2, formatted_messages, **kwargs)
             except Exception as e2:
                 logger.warning("[AI Chat] Retry failed: %s", e2)
+
+    # ── Automatic Fallback to alternative providers (Gemini/Groq) if primary provider fails ──
+    try:
+        import database as db
+        if provider != "gemini":
+            gemini_raw = await db.get_setting("ai_keys_gemini", "[]")
+            g_keys = json.loads(gemini_raw) if gemini_raw else []
+            if g_keys:
+                logger.info("[AI Chat] 🔄 Provider '%s' failed. Auto-fallback to Gemini (%d keys)...", provider, len(g_keys))
+                res = await _call_chat_provider("gemini", g_keys[0], formatted_messages)
+                if res:
+                    return res
+
+        if provider != "groq":
+            groq_raw = await db.get_setting("ai_keys_groq", "[]")
+            gr_keys = json.loads(groq_raw) if groq_raw else []
+            if gr_keys:
+                logger.info("[AI Chat] 🔄 Auto-fallback to Groq (%d keys)...", len(gr_keys))
+                res = await _call_chat_provider("groq", gr_keys[0], formatted_messages)
+                if res:
+                    return res
+    except Exception as _fb_err:
+        logger.warning("[AI Chat] Fallback provider error: %s", _fb_err)
 
     return None
 
