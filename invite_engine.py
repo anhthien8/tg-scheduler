@@ -175,7 +175,7 @@ async def run_invite_campaign(campaign_id: int):
                         else:
                             user_target = PeerUser(user_id)
 
-                        await tg.send_message(acc_id, user_target, msg_text)
+                        await tg.send_text_message(acc_id, user_target, msg_text)
                         invited += 1
                         daily_sent += 1
                         consecutive_errors = 0

@@ -302,7 +302,7 @@ def _make_handler(account_id: int):
                                         delay = random.uniform(6.0, 15.0)
                                         logger.info("[AIFollowUp] Simulating human typing for %.1fs before sending AI reply to user %d...", delay, sender_id)
                                         await asyncio.sleep(delay)
-                                        await tg.send_message(account_id, sender_id, ai_reply)
+                                        await tg.send_text_message(account_id, sender_id, ai_reply)
                                         await db.append_followup_chat_message(account_id, sender_id, "assistant", ai_reply, inc_reply_count=True)
 
                                     if new_status != "active":
