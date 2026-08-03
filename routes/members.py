@@ -1512,8 +1512,14 @@ async def _run_campaign(campaign_id: int):
             _active_campaigns.pop(campaign_id, None)
             return
 
-        # ── Diagnostic logging: show filtering stats ──
+        # ── Sync total_targets in DB if changed ──
         _total_members = len(members)
+        if campaign.get("total_targets") != _total_members:
+            async with db.get_db() as conn:
+                await conn.execute("UPDATE dm_campaigns SET total_targets = ? WHERE id = ?", (_total_members, campaign_id))
+                await conn.commit()
+
+        # ── Diagnostic logging: show filtering stats ──
         _already_sent = len(sent_user_ids)
         _cross_excluded = len(all_previous_user_ids) + len(all_previous_usernames)
         _blacklisted = len(blacklisted_ids)
@@ -1532,6 +1538,7 @@ async def _run_campaign(campaign_id: int):
             if not _active_campaigns.get(campaign_id, False):
                 logger.info(f"[Campaign {campaign_id}] Stopped by user")
                 break
+
 
             user_id = member["user_id"]
             username = member.get("username")
@@ -1849,10 +1856,9 @@ async def _run_campaign(campaign_id: int):
                     consecutive_errors += 1
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed", err_str[:100])
 
-            # Update progress periodically
-            if (sent + failed + skipped) % 5 == 0:
-                await db.update_dm_campaign_status(campaign_id, "running",
-                                                    sent=sent, failed=failed, skipped=skipped)
+            # Update progress in DB real-time on every iteration
+            await db.update_dm_campaign_status(campaign_id, "running",
+                                                sent=sent, failed=failed, skipped=skipped)
 
             # ── Smart delay with exponential backoff (anti-ban) ──
             base_delay = random.uniform(delay_min, delay_max)

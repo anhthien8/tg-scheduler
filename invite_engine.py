@@ -231,9 +231,9 @@ async def run_invite_campaign(campaign_id: int):
                 )
                 logger.error(f"[Invite] Campaign {campaign_id}: error inviting {username or user_id}: {error_msg}")
 
-            # Update progress every 5 operations
+            # Update progress in DB real-time on every operation
             ops = invited + failed + skipped
-            if ops % 5 == 0 and ops > 0:
+            if ops > 0:
                 await db.update_invite_campaign_status(campaign_id, "running",
                                                          invited=invited, failed=failed, skipped=skipped)
 

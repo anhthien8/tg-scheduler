@@ -544,7 +544,8 @@ const Members = {
       const sent = c.sent_count || 0;
       const failed = c.failed_count || 0;
       const skipped = c.skipped_count || 0;
-      const progress = total > 0 ? Math.round(((sent + failed + skipped) / total) * 100) : 0;
+      const processed = sent + failed + skipped;
+      const progress = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
 
       let actions = '';
       if (c.status === 'draft' || c.status === 'paused' || c.status === 'error') {
@@ -579,12 +580,12 @@ const Members = {
         <td>
           <div style="display:flex;align-items:center;gap:8px">
             <div style="flex:1;background:var(--bg2);border-radius:4px;height:8px;overflow:hidden">
-              <div style="width:${progress}%;height:100%;background:var(--accent);transition:width .3s"></div>
+              <div style="width:${progress}%;height:100%;background:linear-gradient(90deg, #8b5cf6, #6366f1);border-radius:4px;transition:width .3s"></div>
             </div>
-            <span style="font-size:12px;color:var(--text2)">${sent}/${total}</span>
+            <span style="font-size:12px;font-weight:600;color:var(--text1)">${processed}/${total} (${progress}%)</span>
           </div>
-          <div style="font-size:11px;color:var(--text2);margin-top:2px">
-            ✅${sent} ❌${failed} ⏭${skipped}
+          <div style="font-size:11px;color:var(--text2);margin-top:3px">
+            ✅ Thành công: <b>${sent}</b> | ❌ Lỗi: <b>${failed}</b> | ⏭ Bỏ qua: <b>${skipped}</b>
           </div>
         </td>
         <td><div class="btn-group">${actions}</div></td>
@@ -593,11 +594,19 @@ const Members = {
       let existingRow = tbody.querySelector(`tr[data-id="${c.id}"]`);
       if (existingRow) {
         const existingIdx = parseInt(existingRow.getAttribute('data-index'));
-        if (existingIdx !== (i + 1) || existingRow.getAttribute('data-updated-at') !== c.updated_at || existingRow.getAttribute('data-status') !== c.status) {
+        if (existingIdx !== (i + 1) ||
+            existingRow.getAttribute('data-updated-at') !== c.updated_at ||
+            existingRow.getAttribute('data-status') !== c.status ||
+            existingRow.getAttribute('data-sent') !== String(sent) ||
+            existingRow.getAttribute('data-failed') !== String(failed) ||
+            existingRow.getAttribute('data-skipped') !== String(skipped)) {
           existingRow.innerHTML = rowHtml;
           existingRow.setAttribute('data-updated-at', c.updated_at);
           existingRow.setAttribute('data-status', c.status);
           existingRow.setAttribute('data-index', i + 1);
+          existingRow.setAttribute('data-sent', String(sent));
+          existingRow.setAttribute('data-failed', String(failed));
+          existingRow.setAttribute('data-skipped', String(skipped));
         }
       } else {
         const tr = document.createElement('tr');
@@ -605,6 +614,9 @@ const Members = {
         tr.setAttribute('data-updated-at', c.updated_at);
         tr.setAttribute('data-status', c.status);
         tr.setAttribute('data-index', i + 1);
+        tr.setAttribute('data-sent', String(sent));
+        tr.setAttribute('data-failed', String(failed));
+        tr.setAttribute('data-skipped', String(skipped));
         tr.innerHTML = rowHtml;
         
         if (tbody.children.length === 0 || i >= tbody.children.length) {
@@ -2190,7 +2202,8 @@ const Members = {
       const sent = c.sent_count || 0;
       const failed = c.failed_count || 0;
       const skipped = c.skipped_count || 0;
-      const progress = total > 0 ? Math.round(((sent + failed + skipped) / total) * 100) : 0;
+      const processed = sent + failed + skipped;
+      const progress = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
       const modeBadge = c.invite_mode === 'dm_link'
         ? '<span class="badge" style="background:#8b5cf6">💬 DM Link</span>'
         : '<span class="badge badge-blue">👥 Direct</span>';
@@ -2218,12 +2231,12 @@ const Members = {
         <td>
           <div style="display:flex;align-items:center;gap:8px">
             <div style="flex:1;background:var(--bg2);border-radius:4px;height:8px;overflow:hidden">
-              <div style="width:${progress}%;height:100%;background:var(--accent);transition:width .3s"></div>
+              <div style="width:${progress}%;height:100%;background:linear-gradient(90deg, #8b5cf6, #6366f1);border-radius:4px;transition:width .3s"></div>
             </div>
-            <span style="font-size:12px;color:var(--text2)">${sent}/${total}</span>
+            <span style="font-size:12px;font-weight:600;color:var(--text1)">${processed}/${total} (${progress}%)</span>
           </div>
-          <div style="font-size:11px;color:var(--text2);margin-top:2px">
-            ✅${sent} ❌${failed} ⏭${skipped}
+          <div style="font-size:11px;color:var(--text2);margin-top:3px">
+            ✅ Thành công: <b>${sent}</b> | ❌ Lỗi: <b>${failed}</b> | ⏭ Bỏ qua: <b>${skipped}</b>
           </div>
         </td>
         <td><div class="btn-group">${actions}</div></td>
@@ -2232,11 +2245,19 @@ const Members = {
       let existingRow = tbody.querySelector(`tr[data-id="${c.id}"]`);
       if (existingRow) {
         const existingIdx = parseInt(existingRow.getAttribute('data-index'));
-        if (existingIdx !== (i + 1) || existingRow.getAttribute('data-updated-at') !== c.updated_at || existingRow.getAttribute('data-status') !== c.status) {
+        if (existingIdx !== (i + 1) ||
+            existingRow.getAttribute('data-updated-at') !== c.updated_at ||
+            existingRow.getAttribute('data-status') !== c.status ||
+            existingRow.getAttribute('data-sent') !== String(sent) ||
+            existingRow.getAttribute('data-failed') !== String(failed) ||
+            existingRow.getAttribute('data-skipped') !== String(skipped)) {
           existingRow.innerHTML = rowHtml;
           existingRow.setAttribute('data-updated-at', c.updated_at);
           existingRow.setAttribute('data-status', c.status);
           existingRow.setAttribute('data-index', i + 1);
+          existingRow.setAttribute('data-sent', String(sent));
+          existingRow.setAttribute('data-failed', String(failed));
+          existingRow.setAttribute('data-skipped', String(skipped));
         }
       } else {
         const tr = document.createElement('tr');
@@ -2244,6 +2265,9 @@ const Members = {
         tr.setAttribute('data-updated-at', c.updated_at);
         tr.setAttribute('data-status', c.status);
         tr.setAttribute('data-index', i + 1);
+        tr.setAttribute('data-sent', String(sent));
+        tr.setAttribute('data-failed', String(failed));
+        tr.setAttribute('data-skipped', String(skipped));
         tr.innerHTML = rowHtml;
         
         if (tbody.children.length === 0 || i >= tbody.children.length) {

@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v2.7.3",
+        "date": "03/08/2026",
+        "title": "🎯 Sửa Triệt Để Lỗi Báo Tiến Độ Gửi (Progress Tracking & Real-Time Sync)",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Khắc phục triệt để tình trạng lệch con số tiến độ và thanh phần trăm (progress bar), đồng thời chuyển sang cập nhật tiến độ real-time theo từng tin nhắn ở backend.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Đồng Bộ Con Số Tiến Độ & Thanh Phần Trăm (UI Progress Sync)",
+                "desc": "Hiển thị rõ ràng tổng số target đã xử lý `${processed}/${total} (${progress}%)` để con số ở tiêu đề khớp 100% với thanh phần trăm tím (bao gồm cả tin nhắn gửi thành công, lỗi và bỏ qua qua trùng lặp).",
+                "tag": "Campaign UI"
+            },
+            {
+                "type": "feature",
+                "title": "Cập Nhật Tiến Độ Real-Time Theo Từng Tin Nhắn (Backend)",
+                "desc": "Loại bỏ cơ chế lưu DB mỗi 5 tin nhắn. Giờ đây backend ghi nhận và cập nhật DB tức thì sau mỗi tin nhắn (sent, fail, skip), giúp người dùng xem tiến độ chính xác từng giây.",
+                "tag": "Campaign Engine"
+            },
+            {
+                "type": "improvement",
+                "title": "Tự Động Cập Nhật Lại Hàng Khi Tiến Độ Thay Đổi",
+                "desc": "Cập nhật logic so sánh ở Frontend (`data-sent`, `data-failed`, `data-skipped`) để giao diện bảng tự động re-render mượt mà mỗi khi số lượng tin nhắn thay đổi.",
+                "tag": "Frontend State"
+            }
+        ]
+    },
+    {
         "version": "v2.7.2",
         "date": "03/08/2026",
         "title": "🎨 Thiết Kế Lại Giao Diện & Tối Ưu UI/UX Modal Tạo DM Campaign",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Sửa triệt để lỗi vỡ layout công tắc chuyển đổi (toggle), tối ưu spacing, typography và cấu trúc các ô nhập liệu giúp trải nghiệm tạo chiến dịch chuyên nghiệp & mượt mà hơn.",
         "changes": [
             {
