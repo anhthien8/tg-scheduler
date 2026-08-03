@@ -1068,89 +1068,111 @@
 
   <!-- ══ Campaign Create/Edit Modal ══ -->
   <div class="modal-overlay" id="campaign-modal">
-    <div class="modal" style="width:660px;max-height:92vh;overflow-y:auto">
-      <div class="modal-header">
-        <span class="modal-title" id="campaign-modal-title">Tạo DM Campaign</span>
+    <div class="modal" style="width:680px;max-height:92vh;overflow-y:auto;border:1px solid rgba(167,139,250,0.25);box-shadow:0 20px 50px rgba(0,0,0,0.6);">
+      <div class="modal-header" style="border-bottom:1px solid rgba(255,255,255,0.08);padding:16px 20px;">
+        <span class="modal-title" id="campaign-modal-title" style="font-size:1.15rem;font-weight:700;color:#f3f4f6;display:flex;align-items:center;gap:8px;">
+          <span>📝</span> <span>Tạo DM Campaign</span>
+        </span>
         <button class="modal-close" onclick="Members.closeCampaignModal()">&times;</button>
       </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label class="form-label">Tên Campaign</label>
-          <input type="text" class="form-input" id="cmp-name" placeholder="VD: DM nhóm crypto...">
+      <div class="modal-body" style="padding:20px;display:flex;flex-direction:column;gap:18px;">
+        <div class="form-group" style="margin:0">
+          <label class="form-label" style="font-weight:600;font-size:0.85rem;">Tên Campaign</label>
+          <input type="text" class="form-input" id="cmp-name" placeholder="VD: DM nhóm crypto..." style="font-size:0.9rem;">
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Nguồn Members (Scrape Job)</label>
-          <select id="cmp-scrape-job" class="form-select"></select>
+        <div class="form-group" style="margin:0">
+          <label class="form-label" style="font-weight:600;font-size:0.85rem;">Nguồn Members (Scrape Job)</label>
+          <select id="cmp-scrape-job" class="form-select" style="font-size:0.9rem;"></select>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Tài khoản gửi</label>
-          <div id="cmp-accounts-list" style="display:flex;flex-wrap:wrap;gap:8px"></div>
-          <p class="form-hint">Chọn các tài khoản sẽ luân phiên gửi DM</p>
+        <div class="form-group" style="margin:0">
+          <label class="form-label" style="font-weight:600;font-size:0.85rem;">Tài khoản gửi</label>
+          <div id="cmp-accounts-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;"></div>
+          <p class="form-hint" style="margin-top:6px;font-size:0.78rem;">Các tài khoản được chọn sẽ luân phiên xoay vòng gửi DM anti-ban</p>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Nội dung tin nhắn</label>
-          <div id="cmp-messages-list"></div>
-          <button class="btn btn-ghost btn-sm" onclick="Members.addCampaignMessage()" style="margin-top:8px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label" style="font-weight:600;font-size:0.85rem;display:flex;justify-content:space-between;align-items:center;">
+            <span>💬 Nội dung tin nhắn</span>
+          </label>
+          <div id="cmp-messages-list" style="display:flex;flex-direction:column;gap:12px;margin-top:6px;"></div>
+          <button class="btn btn-ghost btn-sm" onclick="Members.addCampaignMessage()" style="margin-top:10px;border:1px dashed rgba(167,139,250,0.4);color:#a78bfa;width:100%;justify-content:center;padding:8px 0;font-weight:600;">
             + Thêm tin nhắn
           </button>
         </div>
 
-        <div style="display:flex;gap:12px">
-          <div class="form-group" style="flex:1">
-            <label class="form-label">Delay tối thiểu (giây)</label>
-            <input type="number" class="form-input" id="cmp-delay-min" value="30" min="10">
+        <!-- Limits & Delays Card -->
+        <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px 16px;">
+          <div style="font-size:0.82rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+            <span>⏱️</span> <span>Cấu Hình Giãn Cách & Giới Hạn (Anti-Ban)</span>
           </div>
-          <div class="form-group" style="flex:1">
-            <label class="form-label">Delay tối đa (giây)</label>
-            <input type="number" class="form-input" id="cmp-delay-max" value="90" min="20">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+            <div class="form-group" style="margin:0">
+              <label class="form-label" style="font-size:0.78rem;">Delay Tối Thiểu (s)</label>
+              <input type="number" class="form-input" id="cmp-delay-min" value="180" min="10" style="font-size:0.88rem;">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label" style="font-size:0.78rem;">Delay Tối Đa (s)</label>
+              <input type="number" class="form-input" id="cmp-delay-max" value="500" min="20" style="font-size:0.88rem;">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label" style="font-size:0.78rem;">Giới Hạn DM/Ngày/Acc</label>
+              <input type="number" class="form-input" id="cmp-daily-limit" value="30" min="1" max="50" style="font-size:0.88rem;">
+            </div>
           </div>
         </div>
 
-        <div style="display:flex;gap:12px">
-          <div class="form-group" style="flex:1">
-            <label class="form-label">DM/ngày (mỗi account)</label>
-            <input type="number" class="form-input" id="cmp-daily-limit" value="30" min="1" max="50">
+        <!-- AI Agent & Smart Features Card -->
+        <div style="background:linear-gradient(135deg, rgba(139,92,246,0.08) 0%, rgba(99,102,241,0.04) 100%);border:1px solid rgba(167,139,250,0.25);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.05);">
+          <div style="font-size:0.85rem;font-weight:700;color:#a78bfa;display:flex;align-items:center;gap:6px;">
+            <span>🤖</span> <span>Trí Tuệ Nhân Tạo AI & Bản Địa Hóa (AI Features)</span>
           </div>
-          <div class="form-group" style="flex:1">
-            <label class="form-label">AI Remix tin nhắn</label>
-            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-              <label class="toggle">
+
+          <!-- AI Remix & AI Agent Row -->
+          <div style="display:grid;grid-template-columns:1fr 1.2fr;gap:14px;align-items:center;">
+            <div style="display:flex;align-items:center;gap:10px;background:rgba(0,0,0,0.2);padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
+              <label class="toggle" style="flex-shrink:0;">
                 <input type="checkbox" id="cmp-ai-remix">
                 <span class="toggle-slider"></span>
               </label>
-              <span style="font-size:13px;color:var(--text2)">Bật AI cá nhân hóa</span>
+              <div style="display:flex;flex-direction:column;">
+                <span style="font-size:0.83rem;font-weight:600;color:#f3f4f6;">AI Remix Tin Nhắn</span>
+                <span style="font-size:0.73rem;color:#9ca3af;">Biến tấu câu chữ chống trùng lặp</span>
+              </div>
+            </div>
+
+            <div>
+              <label class="form-label" style="font-size:0.78rem;margin-bottom:4px;">Gán AI Agent Theo Chiến Dịch</label>
+              <select id="cmp-ai-agent" class="form-input" style="font-size:0.83rem;padding:6px 10px;height:36px;background:rgba(0,0,0,0.25);">
+                <option value="">-- Khôi phục AI Agent mặc định --</option>
+              </select>
             </div>
           </div>
-          <div class="form-group" style="flex:1">
-            <label class="form-label">🤖 AI Agent</label>
-            <select id="cmp-ai-agent" class="form-input" style="margin-top:4px">
-              <option value="">-- Không dùng AI Agent --</option>
-            </select>
-            <div style="font-size:11px;color:var(--text2);margin-top:4px">Chọn AI Agent để dùng prompt riêng cho chiến dịch này</div>
-          </div>
-        </div>
 
-        <div class="form-group" style="margin-top:12px;padding:10px 12px;background:rgba(167,139,250,.08);border:1px dashed rgba(167,139,250,.3);border-radius:8px">
-          <div style="display:flex;align-items:center;gap:10px">
-            <label class="toggle">
+          <!-- Auto Native Language Box -->
+          <div style="display:flex;align-items:flex-start;gap:12px;padding:12px;background:rgba(0,0,0,0.25);border:1px solid rgba(167,139,250,0.2);border-radius:8px;">
+            <label class="toggle" style="margin-top:2px;flex-shrink:0;">
               <input type="checkbox" id="cmp-auto-translate-native" checked>
               <span class="toggle-slider"></span>
             </label>
-            <div>
-              <strong style="font-size:13px;color:#a78bfa">🌐 Tự Động Dịch Ngôn Ngữ Bản Địa (Auto Native Language)</strong>
-              <div style="font-size:11px;color:var(--text2);margin-top:2px">
-                Tự động phát hiện quốc gia/ngôn ngữ của member (Trung Quốc 🇨🇳, Nga 🇷🇺, Thổ Nhĩ Kỳ 🇹🇷, Việt Nam 🇻🇳...) để AI viết tin nhắn bằng chính tiếng mẹ đẻ của họ, tăng Reply Rate 3-5x!
+            <div style="flex:1;">
+              <div style="font-size:0.84rem;font-weight:700;color:#c084fc;display:flex;align-items:center;gap:6px;">
+                <span>🌐</span> <span>Tự Động Dịch Ngôn Ngữ Bản Địa (Auto Native Language)</span>
+              </div>
+              <div style="font-size:0.75rem;color:#9ca3af;margin-top:3px;line-height:1.4;">
+                AI tự động phát hiện quốc gia & tiếng mẹ đẻ của khách hàng (Trung 🇨🇳, Nga 🇷🇺, Thổ 🇹🇷, Việt 🇻🇳, Hàn 🇰🇷...) để gửi DM bằng ngôn ngữ bản địa của họ, giúp tăng Reply Rate 3-5x!
               </div>
             </div>
           </div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="Members.closeCampaignModal()">Hủy</button>
-        <button class="btn btn-primary" onclick="Members.saveCampaign()">Tạo Campaign</button>
+
+      <div class="modal-footer" style="border-top:1px solid rgba(255,255,255,0.08);padding:14px 20px;">
+        <button class="btn btn-ghost" onclick="Members.closeCampaignModal()" style="font-weight:600;">Hủy</button>
+        <button class="btn btn-primary" onclick="Members.saveCampaign()" style="font-weight:600;padding:8px 20px;background:linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);border:none;box-shadow:0 4px 14px rgba(139,92,246,0.4);">
+          💾 Lưu thay đổi
+        </button>
       </div>
     </div>
   </div>

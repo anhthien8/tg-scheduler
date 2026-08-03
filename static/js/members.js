@@ -1112,19 +1112,19 @@ const Members = {
     const idx = list.children.length;
     const div = document.createElement('div');
     div.className = 'cmp-msg-item';
-    div.style.cssText = 'display:flex;gap:8px;margin-bottom:12px;align-items:flex-start';
+    div.style.cssText = 'display:flex;gap:10px;align-items:flex-start;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;';
     div.innerHTML = `
-      <span style="color:var(--text2);font-size:12px;margin-top:10px">#${idx + 1}</span>
+      <span style="color:#a78bfa;font-size:12px;font-weight:700;margin-top:8px">#${idx + 1}</span>
       <div style="flex:1;display:flex;flex-direction:column;gap:6px">
-        <textarea class="form-input cmp-msg-content" rows="5" style="width:100%;min-height:120px;resize:vertical" placeholder="Nội dung tin nhắn... Dùng {name} để chèn tên user" oninput="Members.updateMsgCharCounter(this)"></textarea>
-        <div class="cmp-msg-char-counter" style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text2)">
+        <textarea class="form-input cmp-msg-content" rows="4" style="width:100%;min-height:100px;resize:vertical;font-size:13px;line-height:1.5;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px;color:#e5e7eb" placeholder="Nội dung tin nhắn... Dùng {name} để chèn tên user" oninput="Members.updateMsgCharCounter(this)"></textarea>
+        <div class="cmp-msg-char-counter" style="display:flex;align-items:center;gap:8px;font-size:11px;color:#9ca3af">
           <span class="cmp-char-count">0 ký tự</span>
           <span class="cmp-caption-warn" style="display:none;color:#f59e0b;font-weight:600">⚠️ Caption ảnh/video tối đa 1024 ký tự!</span>
         </div>
         <!-- Image attachment row -->
-        <div class="cmp-msg-media-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div class="cmp-msg-media-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px">
           <input type="file" class="cmp-msg-file-input" accept="image/*,video/*,.pdf,.doc,.docx" style="display:none" onchange="Members.handleMsgFileUpload(this)">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="this.parentElement.querySelector('.cmp-msg-file-input').click()" style="font-size:12px;padding:4px 10px">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="this.parentElement.querySelector('.cmp-msg-file-input').click()" style="font-size:12px;padding:4px 10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:#d1d5db">
             📎 Đính kèm ảnh/file
           </button>
           <div class="cmp-msg-media-preview" style="display:none;align-items:center;gap:6px;padding:4px 8px;background:var(--bg2);border-radius:6px;border:1px solid var(--border)"></div>
@@ -1132,7 +1132,7 @@ const Members = {
         <input type="hidden" class="cmp-msg-media-path" value="">
         <input type="hidden" class="cmp-msg-media-type" value="text">
       </div>
-      <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()" style="margin-top:4px">✕</button>
+      <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()" style="margin-top:4px;padding:4px 8px;font-size:12px" title="Xóa tin nhắn này">✕</button>
     `;
     list.appendChild(div);
   },

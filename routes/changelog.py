@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v2.7.2",
+        "date": "03/08/2026",
+        "title": "🎨 Thiết Kế Lại Giao Diện & Tối Ưu UI/UX Modal Tạo DM Campaign",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Sửa triệt để lỗi vỡ layout công tắc chuyển đổi (toggle), tối ưu spacing, typography và cấu trúc các ô nhập liệu giúp trải nghiệm tạo chiến dịch chuyên nghiệp & mượt mà hơn.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Khắc Phục Lỗi Vỡ Layout Toggle Switch",
+                "desc": "Khắc phục triệt để tình trạng công tắc toggle bị đè/tràn lên chữ khi thu nhỏ layout nhờ bổ sung `flex-shrink: 0` và thiết kế lại slider mượt mà với hiệu ứng neon glow.",
+                "tag": "UI/UX"
+            },
+            {
+                "type": "feature",
+                "title": "Cấu Trúc Modal Thẻ Card Hiện Đại & Trực Quan",
+                "desc": "Phân chia rõ ràng thành các phân vùng thẻ Card riêng biệt (Thông tin chung, Giãn cách Anti-Ban, Cấu hình Trí Tuệ Nhân Tạo AI) giúp thao tác cài đặt nhanh chóng và trực quan.",
+                "tag": "Campaign Modal"
+            },
+            {
+                "type": "improvement",
+                "title": "Tối Ưu Khung Soạn Thảo Tin Nhắn Textarea",
+                "desc": "Loại bỏ tay cầm kéo giãn xấu của trình duyệt, áp dụng viền mờ tối, phông chữ 13.5px dễ đọc và hiệu ứng viền phát sáng khi focus.",
+                "tag": "Form Design"
+            }
+        ]
+    },
+    {
         "version": "v2.7.1",
         "date": "03/08/2026",
         "title": "⚡ Tự Động Khôi Phục & Tiếp Tục Gửi DM Sau Khi Server Khởi Động Lại",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Tự động phát hiện và khôi phục các Chiến dịch DM đang ở trạng thái 'running' mỗi khi app restart, khắc phục triệt để tình trạng campaign bị dừng ngầm.",
         "changes": [
             {
