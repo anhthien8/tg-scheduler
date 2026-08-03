@@ -8,11 +8,27 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.0.1",
+        "date": "03/08/2026",
+        "title": "⏰ Tự Động Tiếp Quản Trả Lời Thay Người Thật Sau 60 Phút Trôi Qua (60m Human Timeout Auto-Resume)",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Tự động kích hoạt AI Agent tiếp quản lại phiên chat nếu người thật đã nhắn tin tiếp quản trước đó nhưng sau 60 phút người dùng nhắn lại mà người thật vẫn chưa phản hồi.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Thời Gian Chờ Tiếp Quản Tự Động 60 Phút",
+                "desc": "Theo dõi thời điểm người thật can thiệp thủ công (needs_human). Nếu quá 60 phút người thật không trả lời tin nhắn của khách, AI Agent sẽ tự động chuyển lại active và nhảy vào trả lời thay.",
+                "tag": "AI Human Coexistence"
+            }
+        ]
+    },
+    {
         "version": "v3.0.0",
         "date": "03/08/2026",
         "title": "💎 Phân Loại Lead Tier A/B/C, Intent Scoring & Drip Follow-Up (Crypto BD Power Pack)",
-        "is_latest": True,
-        "badge": "MAJOR RELEASE",
+        "is_latest": False,
+        "badge": "",
         "summary": "Nâng cấp toàn bộ hệ thống AI Agent chuyên sâu cho Business Development sàn Crypto: tự động chấm điểm Intent (0-100), xếp hạng Lead Tier A/B/C, tóm tắt bối cảnh nhu cầu khách hàng và tự động chạy chuỗi Drip Follow-up sau 48h im lặng.",
         "changes": [
             {

@@ -268,8 +268,32 @@ def _make_handler(account_id: int):
                     )
 
                     current_status = chat.get("status", "active")
-                    if current_status in ("paused_admin", "onboarded", "needs_human"):
-                        logger.info("[AIFollowUp] User %d chat status is '%s' — skipping AI reply", sender_id, current_status)
+
+                    # ── HUMAN TAKEOVER 60-MINUTE AUTO-RESUME TIMEOUT ──
+                    # If chat was paused for human takeover ('needs_human' or 'paused_admin'),
+                    # check if > 60 minutes (3600 seconds) have elapsed since human takeover / last update.
+                    # If human hasn't replied within 60 minutes, AI Agent automatically resumes!
+                    if current_status in ("needs_human", "paused_admin"):
+                        updated_at_str = chat.get("updated_at")
+                        should_resume = False
+                        if updated_at_str:
+                            try:
+                                from datetime import timezone
+                                dt_updated = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+                                now_dt = datetime.now(timezone.utc) if dt_updated.tzinfo else datetime.now()
+                                elapsed = (now_dt - dt_updated).total_seconds()
+                                if elapsed >= 3600:  # 60 minutes
+                                    should_resume = True
+                            except Exception as _ex_dt:
+                                logger.debug("[AIFollowUp] Date parse error: %s", _ex_dt)
+                        
+                        if should_resume:
+                            logger.info("[AIFollowUp] ⏰ 60 minutes elapsed since human takeover for user %d (acc=%d) — auto-resuming AI Agent!", sender_id, account_id)
+                            await db.update_followup_chat_status(account_id, sender_id, "active")
+                            current_status = "active"
+
+                    if current_status in ("paused_admin", "onboarded", "needs_human", "bot_ignored"):
+                        logger.info("[AIFollowUp] User %d chat status is '%s' (<60m since human takeover) — skipping AI reply", sender_id, current_status)
                     else:
                         # Append incoming user message
                         chat = await db.append_followup_chat_message(account_id, sender_id, "user", message_text)
@@ -590,10 +614,28 @@ def unregister_account(account_id: int) -> None:
 
 
 async def process_drip_followups() -> dict:
-    """Scan inactive followup chats (>48h) and send automated value-add drip messages."""
+    """Scan inactive followup chats (>48h) and auto-resume human takeover chats (>60m)."""
     import aiosqlite
     sent_count = 0
     errors = []
+
+    # 1. Auto-resume chats paused for human takeover if >60m elapsed and last msg was from user
+    async with db.get_db() as db_conn:
+        db_conn.row_factory = aiosqlite.Row
+        cur_to = await db_conn.execute("""
+            SELECT * FROM ai_followup_chats
+            WHERE status IN ('needs_human', 'paused_admin')
+              AND datetime(updated_at) <= datetime('now', '-60 minutes')
+            LIMIT 20
+        """)
+        to_chats = [dict(r) for r in await cur_to.fetchall()]
+        for t in to_chats:
+            hist = json.loads(t.get("history_json", "[]"))
+            if hist and hist[-1].get("role") == "user":
+                logger.info("[AIFollowUp] ⏰ 60m timeout: Human admin silent after user msg for user %d — auto-resuming AI Agent!", t["user_id"])
+                await db.update_followup_chat_status(t["account_id"], t["user_id"], "active")
+
+    # 2. Process drip follow-ups
     async with db.get_db() as db_conn:
         db_conn.row_factory = aiosqlite.Row
         cursor = await db_conn.execute("""
