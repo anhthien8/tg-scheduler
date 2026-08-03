@@ -541,8 +541,12 @@ async def get_scrape_job_members(scrape_job_id: str,
 @router.delete("/scrape-jobs/{scrape_job_id}")
 async def delete_scrape_job(scrape_job_id: str):
     """Delete a scrape job and its members."""
-    await db.delete_scrape_job(scrape_job_id)
-    return {"status": "deleted"}
+    try:
+        await db.delete_scrape_job(scrape_job_id)
+        return {"status": "deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting scrape job {scrape_job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Lỗi xóa scrape job: {str(e)}")
 
 
 # ── Batch Scrape ─────────────────────────────────────────────────────────────

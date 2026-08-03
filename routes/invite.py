@@ -111,13 +111,17 @@ async def update_invite_campaign(campaign_id: int, data: InviteCampaignUpdate):
 # ── Delete invite campaign ─────────────────────────────────────────────────────
 @router.delete("/invite-campaigns/{campaign_id}")
 async def delete_invite_campaign(campaign_id: int):
-    # Stop if running
-    if campaign_id in _active_invite_campaigns:
-        stop_invite_campaign(campaign_id)
-        await asyncio.sleep(1)
+    try:
+        # Stop if running
+        if campaign_id in _active_invite_campaigns:
+            stop_invite_campaign(campaign_id)
+            await asyncio.sleep(0.5)
 
-    await db.delete_invite_campaign(campaign_id)
-    return {"status": "deleted"}
+        await db.delete_invite_campaign(campaign_id)
+        return {"status": "deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting invite campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Lỗi xóa chiến dịch invite: {str(e)}")
 
 
 # ── Start invite campaign ──────────────────────────────────────────────────────

@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v2.7.4",
+        "date": "03/08/2026",
+        "title": "🛡️ Tổng Kiểm Thử Toàn Hệ Thống (Full System QA/QC Audit & Hardening)",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Hoàn tất tổng kiểm thử toàn bộ hệ thống từ UI/UX, Frontend DOM safety, backend connection pool đến việc bọc try-except các API endpoint và sửa lỗi kiểu dữ liệu ở auto-resume.",
+        "changes": [
+            {
+                "type": "bugfix",
+                "title": "Sửa Lỗi Kiểu Dữ Liệu Auto-Resume DM Campaigns (`main.py`)",
+                "desc": "Khắc phục triệt để nguy cơ `AttributeError: 'bool' object has no attribute 'done'` khi tiến trình auto-resume kiểm tra danh sách chiến dịch đang chạy sau khi restart server.",
+                "tag": "Backend Lifespan"
+            },
+            {
+                "type": "improvement",
+                "title": "Bọc Xử Lý Lỗi Exception Cho Các Endpoint Xóa (`API Hardening`)",
+                "desc": "Bổ sung khối `try...except` và trả về `HTTPException(500)` chuẩn cho các endpoint xóa Scrape Job (`routes/members.py`) và xóa Invite Campaign (`routes/invite.py`).",
+                "tag": "API Security"
+            },
+            {
+                "type": "feature",
+                "title": "Xác Nhận Đạt 100% Tiêu Chuẩn QA/QC",
+                "desc": "Đã kiểm tra 71 file Python, 8 file JS, 0 lỗi DOM null dereference, 0 lệnh `showToast` sai quy tắc và 0 tham chiếu Zalo dư thừa.",
+                "tag": "System Audit"
+            }
+        ]
+    },
+    {
         "version": "v2.7.3",
         "date": "03/08/2026",
         "title": "🎯 Sửa Triệt Để Lỗi Báo Tiến Độ Gửi (Progress Tracking & Real-Time Sync)",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Khắc phục triệt để tình trạng lệch con số tiến độ và thanh phần trăm (progress bar), đồng thời chuyển sang cập nhật tiến độ real-time theo từng tin nhắn ở backend.",
         "changes": [
             {

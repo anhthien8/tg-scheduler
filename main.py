@@ -181,7 +181,9 @@ async def lifespan(app: FastAPI):
         for rc in all_campaigns:
             if rc.get("status") == "running":
                 from routes.members import _run_campaign, _active_campaigns
-                if rc["id"] not in _active_campaigns or _active_campaigns[rc["id"]] is not True and _active_campaigns[rc["id"]].done():
+                curr_task = _active_campaigns.get(rc["id"])
+                is_running = curr_task is True or (isinstance(curr_task, asyncio.Task) and not curr_task.done())
+                if not is_running:
                     logger.info(f"Auto-resuming running DM campaign #{rc['id']} ({rc['name']})...")
                     _active_campaigns[rc["id"]] = asyncio.create_task(_run_campaign(rc["id"]))
                     running_cnt += 1
