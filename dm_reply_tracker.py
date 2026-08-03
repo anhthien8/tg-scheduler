@@ -216,36 +216,57 @@ def _make_handler(account_id: int):
                             logger.warning("[AIFollowUp] 🚨 [ADMIN ALERT] Max replies (%d) reached for user %d (acc=%d) — setting status to 'needs_human'", max_replies_val, sender_id, account_id)
                             await db.update_followup_chat_status(account_id, sender_id, "needs_human")
                         else:
-                            # Load global provider & keys
-                            async def _load_provider_keys(prov):
-                                if not prov:
-                                    return []
-                                try:
-                                    raw = await db.get_setting(f"ai_keys_{prov}", "[]")
-                                    return json.loads(raw) if raw else []
-                                except Exception:
-                                    return []
-
-                            ai_provider = await db.get_setting("ai_provider", "gemini")
-                            ai_keys = await _load_provider_keys(ai_provider)
-
-                            if not ai_keys:
-                                all_providers = ["gemini", "groq", "openai", "deepseek", "openai_compatible"]
-                                for alt_prov in all_providers:
-                                    alt_keys = await _load_provider_keys(alt_prov)
-                                    if alt_keys:
-                                        ai_provider = alt_prov
-                                        ai_keys = alt_keys
-                                        break
-
                             kwargs = {}
-                            if ai_provider == "openai_compatible":
-                                b_url = await db.get_setting("ai_oai_compat_base_url", "")
-                                mod = await db.get_setting("ai_oai_compat_model", "")
-                                if b_url and b_url.strip():
-                                    kwargs["base_url"] = b_url.strip()
-                                if mod and mod.strip():
-                                    kwargs["model"] = mod.strip()
+                            ai_provider = None
+                            ai_keys = []
+
+                            # 1. Prefer Agent-specific provider & keys
+                            if agent_config:
+                                agent_keys = agent_config.get("api_keys_json", [])
+                                if isinstance(agent_keys, str):
+                                    try:
+                                        agent_keys = json.loads(agent_keys)
+                                    except Exception:
+                                        agent_keys = []
+                                if agent_keys:
+                                    ai_provider = agent_config.get("provider", "gemini")
+                                    ai_keys = agent_keys
+                                    if ai_provider == "openai_compatible":
+                                        b_url = agent_config.get("base_url", "")
+                                        mod = agent_config.get("model", "")
+                                        if b_url and b_url.strip(): kwargs["base_url"] = b_url.strip()
+                                        if mod and mod.strip(): kwargs["model"] = mod.strip()
+
+                            # 2. Fallback to global settings if agent has no keys
+                            if not ai_keys:
+                                async def _load_provider_keys(prov):
+                                    if not prov:
+                                        return []
+                                    try:
+                                        raw = await db.get_setting(f"ai_keys_{prov}", "[]")
+                                        return json.loads(raw) if raw else []
+                                    except Exception:
+                                        return []
+
+                                ai_provider = await db.get_setting("ai_provider", "gemini")
+                                ai_keys = await _load_provider_keys(ai_provider)
+
+                                if not ai_keys:
+                                    all_providers = ["gemini", "groq", "openai", "deepseek", "openai_compatible"]
+                                    for alt_prov in all_providers:
+                                        alt_keys = await _load_provider_keys(alt_prov)
+                                        if alt_keys:
+                                            ai_provider = alt_prov
+                                            ai_keys = alt_keys
+                                            break
+
+                                if ai_provider == "openai_compatible":
+                                    b_url = await db.get_setting("ai_oai_compat_base_url", "")
+                                    mod = await db.get_setting("ai_oai_compat_model", "")
+                                    if b_url and b_url.strip():
+                                        kwargs["base_url"] = b_url.strip()
+                                    if mod and mod.strip():
+                                        kwargs["model"] = mod.strip()
 
                             sys_prompt = agent_config.get("system_prompt", "")
                             kb = agent_config.get("knowledge_base", "")
