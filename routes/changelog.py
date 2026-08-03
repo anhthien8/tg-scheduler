@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v2.7.1",
+        "date": "03/08/2026",
+        "title": "⚡ Tự Động Khôi Phục & Tiếp Tục Gửi DM Sau Khi Server Khởi Động Lại",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Tự động phát hiện và khôi phục các Chiến dịch DM đang ở trạng thái 'running' mỗi khi app restart, khắc phục triệt để tình trạng campaign bị dừng ngầm.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Tự Động Auto-Resume DM Campaigns",
+                "desc": "Mỗi khi ứng dụng restart/reload, hệ thống sẽ tự động tìm tất cả các DM Campaign đang ở trạng thái 'running' để tiếp tục gửi tin nhắn mà không cần phải nhấn nút chạy lại.",
+                "tag": "Campaign Engine"
+            },
+            {
+                "type": "improvement",
+                "title": "Sửa Nguyên Nhân Bị Trùng Trạng Thái Running",
+                "desc": "Cập nhật hàm `start_campaign` cho phép kích hoạt lại tiến trình gửi nếu tiến trình background cũ đã kết thúc hoặc bị gián đoạn.",
+                "tag": "DM Dispatcher"
+            }
+        ]
+    },
+    {
         "version": "v2.7.0",
         "date": "02/08/2026",
         "title": "🌐 AI Auto Native Language Outreach — Tự Động Dịch DM Theo Tiếng Bản Địa Của Khách Hàng",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "AI tự động phát hiện ngôn ngữ & quốc gia của từng member (Trung Quốc, Nga, Thổ Nhĩ Kỳ, Việt Nam...) để chuyển đổi tin nhắn outreach sang tiếng mẹ đẻ của họ, tăng Reply Rate 3-5x.",
         "changes": [
             {

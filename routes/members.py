@@ -1221,13 +1221,15 @@ async def start_campaign(campaign_id: int, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=404, detail="Campaign không tồn tại")
 
     if campaign["status"] == "running":
-        raise HTTPException(status_code=400, detail="Campaign đang chạy")
+        task = _active_campaigns.get(campaign_id)
+        if task is True or (isinstance(task, asyncio.Task) and not task.done()):
+            raise HTTPException(status_code=400, detail="Campaign đang chạy")
+        logger.info(f"[Campaign {campaign_id}] Campaign marked running in DB but no active background task found. Re-starting task...")
 
     # Mark as running
     await db.update_dm_campaign_status(campaign_id, "running")
-    _active_campaigns[campaign_id] = True
-
-    background_tasks.add_task(_run_campaign, campaign_id)
+    task = asyncio.create_task(_run_campaign(campaign_id))
+    _active_campaigns[campaign_id] = task
 
     return {"status": "started", "message": "Campaign đã bắt đầu chạy"}
 

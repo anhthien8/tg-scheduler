@@ -174,6 +174,22 @@ async def lifespan(app: FastAPI):
     if scheduled_campaigns:
         logger.info(f"Reloaded {len(scheduled_campaigns)} scheduled DM campaigns")
 
+    # Auto-resume active running DM campaigns after app restart
+    try:
+        all_campaigns = await db.get_all_dm_campaigns()
+        running_cnt = 0
+        for rc in all_campaigns:
+            if rc.get("status") == "running":
+                from routes.members import _run_campaign, _active_campaigns
+                if rc["id"] not in _active_campaigns or _active_campaigns[rc["id"]] is not True and _active_campaigns[rc["id"]].done():
+                    logger.info(f"Auto-resuming running DM campaign #{rc['id']} ({rc['name']})...")
+                    _active_campaigns[rc["id"]] = asyncio.create_task(_run_campaign(rc["id"]))
+                    running_cnt += 1
+        if running_cnt:
+            logger.info(f"Auto-resumed {running_cnt} active running DM campaigns")
+    except Exception as e:
+        logger.warning(f"Error auto-resuming DM campaigns: {e}")
+
     # Daily summary notification
     from daily_summary import send_daily_summary
     from apscheduler.triggers.cron import CronTrigger
