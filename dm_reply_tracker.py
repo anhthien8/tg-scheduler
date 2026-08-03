@@ -306,8 +306,8 @@ def _make_handler(account_id: int):
 
                             format_rules = (
                                 "\n\n--- CRITICAL RESPONSE INSTRUCTIONS ---\n"
-                                "1. LANGUAGE MANDATE: Always reply in polite, friendly Vietnamese (Tiếng Việt) unless the user explicitly asks you to speak in English.\n"
-                                "2. FORMATTING MANDATE: Do NOT output literal '\\n' text characters. Use actual line breaks. Do NOT use raw markdown like **bold**. Use HTML <b>bold</b> or <i>italic</i> for formatting, or write clean plain text.\n"
+                                "1. DYNAMIC LANGUAGE MATCHING MANDATE: Automatically detect the language used by the user in their message (e.g., Chinese/中文, English, Vietnamese, Russian, Spanish, etc.) and ALWAYS reply in that EXACT SAME LANGUAGE! If the user speaks Chinese (中文), reply in fluent Chinese (中文). If English, reply in English. Match their language naturally.\n"
+                                "2. TELEGRAM FORMATTING: Do NOT output literal '\\n' text characters. Use actual line breaks. Do NOT use raw markdown like **bold**. Use standard HTML <b>bold</b> or <i>italic</i> for formatting, or write clean plain text.\n"
                                 "3. KNOWLEDGE BASE ACCURACY: If the user asks about policies, rates, commissions, benefits, or exchange details, ALWAYS extract and cite specific, exact numbers and facts directly from the KNOWLEDGE BASE section below."
                             )
                             combined_prompt = sys_prompt + format_rules
