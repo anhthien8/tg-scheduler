@@ -8,11 +8,51 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v2.9.0",
+        "date": "03/08/2026",
+        "title": "🤖 Hệ Thống Multi-AI-Agent, 9Router Local Proxy & Dynamic Fallback Tự Động",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Phát hành hệ thống Quản lý Đa AI Agents chuyên biệt cho sales/BD, tích hợp kết nối 9Router local proxy, tự động xử lý định dạng Telegram HTML, phản hồi đa ngôn ngữ theo khách hàng và luồng Fallback đa tầng 24/7.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Hệ Thống Quản Lý Đa AI Agents (Multi-AI-Agent Architecture)",
+                "desc": "Cho phép khởi tạo nhiều AI Agent riêng biệt (BD WEEX, CSKH, Sales Negotiator) với System Prompt, Knowledge Base, Provider và Model hoàn toàn độc lập.",
+                "tag": "AI System"
+            },
+            {
+                "type": "feature",
+                "title": "Tích Hợp 9Router Local Proxy & Namespace Models",
+                "desc": "Hỗ trợ kết nối tới 9Router local proxy (http://127.0.0.1:20128/v1) với hơn 93+ model AI cao cấp (im/claude-opus-4.7, ag/gemini-3-flash, cd/codex-5.6), tự động lắp ráp SSE Server-Sent Events stream.",
+                "tag": "9Router API"
+            },
+            {
+                "type": "feature",
+                "title": "Chuỗi Tự Động Fallback API Đa Tầng (Multi-Provider Fallback Chain)",
+                "desc": "Tự động dự phòng 24/7: Khi Provider chính (9Router) bị lỗi hoặc nghẽn, hệ thống tự động nhảy sang Gemini -> Groq -> OpenAI -> DeepSeek mà không làm ngắt quãng hội thoại.",
+                "tag": "AI Reliability"
+            },
+            {
+                "type": "improvement",
+                "title": "Tự Động Nhận Diện & Phản Hồi Ngôn Ngữ Khách Hàng (Dynamic Language Matching)",
+                "desc": "AI tự động phân tích ngôn ngữ của khách hàng (Tiếng Trung, Tiếng Anh, Tiếng Việt...) và phản hồi bằng đúng ngôn ngữ mẹ đẻ của khách hàng.",
+                "tag": "NLP & Language"
+            },
+            {
+                "type": "bugfix",
+                "title": "Bộ Lọc Telegram HTML Sanitizer Chuyên Biệt",
+                "desc": "Tự động chuyển đổi các thẻ HTML trang web (<p>, <div>, <br>, <li>) và chuỗi escaped '\\n' thành ngắt dòng tự nhiên và thẻ Telegram chuẩn (<b>, <i>), khắc phục vỡ giao diện tin nhắn.",
+                "tag": "Telegram Engine"
+            }
+        ]
+    },
+    {
         "version": "v2.7.4",
         "date": "03/08/2026",
         "title": "🛡️ Tổng Kiểm Thử Toàn Hệ Thống (Full System QA/QC Audit & Hardening)",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Hoàn tất tổng kiểm thử toàn bộ hệ thống từ UI/UX, Frontend DOM safety, backend connection pool đến việc bọc try-except các API endpoint và sửa lỗi kiểu dữ liệu ở auto-resume.",
         "changes": [
             {
