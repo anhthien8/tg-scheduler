@@ -16,38 +16,49 @@ def _parse_openai_compatible_json(raw: str) -> dict:
     if not raw_str:
         raise ValueError("Empty response from OpenAI compatible API")
 
+    # 1. Standard single JSON object parse
     try:
-        return json.loads(raw_str)
+        data = json.loads(raw_str)
+        if isinstance(data, dict) and "choices" in data and isinstance(data["choices"], list):
+            return data
     except json.JSONDecodeError:
         pass
 
-    # Try fixing common malformed JSON from local proxies (e.g. unquoted choice strings like "choices":claude-opus-4.7)
-    fixed = re.sub(r'"choices"\s*:\s*([a-zA-Z0-9_.-]+)', r'"choices_model":"\1","choices":[]', raw_str)
-    try:
-        return json.loads(fixed)
-    except Exception:
-        pass
-
+    # 2. SSE (Server-Sent Events) stream assembler (e.g. 9Router streaming responses)
+    parts = []
+    reasoning_parts = []
     for line in raw_str.splitlines():
         line_s = line.strip()
         if line_s.startswith("data:"):
             line_s = line_s[5:].strip()
-        if line_s.startswith("{") and line_s.endswith("}"):
-            try:
-                return json.loads(line_s)
-            except json.JSONDecodeError:
-                pass
+        if not line_s or line_s == "[DONE]":
+            continue
+        try:
+            item = json.loads(line_s)
+            if isinstance(item, dict):
+                choices = item.get("choices", [])
+                if choices and isinstance(choices, list):
+                    c = choices[0]
+                    if isinstance(c, dict):
+                        delta = c.get("delta", {}) if isinstance(c.get("delta"), dict) else {}
+                        msg = c.get("message", {}) if isinstance(c.get("message"), dict) else {}
+                        content = delta.get("content") or msg.get("content") or ""
+                        reasoning = delta.get("reasoning_content") or ""
+                        if content:
+                            parts.append(content)
+                        if reasoning:
+                            reasoning_parts.append(reasoning)
+        except Exception:
+            pass
 
-    first_brace = raw_str.find("{")
-    if first_brace != -1:
-        last_brace = raw_str.rfind("}")
-        if last_brace > first_brace:
-            candidate = raw_str[first_brace:last_brace + 1]
-            try:
-                return json.loads(candidate)
-            except json.JSONDecodeError:
-                pass
+    assembled = "".join(parts).strip()
+    if not assembled and reasoning_parts:
+        assembled = "".join(reasoning_parts).strip()
 
+    if assembled:
+        return {"choices": [{"message": {"content": assembled}}]}
+
+    # 3. Fallback regex search for "content" or "text"
     content_match = re.search(r'"content"\s*:\s*"([^"]+)"', raw_str)
     if content_match:
         return {"choices": [{"message": {"content": content_match.group(1)}}]}

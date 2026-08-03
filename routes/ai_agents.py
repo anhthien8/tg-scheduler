@@ -172,3 +172,44 @@ async def duplicate_agent(agent_id: int):
     if not new_id:
         raise HTTPException(404, "Agent not found")
     return {"id": new_id, "status": "duplicated"}
+
+
+@router.get("/test-router")
+async def test_router_models(base_url: str = "http://127.0.0.1:20128/v1", model: str = ""):
+    """Diagnostic endpoint to test 9Router proxy and list available models."""
+    import httpx
+    url = f"{base_url.rstrip('/')}/models"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url)
+            models = []
+            if resp.status_code == 200:
+                data = resp.json()
+                if "data" in data and isinstance(data["data"], list):
+                    models = [m.get("id") for m in data["data"] if isinstance(m, dict) and m.get("id")]
+
+            test_result = None
+            if model:
+                try:
+                    test_reply = await ai_rmx.generate_chat_response(
+                        [{"role": "user", "content": "Ping test"}],
+                        "You are a helpful assistant.",
+                        "openai_compatible",
+                        ["sk-none"],
+                        base_url=base_url,
+                        model=model
+                    )
+                    test_result = {"status": "ok", "reply": test_reply}
+                except Exception as ex:
+                    test_result = {"status": "error", "error": str(ex)}
+
+            return {
+                "status": "connected",
+                "base_url": base_url,
+                "available_models": models,
+                "model_count": len(models),
+                "tested_model": model,
+                "test_result": test_result
+            }
+    except Exception as e:
+        return {"status": "unreachable", "base_url": base_url, "error": str(e)}
