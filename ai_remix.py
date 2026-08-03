@@ -378,26 +378,31 @@ async def generate_chat_response(
             except Exception as e2:
                 logger.warning("[AI Chat] Retry failed: %s", e2)
 
-    # ── Automatic Fallback to alternative providers (Gemini/Groq) if primary provider fails ──
+    # ── Automatic Fallback to alternative providers if primary fails ──
     try:
         import database as db
-        if provider != "gemini":
-            gemini_raw = await db.get_setting("ai_keys_gemini", "[]")
-            g_keys = json.loads(gemini_raw) if gemini_raw else []
-            if g_keys:
-                logger.info("[AI Chat] 🔄 Provider '%s' failed. Auto-fallback to Gemini (%d keys)...", provider, len(g_keys))
-                res = await _call_chat_provider("gemini", g_keys[0], formatted_messages)
-                if res:
-                    return res
-
-        if provider != "groq":
-            groq_raw = await db.get_setting("ai_keys_groq", "[]")
-            gr_keys = json.loads(groq_raw) if groq_raw else []
-            if gr_keys:
-                logger.info("[AI Chat] 🔄 Auto-fallback to Groq (%d keys)...", len(gr_keys))
-                res = await _call_chat_provider("groq", gr_keys[0], formatted_messages)
-                if res:
-                    return res
+        fallback_order = ["openai_compatible", "gemini", "groq", "openai", "deepseek"]
+        for alt_prov in fallback_order:
+            if alt_prov == provider:
+                continue
+            alt_raw = await db.get_setting(f"ai_keys_{alt_prov}", "[]")
+            alt_keys = json.loads(alt_raw) if alt_raw else []
+            if not alt_keys and alt_prov == "gemini":
+                legacy_k = await db.get_setting("gemini_api_key", "")
+                if legacy_k and legacy_k.strip():
+                    alt_keys = [legacy_k.strip()]
+            if alt_keys:
+                alt_kwargs = {}
+                if alt_prov == "openai_compatible":
+                    alt_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
+                    alt_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
+                logger.info("[AI Chat] 🔄 Provider '%s' failed. Auto-fallback to '%s' (%d keys)...", provider, alt_prov, len(alt_keys))
+                try:
+                    res = await _call_chat_provider(alt_prov, alt_keys[0], formatted_messages, **alt_kwargs)
+                    if res:
+                        return res
+                except Exception as _sub_fb_err:
+                    logger.warning("[AI Chat] Fallback to '%s' failed: %s", alt_prov, _sub_fb_err)
     except Exception as _fb_err:
         logger.warning("[AI Chat] Fallback provider error: %s", _fb_err)
 
