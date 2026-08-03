@@ -270,7 +270,13 @@ def _make_handler(account_id: int):
 
                             sys_prompt = agent_config.get("system_prompt", "")
                             kb = agent_config.get("knowledge_base", "")
-                            combined_prompt = sys_prompt
+
+                            format_rules = (
+                                "\n\n--- CRITICAL INSTRUCTIONS ---\n"
+                                "1. KNOWLEDGE BASE MANDATE: If the user asks about policies, rates, commissions, benefits, or exchange details, ALWAYS extract and cite specific, exact numbers and facts directly from the KNOWLEDGE BASE section below.\n"
+                                "2. TELEGRAM FORMATTING: Do NOT use markdown syntax like **bold** or *italic*. Use standard HTML tags <b>bold</b> or <i>italic</i> for formatting, or write plain text."
+                            )
+                            combined_prompt = sys_prompt + format_rules
                             if kb and kb.strip():
                                 combined_prompt += "\n\n--- KNOWLEDGE BASE ---\n" + kb.strip()
 
@@ -297,6 +303,10 @@ def _make_handler(account_id: int):
                                     elif "[ONBOARDED]" in ai_reply:
                                         new_status = "onboarded"
                                         ai_reply = ai_reply.replace("[ONBOARDED]", "").strip()
+
+                                    # Convert markdown **bold** to <b>bold</b> and *italic* to <i>italic</i> for Telegram HTML parse_mode
+                                    ai_reply = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', ai_reply)
+                                    ai_reply = re.sub(r'(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)', r'<i>\1</i>', ai_reply)
 
                                     if ai_reply:
                                         delay = random.uniform(6.0, 15.0)
