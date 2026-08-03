@@ -244,3 +244,19 @@ async def duplicate_agent(agent_id: int):
     if not new_id:
         raise HTTPException(404, "Agent not found")
     return {"id": new_id, "status": "duplicated"}
+
+
+@router.post("/{agent_id}/reset-chats")
+async def reset_agent_chats(agent_id: int):
+    """Reset all paused/needs_human chats for this agent or globally back to active."""
+    agent = await db.get_ai_agent(agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    
+    async with db.get_db() as database:
+        await database.execute("UPDATE ai_followup_chats SET status = 'active', reply_count = 0")
+        await database.commit()
+    
+    logger.info("Reset all AI followup chats to 'active' state")
+    return {"status": "ok", "message": "Đã kích hoạt lại toàn bộ hội thoại AI!"}
+
