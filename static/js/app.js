@@ -608,12 +608,73 @@ if(!this.accounts.length){grid.innerHTML='<div class="empty-state"><div class="e
 let aiAgents = [];
 try { const agentData = await API.get('/api/ai-agents'); aiAgents = agentData.agents || []; } catch(agErr){}
 
-grid.innerHTML=this.accounts.map(a=>{const logged=a.is_logged_in;const isOff=Boolean(a.is_paused);const ui=a.user_info;const name=ui?[ui.first_name,ui.last_name].filter(Boolean).join(' '):a.name;const uname=ui?`@${ui.username||ui.phone}`:`@${a.phone}`;
+grid.innerHTML = this.accounts.map(a => {
+  const logged = a.is_logged_in;
+  const isOff = Boolean(a.is_paused);
+  const ui = a.user_info;
+  const name = ui ? [ui.first_name, ui.last_name].filter(Boolean).join(' ') : a.name;
+  const uname = ui ? `@${ui.username || ui.phone}` : `@${a.phone}`;
+  const dmLimit = a.is_premium ? 50 : 10;
+  const initial = name ? name.trim().charAt(0).toUpperCase() : 'T';
 
-return`<div class="account-card ${isOff?'account-card-disabled':''}" data-account-id="${a.id}" style="${isOff?'opacity:.75;border:1px solid rgba(239,68,68,.35);':''}"><div class="account-card-header"><div class="account-avatar">${logged?(isOff?'🔴':'🟢'):'🔴'}</div><div><strong>${esc(name)}</strong><br><small style="color:var(--text2)">${esc(uname)}</small></div></div><div class="account-card-body"><div><small>API ID: ${a.api_id}</small></div><div><small>Session: ${a.session_name}</small></div>${a.proxy_url?`<div style="font-size:.75rem;color:#a78bfa;margin-top:.2rem">🔒 ${esc(a.proxy_url.replace(/:([^:@]+)@/,':***@'))}</div>`:''}<div style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="badge ${isOff?'badge-red':(logged?'badge-green':'badge-red')}">${isOff?'🔴 ĐÃ TẮT (OFF)':(logged?'Online':'Offline')}</span><span class="spam-badge-slot"></span><span style="cursor:pointer;background:${a.is_premium?'rgba(251,191,36,.18)':'rgba(255,255,255,.07)'};border:1px solid ${a.is_premium?'rgba(251,191,36,.5)':'rgba(255,255,255,.12)'};border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:${a.is_premium?'#fbbf24':'#888'}" onclick="App.togglePremium(${a.id},${a.is_premium?'false':'true'})" title="Click để ${a.is_premium?'bỏ':'bật'} Premium (${a.is_premium?50:10}→${a.is_premium?10:50} DM/ngày)">${a.is_premium?'⭐ Premium':'⬜ Thường'}</span>${a.is_flagged?`<span style="background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:#f87171;cursor:pointer" onclick="App.unflagAccount(${a.id})" title="${esc(a.flag_reason||'')}
-Click để bỏ cảnh báo">⚠️ Cảnh báo</span>`:''}
-${a.is_paused?`<span style="background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:#f87171;cursor:pointer" onclick="App.toggleAccountActive(${a.id},true)" title="${esc(a.pause_reason||'')}
-Click để Bật lại">🛑 Tắt thủ công</span>`:''}</div><div style="margin-top:6px;padding-top:6px;border-top:1px dashed rgba(255,255,255,.08);display:flex;align-items:center;justify-content:space-between;gap:4px"><small style="color:var(--text2);font-weight:600;font-size:.78rem">🤖 AI Care Account:</small><select class="form-input form-input-sm" style="width:auto;font-size:.75rem;padding:1px 4px;height:24px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.15);border-radius:4px;color:#e5e7eb" onchange="App.setAccountAiAgent(${a.id},this.value)"><option value="">🚫 Tắt (Không dùng AI)</option>${aiAgents.map(ag=>`<option value="${ag.id}" ${a.ai_agent_id===ag.id?'selected':''}>${ag.avatar_emoji||'🤖'} ${esc(ag.name)}</option>`).join('')}</select></div><div style="margin-top:4px"><small style="color:#6b7280">DM limit: ${a.is_premium?'50':'10'}/ngày</small></div></div><div class="account-card-actions">${isOff?`<button class="btn btn-success btn-sm" onclick="App.toggleAccountActive(${a.id},true)" title="Bật lại tài khoản này để hoạt động">⚡ Bật Account (ON)</button>`:`<button class="btn btn-warning btn-sm" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171" onclick="App.toggleAccountActive(${a.id},false)" title="Tắt hoàn toàn tài khoản này (ngắt mọi AI & DM)">🛑 Tắt Account (OFF)</button>`}${!logged?`<button class="btn btn-primary btn-sm" onclick="App.loginAccount(${a.id},'${a.phone}')">Login</button>`:''}<button class="btn btn-danger btn-sm" onclick="App.deleteAccount(${a.id})">Xóa</button></div></div>`}).join('')}catch(e){this.toast(e.message,'error')}},
+  const agentOptions = aiAgents.map(ag => 
+    `<option value="${ag.id}" ${a.ai_agent_id === ag.id ? 'selected' : ''}>${ag.avatar_emoji || '🤖'} ${esc(ag.name)}</option>`
+  ).join('');
+
+  return `
+  <div class="account-card ${isOff ? 'account-card-disabled' : ''}" data-account-id="${a.id}" style="background:var(--bg-card);border:1px solid ${isOff ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.08)'};border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;position:relative;${isOff ? 'opacity:0.82;' : ''}">
+    
+    <!-- Top Header: Avatar + Info + Badges -->
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="position:relative;width:42px;height:42px;border-radius:50%;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;color:#818cf8">
+          ${esc(initial)}
+          <span style="position:absolute;bottom:0;right:0;width:11px;height:11px;border-radius:50%;background:${isOff ? '#ef4444' : (logged ? '#10b981' : '#f59e0b')};border:2px solid var(--bg-card)"></span>
+        </div>
+        <div>
+          <div style="font-weight:700;font-size:15px;color:var(--text1);line-height:1.2">${esc(name)}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px">${esc(uname)}</div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+        <span class="badge ${isOff ? 'badge-red' : (logged ? 'badge-green' : 'badge-amber')}" style="font-size:11px;padding:2px 8px">
+          ${isOff ? '🔴 Đã tắt' : (logged ? '🟢 Online' : '🟠 Disconnected')}
+        </span>
+        <span style="cursor:pointer;background:${a.is_premium ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.06)'};border:1px solid ${a.is_premium ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.1)'};border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;color:${a.is_premium ? '#fbbf24' : '#9ca3af'}" onclick="App.togglePremium(${a.id}, ${!a.is_premium})" title="Click để chuyển trạng thái Premium (${a.is_premium ? 50 : 10}→${a.is_premium ? 10 : 50} DM/ngày)">
+          ${a.is_premium ? '⭐ Premium' : '⬜ Thường'}
+        </span>
+        ${a.is_flagged ? `<span style="background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.5);border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;color:#f87171;cursor:pointer" onclick="App.unflagAccount(${a.id})" title="${esc(a.flag_reason || '')}">⚠️ Cảnh báo</span>` : ''}
+      </div>
+    </div>
+
+    <!-- Technical Meta Strip -->
+    <div style="background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.05);border-radius:8px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--text2)">
+      <div>ID: <span style="color:var(--text1);font-family:monospace;font-weight:600">${a.api_id}</span></div>
+      <div>Giới hạn: <span style="color:${a.is_premium ? '#fbbf24' : 'var(--text1)'};font-weight:600">${dmLimit} DM/ngày</span></div>
+    </div>
+
+    <!-- AI Agent Selector Box -->
+    <div style="background:rgba(15,23,42,0.5);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px 12px">
+      <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">🤖 AI Agent Phụ Trách</div>
+      <select class="form-input" style="width:100%;height:32px;font-size:12px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:#f3f4f6;padding:0 8px" onchange="App.setAccountAiAgent(${a.id}, this.value)">
+        <option value="">🚫 Tắt (Không dùng AI)</option>
+        ${agentOptions}
+      </select>
+    </div>
+
+    <!-- Action Buttons Row -->
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06)">
+      ${isOff ? 
+        `<button class="btn btn-success btn-sm" style="flex:1" onclick="App.toggleAccountActive(${a.id}, true)" title="Bật lại tài khoản">▶️ Bật Account</button>` : 
+        `<button class="btn btn-ghost btn-sm" style="flex:1;border:1px solid rgba(239,68,68,0.3);color:#f87171;background:rgba(239,68,68,0.08)" onclick="App.toggleAccountActive(${a.id}, false)" title="Tắt tạm dừng">⏸️ Tắt Account</button>`
+      }
+      ${!logged ? `<button class="btn btn-primary btn-sm" onclick="App.loginAccount(${a.id}, '${a.phone}')">🔑 Login</button>` : ''}
+      <button class="btn btn-ghost btn-sm" style="color:#ef4444;border:1px solid rgba(239,68,68,0.2)" onclick="App.deleteAccount(${a.id})" title="Xóa tài khoản">🗑️ Xóa</button>
+    </div>
+
+  </div>`;
+}).join('')}catch(e){this.toast(e.message,'error')}},
 
 openAddAccountModal(){(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-phone') || me_dummy).value = '';const proxyEl=document.getElementById('acc-proxy');if(proxyEl)proxyEl.value='';(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
 

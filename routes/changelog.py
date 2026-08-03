@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v2.9.2",
+        "date": "03/08/2026",
+        "title": "🎨 Tái Thiết Kế Giao Diện Thẻ Tài Khoản Telegram (Account Cards Redesign)",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Nâng cấp giao diện danh sách Telegram Accounts theo chuẩn Glassmorphic hiện đại, sắp xếp khoa học thông tin Avatar, Badge trạng thái, Giới hạn DM/ngày và Khung chọn AI Agent phụ trách.",
+        "changes": [
+            {
+                "type": "ui",
+                "title": "Tái Thiết Kế Cấu Trúc Card Khoa Học",
+                "desc": "Cải thiện visual card với Avatar kèm chấm Indicator trạng thái (Online / Off / Disconnected), gom nhóm badge góc phải và dải thông số kỹ thuật (ID / Giới hạn DM/ngày).",
+                "tag": "Accounts UI/UX"
+            },
+            {
+                "type": "improvement",
+                "title": "Tối Ưu Hóa Nút Thao Tác & Khung AI Agent",
+                "desc": "Tách riêng khung '🤖 AI Agent Phụ Trách' sang trọng và tinh chỉnh nút '▶️ Bật Account' / '⏸️ Tắt Account' gọn gàng, tránh nhầm lẫn cho người dùng.",
+                "tag": "User Experience"
+            }
+        ]
+    },
+    {
         "version": "v2.9.1",
         "date": "03/08/2026",
         "title": "🛑 Tính Năng Tự Động Nhường Quyền Khi Người Thật Nhắn Tin (Human Takeover Interception)",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Tự động phát hiện khi chủ tài khoản Telegram tự tay nhắn tin với khách hàng (trên ứng dụng Telegram điện thoại/máy tính), AI Agent sẽ ngay lập tức tự động nhường quyền và giữ yên lặng để không làm gián đoạn cuộc trò chuyện.",
         "changes": [
             {
