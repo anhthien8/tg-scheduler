@@ -438,14 +438,30 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
 
     elif provider == "gemini":
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-        sys_prompt = messages[0]["content"] if messages and messages[0]["role"] == "system" else ""
-        contents = []
-        for m in (messages[1:] if sys_prompt else messages):
+        sys_prompt = messages[0]["content"] if (messages and messages[0]["role"] == "system") else ""
+        raw_msgs = messages[1:] if (messages and messages[0]["role"] == "system") else messages
+
+        # Merge consecutive messages with the same role to strictly satisfy Gemini API requirements
+        merged_contents = []
+        for m in raw_msgs:
             g_role = "model" if m["role"] == "assistant" else "user"
-            contents.append({"role": g_role, "parts": [{"text": m["content"]}]})
+            text = (m.get("content") or "").strip()
+            if not text:
+                continue
+            if merged_contents and merged_contents[-1]["role"] == g_role:
+                merged_contents[-1]["parts"][0]["text"] += "\n" + text
+            else:
+                merged_contents.append({"role": g_role, "parts": [{"text": text}]})
+
+        if not merged_contents:
+            return None
+
+        # Ensure first message in Gemini contents is 'user'
+        if merged_contents[0]["role"] == "model":
+            merged_contents.insert(0, {"role": "user", "parts": [{"text": "Hello"}]})
 
         payload = {
-            "contents": contents,
+            "contents": merged_contents,
             "systemInstruction": {"parts": [{"text": sys_prompt}]} if sys_prompt else None,
             "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1000}
         }
