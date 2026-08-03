@@ -95,6 +95,47 @@ async def list_agents():
     return {"agents": agents}
 
 
+@router.get("/test-router")
+async def test_router_models(base_url: str = "http://127.0.0.1:20128/v1", model: str = ""):
+    """Diagnostic endpoint to test 9Router proxy and list available models."""
+    import httpx
+    url = f"{base_url.rstrip('/')}/models"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url)
+            models = []
+            if resp.status_code == 200:
+                data = resp.json()
+                if "data" in data and isinstance(data["data"], list):
+                    models = [m.get("id") for m in data["data"] if isinstance(m, dict) and m.get("id")]
+
+            test_result = None
+            if model:
+                try:
+                    test_reply = await ai_rmx.generate_chat_response(
+                        [{"role": "user", "content": "Ping test"}],
+                        "You are a helpful assistant.",
+                        "openai_compatible",
+                        ["sk-none"],
+                        base_url=base_url,
+                        model=model
+                    )
+                    test_result = {"status": "ok", "reply": test_reply}
+                except Exception as ex:
+                    test_result = {"status": "error", "error": str(ex)}
+
+            return {
+                "status": "connected",
+                "base_url": base_url,
+                "available_models": models,
+                "model_count": len(models),
+                "tested_model": model,
+                "test_result": test_result
+            }
+    except Exception as e:
+        return {"status": "unreachable", "base_url": base_url, "error": str(e)}
+
+
 @router.get("/{agent_id}")
 async def get_agent(agent_id: int):
     agent = await db.get_ai_agent(agent_id)
@@ -136,9 +177,34 @@ async def test_agent(agent_id: int, req: AgentTestRequest):
     if not agent:
         raise HTTPException(404, "Agent not found")
 
-    provider, api_keys, kwargs = await _get_system_ai_config()
+    kwargs = {}
+    provider = agent.get("provider")
+    api_keys = agent.get("api_keys_json", [])
+    if isinstance(api_keys, str):
+        try:
+            api_keys = json.loads(api_keys)
+        except Exception:
+            api_keys = []
+
+    # If agent doesn't have keys, fallback to global system settings
     if not api_keys:
-        raise HTTPException(400, "Hệ thống chưa có API Key nào được cấu hình trong mục Cài đặt AI hệ thống!")
+        provider, api_keys, kwargs = await _get_system_ai_config()
+
+    if not api_keys:
+        raise HTTPException(400, f"AI Agent '{agent['name']}' chưa có API Key và hệ thống chưa cấu hình API Key!")
+
+    # Merge base_url and model for openai_compatible
+    if provider == "openai_compatible":
+        b_url = agent.get("base_url", "")
+        mod = agent.get("model", "")
+        if not b_url or not b_url.strip():
+            b_url = await db.get_setting("ai_oai_compat_base_url", "")
+        if not mod or not mod.strip():
+            mod = await db.get_setting("ai_oai_compat_model", "")
+        if b_url and b_url.strip():
+            kwargs["base_url"] = b_url.strip()
+        if mod and mod.strip():
+            kwargs["model"] = mod.strip()
 
     sys_prompt = agent.get("system_prompt", "")
     kb = agent.get("knowledge_base", "")
@@ -147,6 +213,7 @@ async def test_agent(agent_id: int, req: AgentTestRequest):
         combined += "\n\n--- KNOWLEDGE BASE ---\n" + kb.strip()
 
     history = [{"role": "user", "content": req.text}]
+    used_model = kwargs.get("model") or "default"
 
     try:
         reply = await ai_rmx.generate_chat_response(
@@ -155,10 +222,15 @@ async def test_agent(agent_id: int, req: AgentTestRequest):
         if not reply:
             raise HTTPException(
                 400,
-                f"AI Provider '{provider}' không trả về kết quả. "
-                "Vui lòng kiểm tra lại API Key, Provider hoặc Model/Base URL trong Cài đặt AI hệ thống!"
+                f"AI Provider '{provider}' (Model: '{used_model}') không trả về kết quả. "
+                "Vui lòng kiểm tra lại API Key, Provider hoặc Model/Base URL!"
             )
-        return {"reply": reply, "provider": provider, "status": "ok"}
+        return {
+            "reply": reply,
+            "provider": provider,
+            "model": used_model,
+            "status": "ok"
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -172,44 +244,3 @@ async def duplicate_agent(agent_id: int):
     if not new_id:
         raise HTTPException(404, "Agent not found")
     return {"id": new_id, "status": "duplicated"}
-
-
-@router.get("/test-router")
-async def test_router_models(base_url: str = "http://127.0.0.1:20128/v1", model: str = ""):
-    """Diagnostic endpoint to test 9Router proxy and list available models."""
-    import httpx
-    url = f"{base_url.rstrip('/')}/models"
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(url)
-            models = []
-            if resp.status_code == 200:
-                data = resp.json()
-                if "data" in data and isinstance(data["data"], list):
-                    models = [m.get("id") for m in data["data"] if isinstance(m, dict) and m.get("id")]
-
-            test_result = None
-            if model:
-                try:
-                    test_reply = await ai_rmx.generate_chat_response(
-                        [{"role": "user", "content": "Ping test"}],
-                        "You are a helpful assistant.",
-                        "openai_compatible",
-                        ["sk-none"],
-                        base_url=base_url,
-                        model=model
-                    )
-                    test_result = {"status": "ok", "reply": test_reply}
-                except Exception as ex:
-                    test_result = {"status": "error", "error": str(ex)}
-
-            return {
-                "status": "connected",
-                "base_url": base_url,
-                "available_models": models,
-                "model_count": len(models),
-                "tested_model": model,
-                "test_result": test_result
-            }
-    except Exception as e:
-        return {"status": "unreachable", "base_url": base_url, "error": str(e)}

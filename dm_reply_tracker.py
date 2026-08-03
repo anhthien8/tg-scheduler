@@ -232,11 +232,6 @@ def _make_handler(account_id: int):
                                 if agent_keys:
                                     ai_provider = agent_config.get("provider", "gemini")
                                     ai_keys = agent_keys
-                                    if ai_provider == "openai_compatible":
-                                        b_url = agent_config.get("base_url", "")
-                                        mod = agent_config.get("model", "")
-                                        if b_url and b_url.strip(): kwargs["base_url"] = b_url.strip()
-                                        if mod and mod.strip(): kwargs["model"] = mod.strip()
 
                             # 2. Fallback to global settings if agent has no keys
                             if not ai_keys:
@@ -261,13 +256,18 @@ def _make_handler(account_id: int):
                                             ai_keys = alt_keys
                                             break
 
-                                if ai_provider == "openai_compatible":
+                            # 3. Always populate base_url & model for openai_compatible
+                            if ai_provider == "openai_compatible":
+                                b_url = agent_config.get("base_url", "") if agent_config else ""
+                                mod = agent_config.get("model", "") if agent_config else ""
+                                if not b_url or not b_url.strip():
                                     b_url = await db.get_setting("ai_oai_compat_base_url", "")
+                                if not mod or not mod.strip():
                                     mod = await db.get_setting("ai_oai_compat_model", "")
-                                    if b_url and b_url.strip():
-                                        kwargs["base_url"] = b_url.strip()
-                                    if mod and mod.strip():
-                                        kwargs["model"] = mod.strip()
+                                if b_url and b_url.strip():
+                                    kwargs["base_url"] = b_url.strip()
+                                if mod and mod.strip():
+                                    kwargs["model"] = mod.strip()
 
                             sys_prompt = agent_config.get("system_prompt", "")
                             kb = agent_config.get("knowledge_base", "")

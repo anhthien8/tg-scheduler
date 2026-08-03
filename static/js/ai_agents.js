@@ -271,9 +271,9 @@ const AIAgents = {
         outputContent.textContent = res?.error || 'AI Provider không trả về kết quả. Vui lòng kiểm tra lại Cài đặt AI.';
         App.toast('AI Provider không trả về kết quả', 'error');
       } else {
-        statusLabel.textContent = `🤖 AI trả lời (Provider: ${res.provider || 'AI System'}):`;
+        statusLabel.textContent = `🤖 AI trả lời (Provider: ${res.provider || 'AI System'}, Model: ${res.model || 'Default'}):`;
         outputContent.textContent = res.reply;
-        App.toast('✅ Test hoàn tất!', 'success');
+        App.toast(`✅ Test hoàn tất! (Model: ${res.model || 'Default'})`, 'success');
       }
     } catch (e) {
       if (statusLabel) statusLabel.textContent = '❌ Lỗi gọi AI';
