@@ -39,6 +39,35 @@ _seen: set[tuple[int, int, int]] = set()
 _MAX_SEEN = 5000  # cap to prevent unbounded growth
 
 
+def sanitize_telegram_html(text: str) -> str:
+    if not text:
+        return ""
+    # 1. Convert html block elements & lists to clean newlines/bullets
+    s = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    s = re.sub(r'</?p\s*/?>', '\n', s, flags=re.IGNORECASE)
+    s = re.sub(r'</?div\s*/?>', '\n', s, flags=re.IGNORECASE)
+    s = re.sub(r'<li\s*/?>', '\n• ', s, flags=re.IGNORECASE)
+    s = re.sub(r'</?ul\s*/?>', '\n', s, flags=re.IGNORECASE)
+    s = re.sub(r'</?ol\s*/?>', '\n', s, flags=re.IGNORECASE)
+
+    # 2. Convert markdown bold/italic syntax
+    s = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', s)
+    s = re.sub(r'(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)', r'<i>\1</i>', s)
+
+    # 3. Strip any unsupported HTML tags (keep Telegram supported: b, i, u, s, strong, em, ins, del, code, pre, a)
+    allowed_pattern = r'</?(?:b|i|u|s|strong|em|ins|del|strike|code|pre|a(?:\s+href="[^"]*")?)\s*/?>'
+
+    def _clean_tag(m):
+        tag = m.group(0)
+        if re.match(allowed_pattern, tag, re.IGNORECASE):
+            return tag
+        return ""
+
+    s = re.sub(r'<[^>]+>', _clean_tag, s)
+    s = re.sub(r'\n{3,}', '\n\n', s)
+    return s.strip()
+
+
 def _trim_seen() -> None:
     global _seen
     if len(_seen) > _MAX_SEEN:
@@ -305,9 +334,8 @@ def _make_handler(account_id: int):
                                         new_status = "onboarded"
                                         ai_reply = ai_reply.replace("[ONBOARDED]", "").strip()
 
-                                    # Convert markdown **bold** to <b>bold</b> and *italic* to <i>italic</i> for Telegram HTML parse_mode
-                                    ai_reply = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', ai_reply)
-                                    ai_reply = re.sub(r'(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)', r'<i>\1</i>', ai_reply)
+                                    # Sanitize and convert AI output to Telegram-compatible HTML
+                                    ai_reply = sanitize_telegram_html(ai_reply)
 
                                     if ai_reply:
                                         delay = random.uniform(6.0, 15.0)
