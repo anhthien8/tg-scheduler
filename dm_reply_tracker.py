@@ -42,8 +42,11 @@ _MAX_SEEN = 5000  # cap to prevent unbounded growth
 def sanitize_telegram_html(text: str) -> str:
     if not text:
         return ""
+    # 0. Convert literal '\n' string representation to real line breaks
+    s = text.replace('\\n', '\n')
+
     # 1. Convert html block elements & lists to clean newlines/bullets
-    s = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    s = re.sub(r'<br\s*/?>', '\n', s, flags=re.IGNORECASE)
     s = re.sub(r'</?p\s*/?>', '\n', s, flags=re.IGNORECASE)
     s = re.sub(r'</?div\s*/?>', '\n', s, flags=re.IGNORECASE)
     s = re.sub(r'<li\s*/?>', '\n• ', s, flags=re.IGNORECASE)
@@ -302,9 +305,10 @@ def _make_handler(account_id: int):
                             kb = agent_config.get("knowledge_base", "")
 
                             format_rules = (
-                                "\n\n--- CRITICAL INSTRUCTIONS ---\n"
-                                "1. KNOWLEDGE BASE MANDATE: If the user asks about policies, rates, commissions, benefits, or exchange details, ALWAYS extract and cite specific, exact numbers and facts directly from the KNOWLEDGE BASE section below.\n"
-                                "2. TELEGRAM FORMATTING: Do NOT use markdown syntax like **bold** or *italic*. Use standard HTML tags <b>bold</b> or <i>italic</i> for formatting, or write plain text."
+                                "\n\n--- CRITICAL RESPONSE INSTRUCTIONS ---\n"
+                                "1. LANGUAGE MANDATE: Always reply in polite, friendly Vietnamese (Tiếng Việt) unless the user explicitly asks you to speak in English.\n"
+                                "2. FORMATTING MANDATE: Do NOT output literal '\\n' text characters. Use actual line breaks. Do NOT use raw markdown like **bold**. Use HTML <b>bold</b> or <i>italic</i> for formatting, or write clean plain text.\n"
+                                "3. KNOWLEDGE BASE ACCURACY: If the user asks about policies, rates, commissions, benefits, or exchange details, ALWAYS extract and cite specific, exact numbers and facts directly from the KNOWLEDGE BASE section below."
                             )
                             combined_prompt = sys_prompt + format_rules
                             if kb and kb.strip():
