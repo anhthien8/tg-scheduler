@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v2.9.1",
+        "date": "03/08/2026",
+        "title": "🛑 Tính Năng Tự Động Nhường Quyền Khi Người Thật Nhắn Tin (Human Takeover Interception)",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Tự động phát hiện khi chủ tài khoản Telegram tự tay nhắn tin với khách hàng (trên ứng dụng Telegram điện thoại/máy tính), AI Agent sẽ ngay lập tức tự động nhường quyền và giữ yên lặng để không làm gián đoạn cuộc trò chuyện.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Phát Hiện Người Thật Trả Lời Thủ Công (Human Outgoing Interception)",
+                "desc": "Theo dõi các tin nhắn đi (outgoing) phát xuất từ chủ tài khoản. Khi phát hiện người thật nhắn tin thủ công cho khách, hệ thống tự động gán nhãn status='needs_human' cho cuộc hội thoại đó.",
+                "tag": "AI Human Coexistence"
+            },
+            {
+                "type": "improvement",
+                "title": "Phân Biệt Tin Nhắn Từ AI Script vs Tin Nhắn Từ Người Thật",
+                "desc": "Sử dụng bộ nhớ theo dõi _pending_ai_sends để phân biệt chính xác đâu là tin nhắn do AI Agent gửi và đâu là tin nhắn do chủ tài khoản tự gõ bằng tay.",
+                "tag": "Telethon Event Engine"
+            }
+        ]
+    },
+    {
         "version": "v2.9.0",
         "date": "03/08/2026",
         "title": "🤖 Hệ Thống Multi-AI-Agent, 9Router Local Proxy & Dynamic Fallback Tự Động",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Phát hành hệ thống Quản lý Đa AI Agents chuyên biệt cho sales/BD, tích hợp kết nối 9Router local proxy, tự động xử lý định dạng Telegram HTML, phản hồi đa ngôn ngữ theo khách hàng và luồng Fallback đa tầng 24/7.",
         "changes": [
             {

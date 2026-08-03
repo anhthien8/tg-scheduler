@@ -38,6 +38,14 @@ _handler_removers: dict[int, tuple[Any, Any]] = {}
 _seen: set[tuple[int, int, int]] = set()
 _MAX_SEEN = 5000  # cap to prevent unbounded growth
 
+# Pending AI sends set: (account_id, user_id)
+_pending_ai_sends: set[tuple[int, int]] = set()
+
+
+async def _remove_ai_send_after_delay(account_id: int, user_id: int):
+    await asyncio.sleep(5)
+    _pending_ai_sends.discard((account_id, user_id))
+
 
 def sanitize_telegram_html(text: str) -> str:
     if not text:
@@ -111,7 +119,11 @@ def _make_handler(account_id: int):
                 peer = await event.get_input_chat()
                 peer_user_id = getattr(peer, "user_id", None) or getattr(event, "chat_id", None)
                 if peer_user_id and peer_user_id != me.id:
-                    logger.info("[AIFollowUp] 🛑 Human admin manually sent message to user %d — auto-pausing AI Agent (status='needs_human')", peer_user_id)
+                    if (account_id, peer_user_id) in _pending_ai_sends:
+                        # This outgoing send was initiated by AI script, skip auto-pause
+                        _pending_ai_sends.discard((account_id, peer_user_id))
+                        return
+                    logger.info("[AIFollowUp] 🛑 Human admin manually typed message to user %d (acc=%d) — auto-pausing AI Agent (status='needs_human')", peer_user_id, account_id)
                     await db.update_followup_chat_status(account_id, peer_user_id, "needs_human")
                 return
         except Exception as _me_err:
@@ -345,7 +357,9 @@ def _make_handler(account_id: int):
                                         delay = random.uniform(6.0, 15.0)
                                         logger.info("[AIFollowUp] Simulating human typing for %.1fs before sending AI reply to user %d...", delay, sender_id)
                                         await asyncio.sleep(delay)
+                                        _pending_ai_sends.add((account_id, sender_id))
                                         await tg.send_text_message(account_id, sender_id, ai_reply)
+                                        asyncio.create_task(_remove_ai_send_after_delay(account_id, sender_id))
                                         await db.append_followup_chat_message(account_id, sender_id, "assistant", ai_reply, inc_reply_count=True)
 
                                     if new_status != "active":
@@ -464,9 +478,9 @@ def _register_account(account_id: int) -> None:
     _unregister_account(account_id)
 
     handler_fn = _make_handler(account_id)
-    client.add_event_handler(handler_fn, events.NewMessage(incoming=True))
+    client.add_event_handler(handler_fn, events.NewMessage())
     _handler_removers[account_id] = (client, handler_fn)
-    logger.info("[Inbox] acc=%d: reply handler registered", account_id)
+    logger.info("[Inbox] acc=%d: reply handler registered (incoming + outgoing human interception)", account_id)
 
 
 def _unregister_account(account_id: int) -> None:
@@ -475,7 +489,7 @@ def _unregister_account(account_id: int) -> None:
     if entry:
         client, handler_fn = entry
         try:
-            client.remove_event_handler(handler_fn, events.NewMessage(incoming=True))
+            client.remove_event_handler(handler_fn, events.NewMessage())
         except Exception:
             pass
 
