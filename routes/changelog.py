@@ -8,11 +8,45 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.0.0",
+        "date": "03/08/2026",
+        "title": "💎 Phân Loại Lead Tier A/B/C, Intent Scoring & Drip Follow-Up (Crypto BD Power Pack)",
+        "is_latest": True,
+        "badge": "MAJOR RELEASE",
+        "summary": "Nâng cấp toàn bộ hệ thống AI Agent chuyên sâu cho Business Development sàn Crypto: tự động chấm điểm Intent (0-100), xếp hạng Lead Tier A/B/C, tóm tắt bối cảnh nhu cầu khách hàng và tự động chạy chuỗi Drip Follow-up sau 48h im lặng.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Phân Loại Lead Tier A/B/C & Intent Score 0-100",
+                "desc": "Tự động trích xuất intent_score và phân hạng Tier A (Hot Lead), Tier B, Tier C trực tiếp từ cuộc hội thoại để BD người thật tập trung chốt deal lớn.",
+                "tag": "Lead Qualification"
+            },
+            {
+                "type": "feature",
+                "title": "Agent Mẫu '🤖 Crypto Exchange BD Pro'",
+                "desc": "Cung cấp sẵn Agent mẫu với Knowledge Base thương lượng hoa hồng RevShare 50%-75%, ma trận phí Maker 0.02%/Taker 0.06% và kịch bản chốt meeting.",
+                "tag": "AI Presets"
+            },
+            {
+                "type": "feature",
+                "title": "Tự Động Bám Đổi (Drip Follow-up Engine)",
+                "desc": "Tự động quét các cuộc trò chuyện bị ngưng sau 48h/120h để gửi tin nhắn gợi mở sự kiện HOT ($50k pool, VIP discounts) giúp hồi sinh Lead im lặng.",
+                "tag": "Lead Nurturing"
+            },
+            {
+                "type": "ui",
+                "title": "Giao Diện AI Context Summary & Tier Badges",
+                "desc": "Hiển thị Badge ⭐ Tier A (Hot), thanh điểm Intent Score và nút '📋 Tóm Tắt Context' giúp BD người thật nắm ngay tâm lý khách trong 3 giây.",
+                "tag": "Dashboard UX/UI"
+            }
+        ]
+    },
+    {
         "version": "v2.9.3",
         "date": "03/08/2026",
         "title": "🤖 Tự Động Né & Bỏ Qua Telegram Bots (Telegram Bot Auto-Ignorance)",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Tự động phát hiện và bỏ qua toàn bộ tin nhắn từ Telegram Bot (SpamBot, InfoBot, BotFather, RoseBot...), ngăn chặn tuyệt đối tình trạng AI Agent tự nhắn tin/trả lời bot.",
         "changes": [
             {

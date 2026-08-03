@@ -351,9 +351,13 @@ def _make_handler(account_id: int):
 
                             format_rules = (
                                 "\n\n--- CRITICAL RESPONSE INSTRUCTIONS ---\n"
-                                "1. DYNAMIC LANGUAGE MATCHING MANDATE: Automatically detect the language used by the user in their message (e.g., Chinese/中文, English, Vietnamese, Russian, Spanish, etc.) and ALWAYS reply in that EXACT SAME LANGUAGE! If the user speaks Chinese (中文), reply in fluent Chinese (中文). If English, reply in English. Match their language naturally.\n"
-                                "2. TELEGRAM FORMATTING: Do NOT output literal '\\n' text characters. Use actual line breaks. Do NOT use raw markdown like **bold**. Use standard HTML <b>bold</b> or <i>italic</i> for formatting, or write clean plain text.\n"
-                                "3. KNOWLEDGE BASE ACCURACY: If the user asks about policies, rates, commissions, benefits, or exchange details, ALWAYS extract and cite specific, exact numbers and facts directly from the KNOWLEDGE BASE section below."
+                                "1. DYNAMIC LANGUAGE MATCHING MANDATE: Automatically detect the language used by the user in their message (e.g., Chinese/中文, English, Vietnamese, Russian, Spanish, etc.) and ALWAYS reply in that EXACT SAME LANGUAGE!\n"
+                                "2. TELEGRAM FORMATTING: Do NOT output literal '\\n' text characters. Use actual line breaks. Do NOT use raw markdown like **bold**. Use standard HTML <b>bold</b> or <i>italic</i> for formatting.\n"
+                                "3. KNOWLEDGE BASE ACCURACY: If the user asks about policies, rates, commissions, benefits, or exchange details, ALWAYS extract and cite specific, exact numbers and facts directly from the KNOWLEDGE BASE section below.\n"
+                                "4. LEAD EVALUATION METRICS: At the VERY END of your response, append a hidden metadata JSON tag on its own line: [METRICS: {\"intent_score\": <0-100>, \"lead_tier\": \"<Tier A|Tier B|Tier C>\", \"summary\": \"<1-sentence lead need summary>\"}].\n"
+                                "   - Tier A (Intent 80-100): High volume trader/KOL (>10k subs or >$5M vol), ready for meeting, negotiating terms.\n"
+                                "   - Tier B (Intent 40-79): Interested in exchange benefits, asking detailed questions.\n"
+                                "   - Tier C (Intent 0-39): Casual question, low interest, or greeting."
                             )
                             combined_prompt = sys_prompt + format_rules
                             if kb and kb.strip():
@@ -383,6 +387,28 @@ def _make_handler(account_id: int):
                                         new_status = "onboarded"
                                         ai_reply = ai_reply.replace("[ONBOARDED]", "").strip()
 
+                                    # Extract Lead Evaluation Metrics if present
+                                    intent_score = 30
+                                    lead_tier = "Tier C"
+                                    summary_text = ""
+                                    if "[METRICS:" in ai_reply:
+                                        try:
+                                            metrics_match = re.search(r'\[METRICS:\s*({.*?})\]', ai_reply, re.DOTALL)
+                                            if metrics_match:
+                                                metrics_json = json.loads(metrics_match.group(1))
+                                                intent_score = int(metrics_json.get("intent_score", 30))
+                                                lead_tier = str(metrics_json.get("lead_tier", "Tier C"))
+                                                summary_text = str(metrics_json.get("summary", ""))
+                                                ai_reply = re.sub(r'\[METRICS:\s*({.*?})\]', '', ai_reply, flags=re.DOTALL).strip()
+                                        except Exception as ex_m:
+                                            logger.debug("[AIFollowUp] Error parsing METRICS tag: %s", ex_m)
+
+                                    # Update lead metrics in DB
+                                    await db.update_followup_lead_metrics(account_id, sender_id, intent_score, lead_tier, summary_text)
+
+                                    if intent_score >= 80 or lead_tier == "Tier A":
+                                        logger.info("🚨 [HOT LEAD ALERT] User %d (acc=%d) classified as Tier A Hot Lead! Intent Score: %d | Summary: %s", sender_id, account_id, intent_score, summary_text)
+
                                     # Sanitize and convert AI output to Telegram-compatible HTML
                                     ai_reply = sanitize_telegram_html(ai_reply)
 
@@ -397,7 +423,7 @@ def _make_handler(account_id: int):
 
                                     if new_status != "active":
                                         await db.update_followup_chat_status(account_id, sender_id, new_status)
-                                    logger.info("[AIFollowUp] AI reply sent to user %d", sender_id)
+                                    logger.info("[AIFollowUp] AI reply sent to user %d (Tier: %s, Score: %d)", sender_id, lead_tier, intent_score)
                                     return  # Managed by AI Sales Agent, skip legacy rules
 
         except Exception as ex_ai:
@@ -557,5 +583,87 @@ def register_account(account_id: int) -> None:
 
 
 def unregister_account(account_id: int) -> None:
-    """Public helper: call when an account logs out."""
+    """
+    Public helper: call this when an account logs out or is deleted.
+    """
     _unregister_account(account_id)
+
+
+async def process_drip_followups() -> dict:
+    """Scan inactive followup chats (>48h) and send automated value-add drip messages."""
+    import aiosqlite
+    sent_count = 0
+    errors = []
+    async with db.get_db() as db_conn:
+        db_conn.row_factory = aiosqlite.Row
+        cursor = await db_conn.execute("""
+            SELECT * FROM ai_followup_chats
+            WHERE status = 'active'
+              AND (lead_tier IN ('Tier A', 'Tier B') OR intent_score >= 50)
+              AND last_drip_stage < 2
+              AND datetime(updated_at) <= datetime('now', '-48 hours')
+            ORDER BY updated_at ASC
+            LIMIT 20
+        """)
+        chats = [dict(r) for r in await cursor.fetchall()]
+
+    for chat in chats:
+        account_id = chat["account_id"]
+        user_id = chat["user_id"]
+        stage = chat.get("last_drip_stage", 0) + 1
+
+        client = tg.get_client(account_id)
+        if not client:
+            continue
+
+        account_obj = await db.get_account(account_id)
+        agent_id = account_obj.get("ai_agent_id") if account_obj else None
+        agent_config = await db.get_ai_agent(agent_id) if agent_id else None
+
+        if stage == 1:
+            drip_instruction = (
+                "The user has not replied in 2 days. Send a friendly, non-pushy follow-up (1-2 short sentences) "
+                "mentioning our latest crypto trading competition with $50,000 prize pool and VIP Maker fee discounts."
+            )
+        else:
+            drip_instruction = (
+                "The user has been silent for 5 days. Send a courteous, brief final check-in asking if they need "
+                "any customized rate proposal or meeting link before closing this conversation."
+            )
+
+        sys_p = agent_config.get("system_prompt", "") if agent_config else ""
+        combined = sys_p + f"\n\n[DRIP FOLLOWUP STAGE {stage} INSTRUCTION]: " + drip_instruction
+
+        try:
+            history = json.loads(chat.get("history_json", "[]"))
+            ai_provider = agent_config.get("provider", "gemini") if agent_config else "gemini"
+            ai_keys = agent_config.get("api_keys_json", []) if agent_config else []
+            if isinstance(ai_keys, str):
+                ai_keys = json.loads(ai_keys)
+            
+            if not ai_keys:
+                continue
+
+            kwargs = {}
+            if ai_provider == "openai_compatible" and agent_config:
+                if agent_config.get("base_url"): kwargs["base_url"] = agent_config["base_url"]
+                if agent_config.get("model"): kwargs["model"] = agent_config["model"]
+
+            msg = await ai_rmx.generate_chat_response(history[-5:], combined, ai_provider, ai_keys, **kwargs)
+            if msg:
+                msg = sanitize_telegram_html(msg)
+                await tg.send_text_message(account_id, user_id, msg)
+                await db.append_followup_chat_message(account_id, user_id, "assistant", msg, inc_reply_count=True)
+                
+                async with db.get_db() as db_conn2:
+                    await db_conn2.execute(
+                        "UPDATE ai_followup_chats SET last_drip_stage = ?, updated_at = datetime('now') WHERE account_id = ? AND user_id = ?",
+                        (stage, account_id, user_id)
+                    )
+                    await db_conn2.commit()
+                sent_count += 1
+        except Exception as e:
+            logger.error("[DripEngine] Failed drip for user %d: %s", user_id, e)
+            errors.append(str(e))
+
+    return {"processed": len(chats), "sent": sent_count, "errors": errors}

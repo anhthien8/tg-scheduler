@@ -679,6 +679,19 @@ async def init_db():
         except Exception:
             pass
 
+        # Migrations for Crypto BD Lead Metrics & Drip stage in ai_followup_chats
+        for col_name, col_def in [
+            ("intent_score", "INTEGER DEFAULT 0"),
+            ("lead_tier", "TEXT DEFAULT 'Tier C'"),
+            ("summary", "TEXT DEFAULT ''"),
+            ("last_drip_stage", "INTEGER DEFAULT 0"),
+            ("last_user_message_at", "TEXT DEFAULT (datetime('now'))")
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE ai_followup_chats ADD COLUMN {col_name} {col_def}")
+            except Exception:
+                pass
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS ai_agents (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3760,6 +3773,23 @@ async def update_followup_chat_status(account_id: int, user_id: int, status: str
             SET status = ?, updated_at = datetime('now')
             WHERE account_id = ? AND user_id = ?
         """, (status, account_id, user_id))
+        await db.commit()
+        return True
+
+
+async def update_followup_lead_metrics(
+    account_id: int,
+    user_id: int,
+    intent_score: int,
+    lead_tier: str,
+    summary: str
+) -> bool:
+    async with get_db() as db:
+        await db.execute("""
+            UPDATE ai_followup_chats
+            SET intent_score = ?, lead_tier = ?, summary = ?, updated_at = datetime('now')
+            WHERE account_id = ? AND user_id = ?
+        """, (intent_score, lead_tier, summary, account_id, user_id))
         await db.commit()
         return True
 

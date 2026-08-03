@@ -87,9 +87,54 @@ async def _get_system_ai_config():
     return ai_provider, ai_keys, kwargs
 
 
+CRYPTO_BD_DEFAULT_PROMPT = """Bạn là Senior Business Development Manager (BD Manager) của Sàn Giao Dịch Crypto WEEX Exchange.
+Phong cách giao tiếp: Chuyên nghiệp, am hiểu thị trường Crypto (Futures, Spot, Leverage), đàm phán tự tin nhưng lịch sự, tự nhiên như người thật đang nhắn tin trên Telegram.
+
+Nhiệm vụ chính:
+1. Chào hỏi và tìm hiểu quy mô đối tác (KOL, Channel Admin, Trader Group, Partner).
+2. Trả lời các câu hỏi về Phí giao dịch (Maker/Taker), Tỷ lệ chia sẻ doanh thu (RevShare), Quỹ hỗ trợ Marketing & Milestone Payments.
+3. Đánh giá quy mô Volume/Cộng đồng và xếp hạng đối tác (Tier A / Tier B / Tier C).
+4. Khéo léo chốt lịch hẹn Meeting / Tạo Group Telegram làm việc trực tiếp với Trưởng phòng BD."""
+
+CRYPTO_BD_DEFAULT_KB = """--- WEEX EXCHANGE PARTNERSHIP PROGRAM ---
+1. Phí Giao Dịch Cơ Bản:
+   - Maker Fee: 0.02%
+   - Taker Fee: 0.06%
+
+2. Mô Hình Hoa Hồng Partnership:
+   - Revenue Share: 50% - 75% tùy Volume hàng tháng.
+   - Tier 1 (Vol > $10M/tháng): RevShare 70% - 75% + Performance Marketing Fund $2,000 - $5,000/tháng + Hỗ trợ Event riêng.
+   - Tier 2 (Vol $2M - $10M/tháng): RevShare 60% - 65% + MKT Fund $500 - $1,500/tháng.
+   - Tier 3 (Vol < $2M/tháng): RevShare 50% - 55%.
+
+3. Ưu Điểm Nổi Bật Của WEEX:
+   - Zero Slippage (Không trượt giá lệnh Futures).
+   - Tốc độ khớp lệnh VIP API latency < 10ms.
+   - Hỗ trợ Quỹ bảo hiểm người dùng $100,000,000.
+   - Nạp rút siêu tốc 24/7, không giữ tiền.
+
+4. Hướng Dẫn Chốt Hẹn:
+   - Nếu đối tác có Volume > $5M hoặc Channel > 10k Subs: Hãy đề xuất họp Cal.com hoặc tạo Group Telegram riêng để chốt DEAL tùy chỉnh."""
+
+
 @router.get("")
 async def list_agents():
     agents = await db.get_all_ai_agents(active_only=True)
+    if not agents:
+        default_agent = {
+            "name": "🤖 Crypto Exchange BD Pro",
+            "description": "Agent BD chuyên nghiệp cho sàn Crypto, hỗ trợ tính phí, đàm phán RevShare & phân loại Lead Tier A/B/C.",
+            "avatar_emoji": "💎",
+            "provider": "gemini",
+            "system_prompt": CRYPTO_BD_DEFAULT_PROMPT,
+            "knowledge_base": CRYPTO_BD_DEFAULT_KB,
+            "tone": "professional",
+            "max_replies": 50,
+            "handover_keywords": ["gặp admin", "tạo group", "họp trực tiếp", "sàn khác", "thương lượng"]
+        }
+        await db.create_ai_agent(default_agent)
+        agents = await db.get_all_ai_agents(active_only=True)
+
     for agent in agents:
         agent["campaign_count"] = await db.count_campaigns_by_agent(agent["id"])
     return {"agents": agents}

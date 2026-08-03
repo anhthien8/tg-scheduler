@@ -86,7 +86,7 @@ async def get_chats(
 @router.post("/chats/{account_id}/{user_id}/status")
 async def update_chat_status(account_id: int, user_id: int, req: UpdateChatStatusRequest):
     """Update status of a specific follow-up chat (e.g. pause AI to take over manually)."""
-    valid_statuses = ("active", "paused_admin", "onboarded", "needs_human")
+    valid_statuses = ("active", "paused_admin", "onboarded", "needs_human", "bot_ignored")
     if req.status not in valid_statuses:
         raise HTTPException(status_code=400, detail=f"Trạng thái không hợp lệ. Chọn 1 trong: {valid_statuses}")
 
@@ -94,3 +94,27 @@ async def update_chat_status(account_id: int, user_id: int, req: UpdateChatStatu
     if not ok:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
     return {"status": "ok", "message": f"Đã chuyển trạng thái sang '{req.status}'"}
+
+
+@router.post("/trigger-drip")
+async def trigger_drip_followup():
+    """Trigger automated Drip Follow-up for inactive chats (>48h)."""
+    import dm_reply_tracker
+    res = await dm_reply_tracker.process_drip_followups()
+    return {"status": "ok", "result": res}
+
+
+@router.get("/chats/{account_id}/{user_id}/summary")
+async def get_chat_summary(account_id: int, user_id: int):
+    """Get context summary and lead tier metrics for a chat."""
+    chat = await db.get_followup_chat(account_id, user_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    return {
+        "user_id": user_id,
+        "account_id": account_id,
+        "lead_tier": chat.get("lead_tier", "Tier C"),
+        "intent_score": chat.get("intent_score", 0),
+        "summary": chat.get("summary", "Chưa có tóm tắt nhu cầu khách hàng."),
+        "status": chat.get("status", "active")
+    }

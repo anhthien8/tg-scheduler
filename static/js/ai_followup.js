@@ -104,7 +104,8 @@ const AIFollowUp = {
       active: '<span class="badge badge-blue">🤖 AI Active</span>',
       needs_human: '<span class="badge badge-red" style="animation:pulse 1.5s infinite">⚠️ Cần Người Thật</span>',
       onboarded: '<span class="badge badge-green">✅ Onboarded</span>',
-      paused_admin: '<span class="badge" style="background:var(--text2)">⏸ Tắt AI (Handover)</span>'
+      paused_admin: '<span class="badge" style="background:var(--text2)">⏸ Tắt AI (Handover)</span>',
+      bot_ignored: '<span class="badge" style="background:rgba(239,68,68,0.2);color:#f87171">🚫 Ignored Bot</span>'
     };
 
     container.innerHTML = chats.map(c => {
@@ -112,21 +113,35 @@ const AIFollowUp = {
       const statusBadge = badgeMap[c.status] || `<span class="badge">${c.status}</span>`;
       const lastUpdated = c.updated_at ? new Date(c.updated_at).toLocaleString('vi-VN') : 'N/A';
 
+      const tier = c.lead_tier || 'Tier C';
+      const score = c.intent_score || 0;
+      const tierBadge = tier === 'Tier A' ? '<span class="badge" style="background:rgba(245,158,11,0.2);border:1px solid rgba(245,158,11,0.5);color:#fbbf24;font-weight:700">⭐ Tier A (Hot)</span>' :
+                        (tier === 'Tier B' ? '<span class="badge" style="background:rgba(59,130,246,0.18);color:#60a5fa">🔷 Tier B</span>' : '<span class="badge" style="background:rgba(156,163,175,0.15);color:#9ca3af">⚪ Tier C</span>');
+
       const jsonStr = JSON.stringify(c.history || []).replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+      const summaryEsc = (c.summary || 'Chưa có tóm tắt.').replace(/'/g, "&apos;").replace(/"/g, "&quot;");
 
       return `
         <tr>
           <td>
-            <strong>${uName}</strong>
-            <div style="font-size:11px;color:var(--text2)">ID: ${c.user_id}</div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <strong>${uName}</strong>
+              ${tierBadge}
+            </div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">ID: ${c.user_id} • Acc #${c.account_id}</div>
           </td>
-          <td>Acc #${c.account_id}</td>
+          <td>
+            <div style="font-size:11px;font-weight:600;color:var(--text1)">Intent: ${score}%</div>
+            <div style="width:70px;height:5px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;margin-top:3px">
+              <div style="width:${Math.min(100, Math.max(0, score))}%;height:100%;background:${score >= 80 ? '#fbbf24' : (score >= 50 ? '#3b82f6' : '#9ca3af')}"></div>
+            </div>
+          </td>
           <td>${c.reply_count} câu</td>
           <td>${statusBadge}</td>
           <td style="font-size:12px;color:var(--text2)">${lastUpdated}</td>
           <td>
-            <div style="display:flex;gap:6px">
-              <button class="btn btn-sm" style="background:var(--card-hover)" onclick="AIFollowUp.openHistoryModal('${uName}', ${c.account_id}, ${c.user_id}, '${c.status}', ${jsonStr})">💬 Xem Chat</button>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn btn-sm" style="background:var(--card-hover)" onclick="AIFollowUp.openHistoryModal('${uName}', ${c.account_id}, ${c.user_id}, '${c.status}', ${jsonStr}, '${summaryEsc}', '${tier}', ${score})">💬 Xem Chat</button>
               ${c.status === 'active' ? `
                 <button class="btn btn-sm btn-warning" onclick="AIFollowUp.updateStatus(${c.account_id}, ${c.user_id}, 'paused_admin')">⏸ Chat Tay</button>
               ` : `
@@ -156,17 +171,28 @@ const AIFollowUp = {
     }
   },
 
-  openHistoryModal(userName, accountId, userId, currentStatus, history) {
+  openHistoryModal(userName, accountId, userId, currentStatus, history, summaryText = '', leadTier = 'Tier C', intentScore = 0) {
     const modal = document.getElementById('aifu-history-modal');
     if (!modal) return;
 
     (document.getElementById('aifu-modal-title') || me_dummy).textContent = `Lịch sử chat với ${userName} (Acc #${accountId})`;
 
     const historyBox = document.getElementById('aifu-modal-chat-box');
+
+    const summaryBanner = `
+      <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(99,102,241,0.25);border-radius:10px;padding:12px 14px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:700;color:#818cf8">📋 TÓM TẮT BỐI CẢNH (AI CONTEXT SUMMARY)</div>
+          <div style="font-size:11px;font-weight:600;color:${intentScore >= 80 ? '#fbbf24' : '#60a5fa'}">${leadTier} • Intent Score: ${intentScore}%</div>
+        </div>
+        <div style="font-size:13px;color:var(--text1);line-height:1.4">${summaryText || 'Chưa có tóm tắt nhu cầu khách hàng.'}</div>
+      </div>
+    `;
+
     if (!history || history.length === 0) {
-      historyBox.innerHTML = '<div style="text-align:center;color:var(--text2);padding:20px">Chưa có tin nhắn nào</div>';
+      historyBox.innerHTML = summaryBanner + '<div style="text-align:center;color:var(--text2);padding:20px">Chưa có tin nhắn nào</div>';
     } else {
-      historyBox.innerHTML = history.map(msg => {
+      historyBox.innerHTML = summaryBanner + history.map(msg => {
         const isUser = msg.role === 'user';
         const bg = isUser ? 'rgba(59, 130, 246, 0.15)' : 'rgba(139, 92, 246, 0.15)';
         const border = isUser ? 'rgba(59, 130, 246, 0.3)' : 'rgba(139, 92, 246, 0.3)';
