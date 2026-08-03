@@ -51,7 +51,7 @@ const AIAgents = {
               <span class="ai-agent-provider">🤖 Custom Agent</span>
             </div>
             <div class="ai-agent-status ${campCount > 0 ? 'active' : ''}">
-              ${campCount > 0 ? `${campCount} chiến dịch` : 'Chưa dùng'}
+              ${campCount > 0 ? `🟢 ${campCount} chiến dịch` : '⚪ Chưa dùng'}
             </div>
           </div>
           ${agent.description ? `<p class="ai-agent-desc">${this._esc(agent.description)}</p>` : ''}

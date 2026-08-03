@@ -3902,7 +3902,7 @@ async def duplicate_ai_agent(agent_id: int) -> int | None:
 async def count_campaigns_by_agent(agent_id: int) -> int:
     async with get_db() as db:
         cursor = await db.execute(
-            "SELECT COUNT(*) FROM dm_campaigns WHERE ai_agent_id = ? AND status IN ('running', 'draft', 'scheduled')",
+            "SELECT COUNT(*) FROM dm_campaigns WHERE ai_agent_id = ?",
             (agent_id,)
         )
         row = await cursor.fetchone()

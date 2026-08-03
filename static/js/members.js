@@ -966,6 +966,9 @@ const Members = {
     (document.getElementById('cmp-daily-limit-premium') || me_dummy).value = '60';
     (document.getElementById('cmp-daily-limit-normal') || me_dummy).value = '10';
     (document.getElementById('cmp-ai-remix') || me_dummy).checked = false;
+    if (typeof AIAgents !== 'undefined' && AIAgents.populateAgentDropdown) {
+      AIAgents.populateAgentDropdown('cmp-ai-agent', null);
+    }
     const excludePrevEl = document.getElementById('cmp-exclude-previous');
     if (excludePrevEl) excludePrevEl.checked = true;
     (document.getElementById('cmp-messages-list') || me_dummy).innerHTML = '';
