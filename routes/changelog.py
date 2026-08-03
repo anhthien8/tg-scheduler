@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v2.9.3",
+        "date": "03/08/2026",
+        "title": "🤖 Tự Động Né & Bỏ Qua Telegram Bots (Telegram Bot Auto-Ignorance)",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Tự động phát hiện và bỏ qua toàn bộ tin nhắn từ Telegram Bot (SpamBot, InfoBot, BotFather, RoseBot...), ngăn chặn tuyệt đối tình trạng AI Agent tự nhắn tin/trả lời bot.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Bộ Lọc Nhận Diện Telegram Bot Tự Động",
+                "desc": "Bổ sung hàm is_bot_account kiểm tra thuộc tính .bot, đuôi username '%bot', ID hệ thống (777000, 178220800...) để chặn đứng tương tác với Bot ngay tại tầng Inbox.",
+                "tag": "AI Safety & Anti-Spam"
+            },
+            {
+                "type": "fix",
+                "title": "Dọn Dẹp Phiên Chat Bot Hiện Có",
+                "desc": "Tự động chuyển các phiên trò chuyện hiện có với bot sang trạng thái 'bot_ignored' trong cơ sở dữ liệu để đảm bảo AI Agent không bao giờ phản hồi.",
+                "tag": "Database Cleanup"
+            }
+        ]
+    },
+    {
         "version": "v2.9.2",
         "date": "03/08/2026",
         "title": "🎨 Tái Thiết Kế Giao Diện Thẻ Tài Khoản Telegram (Account Cards Redesign)",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Nâng cấp giao diện danh sách Telegram Accounts theo chuẩn Glassmorphic hiện đại, sắp xếp khoa học thông tin Avatar, Badge trạng thái, Giới hạn DM/ngày và Khung chọn AI Agent phụ trách.",
         "changes": [
             {

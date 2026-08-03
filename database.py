@@ -669,6 +669,16 @@ async def init_db():
             ON ai_followup_chats(account_id, user_id)
         """)
 
+        # Auto-pause / ignore any existing Telegram bot chats in ai_followup_chats
+        try:
+            await db.execute("""
+                UPDATE ai_followup_chats 
+                SET status = 'bot_ignored' 
+                WHERE LOWER(username) LIKE '%bot' OR LOWER(name) LIKE '%bot%' OR user_id IN (777000, 178220800, 4244000, 4244001, 1088515515)
+            """)
+        except Exception:
+            pass
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS ai_agents (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,

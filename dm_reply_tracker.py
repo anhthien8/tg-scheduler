@@ -47,6 +47,33 @@ async def _remove_ai_send_after_delay(account_id: int, user_id: int):
     _pending_ai_sends.discard((account_id, user_id))
 
 
+def is_bot_account(sender) -> bool:
+    """Return True if the Telegram sender entity is a Telegram Bot or official service bot account."""
+    if not sender:
+        return False
+    
+    # 1. Telethon User.bot attribute
+    if getattr(sender, "bot", False) or getattr(sender, "is_bot", False):
+        return True
+    
+    # 2. Check user ID for known Telegram system bots / service IDs
+    sender_id = getattr(sender, "id", 0) or 0
+    if sender_id in (777000, 178220800, 4244000, 4244001, 1088515515) or (0 < sender_id < 1000):
+        return True
+    
+    # 3. Check username ending in 'bot' or starting with 'bot'
+    username = (getattr(sender, "username", "") or "").strip().lower()
+    if username and (username.endswith("bot") or username.endswith("_bot") or username.startswith("bot_")):
+        return True
+
+    # 4. Check display name for common bot markers
+    first_name = (getattr(sender, "first_name", "") or "").lower()
+    if "spambot" in first_name or "infobot" in first_name or "telegram bot" in first_name:
+        return True
+
+    return False
+
+
 def sanitize_telegram_html(text: str) -> str:
     if not text:
         return ""
@@ -104,6 +131,12 @@ def _make_handler(account_id: int):
 
         sender = await event.get_sender()
         if sender is None:
+            return
+
+        # ── TELEGRAM BOT IGNORANCE MANDATE ──
+        # Skip all message logging, tracking, auto-replies and AI Agent processing if sender is a Bot
+        if is_bot_account(sender):
+            logger.info("[Inbox] 🤖 Sender @%s (id=%d) is a Telegram Bot — skipping message processing & AI replies", getattr(sender, "username", "?"), getattr(sender, "id", 0))
             return
 
         # Check if message is from ourselves (outgoing from human owner/admin)
