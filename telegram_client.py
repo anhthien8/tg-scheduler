@@ -256,6 +256,32 @@ async def start_client(account_id: int) -> bool:
         return False
 
 
+async def ensure_connected(client: "TelegramClient", account_id: int, timeout: float = 10.0) -> bool:
+    """
+    Ensure a Telethon client is connected. If not, attempt to reconnect once.
+    Returns True if the client is connected (or successfully reconnected), False otherwise.
+    This prevents transient disconnects from permanently marking accounts as offline.
+    """
+    if client is None:
+        return False
+    if client.is_connected():
+        return True
+    logger.info(f"Account {account_id}: client disconnected, attempting auto-reconnect...")
+    try:
+        await asyncio.wait_for(client.connect(), timeout=timeout)
+        if client.is_connected():
+            logger.info(f"Account {account_id}: auto-reconnect successful ✓")
+            return True
+        logger.warning(f"Account {account_id}: connect() called but still not connected")
+        return False
+    except asyncio.TimeoutError:
+        logger.warning(f"Account {account_id}: auto-reconnect timed out after {timeout}s")
+        return False
+    except Exception as e:
+        logger.warning(f"Account {account_id}: auto-reconnect failed: {e}")
+        return False
+
+
 async def reconnect_with_proxy(account_id: int, proxy_url: str | None) -> bool:
     """
     Disconnect existing client and reconnect with a new proxy.

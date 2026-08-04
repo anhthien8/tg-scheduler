@@ -466,8 +466,8 @@ async def _do_send_dm_with_fallback(
         if not client:
             logger.warning(f"[Watcher {watcher_id}] Account {acc_id} client not found, trying next")
             continue
-        if not client.is_connected():
-            logger.warning(f"[Watcher {watcher_id}] Account {acc_id} disconnected, trying next")
+        if not await tg.ensure_connected(client, acc_id):
+            logger.warning(f"[Watcher {watcher_id}] Account {acc_id} offline/unreachable, trying next")
             continue
 
         # Skip accounts that are in PeerFlood cooldown
@@ -753,8 +753,8 @@ async def _send_group_reply(
     await _aio.sleep(_rnd.uniform(1.5, 4.0))
 
     client = tg.get_client(used_dm_acc_id)
-    if not client or not client.is_connected():
-        logger.warning(f"[Watcher {watcher_id}] Group reply skipped — acc={used_dm_acc_id} not connected")
+    if not client or not await tg.ensure_connected(client, used_dm_acc_id):
+        logger.warning(f"[Watcher {watcher_id}] Group reply skipped — acc={used_dm_acc_id} offline/unreachable")
         return
     if _is_peerflood_blocked(used_dm_acc_id):
         logger.warning(f"[Watcher {watcher_id}] Group reply skipped — acc={used_dm_acc_id} PeerFlood blocked")
@@ -1138,7 +1138,7 @@ async def test_dm(watcher_id: int, target: str) -> dict:
 
     for acc_id in account_ids:
         client = tg.get_client(acc_id)
-        if not client or not client.is_connected():
+        if not client or not await tg.ensure_connected(client, acc_id):
             continue
         try:
             # Try numeric id first

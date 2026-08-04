@@ -1595,12 +1595,13 @@ async def _run_campaign(campaign_id: int):
                 account_idx += 1
 
                 c = tg.get_client(acc_id)
-                if not c or not c.is_connected():
-                    # Account offline → remove from rotation, retry with another
+                if not c or not await tg.ensure_connected(c, acc_id):
+                    # Account offline and cannot reconnect → remove from rotation
                     flooded_accounts.add(acc_id)
-                    logger.warning(f"[Campaign {campaign_id}] Account {acc_id} offline, loại khỏi danh sách gửi")
+                    logger.warning(f"[Campaign {campaign_id}] Account {acc_id} offline/unreachable, loại khỏi danh sách gửi")
                     await db.add_dm_campaign_log(campaign_id, acc_id, 0, None, "failed", f"Account {acc_id} offline")
                     continue  # Try next account in inner loop
+
 
                 # Daily DM limit check per account
                 limit_reached, dm_count, dm_limit = await db.is_account_dm_limit_reached(
