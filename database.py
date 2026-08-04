@@ -692,6 +692,17 @@ async def init_db():
             except Exception:
                 pass
 
+        # Auto-mark any chat as 'bot_ignored' if username contains 'bot'
+        try:
+            await db.execute("""
+                UPDATE ai_followup_chats
+                SET status = 'bot_ignored'
+                WHERE status != 'bot_ignored'
+                  AND (LOWER(username) LIKE '%bot%' OR LOWER(username) LIKE 'bot%')
+            """)
+        except Exception:
+            pass
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS ai_agents (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,

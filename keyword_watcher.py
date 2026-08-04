@@ -807,13 +807,15 @@ def _make_handler(watcher: dict):
                 logger.warning(f"[Watcher {watcher_id}] Could not resolve sender, skipping.")
                 return
 
-            if getattr(sender, "bot", False):
-                return
             if not hasattr(sender, "first_name"):  # It's a Channel, not a User
                 return
 
             user_id = sender.id
             username = getattr(sender, "username", None) or str(user_id)
+
+            if tg.is_bot_account(sender, username):
+                logger.info(f"[Watcher {watcher_id}] Skipped - sender @{username} (id={user_id}) is a Telegram Bot")
+                return
 
             # Exclusion list check (by username or numeric id)
             uname_lower = (getattr(sender, "username", None) or "").lower()

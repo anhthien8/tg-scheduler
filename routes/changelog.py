@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.0.3",
+        "date": "05/08/2026",
+        "title": "🛡️ Chặn Triệt Để 100% Tất Cả Các Loại Telegram Bot & Username Chứa 'bot'",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Nâng cấp bộ lọc bot đa tầng: kiểm tra thuộc tính .bot, chặn tất cả username/tên chứa từ 'bot' (case-insensitive) ở cả Keyword DM Watcher và Inbox AI Agent.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Bộ Lọc Telegram Bot Triệt Để (Strict Bot Filter)",
+                "desc": "Bổ sung hàm is_bot_account kiểm tra thuộc tính .bot, quét toàn bộ username chứa 'bot' (ví dụ: @...bot, @..._bot, @...bot_...), tên hiển thị chứa 'bot' và chặn ngay lập tức từ tầng Keyword Watcher đến Inbox AI Agent.",
+                "tag": "Bot Ignorance Guard"
+            },
+            {
+                "type": "feature",
+                "title": "Tự Động Dọn Dẹp Cơ Sở Dữ Liệu Bot",
+                "desc": "Tự động quét và chuyển trạng thái bot_ignored cho toàn bộ các cuộc hội thoại cũ có chứa chữ 'bot' trong username, đảm bảo AI Agent không bao giờ theo đuổi hay nhắn tin lại cho Bot.",
+                "tag": "Database Cleanup"
+            }
+        ]
+    },
+    {
         "version": "v3.0.2",
         "date": "04/08/2026",
         "title": "⚡ Tự Động Join Nhóm Cho Các Tài Khoản Gửi DM & Sửa Lỗi Modal 500 Error",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Tự động kích hoạt Join nhóm Telegram đối với tất cả tài khoản gửi tin nhắn chưa tham gia nhóm target. Khắc phục dứt điểm lỗi Internal Server Error khi tìm kiếm nhóm.",
         "changes": [
             {
