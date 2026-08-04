@@ -3156,9 +3156,12 @@ async def find_running_campaign_log_for_user(sender_user_id: int) -> dict | None
     """
     Find the most recent successful campaign log entry for a user
     where the associated campaign status is currently 'running'.
+    Falls back to any campaign (completed/paused) that has an ai_agent_id set,
+    so users who reply to finished campaigns still get AI follow-up.
     """
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
+        # 1. Prefer RUNNING campaign (highest priority)
         row = await (await db.execute("""
             SELECT l.campaign_id, l.template_variant_id, l.template_variant_index, c.ai_agent_id
             FROM dm_campaign_logs l
@@ -3166,7 +3169,18 @@ async def find_running_campaign_log_for_user(sender_user_id: int) -> dict | None
             WHERE l.target_user_id = ? AND l.status = 'success' AND c.status = 'running'
             ORDER BY l.sent_at DESC LIMIT 1
         """, (sender_user_id,))).fetchone()
+        if row:
+            return dict(row)
+        # 2. Fallback: any campaign (completed/paused) that has an AI agent configured
+        row = await (await db.execute("""
+            SELECT l.campaign_id, l.template_variant_id, l.template_variant_index, c.ai_agent_id
+            FROM dm_campaign_logs l
+            JOIN dm_campaigns c ON l.campaign_id = c.id
+            WHERE l.target_user_id = ? AND l.status = 'success' AND c.ai_agent_id IS NOT NULL
+            ORDER BY l.sent_at DESC LIMIT 1
+        """, (sender_user_id,))).fetchone()
         return dict(row) if row else None
+
 
 
 async def find_watcher_log_for_user(sender_user_id: int) -> dict | None:
