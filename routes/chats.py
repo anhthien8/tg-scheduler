@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 import asyncio
 import telegram_client as tg
+import database as db
 
 router = APIRouter(prefix="/api/chats", tags=["chats"])
 
@@ -13,18 +14,13 @@ router = APIRouter(prefix="/api/chats", tags=["chats"])
 async def get_chats(account_id: int = Query(1, description="Account ID to fetch chats for")):
     """List groups and channels for a specific account."""
     try:
-        chats = await tg.get_dialogs(account_id)
+        chats = await asyncio.wait_for(tg.get_dialogs(account_id), timeout=25.0)
         return {"chats": chats, "account_id": account_id}
+    except asyncio.TimeoutError:
+        return {"chats": [], "account_id": account_id, "error": "Request timed out"}
     except Exception as e:
-        # Fallback: try any connected account
-        for acc in await db.get_all_accounts():
-            if acc.get("is_logged_in"):
-                try:
-                    chats = await tg.get_dialogs(acc["id"])
-                    return {"chats": chats, "account_id": acc["id"]}
-                except Exception:
-                    pass
         return {"chats": [], "account_id": account_id, "error": str(e)}
+
 
 
 class LeaveChannelPayload(BaseModel):

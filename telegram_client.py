@@ -436,14 +436,17 @@ async def get_me(account_id: int) -> dict | None:
     return None
 
 
-async def get_dialogs(account_id: int) -> list:
+async def get_dialogs(account_id: int, timeout: float = 20.0) -> list:
     if not await is_authorized(account_id):
         return []
     client = _clients.get(account_id)
     if not client or not client.is_connected():
         return []
     try:
-        dialogs = await client.get_dialogs(limit=200)
+        dialogs = await asyncio.wait_for(client.get_dialogs(limit=200), timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning(f"Account {account_id} get_dialogs timed out after {timeout}s")
+        return []
     except Exception as e:
         logger.warning(f"Account {account_id} get_dialogs failed: {e}")
         return []
