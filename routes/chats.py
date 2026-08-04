@@ -12,8 +12,19 @@ router = APIRouter(prefix="/api/chats", tags=["chats"])
 @router.get("")
 async def get_chats(account_id: int = Query(1, description="Account ID to fetch chats for")):
     """List groups and channels for a specific account."""
-    chats = await tg.get_dialogs(account_id)
-    return {"chats": chats, "account_id": account_id}
+    try:
+        chats = await tg.get_dialogs(account_id)
+        return {"chats": chats, "account_id": account_id}
+    except Exception as e:
+        # Fallback: try any connected account
+        for acc in await db.get_all_accounts():
+            if acc.get("is_logged_in"):
+                try:
+                    chats = await tg.get_dialogs(acc["id"])
+                    return {"chats": chats, "account_id": acc["id"]}
+                except Exception:
+                    pass
+        return {"chats": [], "account_id": account_id, "error": str(e)}
 
 
 class LeaveChannelPayload(BaseModel):

@@ -380,8 +380,14 @@ async def get_me(account_id: int) -> dict | None:
 async def get_dialogs(account_id: int) -> list:
     if not await is_authorized(account_id):
         return []
-    client = _clients[account_id]
-    dialogs = await client.get_dialogs(limit=200)
+    client = _clients.get(account_id)
+    if not client or not client.is_connected():
+        return []
+    try:
+        dialogs = await client.get_dialogs(limit=200)
+    except Exception as e:
+        logger.warning(f"Account {account_id} get_dialogs failed: {e}")
+        return []
     result = []
     for d in dialogs:
         entity = d.entity
@@ -589,18 +595,66 @@ async def send_poll_message(account_id: int, chat_id: int, question: str, option
     except Exception as e:
         logger.error(f"Account {account_id}: send poll error: {e}")
         raise
-async def join_channel(account_id: int, channel_link: str) -> dict:
-    """Join a channel/group using its link or username."""
+async def join_channel(account_id: int, channel_link: str | int) -> dict:
+    """Join a channel/group using its link, username, or numeric chat_id."""
     client = _clients.get(account_id)
-    if not client:
-        return {"success": False, "error": "Account not found"}
+    if not client or not client.is_connected():
+        return {"success": False, "error": "Account not found or not connected"}
     try:
         from telethon.tl.functions.channels import JoinChannelRequest
-        entity = await client.get_entity(channel_link)
+        from telethon.tl.types import PeerChannel, PeerChat
+        
+        target = channel_link
+        if isinstance(target, str) and (target.isdigit() or target.startswith("-100") or (target.startswith("-") and target[1:].isdigit())):
+            try:
+                target = int(target)
+            except ValueError:
+                pass
+                
+        entity = None
+        try:
+            entity = await client.get_entity(target)
+        except Exception:
+            if isinstance(target, int):
+                clean_id = abs(target)
+                if str(clean_id).startswith("100"):
+                    clean_id = int(str(clean_id)[3:])
+                try:
+                    entity = await client.get_entity(PeerChannel(clean_id))
+                except Exception:
+                    entity = await client.get_entity(PeerChat(clean_id))
+            else:
+                raise Exception(f"Cannot resolve entity: {channel_link}")
+
         await client(JoinChannelRequest(entity))
-        return {"success": True, "title": getattr(entity, "title", channel_link)}
+        title = getattr(entity, "title", str(channel_link))
+        return {"success": True, "title": title}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        err_msg = str(e)
+        if "already a participant" in err_msg.lower() or "user_already_participant" in err_msg.lower():
+            return {"success": True, "title": "Đã tham gia nhóm trước đó"}
+        return {"success": False, "error": err_msg}
+
+
+async def auto_join_accounts_to_groups(account_ids: list[int], group_ids: list[int]) -> dict:
+    """
+    Auto-join all specified accounts into the specified groups.
+    """
+    results = []
+    for acc_id in account_ids:
+        client = _clients.get(acc_id)
+        if not client or not client.is_connected():
+            continue
+        for gid in group_ids:
+            res = await join_channel(acc_id, gid)
+            results.append({
+                "account_id": acc_id,
+                "group_id": gid,
+                "success": res.get("success", False),
+                "title": res.get("title", str(gid)),
+                "error": res.get("error", "")
+            })
+    return {"results": results}
 
 
 async def get_similar_channels_and_contacts(account_id: int, channel_link: str) -> list[dict]:

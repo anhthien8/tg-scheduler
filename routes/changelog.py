@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.0.2",
+        "date": "04/08/2026",
+        "title": "⚡ Tự Động Join Nhóm Cho Các Tài Khoản Gửi DM & Sửa Lỗi Modal 500 Error",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Tự động kích hoạt Join nhóm Telegram đối với tất cả tài khoản gửi tin nhắn chưa tham gia nhóm target. Khắc phục dứt điểm lỗi Internal Server Error khi tìm kiếm nhóm.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Auto-Join Nhóm Tự Động Hóa Toàn Diện",
+                "desc": "Tự động cho các tài khoản gửi DM join vào nhóm target khi tạo/sửa Keyword Rule hoặc khi quét được tin nhắn nhóm mà tài khoản chưa có mặt.",
+                "tag": "Auto-Join Engine"
+            },
+            {
+                "type": "fix",
+                "title": "Khắc Phục Lỗi Internal Server Error Modal",
+                "desc": "Bổ sung cơ chế fallback an toàn cho API get_chats, ngăn ngừa lỗi 500 khi tài khoản bị đứt kết nối hoặc không phản hồi.",
+                "tag": "API Reliability"
+            }
+        ]
+    },
+    {
         "version": "v3.0.1",
         "date": "03/08/2026",
         "title": "⏰ Tự Động Tiếp Quản Trả Lời Thay Người Thật Sau 60 Phút Trôi Qua (60m Human Timeout Auto-Resume)",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Tự động kích hoạt AI Agent tiếp quản lại phiên chat nếu người thật đã nhắn tin tiếp quản trước đó nhưng sau 60 phút người dùng nhắn lại mà người thật vẫn chưa phản hồi.",
         "changes": [
             {

@@ -40,6 +40,10 @@ async def list_watchers():
 async def create_watcher(payload: WatcherPayload):
     watcher_id = await db.create_watcher(payload.model_dump())
     await kw.reload_watcher(watcher_id)
+    # Auto-join sender accounts into required groups
+    if payload.sender_account_ids and payload.group_ids:
+        import asyncio
+        asyncio.create_task(tg.auto_join_accounts_to_groups(payload.sender_account_ids, payload.group_ids))
     return {"id": watcher_id, "message": "Watcher created"}
 
 
@@ -181,6 +185,9 @@ async def update_watcher(watcher_id: int, payload: WatcherPayload):
 
     if platform == "telegram":
         await kw.reload_watcher(watcher_id)
+        if payload.sender_account_ids and payload.group_ids:
+            import asyncio
+            asyncio.create_task(tg.auto_join_accounts_to_groups(payload.sender_account_ids, payload.group_ids))
     elif platform == "discord":
         try:
             import discord_watcher as dw
@@ -259,5 +266,14 @@ async def check_membership(payload: CheckMembershipPayload):
     Called when saving/editing a watcher rule to warn users.
     """
     result = await tg.check_accounts_in_groups(payload.account_ids, payload.group_ids)
+    return result
+
+
+@router.post("/auto-join")
+async def auto_join_groups(payload: CheckMembershipPayload):
+    """
+    Automatically join specified accounts into specified groups.
+    """
+    result = await tg.auto_join_accounts_to_groups(payload.account_ids, payload.group_ids)
     return result
 

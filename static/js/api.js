@@ -162,6 +162,7 @@ const API = {
   getWatcherStats() { return this.get('/api/watchers/stats'); },
   testWatcherDM(id, target) { return this.post(`/api/watchers/${id}/test-dm`, { target }); },
   checkMembership(account_ids, group_ids) { return this.post('/api/watchers/check-membership', { account_ids, group_ids }); },
+  autoJoinGroups(account_ids, group_ids) { return this.post('/api/watchers/auto-join', { account_ids, group_ids }); },
   joinChannel(account_id, channel_link) { return this.post('/api/members/join-channel', { account_id, channel_link: String(channel_link) }); },
 
   // Settings
