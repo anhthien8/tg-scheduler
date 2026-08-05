@@ -869,23 +869,48 @@ async def deep_crawl_similar_channels(
                 pass
 
     # Step 1: Resolve the source channel — try all accounts until one works
+    # If ALL accounts are FloodWait, wait for the shortest one then retry (up to 3 times)
     source_entity = None
     resolve_errors = []
-    for _aid, _client in valid_clients:
-        try:
-            source_entity = await _client.get_entity(channel_link)
-            source_id = getattr(source_entity, 'id', None)
-            if source_id:
-                visited.add(source_id)
-            logger.info(f"[DeepCrawl] Source resolved via account #{_aid}")
+    MAX_RESOLVE_RETRIES = 3
+    for resolve_attempt in range(MAX_RESOLVE_RETRIES):
+        resolve_errors = []
+        flood_waits = []  # (seconds, aid, client) for each FloodWait account
+        for _aid, _client in valid_clients:
+            try:
+                source_entity = await _client.get_entity(channel_link)
+                source_id = getattr(source_entity, 'id', None)
+                if source_id:
+                    visited.add(source_id)
+                logger.info(f"[DeepCrawl] Source resolved via account #{_aid}")
+                break
+            except errors.FloodWaitError as e:
+                resolve_errors.append(f"Account #{_aid}: FloodWait {e.seconds}s")
+                flood_waits.append((e.seconds, _aid, _client))
+                logger.warning(f"[DeepCrawl] Account #{_aid} FloodWait on resolve ({e.seconds}s), trying next...")
+                continue
+            except Exception as e:
+                resolve_errors.append(f"Account #{_aid}: {str(e)[:60]}")
+                continue
+        if source_entity:
             break
-        except errors.FloodWaitError as e:
-            resolve_errors.append(f"Account #{_aid}: FloodWait {e.seconds}s")
-            logger.warning(f"[DeepCrawl] Account #{_aid} FloodWait on resolve ({e.seconds}s), trying next...")
-            continue
-        except Exception as e:
-            resolve_errors.append(f"Account #{_aid}: {str(e)[:60]}")
-            continue
+        # All accounts failed — if ALL failures are FloodWait, auto-wait the shortest one then retry
+        if flood_waits and len(flood_waits) == len([r for r in resolve_errors if "FloodWait" in r]):
+            min_wait = min(s for s, _, _ in flood_waits)
+            wait_time = min(min_wait + 5, 120)  # cap at 2 minutes
+            if resolve_attempt < MAX_RESOLVE_RETRIES - 1:
+                logger.warning(f"[DeepCrawl] All accounts FloodWait on resolve. "
+                               f"Waiting {wait_time}s then retrying (attempt {resolve_attempt+1}/{MAX_RESOLVE_RETRIES})...")
+                state["errors"] = [f"⏳ FloodWait — tự động thử lại sau {wait_time}s "
+                                   f"(lần {resolve_attempt+1}/{MAX_RESOLVE_RETRIES})"]
+                if progress_callback:
+                    try:
+                        await progress_callback(state)
+                    except Exception:
+                        pass
+                await asyncio.sleep(wait_time)
+                continue
+        break  # Non-FloodWait errors → don't retry
     if not source_entity:
         all_errors = "; ".join(resolve_errors)
         raise Exception(f"Không thể resolve kênh nguồn '{channel_link}' trên tất cả tài khoản: {all_errors}")
