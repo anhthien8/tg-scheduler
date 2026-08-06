@@ -983,6 +983,7 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
         """Callback to update module-level state for polling."""
         _deep_crawl_state.update(state)
 
+    _floodwait_retry_after = None  # seconds to wait before retry
     try:
         results = await tg.deep_crawl_similar_channels(
             account_ids=account_ids,
@@ -996,13 +997,50 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
             _deep_crawl_state["status"] = "completed"
         logger.info(f"[DeepCrawl] Background task complete. {len(results)} leads.")
     except Exception as e:
-        _deep_crawl_state["status"] = "error"
-        _deep_crawl_state["errors"].append(f"Fatal: {str(e)}")
-        logger.error(f"[DeepCrawl] Fatal error: {e}", exc_info=True)
+        err_str = str(e)
+        # Detect FloodWait-only failure — extract longest wait time
+        import re as _re
+        fw_seconds = _re.findall(r'FloodWait\s+(\d+)s', err_str)
+        if fw_seconds and "Không thể resolve" in err_str:
+            max_wait = max(int(s) for s in fw_seconds)
+            _floodwait_retry_after = max_wait + 30  # extra buffer
+            _deep_crawl_state["status"] = "flood_wait"
+            _deep_crawl_state["errors"] = [
+                f"⏳ FloodWait {max_wait}s — tự động thử lại sau {_floodwait_retry_after}s "
+                f"({int(_floodwait_retry_after/60)} phút {_floodwait_retry_after%60}s)"
+            ]
+            logger.warning(f"[DeepCrawl] All accounts FloodWait. Scheduling auto-retry in {_floodwait_retry_after}s")
+        else:
+            _deep_crawl_state["status"] = "error"
+            _deep_crawl_state["errors"].append(f"Fatal: {err_str}")
+            logger.error(f"[DeepCrawl] Fatal error: {e}", exc_info=True)
+
+    # ── FloodWait auto-retry: re-queue current crawl with a delay ──
+    if _floodwait_retry_after and not _deep_crawl_stop_flag.get("stopped"):
+        import time as _time
+        retry_item = {
+            "account_ids": account_ids,
+            "channel_link": channel_link,
+            "max_depth": max_depth,
+            "retry_after": _time.time() + _floodwait_retry_after,
+        }
+        _deep_crawl_queue.insert(0, retry_item)  # put at front of queue
+        logger.info(f"[DeepCrawl] FloodWait retry scheduled: will restart '{channel_link}' in {_floodwait_retry_after}s")
 
     # ── Auto-start next queued crawl ──
     await asyncio.sleep(3)  # Brief pause between crawls
     if _deep_crawl_queue:
+        import time as _time2
+        next_item = _deep_crawl_queue[0]
+        retry_after = next_item.get("retry_after", 0)
+        if retry_after > _time2.time():
+            # Not ready yet — sleep until FloodWait expires
+            wait_secs = retry_after - _time2.time()
+            logger.info(f"[DeepCrawl] Queue: next item has FloodWait, sleeping {wait_secs:.0f}s before starting...")
+            _deep_crawl_state["errors"] = [
+                f"⏳ Chờ hết FloodWait — bắt đầu lại sau {int(wait_secs//60)} phút {int(wait_secs%60)} giây..."
+            ]
+            await asyncio.sleep(wait_secs)
         next_item = _deep_crawl_queue.pop(0)
         logger.info(f"[DeepCrawl] Queue: auto-starting next → {next_item['channel_link']} (depth={next_item['max_depth']}), {len(_deep_crawl_queue)} remaining")
         _deep_crawl_state = {

@@ -427,8 +427,12 @@ def _make_handler(account_id: int):
                                                 lead_tier = str(metrics_json.get("lead_tier", "Tier C"))
                                                 summary_text = str(metrics_json.get("summary", ""))
                                                 ai_reply = re.sub(r'\[METRICS:\s*({.*?})\]', '', ai_reply, flags=re.DOTALL).strip()
+                                            else:
+                                                # METRICS tag là malformed/truncated
+                                                ai_reply = re.sub(r'\[METRICS:.*$', '', ai_reply, flags=re.DOTALL).strip()
                                         except Exception as ex_m:
                                             logger.debug("[AIFollowUp] Error parsing METRICS tag: %s", ex_m)
+                                            ai_reply = re.sub(r'\[METRICS:.*$', '', ai_reply, flags=re.DOTALL).strip()
 
                                     # Update lead metrics in DB
                                     await db.update_followup_lead_metrics(account_id, sender_id, intent_score, lead_tier, summary_text)
