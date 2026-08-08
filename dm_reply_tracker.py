@@ -442,21 +442,30 @@ def _make_handler(account_id: int):
                                     intent_score = 30
                                     lead_tier = "Tier C"
                                     summary_text = ""
-                                    if "[METRICS:" in ai_reply:
+                                    if "METRICS:" in ai_reply:
                                         try:
+                                            # Try format 1: [METRICS: {...}]
                                             metrics_match = re.search(r'\[METRICS:\s*({.*?})\]', ai_reply, re.DOTALL)
+                                            if not metrics_match:
+                                                # Try format 2: METRICS: {...} (no brackets)
+                                                metrics_match = re.search(r'METRICS:\s*({.*?})\s*$', ai_reply, re.DOTALL)
                                             if metrics_match:
                                                 metrics_json = json.loads(metrics_match.group(1))
                                                 intent_score = int(metrics_json.get("intent_score", 30))
                                                 lead_tier = str(metrics_json.get("lead_tier", "Tier C"))
                                                 summary_text = str(metrics_json.get("summary", ""))
-                                                ai_reply = re.sub(r'\[METRICS:\s*({.*?})\]', '', ai_reply, flags=re.DOTALL).strip()
+                                                # Strip both formats: [METRICS: {...}] and METRICS: {...}
+                                                ai_reply = re.sub(r'\[METRICS:\s*{.*?}\]', '', ai_reply, flags=re.DOTALL)
+                                                ai_reply = re.sub(r'METRICS:\s*{.*?}\s*$', '', ai_reply, flags=re.DOTALL)
+                                                ai_reply = ai_reply.strip()
                                             else:
-                                                # METRICS tag là malformed/truncated
-                                                ai_reply = re.sub(r'\[METRICS:.*$', '', ai_reply, flags=re.DOTALL).strip()
+                                                # METRICS tag is malformed/truncated — strip everything from METRICS: onwards
+                                                ai_reply = re.sub(r'\[?METRICS:.*$', '', ai_reply, flags=re.DOTALL).strip()
                                         except Exception as ex_m:
                                             logger.debug("[AIFollowUp] Error parsing METRICS tag: %s", ex_m)
-                                            ai_reply = re.sub(r'\[METRICS:.*$', '', ai_reply, flags=re.DOTALL).strip()
+                                            # Always strip METRICS fragment regardless of parse error
+                                            ai_reply = re.sub(r'\[?METRICS:.*$', '', ai_reply, flags=re.DOTALL).strip()
+
 
                                     # Update lead metrics in DB
                                     await db.update_followup_lead_metrics(account_id, sender_id, intent_score, lead_tier, summary_text)
