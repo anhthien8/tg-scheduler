@@ -83,6 +83,30 @@ def sanitize_telegram_html(text: str) -> str:
     # 0. Convert literal '\n' string representation to real line breaks
     s = text.replace('\\n', '\n')
 
+    # 0b. Decode escaped unicode sequences that LLMs sometimes output as literal text
+    #     e.g. "\uD83D\uDC4B" (surrogate pair for 👋) or "\u2764" (❤)
+    def _decode_unicode_escapes(t: str) -> str:
+        # First: decode surrogate pairs \uD800-\uDBFF followed by \uDC00-\uDFFF
+        def _surrogate_pair(m):
+            hi = int(m.group(1), 16)
+            lo = int(m.group(2), 16)
+            try:
+                cp = 0x10000 + (hi - 0xD800) * 0x400 + (lo - 0xDC00)
+                return chr(cp)
+            except (ValueError, OverflowError):
+                return m.group(0)
+        t = re.sub(r'\\u([dD][89aAbB][0-9a-fA-F]{2})\\u([dD][cCdDeEfF][0-9a-fA-F]{2})', _surrogate_pair, t)
+        # Then: decode remaining simple \uXXXX escapes
+        def _simple_escape(m):
+            try:
+                return chr(int(m.group(1), 16))
+            except (ValueError, OverflowError):
+                return m.group(0)
+        t = re.sub(r'\\u([0-9a-fA-F]{4})', _simple_escape, t)
+        return t
+    s = _decode_unicode_escapes(s)
+
+
     # 1. Convert html block elements & lists to clean newlines/bullets
     s = re.sub(r'<br\s*/?>', '\n', s, flags=re.IGNORECASE)
     s = re.sub(r'</?p\s*/?>', '\n', s, flags=re.IGNORECASE)
