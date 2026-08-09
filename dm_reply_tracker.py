@@ -23,6 +23,8 @@ import re
 from typing import Any
 
 from telethon import events
+from telethon.tl.functions.messages import SendReactionRequest
+from telethon.tl.types import ReactionEmoji
 
 import database as db
 import telegram_client as tg
@@ -480,7 +482,30 @@ def _make_handler(account_id: int):
                                     if ai_reply:
                                         delay = random.uniform(6.0, 15.0)
                                         logger.info("[AIFollowUp] Simulating human typing for %.1fs before sending AI reply to user %d...", delay, sender_id)
-                                        await asyncio.sleep(delay)
+
+                                        # ── Human-like Emoji Reaction on User's Message (to look realistic) ──
+                                        # 35% chance to react with a warm/positive emoji to the user's message
+                                        try:
+                                            reaction_chance = float(await db.get_setting("ai_reaction_chance", "0.35"))
+                                            if random.random() < reaction_chance and getattr(event, "message", None) and getattr(event.message, "id", None):
+                                                react_emoji = random.choice(["❤️", "👍", "🔥", "👌", "💯", "⚡", "🤝"])
+                                                react_delay = min(random.uniform(1.5, 4.0), delay / 2)
+                                                await asyncio.sleep(react_delay)
+                                                delay -= react_delay
+
+                                                chat_peer = await event.get_input_chat()
+                                                await client(SendReactionRequest(
+                                                    peer=chat_peer,
+                                                    msg_id=event.message.id,
+                                                    reaction=[ReactionEmoji(emoticon=react_emoji)],
+                                                ))
+                                                logger.info("[AIFollowUp] ❤️ Reacted %s to user %d msg #%d (acc=%d)", react_emoji, sender_id, event.message.id, account_id)
+                                        except Exception as ex_react:
+                                            logger.debug("[AIFollowUp] Emoji reaction skipped/failed: %s", ex_react)
+
+                                        if delay > 0:
+                                            await asyncio.sleep(delay)
+
                                         _pending_ai_sends.add((account_id, sender_id))
                                         await tg.send_text_message(account_id, sender_id, ai_reply)
                                         asyncio.create_task(_remove_ai_send_after_delay(account_id, sender_id))
