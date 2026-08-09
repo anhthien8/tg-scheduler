@@ -48,31 +48,32 @@ async def _remove_ai_send_after_delay(account_id: int, user_id: int):
 
 
 def is_bot_account(sender, username: str = None) -> bool:
-    """Return True if the Telegram sender entity is a Telegram Bot or official service bot account."""
+    """Return True if the Telegram sender entity is a real Telegram Bot or official service account.
+
+    IMPORTANT: Only use definitive signals (sender.bot flag, system IDs).
+    Do NOT filter based on username/display-name containing 'bot' — real users
+    like @monsterland_bot, @robotics_trader etc. would be wrongly excluded.
+    Username-based detection is only used as fallback when no sender object exists.
+    """
     if not sender and not username:
         return False
 
-    # 1. Telethon User.bot or is_bot attribute
+    # 1. Telethon User.bot or is_bot attribute — DEFINITIVE signal from Telegram API
     if sender:
         if getattr(sender, "bot", False) or getattr(sender, "is_bot", False):
             return True
         sender_id = getattr(sender, "id", 0) or 0
+        # Known Telegram system/service bot IDs
         if sender_id in (777000, 178220800, 4244000, 4244001, 1088515515) or (0 < sender_id < 1000):
             return True
+        # If sender object is available and .bot is False, trust it — this is a real user
+        return False
 
-    # 2. Check username — if 'bot' is ANYWHERE in username (case-insensitive)
-    uname = (username or (getattr(sender, "username", "") if sender else "") or "").strip().lower()
-    if uname and "bot" in uname:
+    # 2. Fallback: no sender object, only username available
+    #    Use Telegram's official bot naming convention: username ENDS with 'bot' (case-insensitive)
+    uname = (username or "").strip().lower()
+    if uname and uname.endswith("bot"):
         return True
-
-    # 3. Check display name / first_name / last_name / title for 'bot'
-    if sender:
-        first_name = (getattr(sender, "first_name", "") or "").lower()
-        last_name = (getattr(sender, "last_name", "") or "").lower()
-        title = (getattr(sender, "title", "") or "").lower()
-        full_name = f"{first_name} {last_name} {title}".strip()
-        if "bot" in full_name:
-            return True
 
     return False
 
