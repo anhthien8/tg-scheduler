@@ -264,13 +264,15 @@ const DiscordAPI = {
 
 // ── AI Agents API ─────────────────────────────────────────────────────────────
 const AIAgentsAPI = {
-  getAll:     ()           => apiGet('/api/ai-agents'),
-  get:        (id)         => apiGet(`/api/ai-agents/${id}`),
-  create:     (data)       => apiPost('/api/ai-agents', data),
-  update:     (id, data)   => apiPut(`/api/ai-agents/${id}`, data),
-  remove:     (id)         => apiDelete(`/api/ai-agents/${id}`),
-  test:       (id, text)   => apiPost(`/api/ai-agents/${id}/test`, { text }),
-  duplicate:  (id)         => apiPost(`/api/ai-agents/${id}/duplicate`, {}),
+  getAll:            ()           => apiGet('/api/ai-agents'),
+  get:               (id)         => apiGet(`/api/ai-agents/${id}`),
+  create:            (data)       => apiPost('/api/ai-agents', data),
+  update:            (id, data)   => apiPut(`/api/ai-agents/${id}`, data),
+  remove:            (id)         => apiDelete(`/api/ai-agents/${id}`),
+  test:              (id, text)   => apiPost(`/api/ai-agents/${id}/test`, { text }),
+  duplicate:         (id)         => apiPost(`/api/ai-agents/${id}/duplicate`, {}),
+  getLearnedRules:   (id)         => apiGet(`/api/ai-agents/${id}/learned-rules`),
+  deleteLearnedRule: (id, ruleId) => apiDelete(`/api/ai-agents/${id}/learned-rules/${ruleId}`),
 };
 
 

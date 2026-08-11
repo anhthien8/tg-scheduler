@@ -307,3 +307,28 @@ async def reset_agent_chats(agent_id: int):
     logger.info("Reset all AI followup chats to 'active' state")
     return {"status": "ok", "message": "Đã kích hoạt lại toàn bộ hội thoại AI!"}
 
+
+# ── AI Memory & Self-Learning Endpoints ────────────────────────────────────────
+@router.get("/{agent_id}/learned-rules")
+async def get_learned_rules(agent_id: int):
+    """List all Q&A rules auto-learned by this AI Agent from human admin interventions."""
+    rules = await db.get_learned_knowledge_for_agent(agent_id, status="approved")
+    return {"rules": rules}
+
+
+@router.delete("/{agent_id}/learned-rules/{rule_id}")
+async def delete_learned_rule(agent_id: int, rule_id: int):
+    """Delete a learned rule."""
+    ok = await db.delete_learned_knowledge(rule_id)
+    if not ok:
+        raise HTTPException(404, "Rule not found")
+    return {"status": "deleted"}
+
+
+@router.get("/kol-profile/{account_id}/{user_id}")
+async def get_kol_profile(account_id: int, user_id: int):
+    """Fetch remembered facts about a specific KOL/User."""
+    profile = await db.get_kol_profile(account_id, user_id)
+    return {"account_id": account_id, "user_id": user_id, "profile": profile}
+
+

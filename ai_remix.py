@@ -511,3 +511,93 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
     return await generate_response(prompt_str, provider, [api_key])
 
 
+# ── AI Memory & Self-Learning Distillation ─────────────────────────────────────
+async def extract_kol_profile(history: list[dict], provider: str, api_keys: list[str], **kwargs) -> dict:
+    """Extract key facts about a KOL/User from conversation history using LLM."""
+    if not history or not api_keys:
+        return {}
+
+    conv_text = "\n".join([f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in history[-10:]])
+    sys_prompt = (
+        "You are an AI data extractor. Analyze the conversation between a BD representative and a Telegram user/KOL.\n"
+        "Extract any specific facts mentioned by the user into a JSON object with keys:\n"
+        " - platform: (e.g. YouTube, Telegram, Twitter, TikTok, or empty string)\n"
+        " - followers: (e.g. 30k subs, 50k members, or empty string)\n"
+        " - current_cex: (e.g. Binance, Bybit, OKX, or empty string)\n"
+        " - revshare_request: (e.g. 75% revshare, 5000$/mo, or empty string)\n"
+        " - key_demands: (e.g. daily payout, no KYC, offline event support, or empty string)\n\n"
+        "Rules:\n"
+        "1. Only extract facts EXPLICITLY stated by the user.\n"
+        "2. Return ONLY the JSON object, wrapped in ```json ``` or raw JSON."
+    )
+
+    try:
+        raw_res = await generate_chat_response(
+            history=[{"role": "user", "content": f"Conversation:\n{conv_text}"}],
+            system_prompt=sys_prompt,
+            provider=provider,
+            api_keys=api_keys,
+            **kwargs
+        )
+        if not raw_res:
+            return {}
+        # Clean JSON block
+        clean = re.sub(r"```json\s*", "", raw_res)
+        clean = re.sub(r"```\s*$", "", clean).strip()
+        data = json.loads(clean)
+        if isinstance(data, dict):
+            return {k: str(v).strip() for k, v in data.items() if v and str(v).strip()}
+    except Exception as e:
+        logger.debug("[AI Extract Profile] Error extracting profile: %s", e)
+    return {}
+
+
+async def distill_human_takeover_rule(history: list[dict], human_reply: str, provider: str, api_keys: list[str], **kwargs) -> dict | None:
+    """Distill a Q&A rule when a human admin manually answers a user."""
+    if not history or not human_reply or not api_keys:
+        return None
+
+    last_user_msg = ""
+    for m in reversed(history):
+        if m.get("role") == "user":
+            last_user_msg = m.get("content", "")
+            break
+
+    conv_context = f"User asked: {last_user_msg}\nHuman Admin answered: {human_reply}"
+    sys_prompt = (
+        "You are an AI learning engine. A human admin manually replied to a user in a Telegram sales chat.\n"
+        "Distill this interaction into a reusable Q&A rule for an AI Sales Agent.\n"
+        "Return a JSON object:\n"
+        "{\n"
+        "  \"question\": \"Concise statement of the user's question or objection\",\n"
+        "  \"answer\": \"Clear, accurate answer/policy provided by the human admin\"\n"
+        "}\n\n"
+        "Rules:\n"
+        "1. Be precise and capture specific terms, rates, or conditions provided by the admin.\n"
+        "2. Return ONLY valid JSON."
+    )
+
+    try:
+        raw_res = await generate_chat_response(
+            history=[{"role": "user", "content": conv_context}],
+            system_prompt=sys_prompt,
+            provider=provider,
+            api_keys=api_keys,
+            **kwargs
+        )
+        if not raw_res:
+            return None
+        clean = re.sub(r"```json\s*", "", raw_res)
+        clean = re.sub(r"```\s*$", "", clean).strip()
+        data = json.loads(clean)
+        if isinstance(data, dict) and data.get("question") and data.get("answer"):
+            return {
+                "question": str(data["question"]).strip(),
+                "answer": str(data["answer"]).strip()
+            }
+    except Exception as e:
+        logger.debug("[AI Distill Rule] Error distilling rule: %s", e)
+    return None
+
+
+

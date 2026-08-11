@@ -61,6 +61,9 @@ const AIAgents = {
             <span title="Handover keywords">🔑 ${(agent.handover_keywords || []).length} keywords</span>
           </div>
           <div class="ai-agent-actions">
+            <button class="btn btn-sm btn-outline" data-agent-action="learned" data-agent-id="${agent.id}" onclick="window.AIAgents.showLearnedRules(${agent.id})" title="Xem bài học tự học">
+              🧠 Tri thức
+            </button>
             <button class="btn btn-sm btn-outline" data-agent-action="edit" data-agent-id="${agent.id}" onclick="window.AIAgents.openForm(${agent.id})" title="Chỉnh sửa">
               ✏️ Sửa
             </button>
@@ -318,6 +321,80 @@ const AIAgents = {
       }
     }
     return this._agents;
+  },
+
+  // ── Self-Learning Rules Modal ──────────────────────────────────────
+  async showLearnedRules(agentId) {
+    const agent = this._agents.find(a => a.id == agentId);
+    const agentName = agent ? agent.name : `#${agentId}`;
+
+    document.getElementById('ai-agent-learned-modal')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ai-agent-learned-modal';
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+
+    overlay.innerHTML = `
+      <div style="background:var(--bg2);border-radius:16px;padding:24px;max-width:700px;width:100%;max-height:85vh;overflow-y:auto;border:1px solid var(--border);box-shadow:0 20px 40px rgba(0,0,0,0.5)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+          <h3 style="margin:0;font-size:18px;display:flex;align-items:center;gap:8px">
+            <span>🧠</span> Tri thức tự học: <span style="color:var(--primary)">${this._esc(agentName)}</span>
+          </h3>
+          <button onclick="document.getElementById('ai-agent-learned-modal').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text2)">✕</button>
+        </div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:16px">
+          Các kịch bản Q&A này do AI Agent <b>tự động rút kinh nghiệm</b> khi bạn (Admin) nhắn tin thủ công cho KOL/Khách hàng.
+        </p>
+        <div id="learned-rules-container" style="display:flex;flex-direction:column;gap:12px">
+          <div style="text-align:center;padding:20px;color:var(--text2)">⏳ Đang tải bài học...</div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    try {
+      const res = await AIAgentsAPI.getLearnedRules(agentId);
+      const rules = res.rules || [];
+      const container = document.getElementById('learned-rules-container');
+      if (!container) return;
+
+      if (rules.length === 0) {
+        container.innerHTML = `
+          <div style="text-align:center;padding:30px;color:var(--text2);background:var(--bg3);border-radius:12px">
+            <div style="font-size:32px;margin-bottom:8px">🌱</div>
+            <div>Chưa có bài học mới nào. Khi bạn nhắn tin thủ công với KOL, AI Agent sẽ tự học theo câu trả lời của bạn!</div>
+          </div>`;
+        return;
+      }
+
+      let html = '';
+      for (const r of rules) {
+        html += `
+          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:14px;position:relative">
+            <button onclick="window.AIAgents.deleteRule(${agentId}, ${r.id})" style="position:absolute;top:10px;right:10px;background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px" title="Xóa bài học này">🗑️ Xóa</button>
+            <div style="font-size:13px;font-weight:600;color:var(--primary);margin-bottom:6px">❓ Khi KOL hỏi: "${this._esc(r.question_pattern)}"</div>
+            <div style="font-size:13px;color:var(--text1);line-height:1.5">💡 AI trả lời/áp dụng: <b>${this._esc(r.learned_answer)}</b></div>
+            <div style="font-size:11px;color:var(--text2);margin-top:8px">🕒 Ngày học: ${r.created_at || 'Mới đây'}</div>
+          </div>`;
+      }
+      container.innerHTML = html;
+    } catch (e) {
+      console.error('Failed to load learned rules:', e);
+      App.toast('Lỗi tải danh sách bài học', 'error');
+    }
+  },
+
+  async deleteRule(agentId, ruleId) {
+    if (!confirm('Xóa bài học này khỏi bộ nhớ AI Agent?')) return;
+    try {
+      await AIAgentsAPI.deleteLearnedRule(agentId, ruleId);
+      App.toast('Đã xóa bài học', 'success');
+      await this.showLearnedRules(agentId);
+    } catch (e) {
+      App.toast('Lỗi xóa bài học', 'error');
+    }
   }
 };
 
@@ -340,5 +417,7 @@ document.addEventListener('click', (e) => {
     window.AIAgents.duplicateAgent(id);
   } else if (action === 'delete') {
     window.AIAgents.deleteAgent(id);
+  } else if (action === 'learned') {
+    window.AIAgents.showLearnedRules(id);
   }
 });

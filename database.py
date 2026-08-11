@@ -725,6 +725,29 @@ async def init_db():
             )
         """)
 
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS kol_profiles (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id      INTEGER NOT NULL,
+                user_id         INTEGER NOT NULL,
+                profile_json    TEXT DEFAULT '{}',
+                updated_at      TEXT DEFAULT (datetime('now')),
+                UNIQUE(account_id, user_id)
+            )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS agent_learned_knowledge (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ai_agent_id     INTEGER NOT NULL,
+                source_user_id  INTEGER DEFAULT 0,
+                question_pattern TEXT NOT NULL,
+                learned_answer  TEXT NOT NULL,
+                status          TEXT DEFAULT 'approved',
+                created_at      TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
         # ── Invite Campaigns ─────────────────────────────────────────────────
         await db.execute("""
             CREATE TABLE IF NOT EXISTS invite_campaigns (
@@ -3972,3 +3995,71 @@ async def count_campaigns_by_agent(agent_id: int) -> int:
         )
         row = await cursor.fetchone()
         return row[0] if row else 0
+
+
+# ── KOL Profiles & Learned Knowledge CRUD ─────────────────────────────────────
+async def get_kol_profile(account_id: int, user_id: int) -> dict:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT profile_json FROM kol_profiles WHERE account_id = ? AND user_id = ?",
+            (account_id, user_id)
+        )
+        row = await cursor.fetchone()
+        if row and row["profile_json"]:
+            try:
+                return json.loads(row["profile_json"])
+            except Exception:
+                return {}
+        return {}
+
+
+async def upsert_kol_profile(account_id: int, user_id: int, profile_data: dict) -> bool:
+    if not profile_data:
+        return False
+    async with get_db() as db:
+        current = await get_kol_profile(account_id, user_id)
+        current.update(profile_data)
+        # Filter out empty/null values
+        cleaned = {k: v for k, v in current.items() if v is not None and str(v).strip() != ""}
+        json_str = json.dumps(cleaned, ensure_ascii=False)
+        await db.execute("""
+            INSERT INTO kol_profiles (account_id, user_id, profile_json, updated_at)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(account_id, user_id) DO UPDATE SET
+                profile_json = excluded.profile_json,
+                updated_at = datetime('now')
+        """, (account_id, user_id, json_str))
+        await db.commit()
+        return True
+
+
+async def add_learned_knowledge(ai_agent_id: int, source_user_id: int, question: str, answer: str, status: str = "approved") -> int:
+    if not question.strip() or not answer.strip():
+        return 0
+    async with get_db() as db:
+        cursor = await db.execute("""
+            INSERT INTO agent_learned_knowledge (ai_agent_id, source_user_id, question_pattern, learned_answer, status)
+            VALUES (?, ?, ?, ?, ?)
+        """, (ai_agent_id, source_user_id, question.strip(), answer.strip(), status))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_learned_knowledge_for_agent(ai_agent_id: int, status: str = "approved") -> list[dict]:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM agent_learned_knowledge WHERE ai_agent_id = ? AND status = ? ORDER BY id DESC LIMIT 30",
+            (ai_agent_id, status)
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def delete_learned_knowledge(rule_id: int) -> bool:
+    async with get_db() as db:
+        await db.execute("DELETE FROM agent_learned_knowledge WHERE id = ?", (rule_id,))
+        await db.commit()
+        return True
+

@@ -49,6 +49,62 @@ async def _remove_ai_send_after_delay(account_id: int, user_id: int):
     _pending_ai_sends.discard((account_id, user_id))
 
 
+async def _async_update_kol_profile(account_id: int, user_id: int, history: list[dict], provider: str, api_keys: list[str], kwargs: dict):
+    """Background task to extract and update KOL profile facts in DB."""
+    try:
+        extracted = await ai_rmx.extract_kol_profile(history, provider, api_keys, **kwargs)
+        if extracted:
+            await db.upsert_kol_profile(account_id, user_id, extracted)
+            logger.info("🧠 [KOL Memory] Updated profile for user %d (acc=%d): %s", user_id, account_id, extracted)
+    except Exception as e:
+        logger.debug("[KOL Memory] Error updating profile: %s", e)
+
+
+async def _async_distill_human_rule(account_id: int, user_id: int, human_text: str):
+    """Background task to distill a Q&A rule from human admin intervention."""
+    try:
+        chat = await db.get_followup_chat(account_id, user_id)
+        if not chat:
+            return
+        campaign_id = chat.get("campaign_id")
+        agent_id = None
+        if campaign_id:
+            campaign = await db.get_campaign(campaign_id)
+            if campaign:
+                agent_id = campaign.get("ai_agent_id")
+        if not agent_id:
+            agents = await db.get_all_ai_agents(active_only=True)
+            if agents:
+                agent_id = agents[0]["id"]
+        if not agent_id:
+            return
+
+        agent = await db.get_ai_agent(agent_id)
+        if not agent or not agent.get("api_keys_json"):
+            return
+
+        history = chat.get("history", [])
+        rule = await ai_rmx.distill_human_takeover_rule(
+            history,
+            human_text,
+            agent.get("provider", "gemini"),
+            agent.get("api_keys_json", []),
+            base_url=agent.get("base_url", ""),
+            model=agent.get("model", "")
+        )
+        if rule and rule.get("question") and rule.get("answer"):
+            rule_id = await db.add_learned_knowledge(
+                ai_agent_id=agent_id,
+                source_user_id=user_id,
+                question=rule["question"],
+                answer=rule["answer"],
+                status="approved"
+            )
+            logger.info("🧠 [Self-Learning] Learned new Q&A rule #%d for Agent '%s': Q='%s' -> A='%s'", rule_id, agent["name"], rule["question"], rule["answer"])
+    except Exception as e:
+        logger.debug("[Self-Learning] Distill rule error: %s", e)
+
+
 def is_bot_account(sender, username: str = None) -> bool:
     """Return True if the Telegram sender entity is a real Telegram Bot or official service account.
 
@@ -188,6 +244,8 @@ def _make_handler(account_id: int):
                         return
                     logger.info("[AIFollowUp] 🛑 Human admin manually typed message to user %d (acc=%d) — auto-pausing AI Agent (status='needs_human')", peer_user_id, account_id)
                     await db.update_followup_chat_status(account_id, peer_user_id, "needs_human")
+                    # ── Self-Learning: Distill Q&A rule from human intervention ──
+                    asyncio.create_task(_async_distill_human_rule(account_id, peer_user_id, event.raw_text or ""))
                 return
         except Exception as _me_err:
             logger.debug("[Inbox] me check error: %s", _me_err)
@@ -417,6 +475,23 @@ def _make_handler(account_id: int):
                             if kb and kb.strip():
                                 combined_prompt += "\n\n--- KNOWLEDGE BASE ---\n" + kb.strip()
 
+                            # ── Inject Remembered KOL Profile Memory ──
+                            kol_prof = await db.get_kol_profile(account_id, sender_id)
+                            if kol_prof:
+                                prof_lines = [f" - {k}: {v}" for k, v in kol_prof.items() if v]
+                                if prof_lines:
+                                    combined_prompt += "\n\n--- REMEMBERED KOL PROFILE (FACTS PREVIOUSLY STATED BY THIS USER) ---\n"
+                                    combined_prompt += "\n".join(prof_lines)
+                                    combined_prompt += "\nDO NOT ask the user for any of these facts again!"
+
+                            # ── Inject Learned Rules from Human Admin Interventions ──
+                            if agent_config and agent_config.get("id"):
+                                learned_rules = await db.get_learned_knowledge_for_agent(agent_config["id"], status="approved")
+                                if learned_rules:
+                                    combined_prompt += "\n\n--- LEARNED RULES (DISCOVERED FROM HUMAN ADMIN INTERVENTIONS) ---\n"
+                                    for r in learned_rules:
+                                        combined_prompt += f"• When user asks about: {r['question_pattern']} -> Follow this answer/policy: {r['learned_answer']}\n"
+
                             if not ai_keys:
                                 logger.warning("[AIFollowUp] ⚠️ Cannot generate AI reply for user %d: No API Keys configured!", sender_id)
                             else:
@@ -510,6 +585,8 @@ def _make_handler(account_id: int):
                                         await tg.send_text_message(account_id, sender_id, ai_reply)
                                         asyncio.create_task(_remove_ai_send_after_delay(account_id, sender_id))
                                         await db.append_followup_chat_message(account_id, sender_id, "assistant", ai_reply, inc_reply_count=True)
+                                        # ── Asynchronously Extract & Remember KOL Profile Facts ──
+                                        asyncio.create_task(_async_update_kol_profile(account_id, sender_id, full_history, ai_provider, ai_keys, kwargs))
 
                                     if new_status != "active":
                                         await db.update_followup_chat_status(account_id, sender_id, new_status)
