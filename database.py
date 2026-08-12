@@ -26,6 +26,7 @@ class ConnectionPool:
         self._lock = asyncio.Lock()
 
     async def _create_connection(self):
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         conn = await aiosqlite.connect(self.db_path)
         initialized = False
         try:
@@ -141,6 +142,14 @@ async def init_db():
                 session_name TEXT NOT NULL UNIQUE,
                 is_logged_in INTEGER DEFAULT 0,
                 is_premium INTEGER DEFAULT 0,
+                peerflood_until REAL DEFAULT 0,
+                is_flagged INTEGER DEFAULT 0,
+                flag_reason TEXT,
+                proxy_url TEXT DEFAULT NULL,
+                is_paused INTEGER DEFAULT 0,
+                paused_at TEXT,
+                pause_reason TEXT,
+                ai_agent_id INTEGER DEFAULT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
@@ -219,6 +228,7 @@ async def init_db():
                 reply_in_group INTEGER DEFAULT 0,
                 group_reply_text TEXT DEFAULT 'Check my DM 😊',
                 group_reply_account_id INTEGER DEFAULT NULL,
+                platform TEXT DEFAULT 'telegram',
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT (datetime('now')),
                 updated_at TEXT DEFAULT (datetime('now'))
@@ -274,6 +284,8 @@ async def init_db():
                 group_id INTEGER,
                 group_title TEXT,
                 matched_keyword TEXT,
+                platform TEXT DEFAULT 'telegram',
+                template_variant_index INTEGER DEFAULT 0,
                 status TEXT NOT NULL CHECK(status IN ('success','failed','skipped')),
                 error_message TEXT,
                 sent_at TEXT DEFAULT (datetime('now'))
@@ -333,6 +345,9 @@ async def init_db():
                 reactions     TEXT DEFAULT '["👍"]',
                 delay_min     INTEGER DEFAULT 5,
                 delay_max     INTEGER DEFAULT 30,
+                view_enabled  INTEGER DEFAULT 0,
+                view_ratio    REAL DEFAULT 1.0,
+                platform      TEXT DEFAULT 'telegram',
                 is_active     INTEGER DEFAULT 1,
                 created_at    TEXT DEFAULT (datetime('now'))
             )
@@ -347,6 +362,7 @@ async def init_db():
                 channel_id INTEGER,
                 msg_id     INTEGER,
                 reaction   TEXT,
+                platform   TEXT DEFAULT 'telegram',
                 status     TEXT DEFAULT 'success',
                 error_msg  TEXT,
                 sent_at    TEXT DEFAULT (datetime('now'))
@@ -436,6 +452,7 @@ async def init_db():
                 sender_username TEXT,
                 sender_name     TEXT,
                 message_text    TEXT,
+                platform        TEXT DEFAULT 'telegram',
                 is_read         INTEGER DEFAULT 0,
                 received_at     TEXT DEFAULT (datetime('now'))
             )
@@ -535,6 +552,7 @@ async def init_db():
                 is_premium      INTEGER DEFAULT 0,
                 status          TEXT DEFAULT 'active',
                 last_seen       TEXT,
+                lang_code       TEXT DEFAULT NULL,
                 scraped_at      TEXT DEFAULT (datetime('now')),
                 UNIQUE(scrape_job_id, user_id)
             )
@@ -578,6 +596,11 @@ async def init_db():
                 daily_limit_normal  INTEGER DEFAULT 10,
                 use_ai_remix    INTEGER DEFAULT 0,
                 exclude_previous_dms INTEGER DEFAULT 1,
+                auto_translate_native INTEGER DEFAULT 1,
+                scheduled_at    TEXT DEFAULT NULL,
+                target_timezone TEXT DEFAULT NULL,
+                exclude_campaign_ids TEXT DEFAULT '[]',
+                ai_agent_id     INTEGER DEFAULT NULL,
                 status          TEXT DEFAULT 'draft',
                 total_targets   INTEGER DEFAULT 0,
                 sent_count      INTEGER DEFAULT 0,
@@ -596,6 +619,8 @@ async def init_db():
                 account_id      INTEGER,
                 target_user_id  INTEGER NOT NULL,
                 target_username TEXT,
+                template_variant_id INTEGER,
+                template_variant_index INTEGER DEFAULT 0,
                 status          TEXT NOT NULL CHECK(status IN ('success','failed','skipped')),
                 error_message   TEXT,
                 sent_at         TEXT DEFAULT (datetime('now')),
@@ -1883,6 +1908,7 @@ async def get_dm_blacklist() -> list:
 async def add_to_dm_blacklist(user_id: int | None, username: str | None, reason: str = "") -> dict:
     """Insert or update a user in the DM blacklist. Returns the saved row as a dict."""
     async with get_db() as db:
+        db.row_factory = aiosqlite.Row
         await db.execute(
             """INSERT INTO dm_blacklist (user_id, username, reason)
                VALUES (?, ?, ?)

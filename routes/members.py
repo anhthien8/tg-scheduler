@@ -210,6 +210,9 @@ def _build_member_dict(user, last_seen):
 @router.post("/scrape")
 async def scrape_members(req: ScrapeRequest, background_tasks: BackgroundTasks):
     """Start scraping members from a Telegram group."""
+    acc = await db.get_account(req.account_id)
+    if not acc:
+        raise HTTPException(status_code=400, detail="Tài khoản không tồn tại")
     client = tg.get_client(req.account_id)
     if not client:
         raise HTTPException(status_code=400, detail="Tài khoản không tồn tại hoặc chưa đăng nhập")
@@ -1375,6 +1378,7 @@ async def check_all_accounts_spam():
 
 async def _run_campaign(campaign_id: int):
     """Background task: run a DM campaign, sending to each target member."""
+    _active_campaigns[campaign_id] = True
     try:
         campaign = await db.get_dm_campaign(campaign_id)
         if not campaign:

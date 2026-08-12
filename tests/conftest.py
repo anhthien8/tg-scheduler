@@ -26,6 +26,27 @@ class DummyClient:
         pass
     def is_connected(self):
         return True
+    def add_event_handler(self, handler, *args, **kwargs):
+        pass
+    def remove_event_handler(self, handler, *args, **kwargs):
+        pass
+    async def __call__(self, *args, **kwargs):
+        class DummyResult:
+            users = []
+            participants = []
+            count = 0
+        return DummyResult()
+    async def iter_participants(self, *args, **kwargs):
+        class User:
+            id = 999
+            first_name = "Scraped"
+            last_name = "User"
+            username = "scraped_user"
+            phone = "+84999999"
+            bot = False
+            premium = False
+            status = None
+        yield User()
     async def connect(self):
         pass
     async def disconnect(self):
@@ -38,6 +59,8 @@ class DummyClient:
             username = "mocked_user"
             phone = "+8412345678"
         return User()
+    async def get_input_entity(self, chat_id_or_username):
+        return chat_id_or_username
     async def get_entity(self, chat_id_or_username):
         class Entity:
             id = int(chat_id_or_username) if str(chat_id_or_username).strip("-").isdigit() else 12345
@@ -130,6 +153,14 @@ tg_mock.get_client = get_client
 async def check_accounts_in_groups(account_ids, group_ids):
     return {"not_in_groups": []}
 tg_mock.check_accounts_in_groups = check_accounts_in_groups
+
+async def auto_join_accounts_to_groups(account_ids, group_ids):
+    return {"success": True}
+tg_mock.auto_join_accounts_to_groups = auto_join_accounts_to_groups
+
+async def check_spam_status(account_id):
+    return {"status": "ok", "message": "", "is_spambanned": False, "reason": None}
+tg_mock.check_spam_status = check_spam_status
 
 async def get_similar_channels_and_contacts(account_id, channel_link):
     return [{"channel_id": 111, "title": "Similar Channel", "username": "similar_ch", "contacts": ["@admin_user"]}]
@@ -247,20 +278,25 @@ def setup_teardown_session():
     temp_dir.cleanup()
 
 @pytest.fixture(autouse=True)
-async def clean_database():
+def clean_database():
     # Empty tables or re-create schema to ensure a completely clean slate between tests
     import aiosqlite
-    if os.path.exists(db.DB_PATH):
-        async with aiosqlite.connect(db.DB_PATH) as conn:
-            # We can drop all tables and call init_db
-            cursor = await conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = await cursor.fetchall()
-            for t in tables:
-                if t[0] != "sqlite_sequence":
-                    await conn.execute(f"DROP TABLE IF EXISTS {t[0]}")
-            await conn.commit()
-    await db.init_db()
+    import asyncio
+    async def _do_clean():
+        await db.close_db()
+        if os.path.exists(db.DB_PATH):
+            async with aiosqlite.connect(db.DB_PATH) as conn:
+                # We can drop all tables and call init_db
+                cursor = await conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = await cursor.fetchall()
+                for t in tables:
+                    if t[0] != "sqlite_sequence":
+                        await conn.execute(f"DROP TABLE IF EXISTS {t[0]}")
+                await conn.commit()
+        await db.init_db()
+    asyncio.run(_do_clean())
     yield
+    asyncio.run(db.close_db())
 
 @pytest.fixture
 def client():

@@ -30,6 +30,8 @@ async def get_schedule(schedule_id: int):
 
 @router.post("")
 async def create_schedule(data: ScheduleCreate):
+    if data.schedule_type not in ('hourly', 'daily', 'weekly', 'monthly', 'once'):
+        raise HTTPException(400, "Invalid schedule_type")
     payload = data.model_dump()
     schedule_id = await db.create_schedule(payload)
     schedule = await db.get_schedule(schedule_id)
