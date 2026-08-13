@@ -153,6 +153,66 @@ async def fetch_models(payload: FetchModelsPayload):
         return {"success": False, "error": str(e)[:200]}
 
 
+class VerifyChatgptOauthPayload(BaseModel):
+    access_token: str
+    base_url: Optional[str] = None
+
+
+@router.post("/verify-chatgpt-oauth")
+async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
+    """Verify ChatGPT Subscription Access Token / OAuth Token and auto-discover models."""
+    token = payload.access_token.strip()
+    if not token:
+        return {"success": False, "error": "Access Token không được để trống"}
+
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+
+    base_url = (payload.base_url or "https://api.openai.com/v1").rstrip("/")
+    if not base_url:
+        base_url = "https://api.openai.com/v1"
+
+    models_url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(models_url, headers=headers)
+            if resp.status_code == 401:
+                return {"success": False, "error": "Access Token không hợp lệ hoặc đã hết hạn (HTTP 401 Unauthorized)"}
+            resp.raise_for_status()
+            data = resp.json()
+
+        models_list = []
+        raw_models = data.get("data", [])
+        if isinstance(raw_models, list):
+            models_list = [m.get("id", "") for m in raw_models if isinstance(m, dict) and m.get("id")]
+
+        best_model = "gpt-4o"
+        if "gpt-4o" in models_list:
+            best_model = "gpt-4o"
+        elif "gpt-4o-mini" in models_list:
+            best_model = "gpt-4o-mini"
+        elif models_list:
+            best_model = models_list[0]
+
+        return {
+            "success": True,
+            "token": token,
+            "base_url": base_url,
+            "model": best_model,
+            "models_found": len(models_list),
+            "message": "Xác thực ChatGPT OAuth Access Token thành công!"
+        }
+    except httpx.HTTPStatusError as e:
+        return {"success": False, "error": f"HTTP {e.response.status_code}: {e.response.text[:200]}"}
+    except Exception as e:
+        return {"success": False, "error": f"Lỗi kết nối: {str(e)[:200]}"}
+
+
 @router.get("/{key}")
 async def get_setting(key: str):
     value = await db.get_setting(key, None)

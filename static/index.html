@@ -455,7 +455,12 @@
           <!-- ChatGPT Subscription OAuth Section -->
           <div id="ai-chatgpt_oauth-section" class="card hidden" style="margin-bottom:20px;padding:20px">
             <div class="form-group">
-              <label class="form-label" style="font-size:15px;font-weight:600">🔑 ChatGPT Subscription (OAuth / Access Token)</label>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <label class="form-label" style="font-size:15px;font-weight:600;margin:0">🔑 ChatGPT Subscription (OAuth / Access Token)</label>
+                <button class="btn btn-sm btn-primary" onclick="App.openChatgptOAuthModal()" style="background:linear-gradient(135deg, #10a37f, #0d8c6d);border:none;box-shadow:0 4px 12px rgba(16,163,127,0.3)">
+                  ⚡ Đăng nhập & Tự động lấy Token ChatGPT
+                </button>
+              </div>
               <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
                 Sử dụng tài khoản gói <strong>ChatGPT Plus / Team / Enterprise Subscription</strong> trực tiếp thông qua ChatGPT OAuth Access Token (chuỗi Bearer token) mà không cần trả tiền theo token API thông thường.
               </p>
@@ -1604,7 +1609,40 @@
         </button>
       </div>
     </div>
-  </template>
+  <!-- ChatGPT OAuth Quick Login Modal -->
+  <div class="modal-overlay" id="chatgpt-oauth-modal" style="z-index:10000">
+    <div class="modal" style="max-width:540px;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+        <h3 style="margin:0;font-size:17px;display:flex;align-items:center;gap:8px">
+          <span style="color:#10a37f">⚡</span> Đăng nhập ChatGPT Subscription (Quick Login)
+        </h3>
+        <button onclick="document.getElementById('chatgpt-oauth-modal').classList.remove('open')" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2)">✕</button>
+      </div>
+
+      <div style="background:rgba(16,163,127,0.08);border-left:3px solid #10a37f;border-radius:6px;padding:12px;margin-bottom:16px;font-size:13px;color:var(--text1)">
+        💡 <b>Cách lấy Token cực nhanh (3 giây):</b>
+        <ol style="margin:6px 0 0 18px;padding:0">
+          <li>Mở trang <a href="https://chatgpt.com/api/auth/session" target="_blank" style="color:#10a37f;font-weight:bold;text-decoration:underline">chatgpt.com/api/auth/session</a> trên trình duyệt đã đăng nhập ChatGPT Plus/Team.</li>
+          <li>Copy toàn bộ đoạn mã JSON hoặc chuỗi <code>accessToken</code> (bắt đầu bằng <code>ey...</code>).</li>
+          <li>Dán vào ô bên dưới và bấm <b>"Tự động điền & Lưu cấu hình"</b>.</li>
+        </ol>
+      </div>
+
+      <div style="margin-bottom:16px">
+        <label class="form-label" style="font-size:13px;font-weight:600">Dán ChatGPT Access Token / JSON Session:</label>
+        <textarea id="chatgpt-token-paste-input" class="form-input" rows="4" placeholder="Dán accessToken hoặc toàn bộ JSON vào đây..." style="font-family:monospace;font-size:12px"></textarea>
+      </div>
+
+      <div id="chatgpt-verify-status" style="margin-bottom:16px;font-size:13px"></div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-outline" onclick="document.getElementById('chatgpt-oauth-modal').classList.remove('open')">Hủy</button>
+        <button class="btn btn-primary" id="btn-verify-chatgpt-oauth" onclick="App.processChatgptOAuthLogin()" style="background:linear-gradient(135deg, #10a37f, #0d8c6d);border:none">
+          🚀 Tự động xác thực & Điền cấu hình
+        </button>
+      </div>
+    </div>
+  </div>
 
     </body>
 </html>

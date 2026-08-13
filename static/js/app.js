@@ -1801,6 +1801,100 @@ App.switchToManualModelInput = function() {
   inputEl.focus();
 };
 
+App.openChatgptOAuthModal = function() {
+  const modal = document.getElementById('chatgpt-oauth-modal');
+  if (!modal) return;
+  const input = document.getElementById('chatgpt-token-paste-input');
+  const status = document.getElementById('chatgpt-verify-status');
+  if (input) input.value = '';
+  if (status) status.textContent = '';
+  modal.classList.add('open');
+};
+
+App.processChatgptOAuthLogin = async function() {
+  const input = document.getElementById('chatgpt-token-paste-input');
+  const status = document.getElementById('chatgpt-verify-status');
+  const btn = document.getElementById('btn-verify-chatgpt-oauth');
+  const modal = document.getElementById('chatgpt-oauth-modal');
+
+  let raw = (input?.value || '').trim();
+  if (!raw) {
+    App.toast('Vui lòng dán Access Token hoặc JSON session', 'error');
+    return;
+  }
+
+  let token = raw;
+  if (raw.startsWith('{') && raw.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(raw);
+      token = parsed.accessToken || parsed.access_token || parsed.token || raw;
+    } catch(e) {}
+  }
+
+  if (token.toLowerCase().startsWith('bearer ')) {
+    token = token.substring(7).trim();
+  }
+
+  const baseUrl = (document.getElementById('chatgpt-oauth-base-url')?.value || 'https://api.openai.com/v1').trim() || 'https://api.openai.com/v1';
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Đang xác thực...';
+  if (status) {
+    status.textContent = '⏳ Đang kiểm tra Access Token với OpenAI ChatGPT...';
+    status.style.color = 'var(--text2)';
+  }
+
+  try {
+    const resp = await fetch('/api/settings/verify-chatgpt-oauth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: token, base_url: baseUrl })
+    });
+    const data = await resp.json();
+
+    if (!data.success) {
+      if (status) {
+        status.textContent = '❌ ' + (data.error || 'Xác thực thất bại');
+        status.style.color = '#ef4444';
+      }
+      App.toast(data.error || 'Token không hợp lệ', 'error');
+      return;
+    }
+
+    // Auto-populate UI fields
+    (document.getElementById('ai-provider-select') || me_dummy).value = 'chatgpt_oauth';
+    App.onProviderChange();
+
+    (document.getElementById('chatgpt-oauth-base-url') || me_dummy).value = data.base_url || 'https://api.openai.com/v1';
+    (document.getElementById('chatgpt-oauth-model') || me_dummy).value = data.model || 'gpt-4o';
+
+    // Set Access Token into keys list
+    App.renderAiKeysList('chatgpt_oauth', [data.token]);
+
+    // Auto-save settings
+    await App.saveSettings();
+
+    if (status) {
+      status.textContent = '✅ ' + data.message + ' (Đã tìm thấy ' + data.models_found + ' models)';
+      status.style.color = '#22c55e';
+    }
+    App.toast('✅ Đã đăng nhập & tự động cấu hình ChatGPT Subscription thành công!', 'success');
+
+    setTimeout(() => {
+      modal?.classList.remove('open');
+    }, 1200);
+
+  } catch(e) {
+    if (status) {
+      status.textContent = '❌ Lỗi kết nối: ' + e.message;
+      status.style.color = '#ef4444';
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🚀 Tự động xác thực & Điền cấu hình';
+  }
+};
+
 App.renderAiKeysList = function(provider, keys) {
   const container = document.getElementById(provider + '-keys-list');
   if (!container) return;
