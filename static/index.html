@@ -1611,7 +1611,7 @@
     </div>
   </template>
 
-  <!-- ChatGPT OAuth Quick Login Modal (MUST be outside template to render) -->
+  <!-- ChatGPT OAuth Quick Login Modal -->
   <div class="modal-overlay" id="chatgpt-oauth-modal" style="z-index:10000">
     <div class="modal" style="max-width:560px;padding:0;overflow:hidden;border-radius:12px">
       <!-- Header -->
@@ -1627,27 +1627,27 @@
 
       <!-- Body -->
       <div style="padding:20px 24px">
-        <!-- Step 1 -->
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <!-- Step 1: Open session page -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#10a37f;color:white;font-size:12px;font-weight:700;flex-shrink:0">1</span>
-          <span style="font-size:14px;font-weight:600">Mở trang xác thực OpenAI trên trình duyệt</span>
+          <span style="font-size:14px;font-weight:600">Lấy Access Token từ tài khoản ChatGPT của bạn</span>
         </div>
         <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.5">
-          Bấm nút bên dưới để mở trang <strong>auth session</strong> của ChatGPT. Trang sẽ trả về JSON chứa <code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:12px">accessToken</code> nếu bạn đã đăng nhập ChatGPT Plus / Team / Enterprise.
+          Bấm nút bên dưới để mở trang session của ChatGPT. Trang sẽ hiển thị JSON chứa <code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:12px">accessToken</code>. Bạn chỉ cần <strong>Ctrl+A</strong> (chọn tất cả) rồi <strong>Ctrl+C</strong> (copy).
         </p>
         <button class="btn btn-primary" onclick="App.openChatgptAuthTab()" style="width:100%;background:linear-gradient(135deg,#10a37f,#0d8c6d);border:none;padding:12px;font-size:14px;font-weight:600;border-radius:8px;margin-bottom:16px;box-shadow:0 4px 14px rgba(16,163,127,0.3)">
-          &#x1F510; Mở trang xác thực OpenAI &#x2192;
+          &#x1F510; Mở trang lấy Token ChatGPT &#x2192;
         </button>
 
         <div style="text-align:center;color:var(--text2);font-size:12px;margin-bottom:16px;position:relative">
-          <span style="background:var(--card-bg);padding:0 12px;position:relative;z-index:1">hoặc dán token trực tiếp</span>
+          <span style="background:var(--card-bg);padding:0 12px;position:relative;z-index:1">rồi dán vào đây</span>
           <div style="position:absolute;top:50%;left:0;right:0;height:1px;background:var(--border);z-index:0"></div>
         </div>
 
-        <!-- Step 2 -->
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <!-- Step 2: Paste token -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#10a37f;color:white;font-size:12px;font-weight:700;flex-shrink:0">2</span>
-          <span style="font-size:14px;font-weight:600">Dán Access Token / JSON vào đây</span>
+          <span style="font-size:14px;font-weight:600">Dán JSON / Access Token vào đây</span>
         </div>
         <textarea id="chatgpt-token-paste-input" class="form-input" rows="4" placeholder='Dán {"accessToken":"eyJhb..."} hoặc chỉ chuỗi eyJhb... vào đây' style="font-family:monospace;font-size:12px;resize:vertical;margin-bottom:12px"></textarea>
 

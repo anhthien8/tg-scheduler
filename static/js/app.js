@@ -1832,112 +1832,29 @@ App._base64urlencode = function(buffer) {
 };
 
 // ── OAuth PKCE Popup Flow (like OpenAI Codex) ──
-App.openChatgptAuthTab = async function() {
+// ── Open ChatGPT Session Token Page (reliable approach) ──
+App.openChatgptAuthTab = function() {
   var status = document.getElementById('chatgpt-verify-status');
-  try {
-    var codeVerifier = App._generateRandomString(64);
-    var hash = await App._sha256(codeVerifier);
-    var codeChallenge = App._base64urlencode(hash);
-    var state = App._generateRandomString(32);
+  var sessionUrl = 'https://chatgpt.com/api/auth/session';
 
-    // Store PKCE params for verification
-    sessionStorage.setItem('chatgpt_oauth_code_verifier', codeVerifier);
-    sessionStorage.setItem('chatgpt_oauth_state', state);
+  // Open in a new tab
+  window.open(sessionUrl, '_blank');
 
-    var clientId = 'app_EMoamEEZ73f0CkXaXp7hrann';
-    var redirectUri = window.location.origin + '/api/settings/chatgpt-oauth/callback';
-    var scope = 'openid profile email offline_access';
-
-    var authUrl = 'https://auth.openai.com/oauth/authorize?' +
-      'response_type=code' +
-      '&client_id=' + encodeURIComponent(clientId) +
-      '&redirect_uri=' + encodeURIComponent(redirectUri) +
-      '&scope=' + encodeURIComponent(scope) +
-      '&code_challenge=' + encodeURIComponent(codeChallenge) +
-      '&code_challenge_method=S256' +
-      '&state=' + encodeURIComponent(state) +
-      '&audience=' + encodeURIComponent('https://api.openai.com/v1');
-
-    // Open popup
-    var width = 520, height = 700;
-    var left = window.screenX + (window.innerWidth - width) / 2;
-    var top = window.screenY + (window.innerHeight - height) / 2;
-    var popup = window.open(authUrl, 'ConnectChatGPT', 'width=' + width + ',height=' + height + ',top=' + top + ',left=' + left + ',scrollbars=yes');
-
-    if (!popup) {
-      App.toast('Trình duyệt đã chặn popup. Vui lòng cho phép popup và thử lại.', 'error');
-      return;
-    }
-
-    if (status) {
-      status.innerHTML = '<span style="color:#10a37f">⏳ Đang chờ bạn đăng nhập trên popup OpenAI...</span>';
-    }
-
-    // Listen for postMessage from callback page
-    var messageHandler = async function(event) {
-      if (event.origin !== window.location.origin) return;
-      if (!event.data || event.data.type !== 'OPENAI_OAUTH_CALLBACK') return;
-
-      window.removeEventListener('message', messageHandler);
-
-      var code = event.data.code;
-      var receivedState = event.data.state;
-      var savedState = sessionStorage.getItem('chatgpt_oauth_state');
-      var savedVerifier = sessionStorage.getItem('chatgpt_oauth_code_verifier');
-
-      if (receivedState !== savedState) {
-        if (status) { status.innerHTML = '<span style="color:#ef4444">❌ OAuth state không khớp. Vui lòng thử lại.</span>'; }
-        App.toast('OAuth state mismatch - vui lòng thử lại', 'error');
-        return;
-      }
-
-      if (status) { status.innerHTML = '<span style="color:#10a37f">⏳ Đang đổi auth code lấy access token...</span>'; }
-
-      try {
-        var resp = await fetch('/api/settings/chatgpt-oauth/exchange', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            code: code,
-            code_verifier: savedVerifier,
-            redirect_uri: redirectUri
-          })
-        });
-        var data = await resp.json();
-
-        if (!data.success) {
-          if (status) { status.innerHTML = '<span style="color:#ef4444">❌ ' + (data.error || 'Token exchange thất bại') + '</span>'; }
-          App.toast(data.error || 'Token exchange thất bại', 'error');
-          return;
-        }
-
-        // SUCCESS! Auto-populate everything
-        App._applyChatgptOAuthToken(data.access_token);
-
-      } catch(e) {
-        if (status) { status.innerHTML = '<span style="color:#ef4444">❌ Lỗi: ' + e.message + '</span>'; }
-      }
-    };
-
-    window.addEventListener('message', messageHandler);
-
-    // Fallback: poll for popup close without completing auth
-    var pollTimer = setInterval(function() {
-      if (popup && popup.closed) {
-        clearInterval(pollTimer);
-        // Give postMessage a moment to arrive
-        setTimeout(function() {
-          if (sessionStorage.getItem('chatgpt_oauth_state') === state) {
-            // State still present = message never arrived
-            // Don't show error, user may have manually closed
-          }
-        }, 500);
-      }
-    }, 1000);
-
-  } catch(e) {
-    if (status) { status.innerHTML = '<span style="color:#ef4444">❌ Lỗi: ' + e.message + '</span>'; }
+  if (status) {
+    status.innerHTML =
+      '<div style="background:rgba(16,163,127,0.08);border-left:3px solid #10a37f;border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.6">' +
+        '<strong style="color:#10a37f">✅ Tab mới đã mở!</strong> Làm theo 3 bước sau:<br>' +
+        '① Trên tab vừa mở, bạn sẽ thấy một đoạn JSON — bấm <kbd style="background:var(--bg);padding:1px 5px;border-radius:3px;font-size:11px">Ctrl+A</kbd> để chọn tất cả<br>' +
+        '② Bấm <kbd style="background:var(--bg);padding:1px 5px;border-radius:3px;font-size:11px">Ctrl+C</kbd> để copy<br>' +
+        '③ Quay lại đây, dán vào ô bên dưới rồi bấm <strong>"🚀 Xác thực"</strong>' +
+      '</div>';
   }
+
+  // Auto-focus the paste textarea
+  setTimeout(function() {
+    var input = document.getElementById('chatgpt-token-paste-input');
+    if (input) input.focus();
+  }, 500);
 };
 
 // ── Apply token after OAuth or manual paste ──
