@@ -1807,26 +1807,186 @@ App.openChatgptOAuthModal = function() {
   const input = document.getElementById('chatgpt-token-paste-input');
   const status = document.getElementById('chatgpt-verify-status');
   if (input) input.value = '';
-  if (status) status.textContent = '';
+  if (status) { status.textContent = ''; status.innerHTML = ''; }
   modal.classList.add('open');
 };
 
-App.processChatgptOAuthLogin = async function() {
-  const input = document.getElementById('chatgpt-token-paste-input');
-  const status = document.getElementById('chatgpt-verify-status');
-  const btn = document.getElementById('btn-verify-chatgpt-oauth');
-  const modal = document.getElementById('chatgpt-oauth-modal');
+// ── PKCE Helpers ──
+App._generateRandomString = function(length) {
+  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  var values = new Uint8Array(length);
+  window.crypto.getRandomValues(values);
+  var result = '';
+  for (var i = 0; i < length; i++) result += chars[values[i] % chars.length];
+  return result;
+};
 
-  let raw = (input?.value || '').trim();
+App._sha256 = async function(plain) {
+  var encoder = new TextEncoder();
+  return window.crypto.subtle.digest('SHA-256', encoder.encode(plain));
+};
+
+App._base64urlencode = function(buffer) {
+  return btoa(String.fromCharCode.apply(null, new Uint8Array(buffer)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
+// ── OAuth PKCE Popup Flow (like OpenAI Codex) ──
+App.openChatgptAuthTab = async function() {
+  var status = document.getElementById('chatgpt-verify-status');
+  try {
+    var codeVerifier = App._generateRandomString(64);
+    var hash = await App._sha256(codeVerifier);
+    var codeChallenge = App._base64urlencode(hash);
+    var state = App._generateRandomString(32);
+
+    // Store PKCE params for verification
+    sessionStorage.setItem('chatgpt_oauth_code_verifier', codeVerifier);
+    sessionStorage.setItem('chatgpt_oauth_state', state);
+
+    var clientId = 'app_EMoamEEZ73f0CkXaXp7hrann';
+    var redirectUri = window.location.origin + '/api/settings/chatgpt-oauth/callback';
+    var scope = 'openid profile email offline_access';
+
+    var authUrl = 'https://auth.openai.com/oauth/authorize?' +
+      'response_type=code' +
+      '&client_id=' + encodeURIComponent(clientId) +
+      '&redirect_uri=' + encodeURIComponent(redirectUri) +
+      '&scope=' + encodeURIComponent(scope) +
+      '&code_challenge=' + encodeURIComponent(codeChallenge) +
+      '&code_challenge_method=S256' +
+      '&state=' + encodeURIComponent(state) +
+      '&audience=' + encodeURIComponent('https://api.openai.com/v1');
+
+    // Open popup
+    var width = 520, height = 700;
+    var left = window.screenX + (window.innerWidth - width) / 2;
+    var top = window.screenY + (window.innerHeight - height) / 2;
+    var popup = window.open(authUrl, 'ConnectChatGPT', 'width=' + width + ',height=' + height + ',top=' + top + ',left=' + left + ',scrollbars=yes');
+
+    if (!popup) {
+      App.toast('Trình duyệt đã chặn popup. Vui lòng cho phép popup và thử lại.', 'error');
+      return;
+    }
+
+    if (status) {
+      status.innerHTML = '<span style="color:#10a37f">⏳ Đang chờ bạn đăng nhập trên popup OpenAI...</span>';
+    }
+
+    // Listen for postMessage from callback page
+    var messageHandler = async function(event) {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || event.data.type !== 'OPENAI_OAUTH_CALLBACK') return;
+
+      window.removeEventListener('message', messageHandler);
+
+      var code = event.data.code;
+      var receivedState = event.data.state;
+      var savedState = sessionStorage.getItem('chatgpt_oauth_state');
+      var savedVerifier = sessionStorage.getItem('chatgpt_oauth_code_verifier');
+
+      if (receivedState !== savedState) {
+        if (status) { status.innerHTML = '<span style="color:#ef4444">❌ OAuth state không khớp. Vui lòng thử lại.</span>'; }
+        App.toast('OAuth state mismatch - vui lòng thử lại', 'error');
+        return;
+      }
+
+      if (status) { status.innerHTML = '<span style="color:#10a37f">⏳ Đang đổi auth code lấy access token...</span>'; }
+
+      try {
+        var resp = await fetch('/api/settings/chatgpt-oauth/exchange', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: code,
+            code_verifier: savedVerifier,
+            redirect_uri: redirectUri
+          })
+        });
+        var data = await resp.json();
+
+        if (!data.success) {
+          if (status) { status.innerHTML = '<span style="color:#ef4444">❌ ' + (data.error || 'Token exchange thất bại') + '</span>'; }
+          App.toast(data.error || 'Token exchange thất bại', 'error');
+          return;
+        }
+
+        // SUCCESS! Auto-populate everything
+        App._applyChatgptOAuthToken(data.access_token);
+
+      } catch(e) {
+        if (status) { status.innerHTML = '<span style="color:#ef4444">❌ Lỗi: ' + e.message + '</span>'; }
+      }
+    };
+
+    window.addEventListener('message', messageHandler);
+
+    // Fallback: poll for popup close without completing auth
+    var pollTimer = setInterval(function() {
+      if (popup && popup.closed) {
+        clearInterval(pollTimer);
+        // Give postMessage a moment to arrive
+        setTimeout(function() {
+          if (sessionStorage.getItem('chatgpt_oauth_state') === state) {
+            // State still present = message never arrived
+            // Don't show error, user may have manually closed
+          }
+        }, 500);
+      }
+    }, 1000);
+
+  } catch(e) {
+    if (status) { status.innerHTML = '<span style="color:#ef4444">❌ Lỗi: ' + e.message + '</span>'; }
+  }
+};
+
+// ── Apply token after OAuth or manual paste ──
+App._applyChatgptOAuthToken = async function(token) {
+  var status = document.getElementById('chatgpt-verify-status');
+  var modal = document.getElementById('chatgpt-oauth-modal');
+
+  // Auto-populate UI
+  var providerSelect = document.getElementById('ai-provider-select');
+  if (providerSelect) providerSelect.value = 'chatgpt_oauth';
+  App.onProviderChange();
+
+  var baseUrlEl = document.getElementById('chatgpt-oauth-base-url');
+  if (baseUrlEl) baseUrlEl.value = 'https://api.openai.com/v1';
+  var modelEl = document.getElementById('chatgpt-oauth-model');
+  if (modelEl) modelEl.value = 'gpt-4o';
+
+  // Set token into keys list
+  App.renderAiKeysList('chatgpt_oauth', [token]);
+
+  // Auto-save
+  await App.saveSettings();
+
+  if (status) {
+    status.innerHTML = '<span style="color:#22c55e">✅ Đăng nhập ChatGPT Subscription thành công! Cấu hình đã được tự động điền.</span>';
+  }
+  App.toast('✅ Đã đăng nhập & tự động cấu hình ChatGPT Subscription thành công!', 'success');
+
+  setTimeout(function() {
+    if (modal) modal.classList.remove('open');
+  }, 1500);
+};
+
+// ── Manual paste flow (Step 2 button) ──
+App.processChatgptOAuthLogin = async function() {
+  var input = document.getElementById('chatgpt-token-paste-input');
+  var status = document.getElementById('chatgpt-verify-status');
+  var btn = document.getElementById('btn-verify-chatgpt-oauth');
+
+  var raw = (input ? input.value : '').trim();
   if (!raw) {
     App.toast('Vui lòng dán Access Token hoặc JSON session', 'error');
     return;
   }
 
-  let token = raw;
+  var token = raw;
   if (raw.startsWith('{') && raw.endsWith('}')) {
     try {
-      const parsed = JSON.parse(raw);
+      var parsed = JSON.parse(raw);
       token = parsed.accessToken || parsed.access_token || parsed.token || raw;
     } catch(e) {}
   }
@@ -1835,65 +1995,44 @@ App.processChatgptOAuthLogin = async function() {
     token = token.substring(7).trim();
   }
 
-  const baseUrl = (document.getElementById('chatgpt-oauth-base-url')?.value || 'https://api.openai.com/v1').trim() || 'https://api.openai.com/v1';
+  var baseUrl = (document.getElementById('chatgpt-oauth-base-url') || {}).value || 'https://api.openai.com/v1';
+  baseUrl = baseUrl.trim() || 'https://api.openai.com/v1';
 
   btn.disabled = true;
   btn.textContent = '⏳ Đang xác thực...';
   if (status) {
-    status.textContent = '⏳ Đang kiểm tra Access Token với OpenAI ChatGPT...';
-    status.style.color = 'var(--text2)';
+    status.innerHTML = '<span style="color:var(--text2)">⏳ Đang kiểm tra Access Token với OpenAI ChatGPT...</span>';
   }
 
   try {
-    const resp = await fetch('/api/settings/verify-chatgpt-oauth', {
+    var resp = await fetch('/api/settings/verify-chatgpt-oauth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ access_token: token, base_url: baseUrl })
     });
-    const data = await resp.json();
+    var data = await resp.json();
 
     if (!data.success) {
       if (status) {
-        status.textContent = '❌ ' + (data.error || 'Xác thực thất bại');
-        status.style.color = '#ef4444';
+        status.innerHTML = '<span style="color:#ef4444">❌ ' + (data.error || 'Xác thực thất bại') + '</span>';
       }
       App.toast(data.error || 'Token không hợp lệ', 'error');
       return;
     }
 
-    // Auto-populate UI fields
-    (document.getElementById('ai-provider-select') || me_dummy).value = 'chatgpt_oauth';
-    App.onProviderChange();
-
-    (document.getElementById('chatgpt-oauth-base-url') || me_dummy).value = data.base_url || 'https://api.openai.com/v1';
-    (document.getElementById('chatgpt-oauth-model') || me_dummy).value = data.model || 'gpt-4o';
-
-    // Set Access Token into keys list
-    App.renderAiKeysList('chatgpt_oauth', [data.token]);
-
-    // Auto-save settings
-    await App.saveSettings();
-
-    if (status) {
-      status.textContent = '✅ ' + data.message + ' (Đã tìm thấy ' + data.models_found + ' models)';
-      status.style.color = '#22c55e';
-    }
-    App.toast('✅ Đã đăng nhập & tự động cấu hình ChatGPT Subscription thành công!', 'success');
-
-    setTimeout(() => {
-      modal?.classList.remove('open');
-    }, 1200);
+    // Use the verified token
+    App._applyChatgptOAuthToken(data.token);
 
   } catch(e) {
     if (status) {
-      status.textContent = '❌ Lỗi kết nối: ' + e.message;
-      status.style.color = '#ef4444';
+      status.innerHTML = '<span style="color:#ef4444">❌ Lỗi kết nối: ' + e.message + '</span>';
     }
   } finally {
     btn.disabled = false;
-    btn.textContent = '🚀 Tự động xác thực & Điền cấu hình';
+    btn.textContent = '🚀 Xác thực & Tự động điền cấu hình';
   }
 };
+
 
 App.renderAiKeysList = function(provider, keys) {
   const container = document.getElementById(provider + '-keys-list');

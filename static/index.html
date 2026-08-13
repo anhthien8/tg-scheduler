@@ -1609,36 +1609,57 @@
         </button>
       </div>
     </div>
-  <!-- ChatGPT OAuth Quick Login Modal -->
+  </template>
+
+  <!-- ChatGPT OAuth Quick Login Modal (MUST be outside template to render) -->
   <div class="modal-overlay" id="chatgpt-oauth-modal" style="z-index:10000">
-    <div class="modal" style="max-width:540px;padding:24px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)">
-        <h3 style="margin:0;font-size:17px;display:flex;align-items:center;gap:8px">
-          <span style="color:#10a37f">⚡</span> Đăng nhập ChatGPT Subscription (Quick Login)
+    <div class="modal" style="max-width:560px;padding:0;overflow:hidden;border-radius:12px">
+      <!-- Header -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid var(--border)">
+        <h3 style="margin:0;font-size:17px;display:flex;align-items:center;gap:10px">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#10a37f,#0d8c6d)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M22.28 9.37c.56-1.58.17-3.34-1.01-4.52-1.73-1.73-4.37-2.06-6.44-.82-.5-.36-1.07-.62-1.67-.78C12.18 1.22 10.12.22 8.09.82 6.07 1.43 4.73 3.2 4.67 5.2c-.53.22-1.02.53-1.44.93-1.68 1.68-2.04 4.24-.9 6.28-.56 1.58-.17 3.34 1.01 4.52 1.73 1.73 4.37 2.06 6.44.82.5.36 1.07.62 1.67.78.98 2.03 3.04 3.03 5.07 2.43 2.02-.61 3.36-2.38 3.42-4.38.53-.22 1.02-.53 1.44-.93 1.68-1.68 2.04-4.24.9-6.28z"/></svg>
+          </span>
+          Connect ChatGPT Subscription
         </h3>
-        <button onclick="document.getElementById('chatgpt-oauth-modal').classList.remove('open')" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2)">✕</button>
+        <button onclick="document.getElementById('chatgpt-oauth-modal').classList.remove('open')" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text2);line-height:1">&#x2715;</button>
       </div>
 
-      <div style="background:rgba(16,163,127,0.08);border-left:3px solid #10a37f;border-radius:6px;padding:12px;margin-bottom:16px;font-size:13px;color:var(--text1)">
-        💡 <b>Cách lấy Token cực nhanh (3 giây):</b>
-        <ol style="margin:6px 0 0 18px;padding:0">
-          <li>Mở trang <a href="https://chatgpt.com/api/auth/session" target="_blank" style="color:#10a37f;font-weight:bold;text-decoration:underline">chatgpt.com/api/auth/session</a> trên trình duyệt đã đăng nhập ChatGPT Plus/Team.</li>
-          <li>Copy toàn bộ đoạn mã JSON hoặc chuỗi <code>accessToken</code> (bắt đầu bằng <code>ey...</code>).</li>
-          <li>Dán vào ô bên dưới và bấm <b>"Tự động điền & Lưu cấu hình"</b>.</li>
-        </ol>
+      <!-- Body -->
+      <div style="padding:20px 24px">
+        <!-- Step 1 -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#10a37f;color:white;font-size:12px;font-weight:700;flex-shrink:0">1</span>
+          <span style="font-size:14px;font-weight:600">Mở trang xác thực OpenAI trên trình duyệt</span>
+        </div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.5">
+          Bấm nút bên dưới để mở trang <strong>auth session</strong> của ChatGPT. Trang sẽ trả về JSON chứa <code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:12px">accessToken</code> nếu bạn đã đăng nhập ChatGPT Plus / Team / Enterprise.
+        </p>
+        <button class="btn btn-primary" onclick="App.openChatgptAuthTab()" style="width:100%;background:linear-gradient(135deg,#10a37f,#0d8c6d);border:none;padding:12px;font-size:14px;font-weight:600;border-radius:8px;margin-bottom:16px;box-shadow:0 4px 14px rgba(16,163,127,0.3)">
+          &#x1F510; Mở trang xác thực OpenAI &#x2192;
+        </button>
+
+        <div style="text-align:center;color:var(--text2);font-size:12px;margin-bottom:16px;position:relative">
+          <span style="background:var(--card-bg);padding:0 12px;position:relative;z-index:1">hoặc dán token trực tiếp</span>
+          <div style="position:absolute;top:50%;left:0;right:0;height:1px;background:var(--border);z-index:0"></div>
+        </div>
+
+        <!-- Step 2 -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#10a37f;color:white;font-size:12px;font-weight:700;flex-shrink:0">2</span>
+          <span style="font-size:14px;font-weight:600">Dán Access Token / JSON vào đây</span>
+        </div>
+        <textarea id="chatgpt-token-paste-input" class="form-input" rows="4" placeholder='Dán {"accessToken":"eyJhb..."} hoặc chỉ chuỗi eyJhb... vào đây' style="font-family:monospace;font-size:12px;resize:vertical;margin-bottom:12px"></textarea>
+
+        <!-- Status -->
+        <div id="chatgpt-verify-status" style="font-size:13px;min-height:20px;margin-bottom:4px"></div>
       </div>
 
-      <div style="margin-bottom:16px">
-        <label class="form-label" style="font-size:13px;font-weight:600">Dán ChatGPT Access Token / JSON Session:</label>
-        <textarea id="chatgpt-token-paste-input" class="form-input" rows="4" placeholder="Dán accessToken hoặc toàn bộ JSON vào đây..." style="font-family:monospace;font-size:12px"></textarea>
-      </div>
-
-      <div id="chatgpt-verify-status" style="margin-bottom:16px;font-size:13px"></div>
-
-      <div style="display:flex;justify-content:flex-end;gap:8px">
+      <!-- Footer -->
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:16px 24px;border-top:1px solid var(--border)">
         <button class="btn btn-outline" onclick="document.getElementById('chatgpt-oauth-modal').classList.remove('open')">Hủy</button>
-        <button class="btn btn-primary" id="btn-verify-chatgpt-oauth" onclick="App.processChatgptOAuthLogin()" style="background:linear-gradient(135deg, #10a37f, #0d8c6d);border:none">
-          🚀 Tự động xác thực & Điền cấu hình
+        <button class="btn btn-primary" id="btn-verify-chatgpt-oauth" onclick="App.processChatgptOAuthLogin()" style="background:linear-gradient(135deg,#10a37f,#0d8c6d);border:none;font-weight:600">
+          &#x1F680; Xác thực &amp; Tự động điền cấu hình
         </button>
       </div>
     </div>
