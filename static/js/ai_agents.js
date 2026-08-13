@@ -211,7 +211,7 @@ const AIAgents = {
 
     const overlay = document.createElement('div');
     overlay.id = 'ai-agent-test-modal';
-    overlay.className = 'modal-overlay';
+    overlay.className = 'modal-overlay open';
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
 
     overlay.innerHTML = `
@@ -332,7 +332,7 @@ const AIAgents = {
 
     const overlay = document.createElement('div');
     overlay.id = 'ai-agent-learned-modal';
-    overlay.className = 'modal-overlay';
+    overlay.className = 'modal-overlay open';
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
 
     overlay.innerHTML = `
@@ -401,10 +401,10 @@ const AIAgents = {
 // Bind globally to window object for reliable inline event invocation
 window.AIAgents = AIAgents;
 
-// Global Event Delegation fallback for AI Agent actions
+// Global Event Delegation fallback for AI Agent actions (skips if inline onclick is present)
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-agent-action]');
-  if (!btn) return;
+  if (!btn || btn.hasAttribute('onclick')) return;
   const action = btn.dataset.agentAction;
   const id = parseInt(btn.dataset.agentId);
   if (!id) return;

@@ -1430,7 +1430,7 @@ async def _run_campaign(campaign_id: int):
                 ai_keys = await _load_provider_keys(ai_provider)
 
             if not ai_keys:
-                all_providers = ["gemini", "groq", "openai", "deepseek", "openai_compatible"]
+                all_providers = ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]
                 for alt_prov in all_providers:
                     alt_keys = await _load_provider_keys(alt_prov)
                     if alt_keys:
@@ -1445,6 +1445,13 @@ async def _run_campaign(campaign_id: int):
             if ai_provider == "openai_compatible":
                 b_url = await db.get_setting("ai_oai_compat_base_url", "")
                 mod = await db.get_setting("ai_oai_compat_model", "")
+                if b_url and b_url.strip():
+                    ai_remix_kwargs["base_url"] = b_url.strip()
+                if mod and mod.strip():
+                    ai_remix_kwargs["model"] = mod.strip()
+            elif ai_provider == "chatgpt_oauth":
+                b_url = await db.get_setting("ai_chatgpt_oauth_base_url", "")
+                mod = await db.get_setting("ai_chatgpt_oauth_model", "")
                 if b_url and b_url.strip():
                     ai_remix_kwargs["base_url"] = b_url.strip()
                 if mod and mod.strip():

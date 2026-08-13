@@ -64,7 +64,7 @@ async def _get_system_ai_config():
             ai_keys = []
 
     if not ai_keys:
-        for alt_prov in ["gemini", "groq", "openai", "deepseek", "openai_compatible"]:
+        for alt_prov in ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]:
             try:
                 raw = await db.get_setting(f"ai_keys_{alt_prov}", "[]")
                 alt_keys = json.loads(raw) if raw else []
@@ -79,6 +79,13 @@ async def _get_system_ai_config():
     if ai_provider == "openai_compatible":
         b_url = await db.get_setting("ai_oai_compat_base_url", "")
         mod = await db.get_setting("ai_oai_compat_model", "")
+        if b_url and b_url.strip():
+            kwargs["base_url"] = b_url.strip()
+        if mod and mod.strip():
+            kwargs["model"] = mod.strip()
+    elif ai_provider == "chatgpt_oauth":
+        b_url = await db.get_setting("ai_chatgpt_oauth_base_url", "")
+        mod = await db.get_setting("ai_chatgpt_oauth_model", "")
         if b_url and b_url.strip():
             kwargs["base_url"] = b_url.strip()
         if mod and mod.strip():

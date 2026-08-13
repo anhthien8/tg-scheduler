@@ -199,6 +199,10 @@ async def _try_call(provider, api_key, prompt, **kwargs):
         if not base_url or not model:
             raise ValueError("openai_compatible requires base_url and model")
         return await _call_openai_compatible(api_key, prompt, base_url, model)
+    elif provider == "chatgpt_oauth":
+        base_url = kwargs.get("base_url") or "https://api.openai.com/v1"
+        model = kwargs.get("model") or "gpt-4o"
+        return await _call_openai_compatible(api_key, prompt, base_url, model)
     else:
         raise ValueError("Unknown provider: " + provider)
 
@@ -381,7 +385,7 @@ async def generate_chat_response(
     # ── Automatic Fallback to alternative providers if primary fails ──
     try:
         import database as db
-        fallback_order = ["openai_compatible", "gemini", "groq", "openai", "deepseek"]
+        fallback_order = ["chatgpt_oauth", "openai_compatible", "gemini", "groq", "openai", "deepseek"]
         for alt_prov in fallback_order:
             if alt_prov == provider:
                 continue
@@ -396,6 +400,9 @@ async def generate_chat_response(
                 if alt_prov == "openai_compatible":
                     alt_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
                     alt_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
+                elif alt_prov == "chatgpt_oauth":
+                    alt_kwargs["base_url"] = await db.get_setting("ai_chatgpt_oauth_base_url", "")
+                    alt_kwargs["model"] = await db.get_setting("ai_chatgpt_oauth_model", "")
                 logger.info("[AI Chat] 🔄 Provider '%s' failed. Auto-fallback to '%s' (%d keys)...", provider, alt_prov, len(alt_keys))
                 try:
                     res = await _call_chat_provider(alt_prov, alt_keys[0], formatted_messages, **alt_kwargs)
@@ -423,6 +430,24 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"].strip()
+
+    elif provider == "chatgpt_oauth":
+        base_url = kwargs.get("base_url") or "https://api.openai.com/v1"
+        model = kwargs.get("model") or "gpt-4o"
+        url = base_url.rstrip('/') + '/chat/completions'
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 1000
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            raw = resp.text
+            data = _parse_openai_compatible_json(raw)
+            return data["choices"][0]["message"]["content"].strip()
 
     elif provider == "deepseek":
         url = "https://api.deepseek.com/chat/completions"

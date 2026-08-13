@@ -437,7 +437,7 @@ def _make_handler(account_id: int):
                                 ai_keys = await _load_provider_keys(ai_provider)
 
                                 if not ai_keys:
-                                    all_providers = ["gemini", "groq", "openai", "deepseek", "openai_compatible"]
+                                    all_providers = ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]
                                     for alt_prov in all_providers:
                                         alt_keys = await _load_provider_keys(alt_prov)
                                         if alt_keys:
@@ -445,7 +445,7 @@ def _make_handler(account_id: int):
                                             ai_keys = alt_keys
                                             break
 
-                            # 3. Always populate base_url & model for openai_compatible
+                            # 3. Always populate base_url & model for openai_compatible or chatgpt_oauth
                             if ai_provider == "openai_compatible":
                                 b_url = agent_config.get("base_url", "") if agent_config else ""
                                 mod = agent_config.get("model", "") if agent_config else ""
@@ -453,6 +453,17 @@ def _make_handler(account_id: int):
                                     b_url = await db.get_setting("ai_oai_compat_base_url", "")
                                 if not mod or not mod.strip():
                                     mod = await db.get_setting("ai_oai_compat_model", "")
+                                if b_url and b_url.strip():
+                                    kwargs["base_url"] = b_url.strip()
+                                if mod and mod.strip():
+                                    kwargs["model"] = mod.strip()
+                            elif ai_provider == "chatgpt_oauth":
+                                b_url = agent_config.get("base_url", "") if agent_config else ""
+                                mod = agent_config.get("model", "") if agent_config else ""
+                                if not b_url or not b_url.strip():
+                                    b_url = await db.get_setting("ai_chatgpt_oauth_base_url", "")
+                                if not mod or not mod.strip():
+                                    mod = await db.get_setting("ai_chatgpt_oauth_model", "")
                                 if b_url and b_url.strip():
                                     kwargs["base_url"] = b_url.strip()
                                 if mod and mod.strip():

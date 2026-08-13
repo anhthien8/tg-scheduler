@@ -1637,7 +1637,10 @@ App.loadSettings = async function() {
       API.getSetting('ai_keys_openai_compatible'),
       API.getSetting('ai_oai_compat_base_url'),
       API.getSetting('ai_oai_compat_model'),
-      API.getSetting('ai_custom_prompt')
+      API.getSetting('ai_custom_prompt'),
+      API.getSetting('ai_keys_chatgpt_oauth'),
+      API.getSetting('ai_chatgpt_oauth_base_url'),
+      API.getSetting('ai_chatgpt_oauth_model')
     ]);
     const provider = res[0].value || '';
     let geminiKeys = [];
@@ -1653,6 +1656,10 @@ App.loadSettings = async function() {
     const oaiCompatBaseUrl = res[6].value || '';
     const oaiCompatModel   = res[7].value || '';
     const customPrompt     = res[8].value || '';
+    let chatgptOauthKeys = [];
+    try { chatgptOauthKeys = JSON.parse(res[9].value || '[]'); } catch(e) {}
+    const chatgptOauthBaseUrl = res[10].value || '';
+    const chatgptOauthModel   = res[11].value || 'gpt-4o';
 
     (document.getElementById('ai-provider-select') || me_dummy).value = provider;
     App.renderAiKeysList('gemini',   geminiKeys);
@@ -1660,8 +1667,11 @@ App.loadSettings = async function() {
     App.renderAiKeysList('openai',   openaiKeys);
     App.renderAiKeysList('groq',     groqKeys);
     App.renderAiKeysList('openai_compatible', oaiCompatKeys);
+    App.renderAiKeysList('chatgpt_oauth', chatgptOauthKeys);
     (document.getElementById('oai-compat-base-url') || me_dummy).value = oaiCompatBaseUrl;
     (document.getElementById('oai-compat-model') || me_dummy).value = oaiCompatModel;
+    (document.getElementById('chatgpt-oauth-base-url') || me_dummy).value = chatgptOauthBaseUrl;
+    (document.getElementById('chatgpt-oauth-model') || me_dummy).value = chatgptOauthModel;
     const customPromptEl = document.getElementById('ai-custom-prompt');
     if (customPromptEl) customPromptEl.value = customPrompt;
 
@@ -1679,6 +1689,8 @@ App.onProviderChange = function() {
   (document.getElementById('ai-deepseek-section')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).toggle('hidden', p !== 'deepseek');
   const openaiEl = document.getElementById('ai-openai-section');
   if (openaiEl) openaiEl.classList.toggle('hidden', p !== 'openai');
+  const chatgptOauthEl = document.getElementById('ai-chatgpt_oauth-section');
+  if (chatgptOauthEl) chatgptOauthEl.classList.toggle('hidden', p !== 'chatgpt_oauth');
   const groqEl = document.getElementById('ai-groq-section');
   if (groqEl) groqEl.classList.toggle('hidden', p !== 'groq');
   const oaiCompatEl = document.getElementById('ai-openai_compatible-section');
@@ -1843,19 +1855,21 @@ App.saveSettings = async function() {
   const openaiKeys   = App.collectAiKeys('openai');
   const groqKeys     = App.collectAiKeys('groq');
   const oaiCompatKeys = App.collectAiKeys('openai_compatible');
-  if (provider === 'gemini'   && geminiKeys.length   === 0) { App.toast('Them it nhat 1 Gemini API Key', 'error'); return; }
-  if (provider === 'deepseek' && deepseekKeys.length === 0) { App.toast('Them it nhat 1 DeepSeek API Key', 'error'); return; }
-  if (provider === 'openai'   && openaiKeys.length   === 0) { App.toast('Them it nhat 1 OpenAI API Key', 'error'); return; }
-  if (provider === 'groq'     && groqKeys.length     === 0) { App.toast('Them it nhat 1 Groq API Key', 'error'); return; }
+  const chatgptOauthKeys = App.collectAiKeys('chatgpt_oauth');
+  if (provider === 'gemini'   && geminiKeys.length   === 0) { App.toast('Thêm ít nhất 1 Gemini API Key', 'error'); return; }
+  if (provider === 'deepseek' && deepseekKeys.length === 0) { App.toast('Thêm ít nhất 1 DeepSeek API Key', 'error'); return; }
+  if (provider === 'openai'   && openaiKeys.length   === 0) { App.toast('Thêm ít nhất 1 OpenAI API Key', 'error'); return; }
+  if (provider === 'groq'     && groqKeys.length     === 0) { App.toast('Thêm ít nhất 1 Groq API Key', 'error'); return; }
+  if (provider === 'chatgpt_oauth' && chatgptOauthKeys.length === 0) { App.toast('Thêm ít nhất 1 ChatGPT Access Token (OAuth)', 'error'); return; }
   if (provider === 'openai_compatible') {
     const baseUrl = (document.getElementById('oai-compat-base-url')?.value || "").trim();
     const model = App.getOaiCompatModel();
-    if (!baseUrl) { App.toast('Nhap Base URL cho OpenAI Compatible', 'error'); return; }
-    if (!model) { App.toast('Nhap Model Name cho OpenAI Compatible', 'error'); return; }
-    if (oaiCompatKeys.length === 0) { App.toast('Them it nhat 1 API Key', 'error'); return; }
+    if (!baseUrl) { App.toast('Nhập Base URL cho OpenAI Compatible', 'error'); return; }
+    if (!model) { App.toast('Nhập Model Name cho OpenAI Compatible', 'error'); return; }
+    if (oaiCompatKeys.length === 0) { App.toast('Thêm ít nhất 1 API Key', 'error'); return; }
   }
   btn.disabled = true;
-  btn.textContent = 'Dang luu...';
+  btn.textContent = 'Đang lưu...';
   statusEl.textContent = '';
   try {
     const customPromptVal = (document.getElementById('ai-custom-prompt')?.value || '').trim();
@@ -1868,11 +1882,14 @@ App.saveSettings = async function() {
       API.setSetting('ai_keys_openai_compatible', JSON.stringify(oaiCompatKeys)),
       API.setSetting('ai_oai_compat_base_url', (document.getElementById('oai-compat-base-url')?.value || "").trim()),
       API.setSetting('ai_oai_compat_model', App.getOaiCompatModel()),
-      API.setSetting('ai_custom_prompt', customPromptVal)
+      API.setSetting('ai_custom_prompt', customPromptVal),
+      API.setSetting('ai_keys_chatgpt_oauth', JSON.stringify(chatgptOauthKeys)),
+      API.setSetting('ai_chatgpt_oauth_base_url', (document.getElementById('chatgpt-oauth-base-url')?.value || "").trim()),
+      API.setSetting('ai_chatgpt_oauth_model', (document.getElementById('chatgpt-oauth-model')?.value || "").trim() || "gpt-4o")
     ]);
     App.toast('Đã lưu cài đặt AI!', 'success');
-    const cnt = provider === 'gemini' ? geminiKeys.length : (provider === 'deepseek' ? deepseekKeys.length : (provider === 'groq' ? groqKeys.length : (provider === 'openai_compatible' ? oaiCompatKeys.length : openaiKeys.length)));
-    const labelMap = { gemini: 'Gemini', deepseek: 'DeepSeek', openai: 'OpenAI', groq: 'Groq', openai_compatible: 'OpenAI Compatible' };
+    const cnt = provider === 'gemini' ? geminiKeys.length : (provider === 'deepseek' ? deepseekKeys.length : (provider === 'groq' ? groqKeys.length : (provider === 'openai_compatible' ? oaiCompatKeys.length : (provider === 'chatgpt_oauth' ? chatgptOauthKeys.length : openaiKeys.length))));
+    const labelMap = { gemini: 'Gemini', deepseek: 'DeepSeek', openai: 'OpenAI', groq: 'Groq', openai_compatible: 'OpenAI Compatible', chatgpt_oauth: 'ChatGPT Subscription (OAuth)' };
     statusEl.textContent = provider
       ? ('Đang dùng: ' + (labelMap[provider] || provider) + ' (' + cnt + ' key)')
       : 'AI Remix đang tắt';

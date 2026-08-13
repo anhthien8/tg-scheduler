@@ -437,16 +437,45 @@
               <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
                 Chọn AI model để tự động remix nội dung DM trước khi gửi, giúp mỗi tin nhắn trông tự nhiên và khác biệt — tránh bị Telegram nhận diện là spam.
               </p>
-              <select class="form-select" id="ai-provider-select" onchange="App.onProviderChange()" style="width:260px">
+              <select class="form-select" id="ai-provider-select" onchange="App.onProviderChange()" style="width:300px">
                 <option value="">🚫 Tắt AI Remix</option>
                 <option value="gemini">✨ Gemini (Google)</option>
                 <option value="deepseek">🔵 DeepSeek</option>
-                <option value="openai">🟢 OpenAI (ChatGPT)</option>
+                <option value="openai">🟢 OpenAI (ChatGPT API Key)</option>
+                <option value="chatgpt_oauth">🔑 ChatGPT Subscription (OAuth / Access Token)</option>
                 <option value="groq">⚡ Groq (Llama 3.3 70B)</option>
                 <option value="openai_compatible">🔌 9Router / OpenAI Compatible</option>
               </select>
               <div style="margin-top:12px;padding:10px 14px;background:rgba(59,130,246,0.1);border-left:3px solid #3b82f6;border-radius:6px;font-size:12px;color:var(--text1)">
-                💡 <b>Tự động Fallback đa tầng:</b> Nếu bạn lưu API Key ở nhiều nhà cung cấp (Gemini, Groq, 9Router, DeepSeek...), khi nhà cung cấp chính bị quá tải hoặc hết credits, hệ thống sẽ <b>tự động nhảy sang các API còn lại</b> làm dự phòng để AI không bao giờ bị gián đoạn.
+                💡 <b>Tự động Fallback đa tầng:</b> Nếu bạn lưu API Key ở nhiều nhà cung cấp (ChatGPT Subscription, Gemini, Groq, 9Router, DeepSeek...), khi nhà cung cấp chính bị quá tải hoặc hết credits, hệ thống sẽ <b>tự động nhảy sang các API còn lại</b> làm dự phòng để AI không bao giờ bị gián đoạn.
+              </div>
+            </div>
+          </div>
+
+          <!-- ChatGPT Subscription OAuth Section -->
+          <div id="ai-chatgpt_oauth-section" class="card hidden" style="margin-bottom:20px;padding:20px">
+            <div class="form-group">
+              <label class="form-label" style="font-size:15px;font-weight:600">🔑 ChatGPT Subscription (OAuth / Access Token)</label>
+              <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+                Sử dụng tài khoản gói <strong>ChatGPT Plus / Team / Enterprise Subscription</strong> trực tiếp thông qua ChatGPT OAuth Access Token (chuỗi Bearer token) mà không cần trả tiền theo token API thông thường.
+              </p>
+
+              <div style="margin-bottom:12px">
+                <label class="form-label" style="font-size:13px">OAuth Base URL / Proxy Endpoint (Tùy chọn)</label>
+                <input type="text" class="form-input" id="chatgpt-oauth-base-url" placeholder="VD: https://api.openai.com/v1 (mặc định) hoặc http://localhost:8000/v1" style="font-family:monospace;font-size:13px">
+                <p class="form-hint">Mặc định: <code>https://api.openai.com/v1</code> hoặc ChatGPT OAuth Proxy Gateway</p>
+              </div>
+
+              <div style="margin-bottom:12px">
+                <label class="form-label" style="font-size:13px">Model Name</label>
+                <input type="text" class="form-input" id="chatgpt-oauth-model" placeholder="VD: gpt-4o (mặc định), gpt-4o-mini, o3-mini" value="gpt-4o" style="font-family:monospace;font-size:13px">
+              </div>
+
+              <div style="margin-bottom:10px">
+                <label class="form-label" style="font-size:13px">ChatGPT Subscription Access Tokens / OAuth Tokens (Round-Robin)</label>
+                <p style="font-size:12px;color:var(--text2);margin-bottom:8px">Thêm 1 hoặc nhiều Access Token (OAuth token):</p>
+                <div id="chatgpt_oauth-keys-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+                <button class="btn btn-ghost btn-sm" onclick="App.addAiKeyRow('chatgpt_oauth')">+ Thêm ChatGPT Access Token</button>
               </div>
             </div>
           </div>
