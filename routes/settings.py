@@ -160,7 +160,7 @@ class VerifyChatgptOauthPayload(BaseModel):
 
 @router.post("/verify-chatgpt-oauth")
 async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
-    """Verify ChatGPT Subscription Access Token / OAuth Token and auto-discover models."""
+    """Verify ChatGPT Session Token or API Key and auto-detect type."""
     token = payload.access_token.strip()
     if not token:
         return {"success": False, "error": "Access Token không được để trống"}
@@ -168,11 +168,6 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
     if token.lower().startswith("bearer "):
         token = token[7:].strip()
 
-    base_url = (payload.base_url or "https://api.openai.com/v1").rstrip("/")
-    if not base_url:
-        base_url = "https://api.openai.com/v1"
-
-    models_url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
@@ -180,35 +175,68 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(models_url, headers=headers)
-            if resp.status_code == 401:
-                return {"success": False, "error": "Access Token không hợp lệ hoặc đã hết hạn (HTTP 401 Unauthorized)"}
-            resp.raise_for_status()
-            data = resp.json()
+            # Strategy 1: Try chatgpt.com/backend-api/me (ChatGPT session token)
+            try:
+                me_resp = await client.get(
+                    "https://chatgpt.com/backend-api/me",
+                    headers=headers,
+                )
+                if me_resp.status_code == 200:
+                    me_data = me_resp.json()
+                    email = me_data.get("email", "")
+                    name = me_data.get("name", "")
+                    logger.info(f"[ChatGPT OAuth] Session token verified for: {email or name}")
+                    return {
+                        "success": True,
+                        "token": token,
+                        "token_type": "session",
+                        "base_url": "https://api.openai.com/v1",
+                        "model": "gpt-4o",
+                        "email": email,
+                        "name": name,
+                        "message": f"Xác thực thành công! Tài khoản: {email or name}"
+                    }
+            except Exception as e:
+                logger.debug(f"[ChatGPT OAuth] backend-api/me check failed: {e}")
 
-        models_list = []
-        raw_models = data.get("data", [])
-        if isinstance(raw_models, list):
-            models_list = [m.get("id", "") for m in raw_models if isinstance(m, dict) and m.get("id")]
+            # Strategy 2: Try OpenAI API /v1/models (standard API key)
+            base_url = (payload.base_url or "https://api.openai.com/v1").rstrip("/")
+            models_url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
+            try:
+                api_resp = await client.get(models_url, headers=headers)
+                if api_resp.status_code == 200:
+                    data = api_resp.json()
+                    models_list = []
+                    raw_models = data.get("data", [])
+                    if isinstance(raw_models, list):
+                        models_list = [m.get("id", "") for m in raw_models if isinstance(m, dict) and m.get("id")]
 
-        best_model = "gpt-4o"
-        if "gpt-4o" in models_list:
-            best_model = "gpt-4o"
-        elif "gpt-4o-mini" in models_list:
-            best_model = "gpt-4o-mini"
-        elif models_list:
-            best_model = models_list[0]
+                    best_model = "gpt-4o"
+                    if "gpt-4o" in models_list:
+                        best_model = "gpt-4o"
+                    elif "gpt-4o-mini" in models_list:
+                        best_model = "gpt-4o-mini"
+                    elif models_list:
+                        best_model = models_list[0]
 
-        return {
-            "success": True,
-            "token": token,
-            "base_url": base_url,
-            "model": best_model,
-            "models_found": len(models_list),
-            "message": "Xác thực ChatGPT OAuth Access Token thành công!"
-        }
-    except httpx.HTTPStatusError as e:
-        return {"success": False, "error": f"HTTP {e.response.status_code}: {e.response.text[:200]}"}
+                    return {
+                        "success": True,
+                        "token": token,
+                        "token_type": "api_key",
+                        "base_url": base_url,
+                        "model": best_model,
+                        "models_found": len(models_list),
+                        "message": f"Xác thực API Key thành công! ({len(models_list)} models)"
+                    }
+            except Exception as e:
+                logger.debug(f"[ChatGPT OAuth] /v1/models check failed: {e}")
+
+            # Both failed
+            return {
+                "success": False,
+                "error": "Access Token không hợp lệ, đã hết hạn, hoặc không có quyền truy cập. Hãy thử lấy token mới từ chatgpt.com/api/auth/session."
+            }
+
     except Exception as e:
         return {"success": False, "error": f"Lỗi kết nối: {str(e)[:200]}"}
 
