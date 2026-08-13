@@ -1831,22 +1831,33 @@ App._base64urlencode = function(buffer) {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
-// ── OAuth PKCE Popup Flow (like OpenAI Codex) ──
-// ── Open ChatGPT Session Token Page (reliable approach) ──
+// ── Open ChatGPT Login → Session Token Popup ──
 App.openChatgptAuthTab = function() {
   var status = document.getElementById('chatgpt-verify-status');
   var sessionUrl = 'https://chatgpt.com/api/auth/session';
 
-  // Open in a new tab
-  window.open(sessionUrl, '_blank');
+  // Open as centered popup window (like Codex login)
+  var width = 520, height = 680;
+  var left = window.screenX + (window.innerWidth - width) / 2;
+  var top = window.screenY + (window.innerHeight - height) / 2;
+  var popup = window.open(
+    sessionUrl,
+    'ChatGPTLogin',
+    'width=' + width + ',height=' + height + ',top=' + top + ',left=' + left + ',scrollbars=yes,menubar=no,toolbar=no'
+  );
+
+  if (!popup) {
+    App.toast('Trình duyệt đã chặn popup. Vui lòng cho phép popup và thử lại.', 'error');
+    return;
+  }
 
   if (status) {
     status.innerHTML =
-      '<div style="background:rgba(16,163,127,0.08);border-left:3px solid #10a37f;border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.6">' +
-        '<strong style="color:#10a37f">✅ Tab mới đã mở!</strong> Làm theo 3 bước sau:<br>' +
-        '① Trên tab vừa mở, bạn sẽ thấy một đoạn JSON — bấm <kbd style="background:var(--bg);padding:1px 5px;border-radius:3px;font-size:11px">Ctrl+A</kbd> để chọn tất cả<br>' +
-        '② Bấm <kbd style="background:var(--bg);padding:1px 5px;border-radius:3px;font-size:11px">Ctrl+C</kbd> để copy<br>' +
-        '③ Quay lại đây, dán vào ô bên dưới rồi bấm <strong>"🚀 Xác thực"</strong>' +
+      '<div style="background:rgba(16,163,127,0.08);border-left:3px solid #10a37f;border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.7">' +
+        '<strong style="color:#10a37f">🔐 Cửa sổ đăng nhập ChatGPT đã mở!</strong><br>' +
+        '① Đăng nhập tài khoản ChatGPT Plus/Team trên popup vừa mở<br>' +
+        '② Sau khi đăng nhập, popup sẽ hiện JSON — bấm <kbd style="background:var(--bg);padding:1px 5px;border-radius:3px;font-size:11px">Ctrl+A</kbd> rồi <kbd style="background:var(--bg);padding:1px 5px;border-radius:3px;font-size:11px">Ctrl+C</kbd><br>' +
+        '③ Quay lại đây dán vào ô bên dưới → bấm <strong>"🚀 Xác thực"</strong>' +
       '</div>';
   }
 
