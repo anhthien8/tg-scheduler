@@ -1912,11 +1912,27 @@ App.processChatgptOAuthLogin = async function() {
   }
 
   var token = raw;
-  if (raw.startsWith('{') && raw.endsWith('}')) {
-    try {
-      var parsed = JSON.parse(raw);
-      token = parsed.accessToken || parsed.access_token || parsed.token || raw;
-    } catch(e) {}
+
+  // Try to parse as JSON (from chatgpt.com/api/auth/session)
+  try {
+    // Find JSON object in pasted text (may have surrounding whitespace/text)
+    var jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      var parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.accessToken) {
+        token = parsed.accessToken;
+      } else if (parsed.access_token) {
+        token = parsed.access_token;
+      } else if (parsed.token) {
+        token = parsed.token;
+      }
+    }
+  } catch(e) {
+    // Not valid JSON - try regex extraction for accessToken value
+    var atMatch = raw.match(/"accessToken"\s*:\s*"([^"]+)"/);
+    if (atMatch) {
+      token = atMatch[1];
+    }
   }
 
   if (token.toLowerCase().startsWith('bearer ')) {
