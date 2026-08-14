@@ -1524,7 +1524,16 @@ async testAiRemix(){
 
     const r = await API.setSetting('_test_remix_trigger', JSON.stringify({provider, keys, text: sampleText}));
 
-    // Actually call the test endpoint
+    const body = {provider, keys, text: sampleText};
+
+    // Include base_url and model for providers that need them
+    if (provider === 'openai_compatible') {
+      body.base_url = (document.getElementById('oai-compat-base-url') || {}).value || '';
+      body.model = (document.getElementById('oai-compat-model') || {}).value || '';
+    } else if (provider === 'chatgpt_oauth') {
+      body.base_url = (document.getElementById('chatgpt-oauth-base-url') || {}).value || 'https://api.openai.com/v1';
+      body.model = (document.getElementById('chatgpt-oauth-model') || {}).value || 'gpt-4o';
+    }
 
     const resp = await fetch('/api/settings/test-remix', {
 
@@ -1532,7 +1541,7 @@ async testAiRemix(){
 
       headers:{'Content-Type':'application/json'},
 
-      body: JSON.stringify({provider, keys, text: sampleText})
+      body: JSON.stringify(body)
 
     });
 
@@ -2191,6 +2200,9 @@ App.testAiRemix = async function() {
     if (provider === 'openai_compatible') {
       body.base_url = (document.getElementById('oai-compat-base-url')?.value || "").trim();
       body.model = App.getOaiCompatModel();
+    } else if (provider === 'chatgpt_oauth') {
+      body.base_url = (document.getElementById('chatgpt-oauth-base-url')?.value || 'https://api.openai.com/v1').trim();
+      body.model = (document.getElementById('chatgpt-oauth-model')?.value || 'gpt-4o').trim();
     }
     const resp = await fetch('/api/settings/test-remix', {
       method: 'POST',
