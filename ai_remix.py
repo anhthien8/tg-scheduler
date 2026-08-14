@@ -261,12 +261,48 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
     return prompt
 
 
+async def _auto_fallback_remix(failed_provider, prompt):
+    """Fallback across alternative configured providers if primary provider fails (e.g. 429 quota, auth error)."""
+    try:
+        import database as db
+        fallback_order = ["chatgpt_oauth", "gemini", "groq", "openai_compatible", "openai", "deepseek"]
+        for alt_prov in fallback_order:
+            if alt_prov == failed_provider:
+                continue
+            alt_raw = await db.get_setting(f"ai_keys_{alt_prov}", "[]")
+            alt_keys = json.loads(alt_raw) if alt_raw else []
+            if not alt_keys and alt_prov == "gemini":
+                legacy_k = await db.get_setting("gemini_api_key", "")
+                if legacy_k and legacy_k.strip():
+                    alt_keys = [legacy_k.strip()]
+            alt_keys = [k.strip() for k in alt_keys if k and str(k).strip()]
+            if alt_keys:
+                alt_kwargs = {}
+                if alt_prov == "openai_compatible":
+                    alt_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
+                    alt_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
+                elif alt_prov == "chatgpt_oauth":
+                    alt_kwargs["base_url"] = await db.get_setting("ai_chatgpt_oauth_base_url", "")
+                    alt_kwargs["model"] = await db.get_setting("ai_chatgpt_oauth_model", "")
+                logger.info("[AI Remix] 🔄 Auto-fallback from '%s' to '%s' (%d keys available)...", failed_provider, alt_prov, len(alt_keys))
+                for a_key in alt_keys:
+                    try:
+                        res = await _try_call(alt_prov, a_key, prompt, **alt_kwargs)
+                        if res and res.strip():
+                            logger.info("[AI Remix] ✨ Auto-fallback to '%s' succeeded!", alt_prov)
+                            return res.strip()
+                    except Exception as fb_err:
+                        logger.warning("[AI Remix] Fallback key for '%s' failed: %s", alt_prov, fb_err)
+    except Exception as e:
+        logger.warning("[AI Remix] Error during auto-fallback: %s", e)
+    return None
+
+
 async def remix_message(original_text, provider, api_keys, sender_name=None, custom_instruction=None, auto_translate_native=False, member_info=None, **kwargs):
     """
     Remix a DM message using round-robin AI key rotation.
-    Supported providers: 'gemini', 'deepseek', 'openai', 'groq', 'openai_compatible'
-    Falls back to original_text if all keys fail.
-    For openai_compatible, pass base_url and model in kwargs.
+    Supported providers: 'gemini', 'deepseek', 'openai', 'groq', 'openai_compatible', 'chatgpt_oauth'
+    Falls back to alternative providers or original_text if all keys fail.
     """
     if not original_text or not original_text.strip():
         return original_text
@@ -297,8 +333,8 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
             "[AI Remix] %s key[%d] HTTP %d: %s",
             provider, idx, status, e.response.text[:200]
         )
-        # On quota/auth errors try next key immediately
-        if status in (429, 403) and len(api_keys) > 1:
+        # On quota/auth errors try next key of same provider immediately
+        if status in (429, 401, 403) and len(api_keys) > 1:
             try:
                 idx2, key2 = _next_key(api_keys, provider)
                 if idx2 != idx:
@@ -309,11 +345,19 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
                         return result2
             except Exception as e2:
                 logger.warning("[AI Remix] Retry failed: %s", e2)
+        
+        # Auto fallback to other providers
+        fb = await _auto_fallback_remix(provider, prompt)
+        if fb:
+            return fb
         return original_text
 
     except Exception as e:
         _mark_key_failed(provider, idx)
-        logger.warning("[AI Remix] %s key[%d] error: %s - using original", provider, idx, e)
+        logger.warning("[AI Remix] %s key[%d] error: %s", provider, idx, e)
+        fb = await _auto_fallback_remix(provider, prompt)
+        if fb:
+            return fb
         return original_text
 
 
@@ -338,6 +382,10 @@ async def generate_response(prompt: str, provider: str, api_keys: list[str], **k
                     return await _try_call(provider, key2, prompt, **kwargs)
             except Exception as e2:
                 logger.warning("[AI AutoReply] Retry failed: %s", e2)
+        
+        fb = await _auto_fallback_remix(provider, prompt)
+        if fb:
+            return fb
         return None
 
 
@@ -404,12 +452,14 @@ async def generate_chat_response(
                     alt_kwargs["base_url"] = await db.get_setting("ai_chatgpt_oauth_base_url", "")
                     alt_kwargs["model"] = await db.get_setting("ai_chatgpt_oauth_model", "")
                 logger.info("[AI Chat] 🔄 Provider '%s' failed. Auto-fallback to '%s' (%d keys)...", provider, alt_prov, len(alt_keys))
-                try:
-                    res = await _call_chat_provider(alt_prov, alt_keys[0], formatted_messages, **alt_kwargs)
-                    if res:
-                        return res
-                except Exception as _sub_fb_err:
-                    logger.warning("[AI Chat] Fallback to '%s' failed: %s", alt_prov, _sub_fb_err)
+                for a_key in alt_keys:
+                    try:
+                        res = await _call_chat_provider(alt_prov, a_key, formatted_messages, **alt_kwargs)
+                        if res:
+                            logger.info("[AI Chat] ✨ Fallback to '%s' succeeded!", alt_prov)
+                            return res
+                    except Exception as _sub_fb_err:
+                        logger.warning("[AI Chat] Fallback key for '%s' failed: %s", alt_prov, _sub_fb_err)
     except Exception as _fb_err:
         logger.warning("[AI Chat] Fallback provider error: %s", _fb_err)
 
