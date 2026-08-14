@@ -356,15 +356,18 @@ async def fetch_chatgpt_models(payload: FetchModelsPayload):
     except Exception as e:
         logger.warning(f"[ChatGPT Models] Error: {e}")
 
-    # Fallback: return default known models
+    # Fallback: return default known models (updated Aug 2026)
     fallback = [
+        {"id": "gpt-5.6-sol", "name": "GPT-5.6 Sol (Flagship)"},
+        {"id": "gpt-5.6-terra", "name": "GPT-5.6 Terra (Balanced)"},
+        {"id": "gpt-5.6-luna", "name": "GPT-5.6 Luna (Fast)"},
         {"id": "gpt-4o", "name": "GPT-4o"},
         {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
         {"id": "gpt-4.1", "name": "GPT-4.1"},
         {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini"},
         {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano"},
-        {"id": "o3-mini", "name": "o3-mini"},
         {"id": "o4-mini", "name": "o4-mini"},
+        {"id": "o3-mini", "name": "o3-mini"},
     ]
     return {"success": True, "models": fallback, "source": "fallback"}
 
