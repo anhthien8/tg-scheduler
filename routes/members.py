@@ -1707,16 +1707,16 @@ async def _run_campaign(campaign_id: int):
                                 original_len = len(content)
                                 auto_native = bool(campaign.get("auto_translate_native", 1))
                                 mem_info = {
-                                    "first_name": target.get("first_name"),
-                                    "last_name": target.get("last_name"),
+                                    "first_name": member.get("first_name"),
+                                    "last_name": member.get("last_name"),
                                     "username": username,
-                                    "lang_code": target.get("lang_code")
+                                    "lang_code": member.get("lang_code")
                                 }
                                 remixed_content = await ai_rmx.remix_message(
                                     original_text=content,
                                     provider=ai_provider,
                                     api_keys=ai_keys,
-                                    sender_name=username if username else target.get("first_name"),
+                                    sender_name=username if username else member.get("first_name"),
                                     custom_instruction=ai_custom_prompt,
                                     auto_translate_native=auto_native,
                                     member_info=mem_info,
