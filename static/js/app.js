@@ -1671,7 +1671,18 @@ App.loadSettings = async function() {
     (document.getElementById('oai-compat-base-url') || me_dummy).value = oaiCompatBaseUrl;
     (document.getElementById('oai-compat-model') || me_dummy).value = oaiCompatModel;
     (document.getElementById('chatgpt-oauth-base-url') || me_dummy).value = chatgptOauthBaseUrl;
-    (document.getElementById('chatgpt-oauth-model') || me_dummy).value = chatgptOauthModel;
+    // For select dropdown: ensure saved model exists as option before setting value
+    var chatgptModelSelect = document.getElementById('chatgpt-oauth-model');
+    if (chatgptModelSelect && chatgptOauthModel) {
+      var hasOption = Array.from(chatgptModelSelect.options).some(function(o) { return o.value === chatgptOauthModel; });
+      if (!hasOption) {
+        var opt = document.createElement('option');
+        opt.value = chatgptOauthModel;
+        opt.textContent = chatgptOauthModel;
+        chatgptModelSelect.appendChild(opt);
+      }
+      chatgptModelSelect.value = chatgptOauthModel;
+    }
     const customPromptEl = document.getElementById('ai-custom-prompt');
     if (customPromptEl) customPromptEl.value = customPrompt;
 
@@ -1880,8 +1891,6 @@ App._applyChatgptOAuthToken = async function(token) {
 
   var baseUrlEl = document.getElementById('chatgpt-oauth-base-url');
   if (baseUrlEl) baseUrlEl.value = 'https://api.openai.com/v1';
-  var modelEl = document.getElementById('chatgpt-oauth-model');
-  if (modelEl) modelEl.value = 'gpt-4o';
 
   // Set token into keys list
   App.renderAiKeysList('chatgpt_oauth', [token]);
@@ -1889,14 +1898,81 @@ App._applyChatgptOAuthToken = async function(token) {
   // Auto-save
   await App.saveSettings();
 
+  // Auto-load models using the new token
+  await App.loadChatgptModels(token);
+
   if (status) {
-    status.innerHTML = '<span style="color:#22c55e">✅ Đăng nhập ChatGPT Subscription thành công! Cấu hình đã được tự động điền.</span>';
+    status.innerHTML = '<span style="color:#22c55e">✅ Đăng nhập ChatGPT Subscription thành công! Models đã được tải.</span>';
   }
   App.toast('✅ Đã đăng nhập & tự động cấu hình ChatGPT Subscription thành công!', 'success');
 
   setTimeout(function() {
     if (modal) modal.classList.remove('open');
   }, 1500);
+};
+
+// ── Load ChatGPT models into dropdown ──
+App.loadChatgptModels = async function(tokenOverride) {
+  var selectEl = document.getElementById('chatgpt-oauth-model');
+  if (!selectEl) return;
+
+  // Get token: from override, from keys list, or from saved settings
+  var token = tokenOverride || '';
+  if (!token) {
+    var keysContainer = document.getElementById('chatgpt_oauth-keys-list');
+    if (keysContainer) {
+      var firstInput = keysContainer.querySelector('input[type="password"], input[type="text"]');
+      if (firstInput) token = firstInput.value;
+    }
+  }
+
+  if (!token) {
+    App.toast('Chưa có Access Token. Vui lòng đăng nhập trước.', 'error');
+    return;
+  }
+
+  var currentVal = selectEl.value;
+
+  // Show loading state
+  selectEl.disabled = true;
+  selectEl.innerHTML = '<option value="">⏳ Đang tải models...</option>';
+
+  try {
+    var baseUrl = (document.getElementById('chatgpt-oauth-base-url') || {}).value || 'https://api.openai.com/v1';
+    var resp = await fetch('/api/settings/chatgpt-oauth/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: token, base_url: baseUrl.trim() })
+    });
+    var data = await resp.json();
+
+    if (data.success && data.models && data.models.length > 0) {
+      selectEl.innerHTML = '';
+      data.models.forEach(function(m) {
+        var opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name || m.id;
+        selectEl.appendChild(opt);
+      });
+
+      // Restore previous selection if it exists
+      if (currentVal) {
+        var found = Array.from(selectEl.options).some(function(o) { return o.value === currentVal; });
+        if (found) selectEl.value = currentVal;
+      }
+
+      var source = data.source === 'chatgpt_backend' ? 'ChatGPT' : data.source === 'openai_api' ? 'OpenAI API' : 'mặc định';
+      App.toast('Đã tải ' + data.models.length + ' models từ ' + source, 'success');
+    } else {
+      selectEl.innerHTML = '<option value="gpt-4o">gpt-4o</option>';
+      App.toast('Không thể tải models. Đang dùng mặc định.', 'error');
+    }
+  } catch(e) {
+    selectEl.innerHTML = '<option value="gpt-4o">gpt-4o</option>';
+    App.toast('Lỗi tải models: ' + e.message, 'error');
+  } finally {
+    selectEl.disabled = false;
+  }
 };
 
 // ── Manual paste flow (Step 2 button) ──

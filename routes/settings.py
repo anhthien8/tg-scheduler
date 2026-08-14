@@ -273,6 +273,101 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
         return {"success": False, "error": f"Lỗi kết nối: {str(e)[:200]}"}
 
 
+# ── Fetch available ChatGPT/OpenAI models ──────────────────────
+
+
+class FetchModelsPayload(BaseModel):
+    access_token: str
+    base_url: Optional[str] = None
+
+
+@router.post("/chatgpt-oauth/models")
+async def fetch_chatgpt_models(payload: FetchModelsPayload):
+    """Fetch available models from ChatGPT backend or OpenAI API."""
+    token = payload.access_token.strip()
+    if not token:
+        return {"success": False, "models": [], "error": "Token không được để trống"}
+
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+
+    chatgpt_headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+    }
+    api_headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    models = []
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            # Try ChatGPT backend-api/models first (session tokens)
+            try:
+                resp = await client.get(
+                    "https://chatgpt.com/backend-api/models",
+                    headers=chatgpt_headers,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # ChatGPT returns {"models": [{"slug": "gpt-4o", "title": "GPT-4o", ...}, ...]}
+                    raw = data.get("models", [])
+                    if isinstance(raw, list):
+                        for m in raw:
+                            if isinstance(m, dict):
+                                slug = m.get("slug", "")
+                                title = m.get("title", slug)
+                                if slug:
+                                    models.append({"id": slug, "name": title})
+                    if models:
+                        logger.info(f"[ChatGPT Models] Found {len(models)} models from backend-api")
+                        return {"success": True, "models": models, "source": "chatgpt_backend"}
+            except Exception as e:
+                logger.debug(f"[ChatGPT Models] backend-api/models failed: {e}")
+
+            # Try OpenAI API /v1/models (API keys)
+            base_url = (payload.base_url or "https://api.openai.com/v1").rstrip("/")
+            models_url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
+            try:
+                resp = await client.get(models_url, headers=api_headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw = data.get("data", [])
+                    if isinstance(raw, list):
+                        # Filter for chat models only
+                        chat_prefixes = ("gpt-", "o1", "o3", "o4", "chatgpt-")
+                        for m in raw:
+                            if isinstance(m, dict):
+                                mid = m.get("id", "")
+                                if mid and any(mid.startswith(p) for p in chat_prefixes):
+                                    models.append({"id": mid, "name": mid})
+                        # Sort: gpt-4o first, then alphabetical
+                        models.sort(key=lambda x: (0 if x["id"] == "gpt-4o" else 1, x["id"]))
+                    if models:
+                        logger.info(f"[ChatGPT Models] Found {len(models)} chat models from API")
+                        return {"success": True, "models": models, "source": "openai_api"}
+            except Exception as e:
+                logger.debug(f"[ChatGPT Models] /v1/models failed: {e}")
+
+    except Exception as e:
+        logger.warning(f"[ChatGPT Models] Error: {e}")
+
+    # Fallback: return default known models
+    fallback = [
+        {"id": "gpt-4o", "name": "GPT-4o"},
+        {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+        {"id": "gpt-4.1", "name": "GPT-4.1"},
+        {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini"},
+        {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano"},
+        {"id": "o3-mini", "name": "o3-mini"},
+        {"id": "o4-mini", "name": "o4-mini"},
+    ]
+    return {"success": True, "models": fallback, "source": "fallback"}
+
 
 # ── OpenAI OAuth PKCE Flow ──────────────────────────────────────
 

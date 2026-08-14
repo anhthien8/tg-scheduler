@@ -473,7 +473,15 @@
 
               <div style="margin-bottom:12px">
                 <label class="form-label" style="font-size:13px">Model Name</label>
-                <input type="text" class="form-input" id="chatgpt-oauth-model" placeholder="VD: gpt-4o (mặc định), gpt-4o-mini, o3-mini" value="gpt-4o" style="font-family:monospace;font-size:13px">
+                <div style="display:flex;gap:8px;align-items:center">
+                  <select class="form-input" id="chatgpt-oauth-model" style="font-family:monospace;font-size:13px;flex:1">
+                    <option value="gpt-4o">gpt-4o</option>
+                  </select>
+                  <button class="btn btn-ghost btn-sm" onclick="App.loadChatgptModels()" title="Tải lại danh sách models" style="white-space:nowrap;flex-shrink:0">
+                    &#x1F504; Load Models
+                  </button>
+                </div>
+                <p class="form-hint">Bấm <strong>Load Models</strong> để tải danh sách models khả dụng từ tài khoản ChatGPT</p>
               </div>
 
               <div style="margin-bottom:10px">
