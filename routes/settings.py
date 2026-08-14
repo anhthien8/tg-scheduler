@@ -39,14 +39,14 @@ class DailySummaryPayload(BaseModel):
 async def test_remix(payload: TestRemixPayload):
     """Test AI remix with provided keys directly (no DB save needed)."""
     import ai_remix as ai_rmx
-    if payload.provider not in ("gemini", "deepseek", "openai", "groq", "openai_compatible"):
+    if payload.provider not in ("gemini", "deepseek", "openai", "groq", "openai_compatible", "chatgpt_oauth"):
         raise HTTPException(status_code=400, detail="Invalid provider")
     if not payload.keys:
         raise HTTPException(status_code=400, detail="No API keys provided")
     kwargs = {}
-    if payload.provider == "openai_compatible":
+    if payload.provider in ("openai_compatible", "chatgpt_oauth"):
         if not payload.base_url or not payload.model:
-            raise HTTPException(status_code=400, detail="base_url and model required for openai_compatible")
+            raise HTTPException(status_code=400, detail="base_url and model required for " + payload.provider)
         kwargs["base_url"] = payload.base_url
         kwargs["model"] = payload.model
     try:
