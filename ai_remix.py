@@ -7,6 +7,7 @@ import httpx
 import json
 import time
 import re
+import uuid
 
 logger = logging.getLogger("tg-scheduler.ai_remix")
 
@@ -28,42 +29,38 @@ def _parse_openai_compatible_json(raw: str) -> dict:
     parts = []
     reasoning_parts = []
     for line in raw_str.splitlines():
-        line_s = line.strip()
-        if line_s.startswith("data:"):
-            line_s = line_s[5:].strip()
-        if not line_s or line_s == "[DONE]":
+        line = line.strip()
+        if not line or not line.startswith("data:"):
             continue
+        data_str = line[5:].strip()
+        if data_str == "[DONE]":
+            break
         try:
-            item = json.loads(line_s)
-            if isinstance(item, dict):
-                choices = item.get("choices", [])
-                if choices and isinstance(choices, list):
-                    c = choices[0]
-                    if isinstance(c, dict):
-                        delta = c.get("delta", {}) if isinstance(c.get("delta"), dict) else {}
-                        msg = c.get("message", {}) if isinstance(c.get("message"), dict) else {}
-                        content = delta.get("content") or msg.get("content") or ""
-                        reasoning = delta.get("reasoning_content") or ""
-                        if content:
-                            parts.append(content)
-                        if reasoning:
-                            reasoning_parts.append(reasoning)
-        except Exception:
+            chunk = json.loads(data_str)
+            delta = chunk.get("choices", [{}])[0].get("delta", {})
+            if "reasoning_content" in delta and delta["reasoning_content"]:
+                reasoning_parts.append(delta["reasoning_content"])
+            elif "content" in delta and delta["content"]:
+                parts.append(delta["content"])
+        except (json.JSONDecodeError, IndexError, KeyError):
+            continue
+
+    if parts or reasoning_parts:
+        content = "".join(parts).strip()
+        if not content and reasoning_parts:
+            content = "".join(reasoning_parts).strip()
+        return {"choices": [{"message": {"content": content}}]}
+
+    # 3. Last-ditch: extract using regex
+    m = re.search(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', raw_str)
+    if m:
+        try:
+            unescaped = json.loads(f'"{m.group(1)}"')
+            return {"choices": [{"message": {"content": unescaped}}]}
+        except json.JSONDecodeError:
             pass
 
-    assembled = "".join(parts).strip()
-    if not assembled and reasoning_parts:
-        assembled = "".join(reasoning_parts).strip()
-
-    if assembled:
-        return {"choices": [{"message": {"content": assembled}}]}
-
-    # 3. Fallback regex search for "content" or "text"
-    content_match = re.search(r'"content"\s*:\s*"([^"]+)"', raw_str)
-    if content_match:
-        return {"choices": [{"message": {"content": content_match.group(1)}}]}
-
-    raise ValueError(f"Cannot parse API response: {raw_str[:200]}")
+    raise ValueError(f"Could not parse OpenAI compatible response: {raw_str[:200]}")
 
 
 _rr_index = {}
@@ -160,6 +157,72 @@ async def _call_groq(api_key, prompt):
         return data["choices"][0]["message"]["content"].strip()
 
 
+async def _call_chatgpt_web_backend(token: str, prompt: str, model: str = "auto") -> str:
+    """
+    Native ChatGPT Web Backend Adapter (9Router / OmniRouter style).
+    Calls https://chatgpt.com/backend-api/conversation directly using Session Token / OAuth JWT.
+    """
+    token_clean = token.replace("Bearer ", "").strip()
+    url = "https://chatgpt.com/backend-api/conversation"
+    headers = {
+        "Authorization": f"Bearer {token_clean}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+        "Origin": "https://chatgpt.com",
+        "Referer": "https://chatgpt.com/",
+        "oai-device-id": str(uuid.uuid4()),
+        "oai-language": "en-US",
+    }
+
+    # Normalize model identifiers
+    target_model = model or "auto"
+    if target_model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+        target_model = target_model
+    elif target_model in ("gpt-4o", "gpt-4o-mini", "o3-mini", "o4-mini"):
+        target_model = target_model
+
+    payload = {
+        "action": "next",
+        "messages": [
+            {
+                "id": str(uuid.uuid4()),
+                "author": {"role": "user"},
+                "content": {"content_type": "text", "parts": [prompt]}
+            }
+        ],
+        "parent_message_id": str(uuid.uuid4()),
+        "model": target_model,
+        "timezone_offset_min": -420,
+        "history_and_training_disabled": True
+    }
+
+    full_text = ""
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        async with client.stream("POST", url, headers=headers, json=payload) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line:
+                    continue
+                if line.startswith("data: "):
+                    chunk_str = line[6:].strip()
+                    if chunk_str == "[DONE]":
+                        break
+                    try:
+                        chunk_json = json.loads(chunk_str)
+                        msg = chunk_json.get("message") or {}
+                        content = msg.get("content") or {}
+                        parts = content.get("parts") or []
+                        if parts and isinstance(parts, list) and parts[0]:
+                            full_text = str(parts[0])
+                    except Exception:
+                        continue
+
+    if not full_text:
+        raise ValueError("Empty response received from ChatGPT Web backend")
+    return full_text.strip()
+
+
 async def _call_openai_compatible(api_key, prompt, base_url, model):
     """Call any OpenAI-compatible API endpoint."""
     url = base_url.rstrip('/') + '/chat/completions'
@@ -200,9 +263,18 @@ async def _try_call(provider, api_key, prompt, **kwargs):
             raise ValueError("openai_compatible requires base_url and model")
         return await _call_openai_compatible(api_key, prompt, base_url, model)
     elif provider == "chatgpt_oauth":
-        base_url = kwargs.get("base_url") or "https://api.openai.com/v1"
+        base_url = (kwargs.get("base_url") or "").strip()
         model = kwargs.get("model") or "gpt-4o"
-        return await _call_openai_compatible(api_key, prompt, base_url, model)
+        is_default_url = not base_url or base_url in ("https://api.openai.com/v1", "https://api.openai.com", "https://chatgpt.com", "https://chatgpt.com/backend-api")
+        if is_default_url:
+            try:
+                logger.info("[ChatGPT Web Adapter] Calling native chatgpt.com/backend-api/conversation (model=%s)...", model)
+                return await _call_chatgpt_web_backend(api_key, prompt, model)
+            except Exception as e:
+                logger.warning("[ChatGPT Web Adapter] Native call failed (%s), attempting OpenAI compatible gateway...", e)
+                return await _call_openai_compatible(api_key, prompt, "https://api.openai.com/v1", model)
+        else:
+            return await _call_openai_compatible(api_key, prompt, base_url, model)
     else:
         raise ValueError("Unknown provider: " + provider)
 
@@ -482,9 +554,23 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             return resp.json()["choices"][0]["message"]["content"].strip()
 
     elif provider == "chatgpt_oauth":
-        base_url = kwargs.get("base_url") or "https://api.openai.com/v1"
+        base_url = (kwargs.get("base_url") or "").strip()
         model = kwargs.get("model") or "gpt-4o"
-        url = base_url.rstrip('/') + '/chat/completions'
+        is_default_url = not base_url or base_url in ("https://api.openai.com/v1", "https://api.openai.com", "https://chatgpt.com", "https://chatgpt.com/backend-api")
+        if is_default_url:
+            try:
+                prompt_lines = []
+                for m in messages:
+                    role = m.get("role", "user").capitalize()
+                    content = m.get("content", "")
+                    prompt_lines.append(f"{role}: {content}")
+                full_prompt = "\n\n".join(prompt_lines)
+                logger.info("[ChatGPT Web Chat] Calling native chatgpt.com/backend-api/conversation (model=%s)...", model)
+                return await _call_chatgpt_web_backend(api_key, full_prompt, model)
+            except Exception as e:
+                logger.warning("[ChatGPT Web Chat] Native call failed (%s), falling back to OpenAI compatible endpoint...", e)
+
+        url = (base_url or "https://api.openai.com/v1").rstrip('/') + '/chat/completions'
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
             "model": model,
