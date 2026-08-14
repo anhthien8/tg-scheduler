@@ -317,7 +317,7 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
         return original_text
 
 
-async def generate_response(prompt: str, provider: str, api_keys: list[str]) -> str | None:
+async def generate_response(prompt: str, provider: str, api_keys: list[str], **kwargs) -> str | None:
     """
     Generate a response to a prompt using the configured LLM provider and key rotation.
     Used for AI auto-reply rules.
@@ -326,7 +326,7 @@ async def generate_response(prompt: str, provider: str, api_keys: list[str]) -> 
         return None
     idx, key = _next_key(api_keys, provider)
     try:
-        return await _try_call(provider, key, prompt)
+        return await _try_call(provider, key, prompt, **kwargs)
     except Exception as e:
         logger.warning("[AI AutoReply] %s key[%d] failed: %s", provider, idx, e)
         _mark_key_failed(provider, idx)
@@ -335,7 +335,7 @@ async def generate_response(prompt: str, provider: str, api_keys: list[str]) -> 
                 idx2, key2 = _next_key(api_keys, provider)
                 if idx2 != idx:
                     logger.info("[AI AutoReply] Retrying with key[%d]...", idx2)
-                    return await _try_call(provider, key2, prompt)
+                    return await _try_call(provider, key2, prompt, **kwargs)
             except Exception as e2:
                 logger.warning("[AI AutoReply] Retry failed: %s", e2)
         return None
@@ -558,7 +558,7 @@ async def extract_kol_profile(history: list[dict], provider: str, api_keys: list
 
     try:
         raw_res = await generate_chat_response(
-            history=[{"role": "user", "content": f"Conversation:\n{conv_text}"}],
+            messages_history=[{"role": "user", "content": f"Conversation:\n{conv_text}"}],
             system_prompt=sys_prompt,
             provider=provider,
             api_keys=api_keys,
@@ -604,7 +604,7 @@ async def distill_human_takeover_rule(history: list[dict], human_reply: str, pro
 
     try:
         raw_res = await generate_chat_response(
-            history=[{"role": "user", "content": conv_context}],
+            messages_history=[{"role": "user", "content": conv_context}],
             system_prompt=sys_prompt,
             provider=provider,
             api_keys=api_keys,

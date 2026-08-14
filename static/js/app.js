@@ -1899,7 +1899,7 @@ App._applyChatgptOAuthToken = async function(token) {
   App.onProviderChange();
 
   var baseUrlEl = document.getElementById('chatgpt-oauth-base-url');
-  if (baseUrlEl) baseUrlEl.value = 'https://api.openai.com/v1';
+  if (baseUrlEl && !baseUrlEl.value.trim()) baseUrlEl.value = 'https://api.openai.com/v1';
 
   // Set token into keys list
   App.renderAiKeysList('chatgpt_oauth', [token]);
@@ -2056,6 +2056,7 @@ App.processChatgptOAuthLogin = async function() {
     if (status) {
       status.innerHTML = '<span style="color:#ef4444">❌ Lỗi kết nối: ' + e.message + '</span>';
     }
+    App.toast('Lỗi kết nối: ' + e.message, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = '🚀 Xác thực & Tự động điền cấu hình';
@@ -2181,7 +2182,7 @@ App.testAiRemix = async function() {
   const provider = document.getElementById('ai-provider-select')?.value;
   const resultBox = document.getElementById('test-remix-result');
   const outputEl  = document.getElementById('test-remix-output');
-  if (!provider) { App.toast('Chon AI provider truoc', 'error'); return; }
+  if (!provider) { App.toast('Chọn provider AI trước', 'error'); return; }
   // Try DOM keys first, fallback to DB-stored keys
   let keys = App.collectAiKeys(provider);
   if (keys.length === 0) {
@@ -2190,10 +2191,10 @@ App.testAiRemix = async function() {
       keys = JSON.parse(stored.value || '[]');
     } catch(e) { keys = []; }
   }
-  if (keys.length === 0) { App.toast('Them API Key truoc khi test', 'error'); return; }
+  if (keys.length === 0) { App.toast('Thêm API Key trước khi test', 'error'); return; }
   const sampleText = 'Hi! Looking for BD partners for Weex. Interested in collaborating?';
   btn.disabled = true;
-  btn.textContent = 'Dang remix...';
+  btn.textContent = 'Đang remix...';
   resultBox.classList.add('hidden');
   try {
     const body = { provider: provider, keys: keys, text: sampleText };
@@ -2213,15 +2214,15 @@ App.testAiRemix = async function() {
     if (data.remixed) {
       outputEl.textContent = data.remixed;
       resultBox.classList.remove('hidden');
-      App.toast('AI remix thanh cong!', 'success');
+      App.toast('AI remix thành công!', 'success');
     } else {
-      App.toast('Loi: ' + (data.detail || data.error || 'Unknown'), 'error');
+      App.toast('Lỗi: ' + (data.detail || data.error || 'Unknown'), 'error');
     }
   } catch(e) {
-    App.toast('Test that bai: ' + e.message, 'error');
+    App.toast('Test thất bại: ' + e.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Test Remix';
+    btn.textContent = '🧪 Test Remix';
   }
 };
 

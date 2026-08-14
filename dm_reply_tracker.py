@@ -650,7 +650,7 @@ def _make_handler(account_id: int):
             reply_text = None
             if rule.get("use_ai"):
                 ai_provider = await db.get_setting("ai_provider", None)
-                if ai_provider in ("gemini", "deepseek", "openai", "groq"):
+                if ai_provider in ("gemini", "deepseek", "openai", "groq", "openai_compatible", "chatgpt_oauth"):
                     try:
                         raw = await db.get_setting("ai_keys_" + ai_provider, "[]")
                         ai_keys = json.loads(raw) if raw else []
@@ -841,7 +841,7 @@ async def process_drip_followups() -> dict:
                 continue
 
             kwargs = {}
-            if ai_provider == "openai_compatible" and agent_config:
+            if ai_provider in ("openai_compatible", "chatgpt_oauth") and agent_config:
                 if agent_config.get("base_url"): kwargs["base_url"] = agent_config["base_url"]
                 if agent_config.get("model"): kwargs["model"] = agent_config["model"]
 

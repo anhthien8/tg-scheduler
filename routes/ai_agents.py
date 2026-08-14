@@ -259,6 +259,15 @@ async def test_agent(agent_id: int, req: AgentTestRequest):
             kwargs["base_url"] = b_url.strip()
         if mod and mod.strip():
             kwargs["model"] = mod.strip()
+    elif provider == "chatgpt_oauth":
+        b_url = agent.get("base_url", "")
+        mod = agent.get("model", "")
+        if not b_url or not b_url.strip():
+            b_url = await db.get_setting("ai_chatgpt_oauth_base_url", "")
+        if not mod or not mod.strip():
+            mod = await db.get_setting("ai_chatgpt_oauth_model", "")
+        kwargs["base_url"] = b_url.strip() if b_url and b_url.strip() else "https://api.openai.com/v1"
+        kwargs["model"] = mod.strip() if mod and mod.strip() else "gpt-4o"
 
     sys_prompt = agent.get("system_prompt", "")
     kb = agent.get("knowledge_base", "")

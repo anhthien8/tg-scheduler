@@ -177,7 +177,7 @@ async def _do_send_dm(
     """Internal: actual DM sending logic with bot rotation fallback."""
     # Load AI remix settings
     ai_provider = await db.get_setting("ai_provider", None)
-    ai_enabled = ai_provider in ("gemini", "deepseek", "openai", "groq", "openai_compatible")
+    ai_enabled = ai_provider in ("gemini", "deepseek", "openai", "groq", "openai_compatible", "chatgpt_oauth")
     ai_keys = []
     ai_remix_kwargs = {}
     if ai_enabled:
@@ -188,9 +188,13 @@ async def _do_send_dm(
             ai_keys = []
         if not ai_keys:
             ai_enabled = False
-        if ai_provider == "openai_compatible":
-            ai_remix_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
-            ai_remix_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
+        if ai_provider in ("openai_compatible", "chatgpt_oauth"):
+            if ai_provider == "chatgpt_oauth":
+                ai_remix_kwargs["base_url"] = await db.get_setting("ai_chatgpt_oauth_base_url", "")
+                ai_remix_kwargs["model"] = await db.get_setting("ai_chatgpt_oauth_model", "")
+            else:
+                ai_remix_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
+                ai_remix_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
 
     last_error = None
     rotated_ids = _next_bot_account(watcher_id, account_ids)

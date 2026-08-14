@@ -44,11 +44,14 @@ async def test_remix(payload: TestRemixPayload):
     if not payload.keys:
         raise HTTPException(status_code=400, detail="No API keys provided")
     kwargs = {}
-    if payload.provider in ("openai_compatible", "chatgpt_oauth"):
+    if payload.provider == "openai_compatible":
         if not payload.base_url or not payload.model:
-            raise HTTPException(status_code=400, detail="base_url and model required for " + payload.provider)
+            raise HTTPException(status_code=400, detail="base_url and model required for openai_compatible")
         kwargs["base_url"] = payload.base_url
         kwargs["model"] = payload.model
+    elif payload.provider == "chatgpt_oauth":
+        kwargs["base_url"] = payload.base_url or "https://api.openai.com/v1"
+        kwargs["model"] = payload.model or "gpt-4o"
     try:
         remixed = await ai_rmx.remix_message(
             original_text=payload.text,
@@ -276,13 +279,13 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
 # ── Fetch available ChatGPT/OpenAI models ──────────────────────
 
 
-class FetchModelsPayload(BaseModel):
+class FetchChatgptModelsPayload(BaseModel):
     access_token: str
     base_url: Optional[str] = None
 
 
 @router.post("/chatgpt-oauth/models")
-async def fetch_chatgpt_models(payload: FetchModelsPayload):
+async def fetch_chatgpt_models(payload: FetchChatgptModelsPayload):
     """Fetch available models from ChatGPT backend or OpenAI API."""
     token = payload.access_token.strip()
     if not token:
