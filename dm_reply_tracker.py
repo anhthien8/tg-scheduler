@@ -322,12 +322,15 @@ def _make_handler(account_id: int):
                 agent_config = None
                 target_campaign_id = None
 
-                # 1. Identify if this user belongs to an active RUNNING campaign with AI Agent
+                # 1. Identify if this user belongs to a campaign with AI Agent (running or past completed campaign)
                 running_log = await db.find_running_campaign_log_for_user(sender_id)
+                if not running_log:
+                    running_log = await db.find_campaign_log_for_user(sender_id)
+
                 if running_log:
                     target_campaign_id = running_log.get("campaign_id")
                     cmp = await db.get_dm_campaign(target_campaign_id) if target_campaign_id else None
-                    if cmp and cmp.get("status") == "running" and cmp.get("ai_agent_id"):
+                    if cmp and cmp.get("ai_agent_id"):
                         c_agent = await db.get_ai_agent(cmp["ai_agent_id"])
                         if c_agent and c_agent.get("is_active", 1):
                             agent_config = c_agent
@@ -341,6 +344,13 @@ def _make_handler(account_id: int):
                         if acc_agent and acc_agent.get("is_active", 1):
                             agent_config = acc_agent
                             logger.info("[AIFollowUp] 🤖 Account-level AI Agent '%s' selected for organic DM on acc=%d from user %d", agent_config["name"], account_id, sender_id)
+
+                # 3. Fallback: Use the default active system AI Agent so no incoming lead is ever ignored
+                if not agent_config:
+                    active_agents = await db.get_ai_agents(is_active=1)
+                    if active_agents:
+                        agent_config = active_agents[0]
+                        logger.info("[AIFollowUp] 🤖 Default System AI Agent '%s' selected for user %d (acc=%d)", agent_config["name"], sender_id, account_id)
 
                 if not agent_config:
                     logger.debug("[AIFollowUp] No active AI Agent assigned for campaign or account — skipping AI reply for user %d", sender_id)
