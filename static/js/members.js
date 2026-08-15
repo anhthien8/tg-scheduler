@@ -41,48 +41,9 @@ const Members = {
       this._pollInviteCampaign();
     }
 
-    // Restore deep crawl polling and UI state on page refresh if active
+    // Restore deep crawl polling and UI state on page refresh if active or has pending queue/results
     if (!this._deepCrawlPolling) {
-      try {
-        const res = await fetch('/api/members/deep-crawl/status');
-        if (res.ok) {
-          const s = await res.json();
-          if (s.status === 'running') {
-            this._deepCrawlPolling = true;
-            this._deepCrawlPollInterval = 3000;
-            this._deepCrawlPrevState = null;
-
-            // Auto-switch to "Similar Channels" tab
-            const simTab = document.getElementById('members-tab-similar');
-            if (simTab) simTab.click();
-
-            const btn = document.getElementById('sim-btn-search');
-            const stopBtn = document.getElementById('sim-btn-stop');
-            const progressPanel = document.getElementById('sim-progress-panel');
-            if (btn) {
-              btn.disabled = true;
-              btn.textContent = '⏳ Đang Deep Crawl...';
-            }
-            if (stopBtn) stopBtn.classList.remove('hidden');
-            if (progressPanel) progressPanel.classList.remove('hidden');
-
-            // Immediately render current server state before starting poll
-            this._renderDeepCrawlProgressFromState(s);
-
-            this._pollDeepCrawlProgress();
-          } else if (s.status === 'completed' || s.status === 'stopped') {
-            // Crawl finished while tab was closed — show results
-            const simTab = document.getElementById('members-tab-similar');
-            if (simTab) simTab.click();
-            const progressPanel = document.getElementById('sim-progress-panel');
-            if (progressPanel) progressPanel.classList.remove('hidden');
-            this._renderDeepCrawlProgressFromState(s);
-            await this._fetchDeepCrawlResults();
-          }
-        }
-      } catch (e) {
-        console.error('Error restoring deep crawl status:', e);
-      }
+      this.restoreDeepCrawlState();
     }
   },
 
@@ -1436,6 +1397,67 @@ const Members = {
       similarView.classList.remove('hidden');
       scrapeView.classList.add('hidden');
       this.populatePremiumCheckboxes();
+      this.restoreDeepCrawlState();
+    }
+  },
+
+  async restoreDeepCrawlState() {
+    try {
+      const res = await fetch('/api/members/deep-crawl/status');
+      if (!res.ok) return;
+      const s = await res.json();
+      this._restoreDeepCrawlUI(s);
+    } catch (e) {
+      console.error('Error restoring deep crawl status:', e);
+    }
+  },
+
+  _restoreDeepCrawlUI(s) {
+    if (!s) return;
+    const btn = document.getElementById('sim-btn-search');
+    const stopBtn = document.getElementById('sim-btn-stop');
+    const progressPanel = document.getElementById('sim-progress-panel');
+
+    // 1. Always render queue panel if queue exists
+    this._renderQueuePanel(s.queue || [], s.queue_count || 0);
+
+    // 2. Handle Running State
+    if (s.status === 'running') {
+      this._deepCrawlPolling = true;
+      this._deepCrawlPollInterval = 3000;
+      this._deepCrawlPrevState = null;
+
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Đang Deep Crawl...';
+      }
+      if (stopBtn) stopBtn.classList.remove('hidden');
+      if (progressPanel) progressPanel.classList.remove('hidden');
+
+      this._renderDeepCrawlProgressFromState(s);
+      this._pollDeepCrawlProgress();
+      return;
+    }
+
+    // 3. Handle Completed / Stopped / Idle with results or queue
+    if (s.queue_count > 0) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = `➕ Thêm Kênh Vào Queue (${s.queue_count} đang chờ)`;
+      }
+    } else {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '🚀 Bắt đầu Deep Crawl';
+      }
+    }
+
+    if (stopBtn) stopBtn.classList.add('hidden');
+
+    if (s.results_count > 0 || s.status === 'completed' || s.status === 'stopped') {
+      if (progressPanel) progressPanel.classList.remove('hidden');
+      this._renderDeepCrawlProgressFromState(s);
+      this._fetchDeepCrawlResults();
     }
   },
 
@@ -1640,19 +1662,24 @@ const Members = {
 
   _renderQueuePanel(queue, count) {
     let panel = document.getElementById('deep-crawl-queue-panel');
-    if (count === 0 && !queue.length) {
+    if (count === 0 && (!queue || !queue.length)) {
       if (panel) panel.classList.add('hidden');
       return;
     }
     // Create panel if not exists
     if (!panel) {
       const progressPanel = document.getElementById('sim-progress-panel');
-      if (!progressPanel) return;
+      const containerCard = document.querySelector('#members-subview-similar .card');
+      if (!progressPanel && !containerCard) return;
       panel = document.createElement('div');
       panel.id = 'deep-crawl-queue-panel';
       panel.className = 'card';
-      panel.style.cssText = 'margin-top:12px; padding:12px 16px; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,0.03);';
-      progressPanel.parentNode.insertBefore(panel, progressPanel.nextSibling);
+      panel.style.cssText = 'margin-top:12px; margin-bottom:16px; padding:12px 16px; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,0.03);';
+      if (progressPanel && progressPanel.parentNode) {
+        progressPanel.parentNode.insertBefore(panel, progressPanel.nextSibling);
+      } else if (containerCard) {
+        containerCard.appendChild(panel);
+      }
     }
     panel.classList.remove('hidden');
 
@@ -1663,7 +1690,7 @@ const Members = {
     }
     html += `</div>`;
 
-    if (queue.length) {
+    if (queue && queue.length) {
       html += `<div style="display:flex; flex-direction:column; gap:6px;">`;
       queue.forEach((q, i) => {
         const link = q.channel_link.length > 35 ? q.channel_link.substring(0, 35) + '...' : q.channel_link;
@@ -1683,6 +1710,7 @@ const Members = {
       const d = await res.json();
       if (res.ok) {
         App.toast(`Đã xóa ${d.removed} khỏi hàng đợi`, 'success');
+        this.restoreDeepCrawlState();
       }
     } catch (e) {
       App.toast('Lỗi xóa queue item', 'error');
@@ -1696,6 +1724,7 @@ const Members = {
       App.toast('Đã xóa hàng đợi', 'success');
       const panel = document.getElementById('deep-crawl-queue-panel');
       if (panel) panel.classList.add('hidden');
+      this.restoreDeepCrawlState();
     } catch (e) {
       App.toast('Lỗi xóa queue', 'error');
     }

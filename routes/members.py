@@ -926,6 +926,34 @@ async def import_contacts(req: ImportContactsRequest):
 
 # ── Deep Crawl (BFS Multi-Layer) ─────────────────────────────────────────────
 
+async def _save_deep_crawl_snapshot():
+    """Persist deep crawl state and queue to database settings so it survives restarts."""
+    try:
+        state_to_save = dict(_deep_crawl_state)
+        await db.set_setting("deep_crawl_state", json.dumps(state_to_save, ensure_ascii=False))
+        await db.set_setting("deep_crawl_queue", json.dumps(_deep_crawl_queue, ensure_ascii=False))
+    except Exception as e:
+        logger.debug(f"[DeepCrawl] Error persisting snapshot: {e}")
+
+
+async def _load_deep_crawl_snapshot():
+    """Load persisted deep crawl state and queue on startup."""
+    global _deep_crawl_state, _deep_crawl_queue
+    try:
+        raw_state = await db.get_setting("deep_crawl_state", "")
+        if raw_state:
+            s = json.loads(raw_state)
+            if s.get("status") == "running":
+                s["status"] = "stopped"
+            _deep_crawl_state.update(s)
+        
+        raw_queue = await db.get_setting("deep_crawl_queue", "")
+        if raw_queue:
+            _deep_crawl_queue = json.loads(raw_queue)
+    except Exception as e:
+        logger.debug(f"[DeepCrawl] Error loading snapshot: {e}")
+
+
 @router.post("/deep-crawl")
 async def start_deep_crawl(req: DeepCrawlRequest):
     """Start a deep BFS crawl of similar channels (1-4 layers).
@@ -945,6 +973,7 @@ async def start_deep_crawl(req: DeepCrawlRequest):
             "added_at": datetime.now().isoformat(),
         }
         _deep_crawl_queue.append(queue_item)
+        await _save_deep_crawl_snapshot()
         pos = len(_deep_crawl_queue)
         logger.info(f"[DeepCrawl] Queued: {req.channel_link} (depth={req.max_depth}), position #{pos}")
         return {
@@ -970,6 +999,7 @@ async def start_deep_crawl(req: DeepCrawlRequest):
         "source_url": req.channel_link,
     }
     _deep_crawl_stop_flag = {"stopped": False}
+    await _save_deep_crawl_snapshot()
 
     _deep_crawl_task = asyncio.create_task(
         _do_deep_crawl(req.account_ids, req.channel_link, req.max_depth)
@@ -998,6 +1028,7 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
         _deep_crawl_state["results"] = results
         if _deep_crawl_state["status"] != "stopped":
             _deep_crawl_state["status"] = "completed"
+        await _save_deep_crawl_snapshot()
         logger.info(f"[DeepCrawl] Background task complete. {len(results)} leads.")
     except Exception as e:
         err_str = str(e)
@@ -1017,6 +1048,7 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
             _deep_crawl_state["status"] = "error"
             _deep_crawl_state["errors"].append(f"Fatal: {err_str}")
             logger.error(f"[DeepCrawl] Fatal error: {e}", exc_info=True)
+        await _save_deep_crawl_snapshot()
 
     # ── FloodWait auto-retry: re-queue current crawl with a delay ──
     if _floodwait_retry_after and not _deep_crawl_stop_flag.get("stopped"):
@@ -1028,6 +1060,7 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
             "retry_after": _time.time() + _floodwait_retry_after,
         }
         _deep_crawl_queue.insert(0, retry_item)  # put at front of queue
+        await _save_deep_crawl_snapshot()
         logger.info(f"[DeepCrawl] FloodWait retry scheduled: will restart '{channel_link}' in {_floodwait_retry_after}s")
 
     # ── Auto-start next queued crawl ──
@@ -1045,6 +1078,7 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
             ]
             await asyncio.sleep(wait_secs)
         next_item = _deep_crawl_queue.pop(0)
+        await _save_deep_crawl_snapshot()
         logger.info(f"[DeepCrawl] Queue: auto-starting next → {next_item['channel_link']} (depth={next_item['max_depth']}), {len(_deep_crawl_queue)} remaining")
         _deep_crawl_state = {
             "status": "running",
@@ -1061,6 +1095,7 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
             "source_url": next_item["channel_link"],
         }
         _deep_crawl_stop_flag = {"stopped": False}
+        await _save_deep_crawl_snapshot()
         _deep_crawl_task = asyncio.create_task(
             _do_deep_crawl(next_item["account_ids"], next_item["channel_link"], next_item["max_depth"])
         )
@@ -1069,6 +1104,10 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
 @router.get("/deep-crawl/status")
 async def get_deep_crawl_status():
     """Poll the current deep crawl progress + queue info."""
+    global _deep_crawl_state, _deep_crawl_queue
+    if _deep_crawl_state.get("status") == "idle" and not _deep_crawl_state.get("results") and not _deep_crawl_queue:
+        await _load_deep_crawl_snapshot()
+
     state_copy = {k: v for k, v in _deep_crawl_state.items() if k != "results"}
     state_copy["results_count"] = len(_deep_crawl_state.get("results", []))
     state_copy["queue"] = [
@@ -1082,6 +1121,9 @@ async def get_deep_crawl_status():
 @router.get("/deep-crawl/results")
 async def get_deep_crawl_results():
     """Get the full results of the last deep crawl."""
+    global _deep_crawl_state
+    if not _deep_crawl_state.get("results"):
+        await _load_deep_crawl_snapshot()
     return {
         "status": _deep_crawl_state.get("status"),
         "leads": _deep_crawl_state.get("results", []),
@@ -1096,12 +1138,16 @@ async def stop_deep_crawl():
     if _deep_crawl_state.get("status") != "running":
         return {"success": False, "message": "Không có deep crawl nào đang chạy."}
     _deep_crawl_stop_flag["stopped"] = True
+    await _save_deep_crawl_snapshot()
     return {"success": True, "message": "Đang dừng deep crawl..."}
 
 
 @router.get("/deep-crawl/queue")
 async def get_deep_crawl_queue():
     """Get the pending deep crawl queue."""
+    global _deep_crawl_queue
+    if not _deep_crawl_queue:
+        await _load_deep_crawl_snapshot()
     return {
         "queue": [
             {"channel_link": q["channel_link"], "max_depth": q["max_depth"],
@@ -1119,6 +1165,7 @@ async def remove_from_deep_crawl_queue(index: int):
     if index < 0 or index >= len(_deep_crawl_queue):
         raise HTTPException(status_code=404, detail="Không tìm thấy item trong queue")
     removed = _deep_crawl_queue.pop(index)
+    await _save_deep_crawl_snapshot()
     logger.info(f"[DeepCrawl] Queue: removed #{index} → {removed['channel_link']}")
     return {"success": True, "removed": removed["channel_link"], "remaining": len(_deep_crawl_queue)}
 
@@ -1129,6 +1176,7 @@ async def clear_deep_crawl_queue():
     global _deep_crawl_queue
     count = len(_deep_crawl_queue)
     _deep_crawl_queue = []
+    await _save_deep_crawl_snapshot()
     logger.info(f"[DeepCrawl] Queue: cleared {count} items")
     return {"success": True, "cleared": count}
 
