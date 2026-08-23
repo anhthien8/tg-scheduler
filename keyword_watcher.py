@@ -15,6 +15,7 @@ import telegram_client as tg
 import ai_remix as ai_rmx
 import image_randomizer as img_rand
 from personalization import apply_personalization
+from message_merger import merge_messages
 from telegram_client import _get_entity_safe
 
 logger = logging.getLogger("tg-scheduler.watcher")
@@ -498,8 +499,11 @@ async def _do_send_dm_with_fallback(
             # Resolve the peer for this specific account client
             peer = await _resolve_peer_for_client(client, user_id, username, event, input_peer)
 
-            # Send all messages sequentially
-            for msg in sorted(messages, key=lambda m: m.get("msg_order", 0)):
+            # ── Consolidate multiple message bubbles into 1 cohesive message ──
+            merged_msgs = merge_messages(messages)
+
+            # Send messages (1 consolidated message / media with caption)
+            for msg in merged_msgs:
                 # AI remix text content if enabled
                 msg_to_send = dict(msg)
 
@@ -538,8 +542,18 @@ async def _do_send_dm_with_fallback(
                         custom_instruction=ai_custom_prompt,
                         **ai_remix_kwargs
                     )
+
+                # ── Simulate realistic typing action (human-like behavior) ──
+                try:
+                    typing_action = "typing" if msg_to_send.get("msg_type") == "text" else "photo"
+                    typing_duration = min(max(len(msg_to_send.get("content") or "") * 0.012, 1.5), 3.5)
+                    if hasattr(client, "action") and callable(client.action):
+                        async with client.action(peer, typing_action):
+                            await asyncio.sleep(typing_duration)
+                except Exception:
+                    pass
+
                 await _send_one(client, peer, msg_to_send)
-                await asyncio.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
 
             logger.info(
                 f"[Watcher {watcher_id}] \u2713 DM sent to {username or user_id} "

@@ -19,6 +19,7 @@ import ai_remix as ai_rmx
 import template_rotation as tmpl_rot
 import image_randomizer as img_rand
 from personalization import apply_personalization
+from message_merger import merge_messages
 from telethon import errors as tg_errors
 
 logger = logging.getLogger("tg-scheduler.members")
@@ -1944,8 +1945,11 @@ async def _run_campaign(campaign_id: int):
                     campaign_id=campaign_id,
                 )
 
-                # Send messages
-                for msg in sorted(selected_msgs, key=lambda m: m.get("msg_order", 0)):
+                # ── Consolidate multiple message bubbles into 1 cohesive message ──
+                merged_msgs = merge_messages(selected_msgs)
+
+                # Send messages (1 consolidated message / media with caption)
+                for msg in merged_msgs:
                     content = msg.get("content", "")
                     msg_type = msg.get("msg_type", "text")
 
@@ -2008,6 +2012,16 @@ async def _run_campaign(campaign_id: int):
                         else:
                             logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix BẬT nhưng thiếu API Key (vui lòng kiểm tra Cài Đặt AI Remix)")
 
+                    # ── Simulate realistic typing action (human-like behavior) ──
+                    try:
+                        typing_action = "typing" if msg_type == "text" else "photo"
+                        typing_duration = min(max(len(content or "") * 0.012, 1.5), 3.5)
+                        if hasattr(client, "action") and callable(client.action):
+                            async with client.action(peer, typing_action):
+                                await asyncio.sleep(typing_duration)
+                    except Exception:
+                        pass
+
                     if msg_type == "text":
                         await client.send_message(peer, content)
                     elif msg_type in ("photo", "video", "document"):
@@ -2026,10 +2040,6 @@ async def _run_campaign(campaign_id: int):
                                     img_rand.cleanup_temp_image(rand_path, media_path)
                         elif content:
                             await client.send_message(peer, content)
-
-                    # Small delay between messages in sequence
-                    if len(selected_msgs) > 1:
-                        await asyncio.sleep(random.uniform(2, 5))
 
                 sent += 1
                 daily_sent += 1

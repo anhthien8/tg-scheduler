@@ -321,9 +321,13 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
         + lang_rule +
         "4. Do NOT use any emoji or icon characters. Write plain text only. Messages with emoji look like spam/bot.\n"
         "5. Keep all @usernames, links, and numbers exactly as-is unless instructed to reframe.\n"
-        "6. Write naturally like a real person texting a colleague or friend - casual, friendly, and authentic. Avoid robotic sales pitches.\n"
-        "7. Output ONLY the rephrased message. No intro, no quotes, no explanation.\n"
-        "8. FORMAT for readability: add a blank line between paragraphs. Group related sentences into short paragraphs.\n"
+        "6. Write naturally like a real person texting a colleague or collaborator: casual, friendly, authentic, peer-to-peer. Avoid robotic sales pitches or corporate jargon.\n"
+        "7. STRUCTURE AS A SINGLE COHESIVE MESSAGE (3-Act Flow):\n"
+        "   - Hook / Warm greeting with context\n"
+        "   - Clear, concise core value (1-2 sentences)\n"
+        "   - End with a low-friction, polite open-ended question to invite genuine dialogue.\n"
+        "8. Output ONLY the rephrased message. No intro, no quotes, no explanation, no multiple message splits.\n"
+        "9. FORMAT for visual breathing room: separate thoughts with a blank line between paragraphs (double newline). Never output a dense wall of text.\n"
         + instruction_addon
         + name_hint
         + "\n\nOriginal message:\n---\n"
