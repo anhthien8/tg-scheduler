@@ -456,10 +456,25 @@ def _make_handler(account_id: int):
                     if active_agents:
                         agent_config = active_agents[0]
                         logger.info("[AIFollowUp] 🤖 Default System AI Agent '%s' selected for user %d (acc=%d)", agent_config["name"], sender_id, account_id)
+                    else:
+                        # 4. Ultimate Fallback: Build virtual agent config from global AI settings
+                        sys_prompt = await db.get_setting("ai_followup_system_prompt", None) or await db.get_setting("ai_custom_prompt", None)
+                        kb = await db.get_setting("ai_followup_knowledge_base", "")
+                        max_rep_str = await db.get_setting("ai_followup_max_replies", "10")
+                        max_rep = int(max_rep_str) if max_rep_str and max_rep_str.isdigit() else 10
+                        handover_raw = await db.get_setting("ai_followup_handover_keywords", '["gặp admin", "tư vấn viên", "số điện thoại"]')
+                        agent_config = {
+                            "name": "Global AI Sales Agent",
+                            "system_prompt": sys_prompt or "Bạn là chuyên gia tư vấn bán hàng & onboard thân thiện.",
+                            "knowledge_base": kb or "",
+                            "max_replies": max_rep,
+                            "handover_keywords": handover_raw,
+                            "provider": await db.get_setting("ai_provider", "gemini"),
+                            "api_keys_json": []
+                        }
+                        logger.info("[AIFollowUp] 🤖 Virtual Global AI Agent activated for user %d (acc=%d)", sender_id, account_id)
 
-                if not agent_config:
-                    logger.debug("[AIFollowUp] No active AI Agent assigned for campaign or account — skipping AI reply for user %d", sender_id)
-                else:
+                if agent_config:
                     # 3. AI Agent verified! Get or create chat session
                     chat = await db.get_or_create_followup_chat(
                         account_id=account_id,
