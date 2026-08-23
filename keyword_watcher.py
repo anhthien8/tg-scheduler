@@ -14,6 +14,7 @@ import database as db
 import telegram_client as tg
 import ai_remix as ai_rmx
 import image_randomizer as img_rand
+from personalization import apply_personalization
 from telegram_client import _get_entity_safe
 
 logger = logging.getLogger("tg-scheduler.watcher")
@@ -501,6 +502,21 @@ async def _do_send_dm_with_fallback(
             for msg in sorted(messages, key=lambda m: m.get("msg_order", 0)):
                 # AI remix text content if enabled
                 msg_to_send = dict(msg)
+
+                # ── Personalization: replace {name}, {first_name}, etc. ──
+                if msg_to_send.get("content"):
+                    # Try to get first/last name from the resolved peer
+                    _peer_first = getattr(peer, "first_name", None) or ""
+                    _peer_last = getattr(peer, "last_name", None) or ""
+                    msg_to_send["content"] = apply_personalization(
+                        msg_to_send["content"],
+                        {
+                            "first_name": _peer_first,
+                            "last_name": _peer_last,
+                            "username": username,
+                        },
+                    )
+
                 if ai_enabled and msg_to_send.get("msg_type") == "text" and msg_to_send.get("content"):
                     logger.info(f"[Watcher {watcher_id}] Requesting {ai_provider} AI remix...")
                     msg_to_send["content"] = await ai_rmx.remix_message(
@@ -849,9 +865,9 @@ def _make_handler(watcher: dict):
             if not w or not w["is_active"]:
                 return
 
-            # Feature #6: Check global DM blacklist
-            if await db.is_user_blacklisted(user_id):
-                logger.info(f"[Watcher {watcher_id}] User {user_id} blacklisted, skip DM")
+            # Feature #6: Check global DM blacklist (by user_id AND username)
+            if await db.is_user_blacklisted(user_id=user_id, username=uname_lower):
+                logger.info(f"[Watcher {watcher_id}] User {user_id} (@{uname_lower or 'N/A'}) blacklisted, skip DM")
                 return
 
             # Cooldown / dm_once check

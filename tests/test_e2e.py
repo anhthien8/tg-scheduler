@@ -1124,3 +1124,115 @@ async def test_71_workload_deep_crawl_bfs_flow(client):
     status_res_after = client.get("/api/members/deep-crawl/status")
     # It sets the stop flag which the background task handles.
     assert status_res_after.status_code == 200
+
+
+# 72. Community Trading Scorer & Auto-Classifier tests
+async def test_72_community_trading_scorer():
+    from telegram_client import score_community_trading
+
+    # 1. VIP Trading & Signals channel (High Intent)
+    vip_res = score_community_trading(
+        title="Binance Futures VIP Signals",
+        description="Daily 95% winrate crypto signals, leverage 20x-50x, Bybit partner, contact @vip_admin for trade access",
+        username="binance_vip_futures",
+        contacts=["@vip_admin"]
+    )
+    assert vip_res["trading_score"] >= 80
+    assert vip_res["category"] == "trading_signals"
+    assert vip_res["is_trading"] is True
+    assert "futures" in vip_res["matched_keywords"] or "signals" in vip_res["matched_keywords"]
+
+    # 2. Chinese Trading / Futures KOL channel
+    zh_res = score_community_trading(
+        title="雷司纪的小道投资 Raysky",
+        description="加密货币 合约交易 现货带单 返佣 商务合作 @raysky_bd",
+        username="rayskyinvestment",
+        contacts=["@raysky_bd"]
+    )
+    assert zh_res["trading_score"] >= 70
+    assert zh_res["is_trading"] is True
+
+    # 3. Vietnamese Trading Community
+    vi_res = score_community_trading(
+        title="Giao Dịch Crypto Việt Nam",
+        description="Cộng đồng chia sẻ kèo trade future, phân tích kỹ thuật BTC/ETH, đòn bẩy và chốt lời @admin_trade",
+        username="trade_coin_vn",
+        contacts=["@admin_trade"]
+    )
+    assert vi_res["trading_score"] >= 80
+    assert vi_res["category"] == "trading_signals"
+    assert vi_res["is_trading"] is True
+
+    # 4. Pure News & Media channel (ABMedia, BlockTempo)
+    news_res = score_community_trading(
+        title="NEWS 鏈新聞-ABMedia",
+        description="加密貨幣 | 區塊鏈 | 幣圈即時快訊 新聞媒體",
+        username="abmedia_news",
+        contacts=[]
+    )
+    assert news_res["category"] == "news_general"
+    assert news_res["trading_score"] <= 55
+
+    # 5. Airdrop Spam / Tap-to-earn channel (Penalty)
+    spam_res = score_community_trading(
+        title="Free Airdrop Daily Claim",
+        description="Free airdrop tap to earn notcoin hamster kombat faucet claim free token 18+",
+        username="airdrop_free_claim",
+        contacts=[]
+    )
+    assert spam_res["trading_score"] < 40
+    assert spam_res["category"] == "low_relevance"
+    assert spam_res["is_trading"] is False
+
+    # 6. Hybrid Channel (Has news in title/desc, but also has Bybit/Binance signals & trading)
+    hybrid_res = score_community_trading(
+        title="Crypto Daily News & Signals",
+        description="Cập nhật tin tức thị trường, bắn kèo trade future Bybit và Binance, chốt lời @admin_trade",
+        username="crypto_news_signals",
+        contacts=["@admin_trade"]
+    )
+    assert hybrid_res["trading_score"] >= 80
+    assert hybrid_res["category"] == "trading_signals"
+
+    # 7. Russian Scalping & Signals channel (DIGAHKA & MOEX Signals)
+    ru_scalp = score_community_trading(
+        title="DIGAHKA - СКАЛЬПИНГ",
+        description="Нужно думать - нужно делать 😊 Скринер - https://digash.live Поддержка: @Puzo_Support",
+        username="digahkaaaa",
+        contacts=["@Puzo_Support"],
+        participants_count=41731
+    )
+    assert ru_scalp["trading_score"] >= 80
+    assert ru_scalp["category"] == "trading_signals"
+    assert ru_scalp["is_trading"] is True
+
+    ru_signals = score_community_trading(
+        title="Сигналы МосБиржа",
+        description="Бесплатные сигналы для трейдеров CScalp News : @cscalpofficial Trader signals : @daytrader_signals",
+        username="signals_moex",
+        contacts=["@daytrader_signals"],
+        participants_count=15170
+    )
+    assert ru_signals["trading_score"] >= 80
+    assert ru_signals["category"] == "trading_signals"
+    assert ru_signals["is_trading"] is True
+    assert hybrid_res["is_trading"] is True
+
+
+# 73. Batch Translation for Channel Descriptions
+async def test_73_translate_descriptions(client):
+    payload = {
+        "texts": [
+            "Финансовая нерекомендация. Связь со мной - @trade_molly",
+            "专注永续合约带单、高胜率策略"
+        ],
+        "target_lang": "en"
+    }
+    res = client.post("/api/members/translate-descriptions", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert "translations" in data
+    assert len(data["translations"]) == 2
+    # Verify cached call returns quickly and with valid content
+    res_cached = client.post("/api/members/translate-descriptions", json=payload)
+    assert res_cached.status_code == 200

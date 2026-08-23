@@ -57,12 +57,203 @@ def is_bot_account(sender, username: str = None) -> bool:
         return False
 
     # 2. Fallback: no sender object, only username available
-    #    Use Telegram's official bot naming convention: username ENDS with 'bot' (case-insensitive)
-    uname = (username or "").strip().lower()
-    if uname and uname.endswith("bot"):
+    #    Use Telegram's official bot naming convention & common bot patterns
+    uname = (username or "").strip().lstrip("@").lower()
+    if uname.endswith("bot") or uname.endswith("_bot") or uname.startswith("bot_") or "_bot_" in uname:
         return True
 
     return False
+
+
+# ── Pre-compiled keyword sets for O(1) membership testing (allocated ONCE at import time) ──
+import re as _re
+
+_TIER1_KW = frozenset([
+    # English
+    "trading", "trader", "traders", "futures", "leverage", "margin", "scalping", "scalper",
+    "day trading", "daytrader", "swing trading", "signals", "signal", "vip signals",
+    "long", "short", "tp/sl", "take profit", "stop loss", "pnl", "roi", "technical analysis",
+    "chart analysis", "orderbook", "copy trading", "copytrade", "funding rate", "quant",
+    "algorithmic", "forex", "binary options", "entry point", "entry", "bullish", "bearish",
+    "breakout", "price action", "smart money", "smc", "ict", "alpha", "calls", "gem",
+    "cscalp", "tradingview", "screener", "order flow", "footprint", "liquidity",
+    "prop firm", "prop trading", "propstart", "arbitrage", "grid trading", "open interest",
+    # Russian
+    "трейдинг", "трейдер", "трейдеры", "трейдеров", "сигналы", "сигнал", "фьючерсы", "плечо",
+    "лонг", "шорт", "скальпинг", "скальп", "ордер", "ордера", "точка входа", "стоп-лосс",
+    "тейк-профит", "аналитика", "сделки", "сделка", "профит", "мосбиржа", "биржа", "скринер",
+    "проп", "проп-трейдинг", "обучение трейдингу", "стакан", "ликвидность", "дневник трейдера",
+    "мемы для трейдеров", "депозит",
+    # Chinese
+    "合约", "合約", "带单", "帶單", "返佣", "返傭", "量化", "现货", "現貨", "杠杆", "槓桿",
+    "交易", "行情", "跟单", "跟單", "开仓", "開倉", "平仓", "平倉", "止盈", "止损", "止損",
+    "爆仓", "爆倉", "操盘", "操盤", "策略", "指标", "指標", "波段", "短线", "短線", "点位", "點位",
+    "财富密码", "現貨密碼", "现货密码", "投研", "盘面", "盤面", "抄底", "逃顶", "逃頂",
+    "多单", "空单", "多單", "空單", "波段交易", "合约交易", "合約交易", "搬砖", "套利", "网格",
+    "量化机器人", "量化策略", "实盘",
+    # Vietnamese
+    "giao dịch", "đòn bẩy", "tín hiệu", "kèo", "lệnh", "phân tích kỹ thuật", "chốt lời",
+    "cắt lỗ", "bắn kèo", "đánh future", "vào lệnh", "nhận định", "soi kèo", "vào kèo", "sóng",
+    "chốt lãi", "bắt đáy", "đu đỉnh", "xu hướng", "lợi nhuận", "lãi", "quản lý vốn",
+    # Turkish
+    "vadeli", "kaldıraç", "sinyal", "al-sat", "analiz", "kripto sinyal"
+])
+
+_TIER2_KW = frozenset([
+    "binance", "bybit", "okx", "weex", "bitget", "mexc", "bingx", "gate.io", "kucoin",
+    "coinex", "deribit", "htx", "huobi", "coinbase", "kraken", "cscalp", "tigertrade", "tradingview",
+    "vip group", "vip channel", "private channel", "affiliate", "partner", "partnership",
+    "kol", "ambassador", "business development", "referral", "ref link", "sponsor",
+    "cashback", "fee discount", "đối tác", "hợp tác", "nhóm vip", "kênh kín", "hoa hồng",
+    "link ref", "giảm phí", "商务", "商務", "合作", "代理", "vip群", "私享群", "返现",
+    "партнер", "сотрудничество", "вип", "рефералка", "скидка", "поддержка", "support"
+])
+
+_TIER3_KW = frozenset([
+    "crypto", "cryptocurrency", "bitcoin", "btc", "ethereum", "eth", "solana", "sol",
+    "altcoin", "altcoins", "defi", "tokenomics", "market analysis", "whale alert", "web3",
+    "invest", "investment", "capital", "fund", "ventures", "holding", "hodl",
+    "tiền điện tử", "thị trường", "đầu tư", "phân tích", "tài chính", "vốn",
+    "加密", "货币", "貨幣", "加密货币", "加密貨幣", "虚拟货币", "虛擬貨幣", "区块链", "區塊鏈",
+    "币圈", "幣圈", "大盘", "大盤", "投资", "投資", "项目", "項目", "资本", "資本",
+    "крипта", "криптовалюта", "биткоин", "блокчейн", "инвестиции", "рынок"
+])
+
+_PENALTY_KW = frozenset([
+    "tap to earn", "notcoin", "hamster kombat", "dogs token", "blum bot", "faucet",
+    "free claim", "claim free", "porn", "18+", "casino", "betting", "gambling",
+    "lottery", "hack", "leak", "nude", "dating"
+])
+
+_NEWS_KW = frozenset(["news", "media", "báo chí", "tin tức", "快讯", "快訊", "新闻", "新聞", "媒体", "媒體", "новости"])
+
+_TITLE_TRADING_RE = _re.compile(
+    r"trade|trader|signal|future|quant|scalp|fx|invest|kèo|lệnh|coin|crypto|cscalp|prop|giao dịch"
+    r"|合约|合約|量化|投资|投資|скальп|трейд|сигнал|биржа|мосбиржа|moex|крипт"
+)
+
+
+def score_community_trading(
+    title: str = "",
+    description: str = "",
+    username: str = "",
+    contacts: list[str] = None,
+    participants_count: int = 0
+) -> dict:
+    """
+    Score a Telegram channel/community for Crypto Exchange Business Development (BD) Outreach.
+    Evaluates multi-language keywords (EN, VI, ZH, RU, TR), audience size, community structure,
+    and trading intent across title, description, and username.
+
+    Returns:
+        {
+            "trading_score": int (0-100),
+            "category": str ("trading_signals" | "crypto_trading" | "potential_bd" | "news_general" | "low_relevance"),
+            "category_label": str,
+            "badge_color": str,
+            "matched_keywords": list[str],
+            "is_trading": bool (True if score >= 60)
+        }
+    """
+    text = f"{title or ''} {description or ''} {username or ''}".lower()
+    contacts = contacts or []
+    matched_keywords = []
+
+    # Calculate matches using frozenset lookups (O(1) per keyword)
+    t1_matches = [k for k in _TIER1_KW if k in text]
+    t2_matches = [k for k in _TIER2_KW if k in text]
+    t3_matches = [k for k in _TIER3_KW if k in text]
+    pen_matches = [k for k in _PENALTY_KW if k in text]
+
+    for k in t1_matches[:4] + t2_matches[:3] + t3_matches[:3]:
+        if k not in matched_keywords:
+            matched_keywords.append(k)
+
+    # Base points
+    score = 0
+
+    # Tier 1 points: 20 per match, up to 50
+    score += min(len(t1_matches) * 20, 50)
+
+    # Tier 2 points: 20 per match, up to 40
+    score += min(len(t2_matches) * 20, 40)
+
+    # Tier 3 points: 10 per match, up to 30
+    score += min(t3_matches.__len__() * 10, 30)
+
+    # Bonus: Has Contact in description or contact list (+15)
+    if contacts or "@" in (description or "") or "поддержка" in text or "support" in text:
+        score += 15
+
+    # Bonus: Has Discussion Chat / Link in description (+15)
+    if "t.me/+" in (description or "") or "t.me/joinchat" in (description or "") or "чат" in text or "chat" in text:
+        score += 15
+
+    # Bonus: Direct Title or Username matches trading keywords (+20)
+    title_user_text = f"{title or ''} {username or ''}".lower()
+    if _TITLE_TRADING_RE.search(title_user_text):
+        score += 20
+
+    # Bonus: Audience Size / Subscriber count multiplier (BD Target Value)
+    if participants_count >= 20000:
+        score += 20
+    elif participants_count >= 5000:
+        score += 15
+    elif participants_count >= 1000:
+        score += 10
+    elif participants_count >= 300:
+        score += 5
+
+    # Penalties: -25 per penalty match
+    penalty_score = len(pen_matches) * 25
+    score -= penalty_score
+
+    # Precise News & Media adjustment:
+    # Only treat as pure news if it contains news terms AND HAS ZERO Tier 1 trading AND ZERO Tier 2 exchange terms
+    has_news = any(k in text for k in _NEWS_KW)
+    is_pure_news = has_news and len(t1_matches) == 0 and len(t2_matches) == 0
+    if is_pure_news:
+        if len(t3_matches) >= 2 and score >= 20:
+            score = max(score, 45)
+        score = min(score, 50)
+
+    # Clamp score to 0..100
+    score = max(0, min(100, score))
+
+    # Category determination for BD Outreach
+    if score >= 80:
+        category = "trading_signals"
+        category_label = "🔥 VIP Signals / KOL"
+        badge_color = "#10b981"
+    elif score >= 60:
+        category = "crypto_trading"
+        category_label = "📈 Trading & Scalping"
+        badge_color = "#3b82f6"
+    elif is_pure_news or (score >= 35 and has_news and len(t1_matches) == 0):
+        category = "news_general"
+        category_label = "📰 Kênh Tin tức"
+        badge_color = "#f59e0b"
+    elif score >= 45:
+        category = "potential_bd"
+        category_label = "💎 Tiềm năng BD"
+        badge_color = "#8b5cf6"
+    elif score >= 30:
+        category = "crypto_trading"
+        category_label = "📈 Cộng đồng Crypto"
+        badge_color = "#6366f1"
+    else:
+        category = "low_relevance"
+        category_label = "⚠️ Ít liên quan"
+        badge_color = "#6b7280"
+
+    return {
+        "trading_score": score,
+        "category": category,
+        "category_label": category_label,
+        "badge_color": badge_color,
+        "matched_keywords": matched_keywords[:6],
+        "is_trading": score >= 60
+    }
 
 
 async def _get_entity_safe(client: TelegramClient, chat_id: int):
@@ -760,19 +951,28 @@ async def get_similar_channels_and_contacts(account_id: int, channel_link: str) 
                 u_lower = u.lower()
                 if username and u_lower == username.lower():
                     continue
+                if is_bot_account(None, u):
+                    continue
                 contact_str = f"@{u}"
                 if contact_str not in contacts:
                     contacts.append(contact_str)
         except Exception as e:
             logger.warning(f"Failed to get full channel details for {title}: {e}")
-            
+
+        score_info = score_community_trading(title, description, username, contacts, participants_count=participants_count)
         leads.append({
             "channel_id": chat.id,
             "title": title,
             "username": username,
             "participants_count": participants_count,
             "description": description,
-            "contacts": contacts
+            "contacts": contacts,
+            "trading_score": score_info["trading_score"],
+            "category": score_info["category"],
+            "category_label": score_info["category_label"],
+            "badge_color": score_info["badge_color"],
+            "matched_keywords": score_info["matched_keywords"],
+            "is_trading": score_info["is_trading"],
         })
         
     return leads
@@ -1093,6 +1293,8 @@ async def deep_crawl_similar_channels(
                     u_lower = u.lower()
                     if username and u_lower == username.lower():
                         continue
+                    if is_bot_account(None, u):
+                        continue
                     contact_str = f"@{u}"
                     if contact_str not in contacts:
                         contacts.append(contact_str)
@@ -1106,6 +1308,7 @@ async def deep_crawl_similar_channels(
             except Exception as e:
                 logger.debug(f"[DeepCrawl] GetFullChannel error for {title}: {e}")
 
+            score_info = score_community_trading(title, description, username, contacts, participants_count=participants_count)
             lead = {
                 "channel_id": ch_id,
                 "title": title,
@@ -1115,6 +1318,12 @@ async def deep_crawl_similar_channels(
                 "contacts": contacts,
                 "depth": depth + 1,        # This channel was found at depth+1
                 "parent_channel": parent_title if depth > 0 else ch_title,
+                "trading_score": score_info["trading_score"],
+                "category": score_info["category"],
+                "category_label": score_info["category_label"],
+                "badge_color": score_info["badge_color"],
+                "matched_keywords": score_info["matched_keywords"],
+                "is_trading": score_info["is_trading"],
             }
             all_leads.append(lead)
             state["channels_found"] = len(all_leads)

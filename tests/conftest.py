@@ -187,6 +187,25 @@ async def deep_crawl_similar_channels(account_ids, channel_link, max_depth, prog
     return [{"channel_id": 111, "title": "Deep Channel", "username": "deep_ch", "contacts": ["@deep_admin"]}]
 tg_mock.deep_crawl_similar_channels = deep_crawl_similar_channels
 
+def is_bot_account(sender, username: str = None) -> bool:
+    if not sender and not username:
+        return False
+    if sender:
+        if getattr(sender, "bot", False) or getattr(sender, "is_bot", False):
+            return True
+        sender_id = getattr(sender, "id", 0) or 0
+        if sender_id in (777000, 178220800, 4244000, 4244001, 1088515515) or (0 < sender_id < 1000):
+            return True
+        return False
+    uname = (username or "").strip().lower()
+    if uname and uname.endswith("bot"):
+        return True
+    return False
+tg_mock.is_bot_account = is_bot_account
+
+import telegram_client as real_tg
+tg_mock.score_community_trading = real_tg.score_community_trading
+
 async def disconnect_all():
     pass
 tg_mock.disconnect_all = disconnect_all
@@ -274,8 +293,16 @@ def setup_teardown_session():
     # Let FastAPI lifespan initialize things (which calls db.init_db())
     with TestClient(app) as c:
         yield
-    # Cleanup temp directory
-    temp_dir.cleanup()
+    # Cleanup temp directory safely on Windows
+    try:
+        import asyncio
+        asyncio.run(db.close_db())
+    except Exception:
+        pass
+    try:
+        temp_dir.cleanup()
+    except Exception:
+        pass
 
 @pytest.fixture(autouse=True)
 def clean_database():

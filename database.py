@@ -34,6 +34,10 @@ class ConnectionPool:
             await conn.execute("PRAGMA synchronous=NORMAL")
             await conn.execute("PRAGMA foreign_keys=ON")
             await conn.execute(f"PRAGMA busy_timeout={int(self.timeout * 1000)}")
+            # Performance tuning: larger cache, temp in RAM, memory-mapped I/O
+            await conn.execute("PRAGMA cache_size=-8000")      # 8MB page cache (default ~2MB)
+            await conn.execute("PRAGMA temp_store=MEMORY")     # temp tables in RAM
+            await conn.execute("PRAGMA mmap_size=67108864")    # 64MB memory-mapped I/O
             initialized = True
             return conn
         finally:
@@ -561,6 +565,10 @@ async def init_db():
             "CREATE INDEX IF NOT EXISTS idx_scraped_members_job "
             "ON scraped_members(scrape_job_id)"
         )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scraped_members_job_username "
+            "ON scraped_members(scrape_job_id, username)"
+        )
 
         # ── Batch Scrape Channels ──────────────────────────────────────────
         await db.execute("""
@@ -954,6 +962,14 @@ async def init_db():
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_template_perf_template "
             "ON template_performance(template_id)"
+        )
+
+        # ── Blacklist username-only support ──
+        # Allow username-only blacklist entries (user_id=NULL)
+        # by adding a partial unique index on username
+        await db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_blacklist_username "
+            "ON dm_blacklist(username) WHERE username IS NOT NULL"
         )
 
         await db.commit()
@@ -1844,13 +1860,15 @@ async def get_campaign_dm_limits(campaign_id: int = None) -> tuple[int, int]:
 
 
 async def get_account_daily_dm_count(account_id: int) -> int:
-    """Count how many DMs this account sent today (UTC date)."""
+    """Count how many DMs this account sent today (UTC date) across watchers and campaigns."""
     async with get_db() as db:
         row = await (await db.execute(
-            """SELECT COUNT(*) as cnt FROM watcher_dm_logs
-               WHERE account_id=? AND status='success'
-               AND DATE(sent_at) = DATE('now')""",
-            (account_id,)
+            """SELECT (
+                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND DATE(sent_at) = DATE('now'))
+                +
+                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND DATE(sent_at) = DATE('now'))
+            ) as cnt""",
+            (account_id, account_id)
         )).fetchone()
         return row[0] if row else 0
 
@@ -1858,11 +1876,12 @@ async def get_account_daily_dm_count(account_id: int) -> int:
 async def is_account_dm_limit_reached(account_id: int, limit_premium: int = None, limit_normal: int = None) -> tuple[bool, int, int]:
     """
     Check if account has reached daily DM limit.
-    Accepts custom limits (from campaign settings) or falls back to defaults.
+    Free/Normal accounts are hard-capped to MAX 10 DMs/day to prevent bans.
+    Premium accounts use limit_premium (default 60).
     Returns (limit_reached: bool, count: int, limit: int)
     """
     lp = limit_premium if limit_premium is not None else DM_DAILY_LIMIT_PREMIUM
-    ln = limit_normal if limit_normal is not None else DM_DAILY_LIMIT_NORMAL
+    ln = min(limit_normal if limit_normal is not None else DM_DAILY_LIMIT_NORMAL, 10)
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
         acc = await (await db.execute(
@@ -1872,10 +1891,12 @@ async def is_account_dm_limit_reached(account_id: int, limit_premium: int = None
         limit = lp if is_premium else ln
 
         row = await (await db.execute(
-            """SELECT COUNT(*) as cnt FROM watcher_dm_logs
-               WHERE account_id=? AND status='success'
-               AND DATE(sent_at) = DATE('now')""",
-            (account_id,)
+            """SELECT (
+                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND DATE(sent_at) = DATE('now'))
+                +
+                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND DATE(sent_at) = DATE('now'))
+            ) as cnt""",
+            (account_id, account_id)
         )).fetchone()
         count = row["cnt"] if row else 0
         return (count >= limit, count, limit)
@@ -1906,19 +1927,57 @@ async def get_dm_blacklist() -> list:
 
 
 async def add_to_dm_blacklist(user_id: int | None, username: str | None, reason: str = "") -> dict:
-    """Insert or update a user in the DM blacklist. Returns the saved row as a dict."""
+    """Insert or update a user in the DM blacklist.
+    Supports: user_id only, username only, or both.
+    Returns the saved row as a dict.
+    """
+    clean_username = username.lstrip("@").lower().strip() if username else None
+
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        await db.execute(
-            """INSERT INTO dm_blacklist (user_id, username, reason)
-               VALUES (?, ?, ?)
-               ON CONFLICT(user_id) DO UPDATE SET username=excluded.username, reason=excluded.reason""",
-            (user_id, username, reason)
-        )
-        await db.commit()
-        row = await (await db.execute(
-            "SELECT * FROM dm_blacklist WHERE user_id=?", (user_id,)
-        )).fetchone()
+
+        if user_id:
+            # Has user_id → use ON CONFLICT(user_id) to upsert
+            await db.execute(
+                """INSERT INTO dm_blacklist (user_id, username, reason)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(user_id) DO UPDATE
+                   SET username=COALESCE(excluded.username, dm_blacklist.username),
+                       reason=excluded.reason""",
+                (user_id, clean_username, reason)
+            )
+            await db.commit()
+            row = await (await db.execute(
+                "SELECT * FROM dm_blacklist WHERE user_id=?", (user_id,)
+            )).fetchone()
+        else:
+            # Username-only (no user_id) → check if username already exists
+            existing = await (await db.execute(
+                "SELECT * FROM dm_blacklist WHERE LOWER(username) = ?",
+                (clean_username,)
+            )).fetchone()
+            if existing:
+                # Update existing entry
+                await db.execute(
+                    "UPDATE dm_blacklist SET reason=? WHERE id=?",
+                    (reason, existing["id"])
+                )
+                await db.commit()
+                row = await (await db.execute(
+                    "SELECT * FROM dm_blacklist WHERE id=?", (existing["id"],)
+                )).fetchone()
+            else:
+                # Insert new username-only entry (user_id=NULL)
+                await db.execute(
+                    "INSERT INTO dm_blacklist (user_id, username, reason) VALUES (NULL, ?, ?)",
+                    (clean_username, reason)
+                )
+                await db.commit()
+                row = await (await db.execute(
+                    "SELECT * FROM dm_blacklist WHERE LOWER(username)=?",
+                    (clean_username,)
+                )).fetchone()
+
         return dict(row) if row else {}
 
 
@@ -1928,12 +1987,33 @@ async def remove_from_dm_blacklist(blacklist_id: int):
         await db.commit()
 
 
-async def is_user_blacklisted(user_id: int) -> bool:
+async def is_user_blacklisted(user_id: int = None, username: str = None) -> bool:
+    """Check if a user is in the global DM blacklist by user_id and/or username."""
     async with get_db() as db:
-        row = await (await db.execute(
-            "SELECT id FROM dm_blacklist WHERE user_id=?", (user_id,)
-        )).fetchone()
-        return row is not None
+        if user_id:
+            row = await (await db.execute(
+                "SELECT 1 FROM dm_blacklist WHERE user_id=?", (user_id,)
+            )).fetchone()
+            if row:
+                return True
+        if username:
+            clean = username.lstrip("@").lower().strip()
+            if clean:
+                row = await (await db.execute(
+                    "SELECT 1 FROM dm_blacklist WHERE LOWER(username)=?", (clean,)
+                )).fetchone()
+                if row:
+                    return True
+        return False
+
+
+async def get_blacklisted_usernames_set() -> set:
+    """Return set of lowercased blacklisted usernames for efficient batch filtering."""
+    async with get_db() as db:
+        rows = await (await db.execute(
+            "SELECT LOWER(username) FROM dm_blacklist WHERE username IS NOT NULL AND username != ''"
+        )).fetchall()
+        return {r[0] for r in rows}
 
 
 # ============================================================
@@ -2446,6 +2526,14 @@ async def get_dm_logs_by_platform(platform: str = "telegram",
 async def save_scraped_members(scrape_job_id: str, account_id: int, group_id: int,
                                 group_title: str, members: list[dict]):
     """Save scraped members to DB in bulk (INSERT OR IGNORE for dedup)."""
+    if not members:
+        return
+
+    # Strict safeguard: never insert bots or usernames ending in 'bot'
+    members = [
+        m for m in members
+        if not (m.get("is_bot") or (m.get("username") and m["username"].strip().lower().endswith("bot")))
+    ]
     if not members:
         return
 
@@ -3909,6 +3997,9 @@ async def get_all_ai_agents(active_only=True) -> list:
             except Exception:
                 r["handover_keywords"] = []
         return rows
+
+
+get_ai_agents = get_all_ai_agents
 
 
 async def get_ai_agent(agent_id: int) -> dict | None:

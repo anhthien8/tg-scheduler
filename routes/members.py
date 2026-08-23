@@ -18,6 +18,7 @@ import telegram_client as tg
 import ai_remix as ai_rmx
 import template_rotation as tmpl_rot
 import image_randomizer as img_rand
+from personalization import apply_personalization
 from telethon import errors as tg_errors
 
 logger = logging.getLogger("tg-scheduler.members")
@@ -103,6 +104,11 @@ class DeepCrawlRequest(BaseModel):
     account_ids: list[int]           # Premium accounts to rotate
     channel_link: str                # Source channel link/username
     max_depth: int = 2               # 1-4 layers deep
+
+
+class TranslateDescriptionsRequest(BaseModel):
+    texts: list[str]
+    target_lang: str = "en"
 
 
 # ── Deep Crawl State (module-level for progress polling) ──
@@ -306,7 +312,7 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
                     continue
 
                 # Filter bots
-                if exclude_bots and getattr(sender, "bot", False):
+                if exclude_bots and tg.is_bot_account(sender, getattr(sender, "username", None)):
                     continue
 
                 # Determine last seen
@@ -389,7 +395,7 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
                         continue
 
                     # Filter bots
-                    if exclude_bots and getattr(user, "bot", False):
+                    if exclude_bots and tg.is_bot_account(user, getattr(user, "username", None)):
                         continue
 
                     # Determine last seen
@@ -466,7 +472,7 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
                             if user.id in admin_ids:
                                 continue
 
-                            if exclude_bots and getattr(user, "bot", False):
+                            if exclude_bots and tg.is_bot_account(user, getattr(user, "username", None)):
                                 continue
 
                             last_seen = None
@@ -719,7 +725,7 @@ async def _do_batch_scrape(batch_job_id: str, account_id: int, channels: list[st
                         continue
                     if sender.id in admin_ids:
                         continue
-                    if exclude_bots and getattr(sender, "bot", False):
+                    if exclude_bots and tg.is_bot_account(sender, getattr(sender, "username", None)):
                         continue
 
                     last_seen = _get_last_seen(sender, message)
@@ -753,7 +759,7 @@ async def _do_batch_scrape(batch_job_id: str, account_id: int, channels: list[st
                         local_seen.add(user.id)
                         if user.id in admin_ids:
                             continue
-                        if exclude_bots and getattr(user, "bot", False):
+                        if exclude_bots and tg.is_bot_account(user, getattr(user, "username", None)):
                             continue
 
                         last_seen = _get_last_seen_from_user(user)
@@ -782,7 +788,7 @@ async def _do_batch_scrape(batch_job_id: str, account_id: int, channels: list[st
                                     continue
                                 if user.id in admin_ids:
                                     continue
-                                if exclude_bots and getattr(user, "bot", False):
+                                if exclude_bots and tg.is_bot_account(user, getattr(user, "username", None)):
                                     continue
                                 last_seen = _get_last_seen_from_user(user)
                                 if not _passes_active_filter(last_seen, filter_active_days):
@@ -870,14 +876,20 @@ async def import_contacts(req: ImportContactsRequest):
             for row in await cursor.fetchall():
                 already_dmd.add(row[0])
 
-        # ── Step 2: Build members list, filtering out already-DM'd ──
+        # ── Step 2: Build members list, filtering out bots and already-DM'd ──
         members_list = []
         skipped_count = 0
+        skipped_bots = 0
         for c in req.contacts:
             username = c.get("username", "").strip()
             if username.startswith("@"):
                 username = username[1:]
             if not username:
+                continue
+
+            # Bot account check
+            if tg.is_bot_account(None, username):
+                skipped_bots += 1
                 continue
 
             # Cross-campaign dedup check
@@ -913,12 +925,19 @@ async def import_contacts(req: ImportContactsRequest):
                 members=members_list
             )
 
+        details = []
+        if skipped_count:
+            details.append(f"bỏ qua {skipped_count} đã DM trước đó")
+        if skipped_bots:
+            details.append(f"lọc {skipped_bots} tài khoản bot")
+        detail_msg = f" ({', '.join(details)})" if details else ""
+
         return {
             "success": True,
             "count": len(members_list),
             "skipped_dmd": skipped_count,
-            "message": f"Imported {len(members_list)} contacts"
-                       + (f", bỏ qua {skipped_count} đã DM trước đó" if skipped_count else "")
+            "skipped_bots": skipped_bots,
+            "message": f"Imported {len(members_list)} contacts{detail_msg}"
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -945,6 +964,19 @@ async def _load_deep_crawl_snapshot():
             s = json.loads(raw_state)
             if s.get("status") == "running":
                 s["status"] = "stopped"
+            if "results" in s and isinstance(s["results"], list):
+                for lead in s["results"]:
+                    if "contacts" in lead and isinstance(lead["contacts"], list):
+                        lead["contacts"] = [c for c in lead["contacts"] if not tg.is_bot_account(None, c)]
+                    if "trading_score" not in lead or lead.get("trading_score") is None:
+                        score_info = tg.score_community_trading(
+                            title=lead.get("title", ""),
+                            description=lead.get("description", ""),
+                            username=lead.get("username", ""),
+                            contacts=lead.get("contacts", []),
+                            participants_count=lead.get("participants_count", 0)
+                        )
+                        lead.update(score_info)
             _deep_crawl_state.update(s)
         
         raw_queue = await db.get_setting("deep_crawl_queue", "")
@@ -1120,15 +1152,122 @@ async def get_deep_crawl_status():
 
 @router.get("/deep-crawl/results")
 async def get_deep_crawl_results():
-    """Get the full results of the last deep crawl."""
+    """Get the full results of the last deep crawl with up-to-date trading scores."""
     global _deep_crawl_state
     if not _deep_crawl_state.get("results"):
         await _load_deep_crawl_snapshot()
+    leads = _deep_crawl_state.get("results", [])
+    for lead in leads:
+        if "contacts" in lead and isinstance(lead["contacts"], list):
+            lead["contacts"] = [c for c in lead["contacts"] if not tg.is_bot_account(None, c)]
+        if "trading_score" not in lead or lead.get("trading_score") is None:
+            score_info = tg.score_community_trading(
+                title=lead.get("title", ""),
+                description=lead.get("description", ""),
+                username=lead.get("username", ""),
+                contacts=lead.get("contacts", []),
+                participants_count=lead.get("participants_count", 0)
+            )
+            lead.update(score_info)
     return {
         "status": _deep_crawl_state.get("status"),
-        "leads": _deep_crawl_state.get("results", []),
-        "total": len(_deep_crawl_state.get("results", [])),
+        "leads": leads,
+        "total": len(leads),
     }
+
+
+_translation_cache: dict[str, str] = {}
+_translate_executor = None
+_translate_semaphore = None
+
+
+def _get_translate_executor():
+    global _translate_executor
+    if _translate_executor is None:
+        from concurrent.futures import ThreadPoolExecutor
+        _translate_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="translate")
+    return _translate_executor
+
+
+def _get_translate_semaphore():
+    global _translate_semaphore
+    if _translate_semaphore is None:
+        import asyncio
+        _translate_semaphore = asyncio.Semaphore(10)
+    return _translate_semaphore
+
+
+async def _translate_single_text(text: str, target_lang: str = "en") -> str:
+    """Translate a single text string to target_lang using Google Translate with in-memory caching."""
+    if not text or not text.strip():
+        return text
+    clean = text.strip()
+    cache_key = f"{target_lang}:{clean}"
+    if cache_key in _translation_cache:
+        return _translation_cache[cache_key]
+
+    import urllib.request
+    import urllib.parse
+    import json
+    import asyncio
+
+    def _do_http():
+        try:
+            url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={target_lang}&dt=t&q=" + urllib.parse.quote(clean[:1200])
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                res = json.loads(response.read().decode("utf-8"))
+                if res and isinstance(res, list) and res[0]:
+                    translated = "".join([part[0] for part in res[0] if part and part[0]])
+                    return translated
+        except Exception as e:
+            logger.debug(f"[Translation] Error: {e}")
+        return clean
+
+    sem = _get_translate_semaphore()
+    async with sem:
+        loop = asyncio.get_running_loop()
+        res = await loop.run_in_executor(_get_translate_executor(), _do_http)
+    _translation_cache[cache_key] = res
+    # Cap cache at 5000 entries (FIFO eviction)
+    if len(_translation_cache) > 5000:
+        oldest = next(iter(_translation_cache))
+        del _translation_cache[oldest]
+    return res
+
+
+@router.post("/translate-descriptions")
+async def translate_descriptions(req: TranslateDescriptionsRequest):
+    """Batch translate list of channel descriptions into English for BD analysis.
+    Deduplicates texts, uses cache, and runs up to 10 concurrent translations."""
+    import asyncio
+    # Deduplicate and skip already-cached
+    unique = []
+    seen = set()
+    for t in req.texts:
+        clean = (t or "").strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            unique.append(clean)
+
+    tasks = [_translate_single_text(t, req.target_lang) for t in unique]
+    translated_list = await asyncio.gather(*tasks, return_exceptions=True)
+    translations = {}
+    for orig, trans in zip(unique, translated_list):
+        if isinstance(trans, Exception):
+            translations[orig] = orig  # fallback to original on error
+        else:
+            translations[orig] = trans
+    return {"translations": translations}
+
+
+@router.post("/deep-crawl/clear")
+async def clear_deep_crawl_results():
+    """Clear previous deep crawl results from memory and database snapshot."""
+    global _deep_crawl_state
+    _deep_crawl_state["results"] = []
+    await _save_deep_crawl_snapshot()
+    return {"success": True, "message": "Đã xóa sạch kết quả deep crawl cũ."}
 
 
 @router.post("/deep-crawl/stop")
@@ -1203,8 +1342,8 @@ async def create_campaign(req: CampaignCreate):
         "messages": [m if isinstance(m, dict) else m.dict() for m in req.messages],
         "delay_min": req.delay_min,
         "delay_max": req.delay_max,
-        "daily_limit_premium": req.daily_limit_premium,
-        "daily_limit_normal": req.daily_limit_normal,
+        "daily_limit_premium": req.daily_limit_premium or 60,
+        "daily_limit_normal": min(req.daily_limit_normal or 10, 10),
         "use_ai_remix": req.use_ai_remix,
         "exclude_previous_dms": req.exclude_previous_dms,
         "total_targets": total,
@@ -1375,7 +1514,7 @@ async def update_campaign_messages(campaign_id: int, req: CampaignUpdateMessages
         delay_min=req.delay_min,
         delay_max=req.delay_max,
         daily_limit_premium=req.daily_limit_premium,
-        daily_limit_normal=req.daily_limit_normal,
+        daily_limit_normal=min(req.daily_limit_normal, 10) if req.daily_limit_normal is not None else None,
         use_ai_remix=req.use_ai_remix,
         exclude_previous_dms=req.exclude_previous_dms,
         ai_agent_id=req.ai_agent_id,
@@ -1437,8 +1576,8 @@ async def _run_campaign(campaign_id: int):
         messages = campaign["messages"]
         delay_min = campaign["delay_min"]
         delay_max = campaign["delay_max"]
-        limit_premium = campaign.get("daily_limit_premium", 60)
-        limit_normal = campaign.get("daily_limit_normal", 10)
+        limit_premium = campaign.get("daily_limit_premium", 60) or 60
+        limit_normal = min(int(campaign.get("daily_limit_normal", 10) or 10), 10)
         use_ai = campaign["use_ai_remix"]
 
         # ── Smart Template Rotation: detect multi-variant messages ──
@@ -1584,11 +1723,13 @@ async def _run_campaign(campaign_id: int):
         daily_sent = 0  # Track daily sends per session
         account_idx = 0  # Round-robin account index
         consecutive_errors = 0  # Track consecutive errors for backoff
+        consecutive_ai_errors = 0  # Track consecutive AI remix failures
         flooded_accounts = set()
 
         # Pre-load blacklist ONCE (avoid N+1 query pattern)
         bl = await db.get_dm_blacklist()
-        blacklisted_ids = {b["user_id"] for b in bl}
+        blacklisted_ids = {b["user_id"] for b in bl if b.get("user_id")}
+        blacklisted_usernames = await db.get_blacklisted_usernames_set()
 
         # ── Pre-campaign SpamBot health check ──
         # Automatically exclude accounts that are currently spam-limited
@@ -1613,6 +1754,47 @@ async def _run_campaign(campaign_id: int):
             _active_campaigns.pop(campaign_id, None)
             return
 
+        # ── Pre-flight AI Remix / AI Agent verification ──
+        # Ensure AI provider & keys are actively working before spending premium DM limit
+        if use_ai:
+            if not ai_keys:
+                logger.error(f"[Campaign {campaign_id}] 🛑 AI Remix BẬT nhưng không có API Key hợp lệ nào! Tạm dừng chiến dịch.")
+                await db.update_dm_campaign_status(campaign_id, "paused",
+                                                    sent=sent, failed=failed, skipped=skipped)
+                await db.add_dm_campaign_log(campaign_id, None, 0, None, "skipped",
+                                            "🛑 AI Remix BẬT nhưng chưa cấu hình API Key. Đã tạm dừng chiến dịch để bảo vệ limit DM!")
+                _active_campaigns.pop(campaign_id, None)
+                return
+
+            logger.info(f"[Campaign {campaign_id}] 🧪 Đang kiểm tra kết nối AI Remix ({ai_provider})...")
+            try:
+                test_sample = "Hello, are you available for a brief discussion?"
+                test_res = await ai_rmx.remix_message(
+                    original_text=test_sample,
+                    provider=ai_provider,
+                    api_keys=ai_keys,
+                    sender_name="tester",
+                    custom_instruction=ai_custom_prompt,
+                    **ai_remix_kwargs
+                )
+                if not test_res or test_res.strip() == test_sample.strip():
+                    logger.error(f"[Campaign {campaign_id}] 🛑 AI Remix ({ai_provider}) kiểm tra thất bại: API không phản hồi hoặc trả về nội dung rỗng. Tạm dừng để tránh lãng phí DM limit!")
+                    await db.update_dm_campaign_status(campaign_id, "paused",
+                                                        sent=sent, failed=failed, skipped=skipped)
+                    await db.add_dm_campaign_log(campaign_id, None, 0, None, "skipped",
+                                                f"🛑 AI Remix ({ai_provider}) kiểm tra thất bại (API Key lỗi hoặc hết quota). Tạm dừng chiến dịch để bảo vệ limit DM!")
+                    _active_campaigns.pop(campaign_id, None)
+                    return
+                logger.info(f"[Campaign {campaign_id}] ✅ AI Remix ({ai_provider}) kiểm tra thành công! Bắt đầu chạy chiến dịch.")
+            except Exception as test_e:
+                logger.error(f"[Campaign {campaign_id}] 🛑 Lỗi khi kiểm tra AI Remix ({ai_provider}): {test_e}")
+                await db.update_dm_campaign_status(campaign_id, "paused",
+                                                    sent=sent, failed=failed, skipped=skipped)
+                await db.add_dm_campaign_log(campaign_id, None, 0, None, "skipped",
+                                            f"🛑 Lỗi kết nối AI Remix ({ai_provider}): {str(test_e)[:100]}. Tạm dừng chiến dịch!")
+                _active_campaigns.pop(campaign_id, None)
+                return
+
         # ── Sync total_targets in DB if changed ──
         _total_members = len(members)
         if campaign.get("total_targets") != _total_members:
@@ -1623,14 +1805,14 @@ async def _run_campaign(campaign_id: int):
         # ── Diagnostic logging: show filtering stats ──
         _already_sent = len(sent_user_ids)
         _cross_excluded = len(all_previous_user_ids) + len(all_previous_usernames)
-        _blacklisted = len(blacklisted_ids)
+        _blacklisted = len(blacklisted_ids) + len(blacklisted_usernames)
         logger.info(
             f"[Campaign {campaign_id}] 📊 Campaign start stats: "
             f"{_total_members} total members | "
             f"{_already_sent} already sent (this campaign) | "
             f"{'exclude_previous ON' if exclude_previous_dms else 'exclude_previous OFF'} "
             f"({len(all_previous_user_ids)} user_ids + {len(all_previous_usernames)} usernames from other campaigns) | "
-            f"{_blacklisted} blacklisted | "
+            f"{_blacklisted} blacklisted ({len(blacklisted_ids)} ids + {len(blacklisted_usernames)} usernames) | "
             f"{len(available_after_check)} sender accounts available"
         )
 
@@ -1643,6 +1825,13 @@ async def _run_campaign(campaign_id: int):
 
             user_id = member["user_id"]
             username = member.get("username")
+
+            # ── Bot filter: Layer 1 (pre-send username / is_bot check) ──
+            if member.get("is_bot") or tg.is_bot_account(None, username):
+                skipped += 1
+                await db.add_dm_campaign_log(campaign_id, None, user_id, username, "skipped",
+                                            "Tài khoản là Telegram Bot (lọc tự động)")
+                continue
 
             # Skip already sent in current campaign
             if user_id in sent_user_ids:
@@ -1657,9 +1846,13 @@ async def _run_campaign(campaign_id: int):
                                                 "Đã từng nhận DM ở chiến dịch/watcher khác")
                     continue
 
-            # Check daily limit
-            # Check total daily limit across all accounts (use total sender count, not shrinking available)
-            total_daily_limit = limit_premium * len(sender_ids)
+            # Check daily limit across all sender accounts
+            all_accs = await db.get_all_accounts()
+            acc_prem_map = {a["id"]: bool(a.get("is_premium", 0)) for a in all_accs}
+            total_daily_limit = sum(
+                limit_premium if acc_prem_map.get(sid, False) else limit_normal
+                for sid in sender_ids
+            )
             if daily_sent >= total_daily_limit:
                 logger.info(f"[Campaign {campaign_id}] Total daily limit reached ({daily_sent}/{total_daily_limit}), stopping")
                 await db.update_dm_campaign_status(campaign_id, "paused",
@@ -1667,8 +1860,9 @@ async def _run_campaign(campaign_id: int):
                 _active_campaigns.pop(campaign_id, None)
                 return
 
-            # Check blacklist (pre-loaded)
-            if user_id in blacklisted_ids:
+            # Check blacklist (pre-loaded: user_id AND username)
+            member_uname_lower = (username or "").lower()
+            if user_id in blacklisted_ids or (member_uname_lower and member_uname_lower in blacklisted_usernames):
                 skipped += 1
                 await db.add_dm_campaign_log(campaign_id, None, user_id, username, "skipped", "Trong blacklist")
                 continue
@@ -1736,6 +1930,13 @@ async def _run_campaign(campaign_id: int):
                                                     "skipped", f"Không resolve được: {str(pe2)[:80]}")
                         continue
 
+                # ── Bot filter: Layer 2 (Telegram API peer verification) ──
+                if tg.is_bot_account(peer, username):
+                    skipped += 1
+                    await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped",
+                                                "Tài khoản là Telegram Bot (xác nhận qua API)")
+                    continue
+
                 # ── Smart Template Rotation: select variant ──
                 selected_msgs, variant_idx = await tmpl_rot.select_variant(
                     messages_variants,
@@ -1747,6 +1948,14 @@ async def _run_campaign(campaign_id: int):
                 for msg in sorted(selected_msgs, key=lambda m: m.get("msg_order", 0)):
                     content = msg.get("content", "")
                     msg_type = msg.get("msg_type", "text")
+
+                    # ── Personalization: replace {name}, {first_name}, etc. ──
+                    if content:
+                        content = apply_personalization(content, {
+                            "first_name": member.get("first_name"),
+                            "last_name": member.get("last_name"),
+                            "username": username,
+                        })
 
                     # AI remix if enabled
                     if use_ai and content:
@@ -1772,11 +1981,30 @@ async def _run_campaign(campaign_id: int):
                                 )
                                 if remixed_content and remixed_content != content:
                                     content = remixed_content
+                                    consecutive_ai_errors = 0
                                     logger.info(f"[Campaign {campaign_id}] ✨ AI Remix thành công ({ai_provider}) cho @{username or user_id}")
                                 else:
-                                    logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix không thay đổi nội dung, dùng bản gốc")
+                                    consecutive_ai_errors += 1
+                                    logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix không thay đổi nội dung (lần {consecutive_ai_errors})")
+                                    if consecutive_ai_errors >= 3:
+                                        logger.error(f"[Campaign {campaign_id}] 🛑 AI Remix thất bại {consecutive_ai_errors} lần liên tiếp. Tạm dừng để bảo vệ quota DM!")
+                                        await db.update_dm_campaign_status(campaign_id, "paused",
+                                                                            sent=sent, failed=failed, skipped=skipped)
+                                        await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
+                                                                    "AI Remix không phản hồi liên tiếp 3 lần, tạm dừng chiến dịch để bảo vệ limit DM")
+                                        _active_campaigns.pop(campaign_id, None)
+                                        return
                             except Exception as ae:
-                                logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix thất bại ({ae}), dùng bản gốc")
+                                consecutive_ai_errors += 1
+                                logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix thất bại ({ae})")
+                                if consecutive_ai_errors >= 3:
+                                    logger.error(f"[Campaign {campaign_id}] 🛑 AI Remix gặp lỗi liên tiếp {consecutive_ai_errors} lần ({ae}). Tạm dừng!")
+                                    await db.update_dm_campaign_status(campaign_id, "paused",
+                                                                        sent=sent, failed=failed, skipped=skipped)
+                                    await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
+                                                                f"AI Remix lỗi liên tiếp: {str(ae)[:80]}")
+                                    _active_campaigns.pop(campaign_id, None)
+                                    return
                         else:
                             logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix BẬT nhưng thiếu API Key (vui lòng kiểm tra Cài Đặt AI Remix)")
 

@@ -690,11 +690,19 @@ async unpauseAccount(accId){if(!await customConfirm('Bỏ tạm dừng tài kho�
 
 async _populateLogAccountFilter(){const sel=document.getElementById('log-filter-account');if(!sel)return;const accs=this.accounts||App._accounts||[];if(!sel.options.length||sel.options.length===1){while(sel.options.length>1)sel.remove(1);accs.forEach(a=>{const opt=document.createElement('option');opt.value=a.id;opt.textContent=a.name||a.phone;sel.appendChild(opt);});} },
 
-async loadBlacklist(){try{const data=await fetch('/api/blacklist').then(r=>r.json());const tbody=document.getElementById('blacklist-body');if(!data.length){tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:24px">Chưa có user nào trong blacklist</td></tr>';return;}tbody.innerHTML=data.map(b=>`<tr><td>${b.user_id||'—'}</td><td style="color:#a78bfa">${esc(b.username||'—')}</td><td style="color:var(--text2);font-size:.85rem">${esc(b.reason||'—')}</td><td style="font-size:.8rem">${formatDate(b.created_at)}</td><td><button onclick="App.removeBlacklist(${b.id})" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">🗑️ Xóa</button></td></tr>`).join('');}catch(e){this.toast(e.message,'error')}},
+async loadBlacklist(){try{const data=await fetch('/api/blacklist').then(r=>r.json());this._blacklistData=data;const badge=document.getElementById('blacklist-badge');if(badge){if(data.length>0){badge.textContent=data.length;badge.classList.remove('hidden')}else{badge.classList.add('hidden')}}const countEl=document.getElementById('blacklist-count');if(countEl)countEl.textContent=data.length?`Tổng: ${data.length} user bị loại trừ`:'';this._renderBlacklistTable(data)}catch(e){this.toast(e.message,'error')}},
 
-showAddBlacklist(){const uid=prompt('Nhập User ID (số):');const uname=prompt('Nhập username (không cần @):');const reason=prompt('Lý do (tuỳ chọn):')||'';if(!uid&&!uname)return;this.addBlacklist(uid?parseInt(uid):null,uname||null,reason)},
+_renderBlacklistTable(data){const tbody=document.getElementById('blacklist-body');if(!data.length){tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:24px">Chưa có user nào trong blacklist</td></tr>';return;}tbody.innerHTML=data.map(b=>`<tr><td>${b.user_id||'—'}</td><td style="color:#a78bfa">${esc(b.username||'—')}</td><td style="color:var(--text2);font-size:.85rem">${esc(b.reason||'—')}</td><td style="font-size:.8rem">${formatDate(b.created_at)}</td><td><button onclick="App.removeBlacklist(${b.id})" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">🗑️ Xóa</button></td></tr>`).join('');},
+
+filterBlacklist(){const q=(document.getElementById('blacklist-search')?.value||'').toLowerCase().trim();if(!this._blacklistData)return;if(!q){this._renderBlacklistTable(this._blacklistData);return}const filtered=this._blacklistData.filter(b=>(String(b.user_id||'').includes(q))||(b.username||'').toLowerCase().includes(q)||(b.reason||'').toLowerCase().includes(q));this._renderBlacklistTable(filtered);const countEl=document.getElementById('blacklist-count');if(countEl)countEl.textContent=`Hiển thị: ${filtered.length}/${this._blacklistData.length}`;},
+
+showAddBlacklist(){const uid=prompt('Nhập User ID (số) — bỏ trống nếu chỉ có username:');const uname=prompt('Nhập username (không cần @):');const reason=prompt('Lý do (tuỳ chọn):')||'';if(!uid&&!uname)return;this.addBlacklist(uid?parseInt(uid):null,uname||null,reason)},
 
 async addBlacklist(userId,username,reason){try{await fetch('/api/blacklist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,username,reason})});this.toast('Đã thêm vào blacklist','success');this.loadBlacklist();}catch(e){this.toast(e.message,'error')}},
+
+toggleBulkBlacklist(){const panel=document.getElementById('blacklist-bulk-panel');if(panel)panel.classList.toggle('hidden');},
+
+async addBulkBlacklist(){const raw=(document.getElementById('blacklist-bulk-input')?.value||'').trim();const reason=(document.getElementById('blacklist-bulk-reason')?.value||'').trim()||'Bulk add';if(!raw){this.toast('Nhập ít nhất 1 username','error');return}const usernames=raw.split(/[\n,;]+/).map(u=>u.trim().replace(/^@/,'')).filter(u=>u.length>0);if(!usernames.length){this.toast('Không tìm thấy username hợp lệ','error');return}let ok=0,fail=0;for(const uname of usernames){try{await fetch('/api/blacklist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:uname,reason})});ok++}catch(e){fail++}}this.toast(`Đã thêm ${ok} username vào blacklist${fail?` (${fail} lỗi)`:''}`,ok?'success':'error');document.getElementById('blacklist-bulk-input').value='';document.getElementById('blacklist-bulk-reason').value='';this.loadBlacklist();},
 
 async removeBlacklist(id){if(!await customConfirm('Xóa user này khỏi blacklist?'))return;try{await fetch(`/api/blacklist/${id}`,{method:'DELETE'});this.toast('Đã xóa khỏi blacklist','success');this.loadBlacklist();}catch(e){this.toast(e.message,'error')}},
 
@@ -3105,6 +3113,7 @@ Object.assign(App, {
   startInboxBadgePolling(){
     if(this._inboxBadgeTimer) return;
     const poll = async () => {
+      if(document.hidden) return; // Skip polling when tab is inactive
       try{
         const r = await fetch('/api/inbox/unread-count');
         const d = await r.json();

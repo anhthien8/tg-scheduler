@@ -112,8 +112,8 @@
         <div class="nav-item" data-page="inbox" onclick="App.navigate('inbox')" id="nav-inbox">
           📬 Inbox <span id="inbox-badge" class="inbox-badge hidden">0</span>
         </div>
-        <div class="nav-item" data-page="blacklist" onclick="App.navigate('blacklist')">
-          🚫 Blacklist
+        <div class="nav-item" data-page="blacklist" onclick="App.navigate('blacklist')" id="nav-blacklist">
+          🚫 Blacklist <span id="blacklist-badge" class="inbox-badge hidden">0</span>
         </div>
         <div class="nav-item" data-page="members" onclick="App.navigate('members')">
           👥 Cào & DM
@@ -623,11 +623,28 @@
           <h2 class="page-title" style="margin-bottom:0">🚫 Blacklist DM</h2>
           <div class="toolbar-left">
             <button class="btn btn-primary" onclick="App.showAddBlacklist()">+ Thêm user</button>
+            <button class="btn btn-ghost" onclick="App.toggleBulkBlacklist()" title="Thêm nhiều username cùng lúc">📋 Thêm hàng loạt</button>
           </div>
         </div>
-        <p style="color:var(--text2);margin-bottom:1rem;font-size:.9rem">
-          Người dùng trong danh sách này sẽ không bao giờ nhận được DM từ bất kỳ watcher nào.
+        <p style="color:var(--text2);margin-bottom:.6rem;font-size:.9rem">
+          Người dùng trong danh sách này sẽ <strong>không bao giờ</strong> nhận được DM từ AI (auto-reply, drip follow-up, keyword watcher, campaign).
         </p>
+
+        <!-- Bulk Add Panel (hidden by default) -->
+        <div id="blacklist-bulk-panel" class="hidden" style="background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.3);border-radius:12px;padding:1rem;margin-bottom:1rem;">
+          <label class="form-label" style="font-size:.85rem;color:#a78bfa">Nhập danh sách username (mỗi dòng 1 username, hoặc phân cách bằng dấu phẩy):</label>
+          <textarea id="blacklist-bulk-input" class="form-input" rows="4" placeholder="user1&#10;user2&#10;user3" style="font-family:monospace;font-size:.85rem;margin-bottom:.5rem;resize:vertical"></textarea>
+          <div style="display:flex;gap:.5rem;align-items:center">
+            <input type="text" id="blacklist-bulk-reason" class="form-input" placeholder="Lý do (tuỳ chọn)" style="flex:1;font-size:.85rem">
+            <button class="btn btn-primary" onclick="App.addBulkBlacklist()" style="white-space:nowrap">🚀 Thêm tất cả</button>
+          </div>
+        </div>
+
+        <!-- Search bar -->
+        <div style="margin-bottom:.8rem">
+          <input type="text" id="blacklist-search" class="form-input" placeholder="🔍 Tìm kiếm username, user ID, lý do..." oninput="App.filterBlacklist()" style="font-size:.85rem;max-width:400px">
+        </div>
+
         <div class="table-wrap">
           <table>
             <thead>
@@ -642,6 +659,7 @@
             <tbody id="blacklist-body"><tr><td colspan="5" style="text-align:center;color:var(--text2);padding:24px">Đang tải...</td></tr></tbody>
           </table>
         </div>
+        <div id="blacklist-count" style="margin-top:.5rem;font-size:.8rem;color:var(--text2)"></div>
       </div>
 
     
@@ -1041,14 +1059,27 @@
             <div id="sim-results-container" class="hidden">
               <div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px;flex-wrap:wrap;gap:12px">
                 <h4 style="margin:0;color:var(--accent)">📋 Danh sách kênh tương tự đề xuất</h4>
-                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                  <input type="text" id="sim-import-job-id" class="form-input" style="width:240px;padding:6px 12px;font-size:13px" placeholder="Tên Scrape Job (e.g. leads_weex)">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <button class="btn btn-sm" onclick="Members.selectOnlyTradingContacts(60)" style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;font-weight:600;display:flex;align-items:center;gap:5px" title="Chỉ chọn các contact thuộc kênh trading đạt từ 60 điểm trở lên">
+                    <span>⚡</span> <span>Chọn nhanh Trading (≥60đ)</span>
+                  </button>
+                  <input type="text" id="sim-import-job-id" class="form-input" style="width:200px;padding:6px 12px;font-size:13px" placeholder="Tên Scrape Job (e.g. leads_weex)">
                   <button class="btn btn-green btn-sm" onclick="Members.importCheckedContacts()">📥 Import Contact Đã Chọn</button>
+                  <button class="btn btn-ghost btn-sm" onclick="Members.clearDeepCrawlResults()" style="color:#ef4444;border-color:rgba(239,68,68,0.3)" title="Xóa toàn bộ kết quả trên bảng">🗑️ Xóa bảng</button>
                 </div>
               </div>
 
-              <!-- Depth filter tabs -->
-              <div id="sim-depth-filter-tabs" style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap"></div>
+              <!-- Filter Bar (Depth + Trading Classification) -->
+              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:10px 12px;">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                  <span style="font-size:0.75rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">🎯 Phân loại Trading:</span>
+                  <div id="sim-trading-filter-tabs" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,0.04);padding-top:8px;">
+                  <span style="font-size:0.75rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">🌐 Độ sâu (Depth):</span>
+                  <div id="sim-depth-filter-tabs" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+                </div>
+              </div>
 
               <div class="table-wrap">
                 <table class="data-table" id="sim-results-table">
@@ -1056,10 +1087,11 @@
                     <tr>
                       <th width="40"><input type="checkbox" id="sim-select-all-channels" onchange="Members.toggleSelectAllChannels(this)"></th>
                       <th>Kênh đề xuất</th>
+                      <th width="145">Đánh giá Trading</th>
                       <th>Subscribers</th>
                       <th width="50">Depth</th>
                       <th>Nguồn (Parent)</th>
-                      <th>Mô tả (Description)</th>
+                      <th style="min-width:240px">Mô tả <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,0.2);color:#818cf8;margin-left:4px;font-weight:600">🌐 Auto EN</span></th>
                       <th>Admin Contact trích xuất</th>
                       <th>Hành động</th>
                     </tr>
@@ -1141,6 +1173,13 @@
           <label class="form-label" style="font-weight:600;font-size:0.85rem;display:flex;justify-content:space-between;align-items:center;">
             <span>💬 Nội dung tin nhắn</span>
           </label>
+          <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;line-height:1.5;">
+            🏷️ Biến cá nhân hóa: <code style="background:rgba(167,139,250,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;font-size:11px">{name}</code>
+            <code style="background:rgba(167,139,250,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;font-size:11px">{first_name}</code>
+            <code style="background:rgba(167,139,250,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;font-size:11px">{last_name}</code>
+            <code style="background:rgba(167,139,250,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;font-size:11px">{full_name}</code>
+            <code style="background:rgba(167,139,250,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;font-size:11px">{username}</code>
+          </div>
           <div id="cmp-messages-list" style="display:flex;flex-direction:column;gap:12px;margin-top:6px;"></div>
           <button class="btn btn-ghost btn-sm" onclick="Members.addCampaignMessage()" style="margin-top:10px;border:1px dashed rgba(167,139,250,0.4);color:#a78bfa;width:100%;justify-content:center;padding:8px 0;font-weight:600;">
             + Thêm tin nhắn
@@ -1162,8 +1201,9 @@
               <input type="number" class="form-input" id="cmp-delay-max" value="500" min="20" style="font-size:0.88rem;">
             </div>
             <div class="form-group" style="margin:0">
-              <label class="form-label" style="font-size:0.78rem;">Giới Hạn DM/Ngày/Acc</label>
-              <input type="number" class="form-input" id="cmp-daily-limit" value="30" min="1" max="50" style="font-size:0.88rem;">
+              <label class="form-label" style="font-size:0.78rem;">Giới Hạn DM/Ngày (Premium)</label>
+              <input type="number" class="form-input" id="cmp-daily-limit" value="50" min="1" max="100" style="font-size:0.88rem;">
+              <span style="font-size:0.7rem;color:#9ca3af;display:block;margin-top:3px;">🔒 Acc Free: cố định max 10 DM/ngày</span>
             </div>
           </div>
         </div>

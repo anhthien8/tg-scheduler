@@ -283,6 +283,7 @@ const Members = {
   _batchPollTimer: null,
   async _pollBatchProgress(batchJobId) {
     const poll = async () => {
+      if (document.hidden) return; // Skip polling when tab is inactive
       try {
         const r = await MembersAPI.getBatchProgress(batchJobId);
 
@@ -675,6 +676,7 @@ const Members = {
     if (this._campaignPollInterval) return;
 
     this._campaignPollInterval = setInterval(async () => {
+      if (document.hidden) return; // Skip polling when tab is inactive
       try {
         await this.loadCampaigns();
         
@@ -713,8 +715,8 @@ const Members = {
       (document.getElementById('cmp-name') || me_dummy).disabled = true; // Can't change name
       (document.getElementById('cmp-delay-min') || me_dummy).value = c.delay_min || 30;
       (document.getElementById('cmp-delay-max') || me_dummy).value = c.delay_max || 90;
-      (document.getElementById('cmp-daily-limit-premium') || me_dummy).value = c.daily_limit_premium || 60;
-      (document.getElementById('cmp-daily-limit-normal') || me_dummy).value = c.daily_limit_normal || 10;
+      const limitInput = document.getElementById('cmp-daily-limit') || document.getElementById('cmp-daily-limit-premium');
+      if (limitInput) limitInput.value = c.daily_limit_premium || 50;
       (document.getElementById('cmp-ai-remix') || me_dummy).checked = !!c.use_ai_remix;
       // Populate AI Agent dropdown if available
       if (typeof AIAgents !== 'undefined' && AIAgents.populateAgentDropdown) {
@@ -825,8 +827,8 @@ const Members = {
 
     const delayMin = parseInt(document.getElementById('cmp-delay-min')?.value) || 30;
     const delayMax = parseInt(document.getElementById('cmp-delay-max')?.value) || 90;
-    const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit-premium')?.value) || 60;
-    const dailyLimitNormal = parseInt(document.getElementById('cmp-daily-limit-normal')?.value) || 10;
+    const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit')?.value || document.getElementById('cmp-daily-limit-premium')?.value) || 50;
+    const dailyLimitNormal = 10; // Auto set cứng tài khoản Telegram Free max 10 DM/ngày
     const useAi = document.getElementById('cmp-ai-remix')?.checked;
     const agentIdVal = document.getElementById('cmp-ai-agent')?.value;
     const aiAgentId = agentIdVal ? parseInt(agentIdVal) : null;
@@ -924,8 +926,8 @@ const Members = {
     (document.getElementById('cmp-name') || me_dummy).value = '';
     (document.getElementById('cmp-delay-min') || me_dummy).value = '30';
     (document.getElementById('cmp-delay-max') || me_dummy).value = '90';
-    (document.getElementById('cmp-daily-limit-premium') || me_dummy).value = '60';
-    (document.getElementById('cmp-daily-limit-normal') || me_dummy).value = '10';
+    const limitInput = document.getElementById('cmp-daily-limit') || document.getElementById('cmp-daily-limit-premium');
+    if (limitInput) limitInput.value = '50';
     (document.getElementById('cmp-ai-remix') || me_dummy).checked = false;
     if (typeof AIAgents !== 'undefined' && AIAgents.populateAgentDropdown) {
       AIAgents.populateAgentDropdown('cmp-ai-agent', null);
@@ -1092,7 +1094,7 @@ const Members = {
     div.innerHTML = `
       <span style="color:#a78bfa;font-size:12px;font-weight:700;margin-top:8px">#${idx + 1}</span>
       <div style="flex:1;display:flex;flex-direction:column;gap:6px">
-        <textarea class="form-input cmp-msg-content" rows="4" style="width:100%;min-height:100px;resize:vertical;font-size:13px;line-height:1.5;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px;color:#e5e7eb" placeholder="Nội dung tin nhắn... Dùng {name} để chèn tên user" oninput="Members.updateMsgCharCounter(this)"></textarea>
+        <textarea class="form-input cmp-msg-content" rows="4" style="width:100%;min-height:100px;resize:vertical;font-size:13px;line-height:1.5;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px;color:#e5e7eb" placeholder="Nội dung tin nhắn...&#10;Biến cá nhân hóa: {name}, {first_name}, {last_name}, {full_name}, {username}" oninput="Members.updateMsgCharCounter(this)"></textarea>
         <div class="cmp-msg-char-counter" style="display:flex;align-items:center;gap:8px;font-size:11px;color:#9ca3af">
           <span class="cmp-char-count">0 ký tự</span>
           <span class="cmp-caption-warn" style="display:none;color:#f59e0b;font-weight:600">⚠️ Caption ảnh/video tối đa 1024 ký tự!</span>
@@ -1253,8 +1255,8 @@ const Members = {
     const jobId = document.getElementById('cmp-scrape-job')?.value;
     const delayMin = parseInt(document.getElementById('cmp-delay-min')?.value) || 30;
     const delayMax = parseInt(document.getElementById('cmp-delay-max')?.value) || 90;
-    const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit-premium')?.value) || 60;
-    const dailyLimitNormal = parseInt(document.getElementById('cmp-daily-limit-normal')?.value) || 10;
+    const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit')?.value || document.getElementById('cmp-daily-limit-premium')?.value) || 50;
+    const dailyLimitNormal = 10; // Auto set cứng tài khoản Telegram Free max 10 DM/ngày
     const useAi = document.getElementById('cmp-ai-remix')?.checked;
     const agentIdVal2 = document.getElementById('cmp-ai-agent')?.value;
     const aiAgentId = agentIdVal2 ? parseInt(agentIdVal2) : null;
@@ -1427,6 +1429,13 @@ const Members = {
       this._deepCrawlPollInterval = 3000;
       this._deepCrawlPrevState = null;
 
+      // Clear stale table results from previous link while new crawl is active
+      if (this._similarLeads && this._similarLeads.length > 0) {
+        this._similarLeads = [];
+        this._selectedContacts.clear();
+        this._renderDeepCrawlResults([]);
+      }
+
       if (btn) {
         btn.disabled = true;
         btn.textContent = '⏳ Đang Deep Crawl...';
@@ -1586,6 +1595,16 @@ const Members = {
         this._deepCrawlPolling = true;
         this._pollDeepCrawlProgress();
         return;
+      }
+
+      // Clear previous crawl table results so user only sees fresh results when ready
+      this._similarLeads = [];
+      this._selectedContacts.clear();
+      this._renderDeepCrawlResults([]);
+      const empty = document.getElementById('sim-empty-state');
+      if (empty) {
+        empty.classList.remove('hidden');
+        empty.querySelector('p').textContent = `Đang chạy Deep Crawl cho "${channelLink}"... Kết quả sẽ tự động hiển thị khi hoàn thành.`;
       }
 
       App.toast(d.message || '🚀 Đã bắt đầu Deep Crawl!', 'success');
@@ -1853,18 +1872,88 @@ const Members = {
 
   // ── Render Deep Crawl Results (with Depth, Parent, and Pagination) ──
   _similarLeads: [],
+  _descTranslationCache: new Map(),
   _depthFilter: 'all',
+  _tradingFilter: 'has_contacts',
   _simPage: 0,
   _simLimit: 50,
   _selectedContacts: new Set(),
+
+  _isBotUsername(u) {
+    if (!u) return false;
+    const s = u.replace(/^@/, '').trim().toLowerCase();
+    return s.endsWith('bot') || s.endsWith('_bot') || s.includes('_bot_') || s.startsWith('bot_');
+  },
+
+  _ensureTradingScore(lead) {
+    if (lead.trading_score !== undefined && lead.trading_score !== null) return lead.trading_score;
+    const text = `${lead.title || ''} ${lead.description || ''} ${lead.username || ''}`.toLowerCase();
+    let score = 0;
+    const tradingTerms = [
+      "trading", "trader", "traders", "futures", "leverage", "margin", "scalping", "scalper",
+      "day trading", "daytrader", "signals", "signal", "cscalp", "smart money", "smc", "ict", "alpha", "gem",
+      "трейдинг", "трейдер", "трейдеры", "сигналы", "фьючерсы", "скальпинг", "скальп", "ордер", "биржа", "мосбиржа", "скринер", "проп", "стакан", "сделки", "депозит",
+      "合约", "带单", "返佣", "量化", "现货", "开仓", "平仓", "止盈", "止损", "爆仓", "跟单", "实盘",
+      "giao dịch", "đòn bẩy", "tín hiệu", "kèo", "lệnh", "phân tích kỹ thuật", "chốt lời", "cắt lỗ", "bắn kèo"
+    ];
+    const matches = tradingTerms.filter(k => text.includes(k));
+    score += Math.min(matches.length * 20, 50);
+
+    const exchangeTerms = ["binance", "bybit", "okx", "weex", "bitget", "mexc", "bingx", "gate.io", "kucoin", "cscalp", "partner", "kol", "affiliate", "vip", "поддержка", "support", "партнер"];
+    const exMatches = exchangeTerms.filter(k => text.includes(k));
+    score += Math.min(exMatches.length * 20, 40);
+
+    const validContacts = (lead.contacts || []).filter(c => !this._isBotUsername(c));
+    if (validContacts.length > 0) score += 15;
+    if (text.includes("t.me/+") || text.includes("t.me/joinchat") || text.includes("чат") || text.includes("chat")) score += 15;
+
+    const titleUser = `${lead.title || ''} ${lead.username || ''}`.toLowerCase();
+    if (["trade", "signal", "future", "scalp", "скальп", "сигнал", "трейд", "биржа", "kèo", "合约"].some(k => titleUser.includes(k))) score += 20;
+
+    const subs = lead.participants_count || 0;
+    if (subs >= 20000) score += 20;
+    else if (subs >= 5000) score += 15;
+    else if (subs >= 1000) score += 10;
+
+    lead.trading_score = Math.min(100, Math.max(0, score));
+    if (lead.trading_score >= 80) {
+      lead.category = "trading_signals";
+      lead.category_label = "🔥 VIP Signals / KOL";
+      lead.badge_color = "#10b981";
+    } else if (lead.trading_score >= 60) {
+      lead.category = "crypto_trading";
+      lead.category_label = "📈 Trading & Scalping";
+      lead.badge_color = "#3b82f6";
+    } else if (lead.trading_score >= 45) {
+      lead.category = "potential_bd";
+      lead.category_label = "💎 Tiềm năng BD";
+      lead.badge_color = "#8b5cf6";
+    } else {
+      lead.category = "low_relevance";
+      lead.category_label = "⚠️ Ít liên quan";
+      lead.badge_color = "#6b7280";
+    }
+    return lead.trading_score;
+  },
 
   _renderDeepCrawlResults(leads) {
     const container = document.getElementById('sim-results-container');
     const tbody = document.getElementById('sim-results-tbody');
     const empty = document.getElementById('sim-empty-state');
     const filterTabs = document.getElementById('sim-depth-filter-tabs');
+    const tradingTabs = document.getElementById('sim-trading-filter-tabs');
     const pagEl = document.getElementById('sim-pagination');
     if (!container || !tbody || !empty) return;
+
+    // Ensure all leads have clean contacts and calculated trading scores
+    if (leads && leads.length) {
+      leads.forEach(l => {
+        if (l.contacts) {
+          l.contacts = l.contacts.filter(c => !this._isBotUsername(c));
+        }
+        this._ensureTradingScore(l);
+      });
+    }
 
     // Detect fresh leads array and build select state
     if (this._similarLeads !== leads) {
@@ -1890,21 +1979,70 @@ const Members = {
     empty.classList.add('hidden');
     container.classList.remove('hidden');
 
-    // Build depth filter tabs
-    const depths = [...new Set(leads.map(l => l.depth))].sort();
+    // ── Single-pass accumulator for all tab counts (P6 optimization) ──
+    let contactCount = 0, vipCount = 0, tradeCount = 0, potentialCount = 0, newsCount = 0;
+    const depthCounts = {};
+    leads.forEach(l => {
+      const hasC = l.contacts && l.contacts.length > 0;
+      const s = l.trading_score || 0;
+      const d = l.depth;
+      depthCounts[d] = (depthCounts[d] || 0) + 1;
+      if (hasC) {
+        contactCount++;
+        if (s >= 80) vipCount++;
+        else if (s >= 60) tradeCount++;
+        else if (s >= 45) potentialCount++;
+        if (l.category === 'news_general') newsCount++;
+      }
+    });
+    const noContactCount = leads.length - contactCount;
+    const allCount = leads.length;
+
+    // Build Contact-First Trading Filter Tabs
+    if (tradingTabs) {
+      tradingTabs.innerHTML = `
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'has_contacts' ? 'active' : ''}" onclick="Members.filterByTrading('has_contacts')" style="border-left:3px solid #6366f1;font-weight:600">🎯 Tất cả có Contact (${contactCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'trading_vip' ? 'active' : ''}" onclick="Members.filterByTrading('trading_vip')" style="border-left:3px solid #10b981">🔥 VIP Signals (${vipCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'trading_all' ? 'active' : ''}" onclick="Members.filterByTrading('trading_all')" style="border-left:3px solid #3b82f6">📈 Trading & Scalping (${tradeCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'potential_bd' ? 'active' : ''}" onclick="Members.filterByTrading('potential_bd')" style="border-left:3px solid #8b5cf6">💎 Tiềm năng BD (${potentialCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'news' ? 'active' : ''}" onclick="Members.filterByTrading('news')" style="border-left:3px solid #f59e0b">📰 Tin tức (${newsCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'no_contacts' ? 'active' : ''}" onclick="Members.filterByTrading('no_contacts')" style="border-left:3px solid #6b7280;opacity:0.75">❌ Chưa có Contact (${noContactCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'all' ? 'active' : ''}" onclick="Members.filterByTrading('all')" style="opacity:0.65">🌐 Xem tất cả (${allCount})</button>
+      `;
+    }
+
+    // Build depth filter tabs (using pre-computed depthCounts)
+    const depths = Object.keys(depthCounts).map(Number).sort();
     if (filterTabs) {
       const allActive = this._depthFilter === 'all' ? 'active' : '';
-      filterTabs.innerHTML = `<button class="tab-btn btn-sm ${allActive}" onclick="Members.filterByDepth('all')">Tất cả (${leads.length})</button>` +
+      filterTabs.innerHTML = `<button class="tab-btn btn-sm ${allActive}" onclick="Members.filterByDepth('all')">Tất cả độ sâu (${leads.length})</button>` +
         depths.map(d => {
-          const count = leads.filter(l => l.depth === d).length;
+          const count = depthCounts[d] || 0;
           const active = this._depthFilter === d ? 'active' : '';
           const colors = ['', '#6366f1', '#a855f7', '#ec4899', '#f59e0b'];
           return `<button class="tab-btn btn-sm ${active}" onclick="Members.filterByDepth(${d})" style="border-left:3px solid ${colors[d] || '#6366f1'}">Lớp ${d} (${count})</button>`;
         }).join('');
     }
 
-    // Filter leads
-    const filtered = this._depthFilter === 'all' ? leads : leads.filter(l => l.depth === this._depthFilter);
+    // Combined Filter leads (Depth + Contact-First Trading Classification)
+    let filtered = leads;
+    if (this._depthFilter !== 'all') {
+      filtered = filtered.filter(l => l.depth === this._depthFilter);
+    }
+    if (this._tradingFilter === 'has_contacts') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0);
+    } else if (this._tradingFilter === 'trading_vip') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 80);
+    } else if (this._tradingFilter === 'trading_all') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 60 && (l.trading_score || 0) < 80);
+    } else if (this._tradingFilter === 'potential_bd') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 45 && (l.trading_score || 0) < 60);
+    } else if (this._tradingFilter === 'news') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && l.category === 'news_general');
+    } else if (this._tradingFilter === 'no_contacts') {
+      filtered = filtered.filter(l => !l.contacts || l.contacts.length === 0);
+    }
+
     const total = filtered.length;
     const pages = Math.ceil(total / this._simLimit);
     const start = this._simPage * this._simLimit;
@@ -1914,7 +2052,10 @@ const Members = {
     // Update global "Select All" checkbox state for the filtered items
     const allFilteredContacts = [];
     filtered.forEach(l => {
-      if (l.contacts) allFilteredContacts.push(...l.contacts);
+      if (l.contacts) {
+        l.contacts = l.contacts.filter(c => !this._isBotUsername(c));
+        allFilteredContacts.push(...l.contacts);
+      }
     });
     const allFilteredSelected = allFilteredContacts.length > 0 && allFilteredContacts.every(c => this._selectedContacts.has(c));
     const selectAllEl = document.getElementById('sim-select-all-channels');
@@ -1925,12 +2066,63 @@ const Members = {
     tbody.innerHTML = pageItems.map((lead) => {
       const idx = leads.indexOf(lead);
       const channelDisplay = lead.username ? `@${lead.username}` : `ID: ${lead.channel_id}`;
-      const description = lead.description ? lead.description : '<em style="color:var(--text-muted)">Không có mô tả</em>';
+      const rawDesc = (lead.description || '').trim();
+
+      // Description with Auto-translation to English
+      let descHtml = '';
+      if (!rawDesc) {
+        descHtml = '<em style="color:var(--text-muted)">Không có mô tả</em>';
+      } else if (this._descTranslationCache.has(rawDesc)) {
+        const trans = this._descTranslationCache.get(rawDesc);
+        const isDiff = trans.trim().toLowerCase() !== rawDesc.trim().toLowerCase();
+        descHtml = `
+          <div style="font-size:12px;line-height:1.45;color:#f3f4f6;font-weight:500">
+            ${esc(trans)}
+          </div>
+          ${isDiff ? `<div style="font-size:10.5px;color:var(--text-muted);margin-top:3px;font-style:italic;line-height:1.3" title="Gốc: ${esc(rawDesc)}">
+            <span style="opacity:0.6">Gốc:</span> ${esc(rawDesc.length > 50 ? rawDesc.substring(0, 50) + '...' : rawDesc)}
+          </div>` : ''}
+        `;
+      } else {
+        descHtml = `
+          <div style="font-size:12px;line-height:1.45;color:var(--text2)">
+            ${esc(rawDesc)}
+          </div>
+          <div style="font-size:10px;color:var(--accent);margin-top:2px;opacity:0.8">🌐 Đang dịch EN...</div>
+        `;
+      }
+
+      // Clean contacts of bots
+      lead.contacts = (lead.contacts || []).filter(c => !this._isBotUsername(c));
 
       // Row checkbox state
       const hasContacts = lead.contacts && lead.contacts.length > 0;
       const allChecked = hasContacts && lead.contacts.every(c => this._selectedContacts.has(c));
       const rowChecked = (hasContacts && allChecked) || (!hasContacts) ? 'checked' : '';
+
+      // Trading Score & Category Badge
+      const score = lead.trading_score !== undefined ? lead.trading_score : 50;
+      const categoryLabel = lead.category_label || (score >= 80 ? '🔥 Trading VIP' : (score >= 60 ? '📈 Crypto Trading' : (score >= 35 ? '📰 Tin tức' : '⚠️ Khác')));
+      const badgeColor = lead.badge_color || (score >= 80 ? '#10b981' : (score >= 60 ? '#3b82f6' : (score >= 35 ? '#f59e0b' : '#6b7280')));
+
+      const keywordsHtml = (lead.matched_keywords && lead.matched_keywords.length)
+        ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;">` +
+          lead.matched_keywords.slice(0, 3).map(k => `<span style="font-size:9.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:4px;color:#d1d5db;">${esc(k)}</span>`).join('') +
+          `</div>`
+        : '';
+
+      const scoreHtml = `
+        <div style="display:flex;flex-direction:column;gap:3px;min-width:135px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">
+            <span style="font-weight:700;font-size:12.5px;color:${badgeColor}">${score} <span style="font-size:9.5px;color:#9ca3af">/ 100</span></span>
+            <span style="display:inline-block;padding:2px 6px;border-radius:6px;font-size:10px;font-weight:600;color:white;background:${badgeColor}">${esc(categoryLabel)}</span>
+          </div>
+          <div style="background:rgba(255,255,255,0.1);height:4px;border-radius:2px;overflow:hidden;width:100%">
+            <div style="background:${badgeColor};height:100%;width:${score}%"></div>
+          </div>
+          ${keywordsHtml}
+        </div>
+      `;
 
       let contactsHtml = '';
       if (lead.contacts && lead.contacts.length) {
@@ -1961,16 +2153,19 @@ const Members = {
             <small style="color:var(--text-muted)">${esc(channelDisplay)}</small>
           </td>
           <td>
+            ${scoreHtml}
+          </td>
+          <td>
             <span class="badge badge-blue">${(lead.participants_count || 0).toLocaleString()}</span>
           </td>
           <td>
             <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:white;background:${depthColor}">L${lead.depth}</span>
           </td>
-          <td style="font-size:12px;color:var(--text-muted);max-width:150px;word-break:break-word">
+          <td style="font-size:12px;color:var(--text-muted);max-width:140px;word-break:break-word">
             ${esc(lead.parent_channel || '—')}
           </td>
-          <td style="max-width:240px;word-break:break-word;font-size:12px;color:var(--text2)">
-            ${esc(description)}
+          <td class="sim-desc-cell" data-desc-idx="${idx}" style="max-width:280px;min-width:220px;word-break:break-word;font-size:12px;vertical-align:top">
+            ${descHtml}
           </td>
           <td>
             <div class="sim-contacts-list-cell">${contactsHtml}</div>
@@ -1983,6 +2178,9 @@ const Members = {
         </tr>
       `;
     }).join('');
+
+    // Trigger async translation for visible descriptions
+    this._translateVisibleDescriptions(pageItems);
 
     // Render pagination controls
     if (pagEl) {
@@ -2010,6 +2208,65 @@ const Members = {
     (document.getElementById('sim-import-job-id') || me_dummy).value = `deep_${cleanName || 'leads'}`;
   },
 
+  // ── Batch Auto-Translate Visible Descriptions to English ──
+  _translatePending: false,
+  async _translateVisibleDescriptions(pageItems) {
+    if (!pageItems || !pageItems.length || this._translatePending) return;
+    const cache = this._descTranslationCache;
+    const untranslated = [];
+    pageItems.forEach(l => {
+      const d = (l.description || '').trim();
+      if (d.length > 0 && !cache.has(d)) untranslated.push(d);
+    });
+
+    if (!untranslated.length) return;
+    const uniqueTexts = [...new Set(untranslated)];
+
+    this._translatePending = true;
+    try {
+      const res = await fetch('/api/members/translate-descriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texts: uniqueTexts, target_lang: 'en' })
+      });
+      if (!res.ok) { this._translatePending = false; return; }
+      const data = await res.json();
+      if (data.translations) {
+        Object.entries(data.translations).forEach(([orig, trans]) => {
+          cache.set(orig, trans);
+        });
+        // Cap cache at 2000 entries (FIFO eviction)
+        if (cache.size > 2000) {
+          const firstKey = cache.keys().next().value;
+          cache.delete(firstKey);
+        }
+
+        // Update DOM cells by matching data-desc-idx
+        document.querySelectorAll('.sim-desc-cell[data-desc-idx]').forEach(cell => {
+          const descIdx = parseInt(cell.getAttribute('data-desc-idx'), 10);
+          if (isNaN(descIdx)) return;
+          const lead = this._similarLeads[descIdx];
+          if (!lead) return;
+          const orig = (lead.description || '').trim();
+          if (!orig || !cache.has(orig)) return;
+          const trans = cache.get(orig);
+          const isDiff = trans.trim().toLowerCase() !== orig.trim().toLowerCase();
+          const shortOrig = orig.length > 60 ? orig.substring(0, 60) + '…' : orig;
+          cell.innerHTML = isDiff
+            ? `<div style="font-size:12px;line-height:1.45;color:#f3f4f6;font-weight:500">${esc(trans)}</div>
+               <div style="font-size:10.5px;color:var(--text-muted);margin-top:3px;font-style:italic;line-height:1.3">
+                 <span style="opacity:0.6">Gốc:</span> ${esc(shortOrig)}
+               </div>`
+            : `<div style="font-size:12px;line-height:1.45;color:#f3f4f6">${esc(trans)}</div>`;
+        });
+      }
+    } catch (e) {
+      console.warn('[Translation] Error:', e);
+    } finally {
+      this._translatePending = false;
+    }
+  },
+
   setPage(p) {
     this._simPage = p;
     this._renderDeepCrawlResults(this._similarLeads);
@@ -2022,11 +2279,53 @@ const Members = {
     this._renderDeepCrawlResults(this._similarLeads);
   },
 
+  // ── Filter results by trading classification ──
+  filterByTrading(cat) {
+    this._tradingFilter = cat;
+    this._simPage = 0;
+    this._renderDeepCrawlResults(this._similarLeads);
+  },
+
+  // ── 1-Click Select Only High-Score Trading Contacts ──
+  selectOnlyTradingContacts(minScore = 60) {
+    this._selectedContacts.clear();
+    let count = 0;
+    (this._similarLeads || []).forEach(lead => {
+      const score = lead.trading_score !== undefined ? lead.trading_score : 50;
+      const validContacts = (lead.contacts || []).filter(c => !this._isBotUsername(c));
+      if (score >= minScore && validContacts.length > 0) {
+        validContacts.forEach(c => {
+          this._selectedContacts.add(c);
+          count++;
+        });
+      }
+    });
+    this._renderDeepCrawlResults(this._similarLeads);
+    App.toast(`⚡ Đã chọn ${this._selectedContacts.size} admin contact từ các kênh trading chất lượng (≥${minScore}đ)!`, 'success');
+  },
+
   toggleSelectAllChannels(el) {
-    const filtered = this._depthFilter === 'all' ? this._similarLeads : this._similarLeads.filter(l => l.depth === this._depthFilter);
+    let filtered = this._similarLeads;
+    if (this._depthFilter !== 'all') {
+      filtered = filtered.filter(l => l.depth === this._depthFilter);
+    }
+    if (this._tradingFilter === 'has_contacts') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0);
+    } else if (this._tradingFilter === 'trading_vip') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 80);
+    } else if (this._tradingFilter === 'trading_all') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 60 && (l.trading_score || 0) < 80);
+    } else if (this._tradingFilter === 'potential_bd') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 45 && (l.trading_score || 0) < 60);
+    } else if (this._tradingFilter === 'news') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && l.category === 'news_general');
+    } else if (this._tradingFilter === 'no_contacts') {
+      filtered = filtered.filter(l => !l.contacts || l.contacts.length === 0);
+    }
+
     filtered.forEach(lead => {
       if (lead.contacts) {
-        lead.contacts.forEach(c => {
+        lead.contacts.filter(c => !this._isBotUsername(c)).forEach(c => {
           if (el.checked) {
             this._selectedContacts.add(c);
           } else {
@@ -2041,7 +2340,7 @@ const Members = {
   onSimilarChannelCheckboxChange(el, idx) {
     const lead = this._similarLeads[idx];
     if (!lead || !lead.contacts) return;
-    lead.contacts.forEach(c => {
+    lead.contacts.filter(c => !this._isBotUsername(c)).forEach(c => {
       if (el.checked) {
         this._selectedContacts.add(c);
       } else {
@@ -2052,6 +2351,7 @@ const Members = {
   },
 
   onContactCheckboxChange(el, contact, leadIdx) {
+    if (this._isBotUsername(contact)) return;
     if (el.checked) {
       this._selectedContacts.add(contact);
     } else {
@@ -2100,18 +2400,63 @@ const Members = {
       return;
     }
 
-    if (!this._selectedContacts.size) {
-      App.toast('Chưa chọn contact nào để import!', 'error');
+    // Apply the same depth + trading filters to get the visible leads
+    let filtered = this._similarLeads || [];
+    if (this._depthFilter !== 'all') {
+      filtered = filtered.filter(l => l.depth === this._depthFilter);
+    }
+    if (this._tradingFilter === 'has_contacts') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0);
+    } else if (this._tradingFilter === 'trading_vip') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 80);
+    } else if (this._tradingFilter === 'trading_all') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 60 && (l.trading_score || 0) < 80);
+    } else if (this._tradingFilter === 'potential_bd') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 45 && (l.trading_score || 0) < 60);
+    } else if (this._tradingFilter === 'news') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && l.category === 'news_general');
+    } else if (this._tradingFilter === 'no_contacts') {
+      filtered = filtered.filter(l => !l.contacts || l.contacts.length === 0);
+    }
+
+    // Collect contacts from filtered leads only, intersected with selected checkboxes
+    const filteredContactSet = new Set();
+    filtered.forEach(l => {
+      if (l.contacts) {
+        l.contacts.forEach(c => {
+          if (!this._isBotUsername(c) && this._selectedContacts.has(c)) {
+            filteredContactSet.add(c);
+          }
+        });
+      }
+    });
+
+    const cleanContacts = Array.from(filteredContactSet);
+    if (!cleanContacts.length) {
+      App.toast('Chưa chọn contact hợp lệ nào trong tab hiện tại!', 'error');
       return;
     }
 
-    const contacts = Array.from(this._selectedContacts).map(c => ({
+    const contacts = cleanContacts.map(c => ({
       username: c,
       first_name: c,
       last_name: ''
     }));
 
     const groupTitle = `Deep Crawl Contacts (${jobId})`;
+
+    // Confirm with exact count and active filter name
+    const filterLabels = {
+      'has_contacts': '🎯 Tất cả có Contact',
+      'trading_vip': '🔥 VIP Signals',
+      'trading_all': '📈 Trading & Scalping',
+      'potential_bd': '💎 Tiềm năng BD',
+      'news': '📰 Tin tức',
+      'no_contacts': '❌ Chưa có Contact',
+      'all': '🌐 Xem tất cả'
+    };
+    const tabLabel = filterLabels[this._tradingFilter] || this._tradingFilter;
+    if (!confirm(`Lưu ${cleanContacts.length} contacts từ tab "${tabLabel}" vào job "${jobId}"?`)) return;
 
     try {
       const res = await fetch('/api/members/import-contacts', {
@@ -2128,14 +2473,42 @@ const Members = {
         throw new Error(d.detail || 'Không thể import contact');
       }
 
-      let msg = `Imported ${d.count} contact vào job "${jobId}"`;
+      let msg = `✅ Đã lưu ${d.count} contact vào job "${jobId}" thành công!`;
       if (d.skipped_dmd > 0) {
-        msg += ` | Bỏ qua ${d.skipped_dmd} contact đã DM trước đó`;
+        msg += ` (Bỏ qua ${d.skipped_dmd} contact đã DM trước đó)`;
       }
       App.toast(msg, 'success');
       this.loadScrapeJobs();
+
+      // Reset selection but KEEP results so user can re-filter and save other tabs
+      this._selectedContacts.clear();
+      this._renderDeepCrawlResults(this._similarLeads);
     } catch (e) {
       App.toast(e.message, 'error');
+    }
+  },
+
+  // ── Manually / Programmatically Clear Deep Crawl Table Results ──
+  async clearDeepCrawlResults(showToast = true) {
+    try {
+      await fetch('/api/members/deep-crawl/clear', { method: 'POST' });
+    } catch (e) {
+      console.debug('Error calling deep-crawl/clear API:', e);
+    }
+    this._similarLeads = [];
+    this._selectedContacts.clear();
+    this._renderDeepCrawlResults([]);
+
+    const empty = document.getElementById('sim-empty-state');
+    if (empty) {
+      empty.classList.remove('hidden');
+      empty.querySelector('p').textContent = 'Chưa có kết quả cào. Nhập link kênh và bắt đầu cào để xem danh sách mới.';
+    }
+    const container = document.getElementById('sim-results-container');
+    if (container) container.classList.add('hidden');
+
+    if (showToast) {
+      App.toast('🗑️ Đã xóa sạch kết quả cào trên bảng!', 'success');
     }
   },
 
@@ -2352,6 +2725,7 @@ const Members = {
     if (this._inviteCampaignPollInterval) return;
 
     this._inviteCampaignPollInterval = setInterval(async () => {
+      if (document.hidden) return; // Skip polling when tab is inactive
       try {
         await this.loadInviteCampaigns();
         

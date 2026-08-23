@@ -45,8 +45,64 @@ _pending_ai_sends: set[tuple[int, int]] = set()
 
 
 async def _remove_ai_send_after_delay(account_id: int, user_id: int):
-    await asyncio.sleep(5)
+    await asyncio.sleep(30)  # Covers full AI cycle: API call + typing delay
     _pending_ai_sends.discard((account_id, user_id))
+
+
+# ── Main account ID for handover notifications ────────────────────────────────
+MAIN_ACCOUNT_ID = 3  # @weexwill / "Will Weex"
+
+
+async def _notify_main_account_handover(
+    account_id: int,
+    sender_id: int,
+    sender_username: str | None,
+    reason: str,
+):
+    """Send handover notification to main @weexwill account (Saved Messages).
+
+    When a secondary account's chat transitions to 'needs_human',
+    this sends a DM alert to the main account's own Saved Messages
+    so the admin can take over.
+    """
+    try:
+        # Build human-readable alert
+        acc_info = await db.get_account(account_id)
+        acc_name = (acc_info or {}).get("name", f"Account #{account_id}")
+        user_tag = f"@{sender_username}" if sender_username else f"user_id={sender_id}"
+
+        alert_text = (
+            f"🚨 HANDOVER ALERT\n\n"
+            f"👤 {user_tag} needs human support\n"
+            f"📱 Account: {acc_name} (#{account_id})\n"
+            f"📋 Reason: {reason}\n\n"
+            f"Please check the AI Followup dashboard or message them directly."
+        )
+
+        # Send to main account's Saved Messages
+        main_client = tg.get_client(MAIN_ACCOUNT_ID)
+        if main_client and main_client.is_connected():
+            me = await main_client.get_me()
+            if me:
+                await main_client.send_message(me.id, alert_text)
+                logger.info("[Handover] 📬 Notification sent to main account #%d for %s (acc=%d, reason=%s)",
+                            MAIN_ACCOUNT_ID, user_tag, account_id, reason)
+                return
+
+        # Fallback: if main account not available, try sending from the same account
+        if account_id != MAIN_ACCOUNT_ID:
+            client = tg.get_client(account_id)
+            if client and client.is_connected():
+                me = await client.get_me()
+                if me:
+                    await client.send_message(me.id, alert_text)
+                    logger.info("[Handover] 📬 Notification sent to self (acc=%d) for %s (reason=%s)",
+                                account_id, user_tag, reason)
+                    return
+
+        logger.warning("[Handover] Could not send notification — no client available")
+    except Exception as e:
+        logger.debug("[Handover] Notification error: %s", e)
 
 
 async def _async_update_kol_profile(account_id: int, user_id: int, history: list[dict], provider: str, api_keys: list[str], kwargs: dict):
@@ -69,7 +125,7 @@ async def _async_distill_human_rule(account_id: int, user_id: int, human_text: s
         campaign_id = chat.get("campaign_id")
         agent_id = None
         if campaign_id:
-            campaign = await db.get_campaign(campaign_id)
+            campaign = await db.get_dm_campaign(campaign_id)
             if campaign:
                 agent_id = campaign.get("ai_agent_id")
         if not agent_id:
@@ -80,15 +136,48 @@ async def _async_distill_human_rule(account_id: int, user_id: int, human_text: s
             return
 
         agent = await db.get_ai_agent(agent_id)
-        if not agent or not agent.get("api_keys_json"):
+        if not agent:
+            return
+
+        # Get API keys: prefer agent-specific, fallback to global settings
+        ai_provider = agent.get("provider", "gemini")
+        agent_keys = agent.get("api_keys_json", [])
+        if isinstance(agent_keys, str):
+            try:
+                agent_keys = json.loads(agent_keys)
+            except Exception:
+                agent_keys = []
+
+        if not agent_keys:
+            # Fallback to global keys (same logic as main AI response flow)
+            try:
+                raw = await db.get_setting(f"ai_keys_{ai_provider}", "[]")
+                agent_keys = json.loads(raw) if raw else []
+            except Exception:
+                agent_keys = []
+            if not agent_keys:
+                all_providers = ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]
+                for alt_prov in all_providers:
+                    try:
+                        alt_raw = await db.get_setting(f"ai_keys_{alt_prov}", "[]")
+                        alt_keys = json.loads(alt_raw) if alt_raw else []
+                        if alt_keys:
+                            ai_provider = alt_prov
+                            agent_keys = alt_keys
+                            break
+                    except Exception:
+                        continue
+
+        if not agent_keys:
+            logger.debug("[Self-Learning] No API keys available for distillation")
             return
 
         history = chat.get("history", [])
         rule = await ai_rmx.distill_human_takeover_rule(
             history,
             human_text,
-            agent.get("provider", "gemini"),
-            agent.get("api_keys_json", []),
+            ai_provider,
+            agent_keys,
             base_url=agent.get("base_url", ""),
             model=agent.get("model", "")
         )
@@ -288,6 +377,14 @@ def _make_handler(account_id: int):
             "watcher_id":      watcher_id,
         })
 
+        # ── BLACKLIST CHECK: Skip AI response for excluded users ──
+        if await db.is_user_blacklisted(user_id=sender_id, username=sender_username):
+            logger.info(
+                "[Inbox] 🚫 Skipped AI response — user @%s (id=%d) is in blacklist",
+                sender_username or "?", sender_id,
+            )
+            return
+
         # ── Smart Template Rotation: record reply for variant performance ──
         try:
             import template_rotation as tmpl_rot
@@ -314,6 +411,14 @@ def _make_handler(account_id: int):
                         )
         except Exception as _tr_err:
             logger.debug("[Inbox] Template rotation reply tracking error: %s", _tr_err)
+
+        # ── MULTI-FIRE GUARD: Skip if AI is already processing for this user ──
+        if (account_id, sender_id) in _pending_ai_sends:
+            logger.info(
+                "[AIFollowUp] ⚡ Skipping duplicate — AI reply already in progress for user @%s (id=%d, acc=%d)",
+                sender_username or "?", sender_id, account_id,
+            )
+            return
 
         # ── AI Follow-Up Sales Agent Engine ──
         try:
@@ -347,7 +452,7 @@ def _make_handler(account_id: int):
 
                 # 3. Fallback: Use the default active system AI Agent so no incoming lead is ever ignored
                 if not agent_config:
-                    active_agents = await db.get_ai_agents(is_active=1)
+                    active_agents = await db.get_all_ai_agents(active_only=True)
                     if active_agents:
                         agent_config = active_agents[0]
                         logger.info("[AIFollowUp] 🤖 Default System AI Agent '%s' selected for user %d (acc=%d)", agent_config["name"], sender_id, account_id)
@@ -412,9 +517,17 @@ def _make_handler(account_id: int):
                         if needs_handover:
                             logger.warning("[AIFollowUp] 🚨 [ADMIN ALERT] Handover keyword matched for user %d (acc=%d) — setting status to 'needs_human'", sender_id, account_id)
                             await db.update_followup_chat_status(account_id, sender_id, "needs_human")
+                            asyncio.create_task(_notify_main_account_handover(
+                                account_id, sender_id, sender_username,
+                                reason=f"Handover keyword detected: '{message_text[:80]}'"
+                            ))
                         elif chat.get("reply_count", 0) >= max_replies_val:
                             logger.warning("[AIFollowUp] 🚨 [ADMIN ALERT] Max replies (%d) reached for user %d (acc=%d) — setting status to 'needs_human'", max_replies_val, sender_id, account_id)
                             await db.update_followup_chat_status(account_id, sender_id, "needs_human")
+                            asyncio.create_task(_notify_main_account_handover(
+                                account_id, sender_id, sender_username,
+                                reason=f"Max replies ({max_replies_val}) reached"
+                            ))
                         else:
                             kwargs = {}
                             ai_provider = None
@@ -523,10 +636,13 @@ def _make_handler(account_id: int):
                                     "[AIFollowUp] 🤖 Generating AI reply using Agent '%s' (user %d, history_len=%d)...",
                                     agent_config['name'], sender_id, len(history)
                                 )
+                                # Lock early to prevent multi-fire from concurrent messages
+                                _pending_ai_sends.add((account_id, sender_id))
                                 try:
                                     ai_reply = await ai_rmx.generate_chat_response(history, combined_prompt, ai_provider, ai_keys, **kwargs)
                                 except Exception as ex_gen:
                                     logger.error("[AIFollowUp] AI generate_chat_response error for user %d: %s", sender_id, ex_gen)
+                                    _pending_ai_sends.discard((account_id, sender_id))
                                     ai_reply = None
 
                                 if ai_reply:
@@ -534,6 +650,10 @@ def _make_handler(account_id: int):
                                     if "[HANDOVER_REQUIRED]" in ai_reply:
                                         new_status = "needs_human"
                                         ai_reply = ai_reply.replace("[HANDOVER_REQUIRED]", "").strip()
+                                        asyncio.create_task(_notify_main_account_handover(
+                                            account_id, sender_id, sender_username,
+                                            reason="AI triggered [HANDOVER_REQUIRED]"
+                                        ))
                                     elif "[ONBOARDED]" in ai_reply:
                                         new_status = "onboarded"
                                         ai_reply = ai_reply.replace("[ONBOARDED]", "").strip()
@@ -542,29 +662,23 @@ def _make_handler(account_id: int):
                                     intent_score = 30
                                     lead_tier = "Tier C"
                                     summary_text = ""
-                                    if "METRICS:" in ai_reply:
+                                    if re.search(r'METRICS\s*:', ai_reply, re.IGNORECASE):
                                         try:
-                                            # Try format 1: [METRICS: {...}]
-                                            metrics_match = re.search(r'\[METRICS:\s*({.*?})\]', ai_reply, re.DOTALL)
+                                            # Try format 1: [METRICS: {...}] (greedy match for full JSON)
+                                            metrics_match = re.search(r'\[METRICS:\s*(\{.*\})\]', ai_reply, re.DOTALL | re.IGNORECASE)
                                             if not metrics_match:
-                                                # Try format 2: METRICS: {...} (no brackets)
-                                                metrics_match = re.search(r'METRICS:\s*({.*?})\s*$', ai_reply, re.DOTALL)
+                                                # Try format 2: METRICS: {...} (no brackets, greedy)
+                                                metrics_match = re.search(r'METRICS:\s*(\{.*\})', ai_reply, re.DOTALL | re.IGNORECASE)
                                             if metrics_match:
                                                 metrics_json = json.loads(metrics_match.group(1))
                                                 intent_score = int(metrics_json.get("intent_score", 30))
                                                 lead_tier = str(metrics_json.get("lead_tier", "Tier C"))
                                                 summary_text = str(metrics_json.get("summary", ""))
-                                                # Strip both formats: [METRICS: {...}] and METRICS: {...}
-                                                ai_reply = re.sub(r'\[METRICS:\s*{.*?}\]', '', ai_reply, flags=re.DOTALL)
-                                                ai_reply = re.sub(r'METRICS:\s*{.*?}\s*$', '', ai_reply, flags=re.DOTALL)
-                                                ai_reply = ai_reply.strip()
-                                            else:
-                                                # METRICS tag is malformed/truncated — strip everything from METRICS: onwards
-                                                ai_reply = re.sub(r'\[?METRICS:.*$', '', ai_reply, flags=re.DOTALL).strip()
                                         except Exception as ex_m:
                                             logger.debug("[AIFollowUp] Error parsing METRICS tag: %s", ex_m)
-                                            # Always strip METRICS fragment regardless of parse error
-                                            ai_reply = re.sub(r'\[?METRICS:.*$', '', ai_reply, flags=re.DOTALL).strip()
+
+                                        # ALWAYS strip METRICS — regardless of parse success/failure
+                                        ai_reply = re.sub(r'\[?METRICS\s*:.*$', '', ai_reply, flags=re.DOTALL | re.IGNORECASE).strip()
 
 
                                     # Update lead metrics in DB
@@ -603,7 +717,6 @@ def _make_handler(account_id: int):
                                         if delay > 0:
                                             await asyncio.sleep(delay)
 
-                                        _pending_ai_sends.add((account_id, sender_id))
                                         await tg.send_text_message(account_id, sender_id, ai_reply)
                                         asyncio.create_task(_remove_ai_send_after_delay(account_id, sender_id))
                                         await db.append_followup_chat_message(account_id, sender_id, "assistant", ai_reply, inc_reply_count=True)
@@ -818,6 +931,12 @@ async def process_drip_followups() -> dict:
         account_id = chat["account_id"]
         user_id = chat["user_id"]
         stage = chat.get("last_drip_stage", 0) + 1
+
+        # ── BLACKLIST CHECK: Skip drip for excluded users ──
+        if await db.is_user_blacklisted(user_id=user_id, username=chat.get("username", "")):
+            logger.info("[DripEngine] 🚫 Skipped drip — user %s (id=%d) is in blacklist",
+                        chat.get("username", "?"), user_id)
+            continue
 
         client = tg.get_client(account_id)
         if not client:

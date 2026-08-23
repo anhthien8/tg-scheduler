@@ -104,7 +104,7 @@ async def run_invite_campaign(campaign_id: int):
                 return
 
             # Skip bots
-            if member.get("is_bot"):
+            if member.get("is_bot") or tg.is_bot_account(None, username):
                 skipped += 1
                 await db.add_invite_campaign_log(
                     campaign_id, 0, user_id, username, "skipped", "Bot account"
