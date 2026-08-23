@@ -1817,6 +1817,14 @@ async def _run_campaign(campaign_id: int):
             f"{len(available_after_check)} sender accounts available"
         )
 
+        # Pre-compute daily limit across all sender accounts
+        all_accs = await db.get_all_accounts()
+        acc_prem_map = {a["id"]: bool(a.get("is_premium", 0)) for a in all_accs}
+        total_daily_limit = sum(
+            limit_premium if acc_prem_map.get(sid, False) else limit_normal
+            for sid in sender_ids
+        )
+
         for member in members:
             # Check if campaign was stopped
             if not _active_campaigns.get(campaign_id, False):
@@ -1848,12 +1856,6 @@ async def _run_campaign(campaign_id: int):
                     continue
 
             # Check daily limit across all sender accounts
-            all_accs = await db.get_all_accounts()
-            acc_prem_map = {a["id"]: bool(a.get("is_premium", 0)) for a in all_accs}
-            total_daily_limit = sum(
-                limit_premium if acc_prem_map.get(sid, False) else limit_normal
-                for sid in sender_ids
-            )
             if daily_sent >= total_daily_limit:
                 logger.info(f"[Campaign {campaign_id}] Total daily limit reached ({daily_sent}/{total_daily_limit}), stopping")
                 await db.update_dm_campaign_status(campaign_id, "paused",

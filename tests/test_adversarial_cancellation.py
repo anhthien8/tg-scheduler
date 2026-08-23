@@ -19,11 +19,11 @@ async def test_cancelled_release_permit_leak():
         
         # 1. Acquire the connection
         conn = await pool.acquire()
-        assert conn._conn is not None
+        assert getattr(conn, "_connection", None) is not None
         
-        # 2. Close the connection so conn._conn is None
+        # 2. Close the connection so conn._connection is None
         await conn.close()
-        assert conn._conn is None
+        assert getattr(conn, "_connection", None) is None
         
         # 3. Simulate calling release inside a cancelled task.
         async def cancel_during_release():
@@ -39,7 +39,10 @@ async def test_cancelled_release_permit_leak():
                 pass
         
         task = asyncio.create_task(cancel_during_release())
-        await task
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
         
         # 4. Now, verify if the permit was leaked.
         try:

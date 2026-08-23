@@ -969,7 +969,7 @@ async def process_drip_followups() -> dict:
         else:
             drip_instruction = (
                 "The user has been silent for 5 days. Send a courteous, brief final check-in asking if they need "
-                "any customized rate proposal or meeting link before closing this conversation."
+                "any customized rate proposal or have any questions before we close this conversation."
             )
 
         sys_p = agent_config.get("system_prompt", "") if agent_config else ""

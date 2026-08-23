@@ -28,6 +28,7 @@ _clients: dict[int, TelegramClient] = {}
 _code_hashes: dict[int, str] = {}
 _auth_cache: dict[int, bool] = {}
 _me_cache: dict[int, dict] = {}
+_dialogs_cache: dict[int, tuple[float, list]] = {}
 
 
 def get_client(account_id: int) -> TelegramClient | None:
@@ -584,13 +585,17 @@ async def logout(account_id: int):
     """Log out an account."""
     _auth_cache.pop(account_id, None)
     _me_cache.pop(account_id, None)
+    _dialogs_cache.pop(account_id, None)
     client = _clients.get(account_id)
     if client and client.is_connected():
-        await client.log_out()
+        try:
+            await asyncio.wait_for(client.log_out(), timeout=5.0)
+        except Exception:
+            pass
         logger.info(f"Account {account_id}: logged out")
 
 
-async def is_authorized(account_id: int) -> bool:
+async def is_authorized(account_id: int, timeout: float = 3.0) -> bool:
     if account_id in _auth_cache:
         return _auth_cache[account_id]
     client = _clients.get(account_id)
@@ -598,35 +603,50 @@ async def is_authorized(account_id: int) -> bool:
         return False
     if not client.is_connected():
         try:
-            await client.connect()
+            await asyncio.wait_for(client.connect(), timeout=timeout)
         except Exception:
             return False
-    is_auth = await client.is_user_authorized()
-    _auth_cache[account_id] = is_auth
-    return is_auth
+    try:
+        is_auth = await asyncio.wait_for(client.is_user_authorized(), timeout=timeout)
+        _auth_cache[account_id] = is_auth
+        return is_auth
+    except Exception:
+        return False
 
 
-async def get_me(account_id: int) -> dict | None:
+async def get_me(account_id: int, timeout: float = 3.0) -> dict | None:
     if account_id in _me_cache:
         return _me_cache[account_id]
-    if not await is_authorized(account_id):
+    if not await is_authorized(account_id, timeout=timeout):
         return None
-    client = _clients[account_id]
-    me = await client.get_me()
-    if me:
-        _me_cache[account_id] = {
-            "user_id": me.id,
-            "first_name": me.first_name,
-            "last_name": me.last_name or "",
-            "username": me.username or "",
-            "phone": me.phone or ""
-        }
-        return _me_cache[account_id]
+    client = _clients.get(account_id)
+    if not client:
+        return None
+    try:
+        me = await asyncio.wait_for(client.get_me(), timeout=timeout)
+        if me:
+            _me_cache[account_id] = {
+                "user_id": me.id,
+                "first_name": me.first_name,
+                "last_name": me.last_name or "",
+                "username": me.username or "",
+                "phone": me.phone or ""
+            }
+            return _me_cache[account_id]
+    except Exception as e:
+        logger.debug(f"Account {account_id} get_me failed or timed out: {e}")
     return None
 
 
-async def get_dialogs(account_id: int, timeout: float = 20.0) -> list:
-    if not await is_authorized(account_id):
+async def get_dialogs(account_id: int, timeout: float = 20.0, force_refresh: bool = False) -> list:
+    import time
+    now = time.time()
+    if not force_refresh and account_id in _dialogs_cache:
+        cached_time, cached_list = _dialogs_cache[account_id]
+        if now - cached_time < 60.0:  # 60s TTL cache for ultra-fast instant UI navigation
+            return cached_list
+
+    if not await is_authorized(account_id, timeout=min(5.0, timeout)):
         return []
     client = _clients.get(account_id)
     if not client or not client.is_connected():
@@ -635,10 +655,10 @@ async def get_dialogs(account_id: int, timeout: float = 20.0) -> list:
         dialogs = await asyncio.wait_for(client.get_dialogs(limit=200), timeout=timeout)
     except asyncio.TimeoutError:
         logger.warning(f"Account {account_id} get_dialogs timed out after {timeout}s")
-        return []
+        return _dialogs_cache.get(account_id, (0, []))[1]
     except Exception as e:
         logger.warning(f"Account {account_id} get_dialogs failed: {e}")
-        return []
+        return _dialogs_cache.get(account_id, (0, []))[1]
     result = []
     for d in dialogs:
         entity = d.entity

@@ -106,11 +106,11 @@ class DummyClient:
 
 tg_mock.DummyClient = DummyClient
 
-async def is_authorized(account_id: int):
+async def is_authorized(account_id: int, *args, **kwargs):
     return True
 tg_mock.is_authorized = is_authorized
 
-async def get_me(account_id: int):
+async def get_me(account_id: int, *args, **kwargs):
     return {
         "user_id": 12345,
         "first_name": "Mocked User",
@@ -239,6 +239,10 @@ tg_mock.send_document_message = send_document_message
 async def send_poll_message(account_id, chat_id, question, options, is_multiple):
     return True
 tg_mock.send_poll_message = send_poll_message
+
+async def get_dialogs(account_id: int, *args, **kwargs):
+    return [{"chat_id": 12345, "chat_title": "Mock Group", "chat_type": "group", "username": "mock_grp", "participants_count": 10}]
+tg_mock.get_dialogs = get_dialogs
 
 sys.modules["telegram_client"] = tg_mock
 

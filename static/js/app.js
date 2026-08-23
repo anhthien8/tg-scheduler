@@ -601,12 +601,7 @@ if(!active.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center
 
 tbody.innerHTML=active.map(s=>{const sends=s.max_sends?`${s.current_sends||0}/${s.max_sends}`:(s.current_sends||0);return`<tr><td>${esc(s.name)}</td><td>${esc(s.account_name||'—')}</td><td><span class="badge badge-blue">${s.schedule_type}</span></td><td>${s.time_of_day}</td><td>${formatDate(s.next_run)}</td><td>${sends}</td></tr>`}).join('')}catch(e){this.toast('Lỗi: '+e.message,'error')}},
 
-async loadAccounts(){try{const d=await API.getAccounts();this.accounts=d.accounts;App._accounts=d.accounts;const grid=document.getElementById('accounts-grid');
-
-if(!this.accounts.length){grid.innerHTML='<div class="empty-state"><div class="empty-state-icon">👤</div><p class="empty-state-text">Chưa có tài khoản nào</p></div>';return}
-
-let aiAgents = [];
-try { const agentData = await API.get('/api/ai-agents'); aiAgents = agentData.agents || []; } catch(agErr){}
+async loadAccounts(){try{const[d,agentData]=await Promise.all([API.getAccounts(),API.get('/api/ai-agents').catch(()=>({agents:[]}))]);this.accounts=d.accounts||[];App._accounts=this.accounts;const grid=document.getElementById('accounts-grid');if(!grid)return;if(!this.accounts.length){grid.innerHTML='<div class="empty-state"><div class="empty-state-icon">👤</div><p class="empty-state-text">Chưa có tài khoản nào</p></div>';return}const aiAgents=agentData.agents||[];
 
 grid.innerHTML = this.accounts.map(a => {
   const logged = a.is_logged_in;

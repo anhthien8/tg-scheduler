@@ -25,7 +25,7 @@ def test_static_html_encoding():
         print(f"\n[INFO] Found HTML numeric entities in index.html: {set(entities)}")
         # Let's decode some and show them
         decoded_examples = []
-        for ent in set(entities)[:10]:
+        for ent in list(set(entities))[:10]:
             val = int(ent.strip("&#;"))
             decoded_examples.append(f"{ent} -> {chr(val)}")
         print(f"[INFO] Examples: {', '.join(decoded_examples)}")

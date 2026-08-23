@@ -11,21 +11,20 @@ import database
 import message_queue as mq
 from main import app
 
-pytestmark = pytest.mark.asyncio
-
 # ── Dynamic Routes for Gzip & Payload Testing ────────────────────────────────
 
 @app.get("/test-empty")
-def test_empty():
+def endpoint_test_empty():
     return Response(content="", media_type="text/plain")
 
 @app.get("/test-204", status_code=204)
-def test_204_route():
+def endpoint_test_204():
     return Response(status_code=204)
 
 
 # ── Connection Pool Hardening Tests ──────────────────────────────────────────
 
+@pytest.mark.asyncio
 async def test_pool_connection_leak_on_append_cancellation():
     """
     Test that if ConnectionPool.acquire() is cancelled during or immediately after
@@ -47,12 +46,12 @@ async def test_pool_connection_leak_on_append_cancellation():
             
         pool._create_connection = mock_create_connection
         
-        # Mock pool._connections.append to raise CancelledError
-        # This simulates a cancellation happening right at that instruction
-        def mock_append(conn):
-            raise asyncio.CancelledError()
+        # Mock pool._connections.append to raise CancelledError via MockList
+        class MockList(list):
+            def append(self, item):
+                raise asyncio.CancelledError()
             
-        pool._connections.append = mock_append
+        pool._connections = MockList()
         
         # Run acquire and expect CancelledError
         with pytest.raises(asyncio.CancelledError):
@@ -64,13 +63,14 @@ async def test_pool_connection_leak_on_append_cancellation():
         # Verify that all connections created during the aborted call were closed
         assert len(created_connections) > 0
         for conn in created_connections:
-            assert conn._conn is None, "A SQLite connection was leaked (not closed) on cancellation!"
+            assert getattr(conn, "_connection", None) is None, "A SQLite connection was leaked (not closed) on cancellation!"
             
     finally:
         await pool.close_all()
         shutil.rmtree(temp_dir)
 
 
+@pytest.mark.asyncio
 async def test_pool_starvation_timeout_prevention():
     """
     Test how the connection pool handles acquisition timeout and starvation.
@@ -84,7 +84,7 @@ async def test_pool_starvation_timeout_prevention():
         
         # 1. Acquire the single connection
         conn1 = await pool.acquire()
-        assert conn1._conn is not None
+        assert getattr(conn1, "_connection", None) is not None
         
         # 2. Try to acquire again with a short timeout
         # It should time out because max_connections = 1
@@ -99,7 +99,7 @@ async def test_pool_starvation_timeout_prevention():
         assert pool._semaphore._value == 1
         
         conn2 = await pool.acquire()
-        assert conn2._conn is not None
+        assert getattr(conn2, "_connection", None) is not None
         await pool.release(conn2)
         
     finally:
@@ -109,19 +109,16 @@ async def test_pool_starvation_timeout_prevention():
 
 # ── Message Queue Worker Hardening Tests ─────────────────────────────────────
 
+@pytest.mark.asyncio
 async def test_queue_worker_cancellation_double_task_done_leak():
     """
     Test that cancelling the queue worker while it is actively processing a message
     does not lead to ValueError (double task_done) or task_done leak.
     """
-    # Clear the queue first
+    # Reset queue for the current test event loop
+    mq._worker_task = None
+    mq._queue = asyncio.Queue()
     q = mq.get_queue()
-    while not q.empty():
-        try:
-            q.get_nowait()
-            q.task_done()
-        except (ValueError, asyncio.QueueEmpty):
-            pass
             
     # Enqueue a test item
     await q.put({
@@ -207,7 +204,7 @@ def test_static_files_range_requests(client):
     
     # 2. Request range with Accept-Encoding: gzip
     headers2 = {"Range": "bytes=10-50", "Accept-Encoding": "gzip"}
-    resp2 = client.get("/static/index.html", headers2=headers2)
+    resp2 = client.get("/static/index.html", headers=headers2)
     # The response should either be 206 (not compressed) or 200 (if gzip takes precedence, compressed).
     # But it must not be 206 compressed!
     if resp2.status_code == 206:

@@ -18,7 +18,7 @@ async def test_pool_starvation_deadlock():
         
         # 1. Acquire the only available connection
         conn1 = await database._pool.acquire()
-        assert conn1._conn is not None
+        assert getattr(conn1, "_connection", None) is not None
         
         # 2. Start a background task to acquire a connection (this should block)
         acquire_task = asyncio.create_task(database._pool.acquire())
@@ -28,7 +28,7 @@ async def test_pool_starvation_deadlock():
         
         # 3. Simulate conn1 closing (e.g. database error or manual close)
         await conn1.close()
-        assert conn1._conn is None
+        assert getattr(conn1, "_connection", None) is None
         
         # 4. Release conn1
         await database._pool.release(conn1)

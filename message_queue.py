@@ -256,7 +256,7 @@ async def queue_worker():
 
         except asyncio.CancelledError:
             logger.info("Queue worker cancelled")
-            break
+            raise
         except Exception as e:
             logger.error(f"Queue worker error: {e}")
             await asyncio.sleep(1)
@@ -277,3 +277,8 @@ def stop_worker():
     if _worker_task and not _worker_task.done():
         _worker_task.cancel()
         _worker_task = None
+
+
+# Backward compatibility aliases
+start_queue_worker = start_worker
+stop_queue_worker = stop_worker

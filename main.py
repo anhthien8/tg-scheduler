@@ -301,7 +301,7 @@ app.mount("/static", CacheControlledStaticFiles(directory=static_dir), name="sta
 
 @app.get("/")
 async def root():
-    return FileResponse(os.path.join(static_dir, "index.html"), headers={"Cache-Control": "no-cache, must-revalidate"})
+    return FileResponse(os.path.join(static_dir, "index.html"), headers={"Cache-Control": "public, max-age=3600"})
 
 
 if __name__ == "__main__":

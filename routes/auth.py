@@ -30,12 +30,15 @@ async def list_accounts():
     import asyncio
     
     async def get_acc_status(acc):
-        acc["is_logged_in"] = await tg.is_authorized(acc["id"])
-        me = await tg.get_me(acc["id"])
-        if me:
-            acc["user_info"] = me
+        try:
+            acc["is_logged_in"] = await tg.is_authorized(acc["id"], timeout=2.5)
+            me = await tg.get_me(acc["id"], timeout=2.5)
+            if me:
+                acc["user_info"] = me
+        except Exception:
+            acc["is_logged_in"] = False
 
-    await asyncio.gather(*(get_acc_status(acc) for acc in accounts))
+    await asyncio.gather(*(get_acc_status(acc) for acc in accounts), return_exceptions=True)
     return {"accounts": accounts}
 
 
@@ -144,22 +147,30 @@ async def logout(account_id: int):
 async def auth_status():
     """Global auth status - checks if any account is logged in."""
     accounts = await db.get_all_accounts()
-    any_logged_in = False
-    logged_accounts = []
+    if not accounts:
+        return {"authenticated": False, "has_accounts": False}
 
-    for acc in accounts:
-        is_auth = await tg.is_authorized(acc["id"])
-        if is_auth:
-            any_logged_in = True
-            me = await tg.get_me(acc["id"])
-            logged_accounts.append({
-                "account_id": acc["id"],
-                "name": acc["name"],
-                "phone": acc["phone"],
-                "user": me
-            })
+    import asyncio
 
-    if any_logged_in:
+    async def check_acc(acc):
+        try:
+            is_auth = await tg.is_authorized(acc["id"], timeout=2.5)
+            if is_auth:
+                me = await tg.get_me(acc["id"], timeout=2.5)
+                return {
+                    "account_id": acc["id"],
+                    "name": acc["name"],
+                    "phone": acc["phone"],
+                    "user": me
+                }
+        except Exception:
+            pass
+        return None
+
+    results = await asyncio.gather(*(check_acc(acc) for acc in accounts), return_exceptions=True)
+    logged_accounts = [r for r in results if r and not isinstance(r, Exception)]
+
+    if logged_accounts:
         return {
             "authenticated": True,
             "accounts": logged_accounts,

@@ -52,10 +52,13 @@ class ConnectionPool:
         conn = None
         try:
             async with self._lock:
+                # Clean up any dead connections in _connections
+                self._connections[:] = [c for c in self._connections if getattr(c, "_connection", None) is not None]
+                
                 # Check if there is an idle connection in the queue
                 while not self._queue.empty():
                     conn = self._queue.get_nowait()
-                    if conn._conn is not None:
+                    if getattr(conn, "_connection", None) is not None:
                         acquired = True
                         return conn
                     else:
@@ -73,19 +76,24 @@ class ConnectionPool:
                     if conn in self._connections:
                         self._connections.remove(conn)
                     try:
-                        await conn.close()
+                        await asyncio.shield(conn.close())
                     except Exception:
                         pass
                 self._semaphore.release()
 
     async def release(self, conn: aiosqlite.Connection):
         try:
-            if conn._conn is not None:
+            if getattr(conn, "_connection", None) is not None:
                 self._queue.put_nowait(conn)
             else:
-                async with self._lock:
+                try:
+                    async with self._lock:
+                        if conn in self._connections:
+                            self._connections.remove(conn)
+                except asyncio.CancelledError:
                     if conn in self._connections:
                         self._connections.remove(conn)
+                    raise
         finally:
             self._semaphore.release()
 
@@ -112,7 +120,7 @@ async def get_db():
         yield conn
     except BaseException:
         try:
-            if conn._conn is not None:
+            if getattr(conn, "_connection", None) is not None:
                 await conn.rollback()
         except Exception:
             pass
@@ -852,6 +860,10 @@ async def init_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_sent_at ON dm_campaign_logs(sent_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_watcher_dm_logs_sent_at ON watcher_dm_logs(sent_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_replies_received_at ON dm_replies(received_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_send_logs_status_sent ON send_logs(status, sent_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_acc_stat_sent ON dm_campaign_logs(account_id, status, sent_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_watcher_dm_logs_acc_stat_sent ON watcher_dm_logs(account_id, status, sent_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_replies_acc_unread ON dm_replies(account_id, is_read, received_at)")
 
 
         # ══════════════════════════════════════════════════════════════
@@ -1366,24 +1378,28 @@ async def get_log_stats() -> dict:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
 
-        cursor = await db.execute("SELECT COUNT(*) as cnt FROM send_logs WHERE status='success'")
-        success = (await cursor.fetchone())["cnt"]
+        cursor = await db.execute("""
+            SELECT 
+                COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END), 0) as success,
+                COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0) as failed,
+                COALESCE(SUM(CASE WHEN status='success' AND date(sent_at)=date('now') THEN 1 ELSE 0 END), 0) as today
+            FROM send_logs
+        """)
+        log_row = await cursor.fetchone()
+        success = log_row["success"] if log_row else 0
+        failed = log_row["failed"] if log_row else 0
+        today = log_row["today"] if log_row else 0
 
-        cursor = await db.execute("SELECT COUNT(*) as cnt FROM send_logs WHERE status='failed'")
-        failed = (await cursor.fetchone())["cnt"]
-
-        cursor = await db.execute(
-            "SELECT COUNT(*) as cnt FROM send_logs WHERE status='success' AND date(sent_at)=date('now')")
-        today = (await cursor.fetchone())["cnt"]
-
-        cursor = await db.execute("SELECT COUNT(*) as cnt FROM schedules WHERE is_active=1")
-        active_schedules = (await cursor.fetchone())["cnt"]
-
-        cursor = await db.execute("SELECT COUNT(*) as cnt FROM schedules")
-        total_schedules = (await cursor.fetchone())["cnt"]
-
-        cursor = await db.execute("SELECT COUNT(*) as cnt FROM accounts")
-        total_accounts = (await cursor.fetchone())["cnt"]
+        cursor = await db.execute("""
+            SELECT
+                (SELECT COUNT(*) FROM schedules WHERE is_active=1) as active_schedules,
+                (SELECT COUNT(*) FROM schedules) as total_schedules,
+                (SELECT COUNT(*) FROM accounts) as total_accounts
+        """)
+        meta_row = await cursor.fetchone()
+        active_schedules = meta_row["active_schedules"] if meta_row else 0
+        total_schedules = meta_row["total_schedules"] if meta_row else 0
+        total_accounts = meta_row["total_accounts"] if meta_row else 0
 
         return {
             "total_sent": success + failed,

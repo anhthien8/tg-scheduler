@@ -98,7 +98,7 @@ async def test_transaction_abort_rollback_and_leak():
         async with db.get_db() as db_conn:
             await db_conn.execute(
                 "INSERT INTO accounts (name, phone, api_id, api_hash, session_name) VALUES (?, ?, ?, ?, ?)",
-                ("Ghost Account", "+8400000000", "ghost_api", "ghost_hash", "session_rb") # session_name is UNIQUE constraint
+                ("Ghost Account", "+8400000000", "ghost_api", "ghost_hash", "session_ghost_rb")
             )
             # This execute should raise a UniqueConstraintError if session_name already exists, 
             # but let's raise a ValueError manually to test clean rollback of preceding commands
