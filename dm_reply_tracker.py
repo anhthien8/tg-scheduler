@@ -67,16 +67,14 @@ async def _notify_main_account_handover(
     """
     try:
         # Build human-readable alert
-        acc_info = await db.get_account(account_id)
-        acc_name = (acc_info or {}).get("name", f"Account #{account_id}")
-        user_tag = f"@{sender_username}" if sender_username else f"user_id={sender_id}"
-
+        direct_link = f"https://t.me/{sender_username}" if sender_username else f"tg://user?id={sender_id}"
         alert_text = (
             f"🚨 HANDOVER ALERT\n\n"
-            f"👤 {user_tag} needs human support\n"
+            f"👤 Lead: {user_tag}\n"
+            f"🔗 Direct Chat: {direct_link}\n"
             f"📱 Account: {acc_name} (#{account_id})\n"
             f"📋 Reason: {reason}\n\n"
-            f"Please check the AI Followup dashboard or message them directly."
+            f"Please check the AI Followup dashboard or tap the link to message them directly."
         )
 
         # Send to main account's Saved Messages
@@ -510,11 +508,12 @@ def _make_handler(account_id: int):
                             await db.update_followup_chat_status(account_id, sender_id, "active")
                             current_status = "active"
 
+                    # Always record incoming user message so chat history & dashboard stay 100% in sync
+                    chat = await db.append_followup_chat_message(account_id, sender_id, "user", message_text)
+
                     if current_status in ("paused_admin", "onboarded", "needs_human", "bot_ignored"):
-                        logger.info("[AIFollowUp] User %d chat status is '%s' (<60m since human takeover) — skipping AI reply", sender_id, current_status)
+                        logger.info("[AIFollowUp] User %d chat status is '%s' (<60m since human takeover) — recorded msg, skipping AI reply", sender_id, current_status)
                     else:
-                        # Append incoming user message
-                        chat = await db.append_followup_chat_message(account_id, sender_id, "user", message_text)
 
                         # Agent-specific handover keywords and max replies
                         agent_handover_kws = agent_config.get("handover_keywords", [])
