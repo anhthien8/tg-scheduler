@@ -266,6 +266,22 @@ async def generate_and_send_ai_reply_for_chat(
         logger.info("[AIFollowUp] 🚫 User %s (id=%d) is blacklisted — skipping AI reply", sender_username or "?", user_id)
         return False
 
+    # 0b. Check if human admin is actively chatting (human_takeover_at < 60m)
+    chat_check = await db.get_followup_chat(account_id, user_id)
+    if chat_check:
+        takeover_str = chat_check.get("human_takeover_at")
+        if takeover_str:
+            try:
+                dt_tk = datetime.fromisoformat(takeover_str.replace("Z", "+00:00"))
+                now_dt = datetime.now(timezone.utc) if dt_tk.tzinfo else datetime.now()
+                elapsed = (now_dt - dt_tk).total_seconds()
+                if elapsed < 3600:
+                    logger.info("[AIFollowUp] 🛑 Human admin active (takeover %ds ago) — skipping AI reply for user %d",
+                                int(elapsed), user_id)
+                    return False
+            except Exception:
+                pass
+
     # 1. Multi-fire guard
     if (account_id, user_id) in _pending_ai_sends:
         logger.info("[AIFollowUp] ⚡ Skipping duplicate — AI reply already in progress for user @%s (id=%d, acc=%d)",
@@ -384,10 +400,12 @@ async def generate_and_send_ai_reply_for_chat(
         "3. KNOWLEDGE BASE & COMMISSION QUOTING MANDATE:\n"
         "   - VIETNAMESE 🇻🇳, KOREAN 🇰🇷, CHINESE 🇨🇳 (or Verified Volume > 20M): Quote 70% - 80% commission.\n"
         "   - GLOBAL / ENGLISH / HIGH-RISK / NIGERIA 🇳🇬 / INDIA 🇮🇳 / OTHER (< 20M volume): STRICTLY ONLY quote 50% - 60% base commission. NEVER mention 70% or 80%! Highlight daily USDT withdrawals, No KYC, No Tax, and ask for their community link & monthly volume.\n"
-        "4. STRICT CONTEXTUAL CONTINUATION, FRIENDLY TONE & REPUTATION INTEGRITY:\n"
-        "   - TONE: Gần gũi, cởi mở, thân thiện như anh em trong ngành crypto (bro, anh em, bạn bè tùy đối tượng), không dùng văn phong quá cứng nhắc hay quan cách.\n"
-        "   - DIRECT SUBSTANCE: Carefully examine the entire conversation history (up to 40 messages) and the user's latest message. Directly address what the user said with high accuracy and professional brevity.\n"
-        "   - DEMANDING / DIFFICULT CASES ESCALATION: Nếu KOL đòi hỏi quá khó khăn (deal vượt khung, đòi ngân sách/upfront lớn, tài trợ phức tạp), TUYỆT ĐỐI không từ chối thô lỗ. Hãy nói khéo léo để đá về phía ban giám đốc sàn phê duyệt riêng (e.g. 'Case này đặc biệt và vượt thẩm quyền thông thường của mình rồi, để mình chuyển tiếp proposal chi tiết của bạn lên Ban Giám Đốc / Partnership Committee của sàn WEEX để duyệt riêng nhé!') và kích hoạt [HANDOVER_REQUIRED].\n"
+        "4. STRICT CONTEXTUAL CONTINUATION, NATURAL HUMAN TONE & ANTI-NAGGING:\n"
+        "   - NATURAL HUMAN TONE: Gần gũi, cởi mở, thân thiện như anh em trong ngành crypto (bro, anh em, bạn bè tùy đối tượng). Không dùng văn phong máy móc, trang trọng hay quan cách.\n"
+        "   - ANTI-NAGGING & NO FORCED CTA: TUYỆT ĐỐI KHÔNG chèo kéo, ép buộc hoặc giục giã KOL hành động (NGHIÊM CẤM các câu hỏi ép như 'Ready to post?', 'Bạn đã sẵn sàng đăng chưa?', 'Bao giờ bạn lên bài?').\n"
+        "   - CONCISE DIRECT ANSWERS: Nếu đối tác hỏi câu hỏi đơn giản (như KYC, nạp rút, link ref), HÃY TRẢ LỜI NGẮN GỌN, TỰ NHIÊN VÀ DỪNG LẠI. Không cố tình nhồi nhét câu hỏi cuối tin nếu không cần thiết!\n"
+        "   - ANTI-CHECKLIST / ANTI-WIZARD: TUYỆT ĐỐI KHÔNG dùng văn phong biểu mẫu hay liệt kê bước tiếp theo dạng robot (như 'UID received. Setting up...', 'Next step: 1..., 2...'). Hãy nói chuyện như một người bạn BD tự nhiên (ví dụ: 'Got your UID bro! Will bind commission for you now. Feel free to check out the campaign when you have time 👍').\n"
+        "   - DEMANDING / DIFFICULT CASES ESCALATION: Nếu KOL đòi hỏi quá khó khăn (deal vượt khung, đòi ngân sách/upfront lớn, tài trợ phức tạp), hãy nói khéo léo để đá về phía ban giám đốc sàn phê duyệt riêng (e.g. 'Case này đặc biệt và vượt thẩm quyền thông thường của mình rồi, để mình chuyển tiếp proposal chi tiết của bạn lên Ban Giám Đốc / Partnership Committee của sàn WEEX để duyệt riêng nhé!') và kích hoạt [HANDOVER_REQUIRED].\n"
         "   - NO HALLUCINATION & NO SPAM: NEVER hallucinate, never output random unrelated greetings, and never repeat points already made.\n"
         "5. LEAD EVALUATION METRICS: At the VERY END of your response, append a hidden metadata JSON tag on its own line: [METRICS: {\"intent_score\": <0-100>, \"lead_tier\": \"<Tier A|Tier B|Tier C>\", \"summary\": \"<1-sentence lead need summary>\"}].\n"
         "   - Tier A (Intent 80-100): High volume trader/KOL (>10k subs or >$5M vol), ready for meeting, negotiating terms.\n"
@@ -466,8 +484,8 @@ async def generate_and_send_ai_reply_for_chat(
         _pending_ai_sends.discard((account_id, user_id))
         return False
 
-    delay = random.uniform(3.0, 8.0)
-    logger.info("[AIFollowUp] Simulating typing for %.1fs before sending AI reply to user %d...", delay, user_id)
+    delay = min(22.0, max(8.0, len(ai_reply) * 0.04 + random.uniform(5.0, 10.0)))
+    logger.info("[AIFollowUp] Simulating human reading & typing for %.1fs before sending AI reply to user %d...", delay, user_id)
 
     client = tg.get_client(account_id)
     if client and event and getattr(event, "message", None) and getattr(event.message, "id", None):
@@ -484,7 +502,20 @@ async def generate_and_send_ai_reply_for_chat(
         except Exception:
             pass
 
-    if delay > 0:
+    if client:
+        try:
+            # First wait a few seconds as human reading time
+            read_time = min(delay * 0.4, 6.0)
+            if read_time > 0:
+                await asyncio.sleep(read_time)
+            # Then show typing action for the remaining duration
+            type_time = max(1.0, delay - read_time)
+            async with client.action(user_id, 'typing'):
+                await asyncio.sleep(type_time)
+        except Exception:
+            if delay > 0:
+                await asyncio.sleep(delay)
+    elif delay > 0:
         await asyncio.sleep(delay)
 
     await tg.send_text_message(account_id, user_id, ai_reply)
@@ -517,22 +548,20 @@ def _make_handler(account_id: int):
                 if not msg_content.strip():
                     return
 
+                # If AI is currently sending, this outgoing msg IS the AI message — skip
+                if (account_id, dest_id) in _pending_ai_sends:
+                    return
+
+                # Human admin is manually sending → ALWAYS lock out AI
                 existing_f_chat = await db.get_followup_chat(account_id, dest_id)
                 if existing_f_chat:
-                    last_msg_role = "assistant"
-                    hist_data = existing_f_chat.get("history", [])
-                    if hist_data:
-                        last_msg_role = hist_data[-1].get("role", "assistant")
-
-                    # Check if this outgoing message is from the human admin (not AI)
-                    if last_msg_role == "user" and (account_id, dest_id) not in _pending_ai_sends:
-                        logger.info(
-                            "🚨 [AIFollowUp] Human Admin manual message detected to user %d (acc=%d)! Pausing AI Agent.",
-                            dest_id, account_id
-                        )
-                        await db.update_followup_chat_status(account_id, dest_id, "needs_human")
-                        await db.append_followup_chat_message(account_id, dest_id, "assistant", f"[Human Admin]: {msg_content}")
-                        asyncio.create_task(_async_distill_human_rule(account_id, dest_id, msg_content))
+                    logger.info(
+                        "🚨 [AIFollowUp] Human Admin manual message detected to user %d (acc=%d)! Pausing AI Agent.",
+                        dest_id, account_id
+                    )
+                    await db.set_human_takeover(account_id, dest_id)
+                    await db.append_followup_chat_message(account_id, dest_id, "assistant", f"[Human Admin]: {msg_content}")
+                    asyncio.create_task(_async_distill_human_rule(account_id, dest_id, msg_content))
             except Exception as ex_out:
                 logger.debug("[AIFollowUp] Error in outgoing human interception: %s", ex_out)
             return
@@ -640,15 +669,16 @@ def _make_handler(account_id: int):
 
                 current_status = chat.get("status", "active")
 
-                # 60m Timeout check on incoming message
+                # 60m Timeout check on incoming message — use human_takeover_at
                 if current_status in ("needs_human", "paused_admin"):
-                    updated_at_str = chat.get("updated_at")
+                    # Prefer human_takeover_at; fallback to updated_at for legacy rows
+                    takeover_at_str = chat.get("human_takeover_at") or chat.get("updated_at")
                     should_resume = False
-                    if updated_at_str:
+                    if takeover_at_str:
                         try:
-                            dt_updated = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
-                            now_dt = datetime.now(timezone.utc) if dt_updated.tzinfo else datetime.now()
-                            if (now_dt - dt_updated).total_seconds() >= 3600:
+                            dt_takeover = datetime.fromisoformat(takeover_at_str.replace("Z", "+00:00"))
+                            now_dt = datetime.now(timezone.utc) if dt_takeover.tzinfo else datetime.now()
+                            if (now_dt - dt_takeover).total_seconds() >= 3600:
                                 should_resume = True
                         except Exception:
                             pass
@@ -801,6 +831,7 @@ async def process_drip_followups() -> dict:
             cur_to = await db_conn.execute("""
                 SELECT * FROM ai_followup_chats
                 WHERE status IN ('needs_human', 'paused_admin')
+                  AND (human_takeover_at IS NULL OR datetime(human_takeover_at) <= datetime('now', '-60 minutes'))
                   AND datetime(updated_at) <= datetime('now', '-60 minutes')
                 LIMIT 20
             """)
@@ -838,6 +869,7 @@ async def process_drip_followups() -> dict:
                 WHERE status = 'active'
                   AND datetime(updated_at) <= datetime('now', '-2 minutes')
                   AND datetime(updated_at) >= datetime('now', '-48 hours')
+                  AND (human_takeover_at IS NULL OR datetime(human_takeover_at) <= datetime('now', '-60 minutes'))
                 LIMIT 20
             """)
             stuck_chats = [dict(r) for r in await cur_stuck.fetchall()]

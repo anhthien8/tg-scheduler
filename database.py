@@ -726,7 +726,8 @@ async def init_db():
             ("lead_tier", "TEXT DEFAULT 'Tier C'"),
             ("summary", "TEXT DEFAULT ''"),
             ("last_drip_stage", "INTEGER DEFAULT 0"),
-            ("last_user_message_at", "TEXT DEFAULT (datetime('now'))")
+            ("last_user_message_at", "TEXT DEFAULT (datetime('now'))"),
+            ("human_takeover_at", "TEXT")
         ]:
             try:
                 await db.execute(f"ALTER TABLE ai_followup_chats ADD COLUMN {col_name} {col_def}")
@@ -3975,6 +3976,19 @@ async def update_followup_chat_status(account_id: int, user_id: int, status: str
         await db.commit()
         return True
 
+
+async def set_human_takeover(account_id: int, user_id: int) -> bool:
+    """Mark chat as human-controlled. AI will NOT reply until 60m of admin inactivity."""
+    async with get_db() as db:
+        await db.execute("""
+            UPDATE ai_followup_chats
+            SET status = 'needs_human',
+                human_takeover_at = datetime('now'),
+                updated_at = datetime('now')
+            WHERE account_id = ? AND user_id = ?
+        """, (account_id, user_id))
+        await db.commit()
+        return True
 
 async def update_followup_lead_metrics(
     account_id: int,
