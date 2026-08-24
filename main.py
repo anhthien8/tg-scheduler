@@ -8,6 +8,13 @@ import asyncio
 import subprocess
 import signal
 import logging
+
+# Ensure stdout and stderr are not None when running via pythonw.exe or Windows background tasks
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8", errors="ignore")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8", errors="ignore")
+
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
