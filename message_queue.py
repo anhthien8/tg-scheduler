@@ -218,8 +218,7 @@ async def queue_worker():
 
             except tg_errors.FloodWaitError as e:
                 wait_time = e.seconds + 1
-                logger.warning(f"⏳ FloodWait: pausing {wait_time}s")
-                await asyncio.sleep(wait_time)
+                logger.warning(f"⏳ FloodWait: got {wait_time}s wait for account {account_id}. Re-queueing.")
                 if retry_count < MAX_RETRIES:
                     item["retry_count"] = retry_count + 1
                     await q.put(item)
@@ -227,6 +226,13 @@ async def queue_worker():
                     friendly_error = translate_error(f"FloodWait after {MAX_RETRIES} retries")
                     await db.add_send_log(schedule_id, account_id, msg.get("id"),
                                           chat_id, chat_title, "failed", friendly_error)
+                await asyncio.sleep(2.5)
+
+            except tg_errors.PeerFloodError as e:
+                logger.warning(f"⚠️ PeerFloodError for account {account_id} -> {chat_title}. Failing immediately.")
+                friendly_error = translate_error("PeerFlood")
+                await db.add_send_log(schedule_id, account_id, msg.get("id"),
+                                      chat_id, chat_title, "failed", friendly_error)
 
             except Exception as e:
                 error_msg = str(e)

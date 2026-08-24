@@ -8,6 +8,7 @@ import json
 from datetime import datetime
 import asyncio
 from contextlib import asynccontextmanager
+import contextvars
 import logging
 
 logger = logging.getLogger("tg-scheduler.database")
@@ -109,13 +110,22 @@ class ConnectionPool:
                 self._queue.get_nowait()
 
 _pool = None
+_current_db_conn: "contextvars.ContextVar[aiosqlite.Connection | None]" = contextvars.ContextVar("_current_db_conn", default=None)
 
 @asynccontextmanager
 async def get_db():
     global _pool
     if _pool is None:
         _pool = ConnectionPool(DB_PATH)
+
+    # Reuse connection if already acquired in this async task (prevents nested deadlock)
+    existing = _current_db_conn.get(None)
+    if existing is not None and getattr(existing, "_connection", None) is not None:
+        yield existing
+        return
+
     conn = await _pool.acquire()
+    token = _current_db_conn.set(conn)
     try:
         yield conn
     except BaseException:
@@ -126,6 +136,7 @@ async def get_db():
             pass
         raise
     finally:
+        _current_db_conn.reset(token)
         await _pool.release(conn)
 
 async def close_db():

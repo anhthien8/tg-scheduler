@@ -1725,7 +1725,7 @@ async def _run_campaign(campaign_id: int):
         account_idx = 0  # Round-robin account index
         consecutive_errors = 0  # Track consecutive errors for backoff
         consecutive_ai_errors = 0  # Track consecutive AI remix failures
-        flooded_accounts = set()
+        flooded_accounts: dict[int, float] = {}
 
         # Pre-load blacklist ONCE (avoid N+1 query pattern)
         bl = await db.get_dm_blacklist()
@@ -1739,7 +1739,7 @@ async def _run_campaign(campaign_id: int):
                 spam_result = await tg.check_spam_status(sid)
                 if spam_result["status"] == "limited":
                     logger.warning(f"[Campaign {campaign_id}] ⚠️ Account {sid} is spam-limited, excluding from senders")
-                    flooded_accounts.add(sid)
+                    flooded_accounts[sid] = float('inf')
                     await db.add_dm_campaign_log(campaign_id, sid, 0, None, "skipped",
                                                 f"SpamBot: tài khoản đang bị giới hạn — {spam_result['message'][:80]}")
                 await asyncio.sleep(2)  # Delay between SpamBot checks
@@ -1747,7 +1747,8 @@ async def _run_campaign(campaign_id: int):
                 logger.warning(f"[Campaign {campaign_id}] SpamBot check failed for {sid}: {e}")
 
         # Check if any senders are still available after spam check
-        available_after_check = [s for s in sender_ids if s not in flooded_accounts]
+        current_time = time.time()
+        available_after_check = [s for s in sender_ids if s not in flooded_accounts or current_time >= flooded_accounts[s]]
         if not available_after_check:
             logger.error(f"[Campaign {campaign_id}] 🛑 All sender accounts are spam-limited! Cannot start campaign.")
             await db.update_dm_campaign_status(campaign_id, "paused",
@@ -1876,7 +1877,8 @@ async def _run_campaign(campaign_id: int):
             client = None
             all_accounts_exhausted = False
             while True:
-                available_senders = [sid for sid in sender_ids if sid not in flooded_accounts]
+                current_time = time.time()
+                available_senders = [sid for sid in sender_ids if sid not in flooded_accounts or current_time >= flooded_accounts[sid]]
                 if not available_senders:
                     logger.warning(f"[Campaign {campaign_id}] Tất cả các tài khoản gửi đều bị giới hạn/flood/offline. Tạm dừng chiến dịch.")
                     await db.update_dm_campaign_status(campaign_id, "paused",
@@ -1891,7 +1893,7 @@ async def _run_campaign(campaign_id: int):
                 c = tg.get_client(acc_id)
                 if not c or not await tg.ensure_connected(c, acc_id):
                     # Account offline and cannot reconnect → remove from rotation
-                    flooded_accounts.add(acc_id)
+                    flooded_accounts[acc_id] = float('inf')
                     logger.warning(f"[Campaign {campaign_id}] Account {acc_id} offline/unreachable, loại khỏi danh sách gửi")
                     await db.add_dm_campaign_log(campaign_id, acc_id, 0, None, "failed", f"Account {acc_id} offline")
                     continue  # Try next account in inner loop
@@ -1903,7 +1905,7 @@ async def _run_campaign(campaign_id: int):
                 )
                 if limit_reached:
                     logger.warning(f"[Campaign {campaign_id}] Account {acc_id} daily limit ({dm_count}/{dm_limit})")
-                    flooded_accounts.add(acc_id)
+                    flooded_accounts[acc_id] = float('inf')
                     await db.add_dm_campaign_log(campaign_id, acc_id, 0, None, "skipped",
                                                 f"Account {acc_id} hết limit DM hàng ngày")
                     continue  # Try next account in inner loop
@@ -2068,13 +2070,10 @@ async def _run_campaign(campaign_id: int):
                 logger.warning(f"[Campaign {campaign_id}] ⏳ FloodWait on account {acc_id}: waiting {wait_time}s (Telegram requested {e.seconds}s)")
                 await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
                                             f"FloodWait: chờ {wait_time}s")
-                flooded_accounts.add(acc_id)
+                flooded_accounts[acc_id] = time.time() + wait_time
                 failed += 1
                 consecutive_errors += 1
-                # Actually wait the required time
-                await asyncio.sleep(wait_time)
-                # After waiting, allow account back
-                flooded_accounts.discard(acc_id)
+                continue
 
             except tg_errors.UserPrivacyRestrictedError:
                 # User has privacy settings blocking DMs
@@ -2099,14 +2098,13 @@ async def _run_campaign(campaign_id: int):
             except tg_errors.PeerFloodError:
                 # Account is globally rate-limited — VERY DANGEROUS
                 logger.error(f"[Campaign {campaign_id}] 🚨 PeerFlood on account {acc_id}! Tạm loại khỏi danh sách gửi.")
-                flooded_accounts.add(acc_id)
+                wait_time = random.uniform(120, 300)
+                flooded_accounts[acc_id] = time.time() + wait_time
                 failed += 1
                 consecutive_errors += 1
                 await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
                                             "PeerFlood — tài khoản bị giới hạn, tạm loại khỏi chiến dịch")
-                # Wait extra time to protect account, then allow it back
-                await asyncio.sleep(random.uniform(120, 300))  # 2-5 min cooldown
-                flooded_accounts.discard(acc_id)  # Allow retry after cooldown
+                continue
 
             except Exception as e:
                 err_str = str(e)
@@ -2139,6 +2137,7 @@ async def _run_campaign(campaign_id: int):
                                 await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
                                                             "Đã auto-join nhóm, sẽ retry ở vòng tiếp")
                                 # Don't increment failures — this is recoverable
+                                await asyncio.sleep(base_delay)
                                 continue
                             else:
                                 logger.warning(
@@ -2153,6 +2152,7 @@ async def _run_campaign(campaign_id: int):
                     skipped += 1
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped",
                                                 "Cần join nhóm trước — không thể auto-join")
+                    await asyncio.sleep(base_delay)
                     continue
 
                 # ── Skip + blacklist non-sendable errors (don't retry) ──
@@ -2181,7 +2181,6 @@ async def _run_campaign(campaign_id: int):
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped", err_str[:100])
                 elif "FloodWait" in err_str or "Too many requests" in err_str or "PeerFlood" in err_str:
                     # Catch string-based flood errors too
-                    flooded_accounts.add(acc_id)
                     failed += 1
                     consecutive_errors += 1
                     # Try to extract wait time from error string
@@ -2192,8 +2191,8 @@ async def _run_campaign(campaign_id: int):
                     logger.warning(f"[Campaign {campaign_id}] Flood detected on {acc_id}, waiting {wait_secs}s")
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
                                                 f"Flood: chờ {wait_secs}s")
-                    await asyncio.sleep(wait_secs)
-                    flooded_accounts.discard(acc_id)
+                    flooded_accounts[acc_id] = time.time() + wait_secs
+                    continue
                 else:
                     failed += 1
                     consecutive_errors += 1

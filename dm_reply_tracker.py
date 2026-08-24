@@ -197,7 +197,7 @@ def is_bot_account(username: str | None, name: str | None, message_text: str | N
     """Check if the sender is likely a bot/channel/system notification."""
     if username and username.lower().endswith("bot"):
         return True
-    if name and "bot" in name.lower():
+    if name and re.search(r'\bbot\b', name.lower()):
         return True
     if message_text:
         bot_signals = [
@@ -248,6 +248,21 @@ def sanitize_telegram_html(text: str) -> str:
 
     s = re.sub(r'<[^>]+>', _clean_tag, s)
     s = re.sub(r'\n{3,}', '\n\n', s)
+
+    # Balance unclosed tags to prevent Telegram HTML_PARSE_ERROR
+    open_tags = re.findall(r'<(b|i|u|s|strong|em|ins|del|strike|code|pre)(?:\s[^>]*)?>',
+                           s, re.IGNORECASE)
+    close_tags = re.findall(r'</(b|i|u|s|strong|em|ins|del|strike|code|pre)>',
+                            s, re.IGNORECASE)
+    close_lower = [t.lower() for t in close_tags]
+    # Close any remaining open tags in reverse order
+    for tag in reversed(open_tags):
+        tag_l = tag.lower()
+        if tag_l in close_lower:
+            close_lower.remove(tag_l)
+        else:
+            s += f"</{tag_l}>"
+
     return s.strip()
 
 

@@ -88,6 +88,12 @@ async def remove_account(account_id: int):
         except Exception:
             pass
 
+    # Clean up client caches
+    tg._clients.pop(account_id, None)
+    tg._auth_cache.pop(account_id, None)
+    tg._me_cache.pop(account_id, None)
+    tg._dialogs_cache.pop(account_id, None)
+
     # Delete session file
     session_path = os.path.join(tg.SESSION_DIR, account["session_name"] + ".session")
     if os.path.exists(session_path):
