@@ -3946,9 +3946,9 @@ async def append_followup_chat_message(
             "content": content,
             "timestamp": datetime.now().isoformat()
         })
-        # Keep last 20 messages to prevent unbounded growth
-        if len(history) > 20:
-            history = history[-20:]
+        # Keep last 60 messages to preserve deep context
+        if len(history) > 60:
+            history = history[-60:]
 
         reply_count = chat.get("reply_count", 0) + (1 if inc_reply_count else 0)
 
