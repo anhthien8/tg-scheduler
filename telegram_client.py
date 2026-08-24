@@ -689,6 +689,7 @@ async def get_dialogs(account_id: int, timeout: float = 20.0, force_refresh: boo
                     "username": entity.username or "",
                     "participants_count": None
                 })
+    _dialogs_cache[account_id] = (time.time(), result)
     return result
 
 

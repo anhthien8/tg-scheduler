@@ -288,6 +288,7 @@ async def generate_and_send_ai_reply_for_chat(
         logger.info("[AIFollowUp] ⚡ Skipping duplicate — AI reply already in progress for user @%s (id=%d, acc=%d)",
                     sender_username or "?", user_id, account_id)
         return False
+    _pending_ai_sends.add((account_id, user_id))  # Lock immediately to prevent race condition
 
     # 2. Get chat session
     chat = await db.get_or_create_followup_chat(
@@ -324,7 +325,8 @@ async def generate_and_send_ai_reply_for_chat(
         acc_agent_id = account_obj.get("ai_agent_id") if account_obj else None
 
         # If account explicitly has NO agent assigned (Tắt AI), do NOT fallback
-        if not acc_agent_id and not target_campaign_id:
+        # Also refuse if campaign was checked but had no agent either
+        if not acc_agent_id:
             logger.info("[AIFollowUp] Account #%d has AI disabled — refusing to send AI reply for user %d",
                         account_id, user_id)
             return False
@@ -445,98 +447,100 @@ async def generate_and_send_ai_reply_for_chat(
     logger.info("[AIFollowUp] 🤖 Generating AI reply using Agent '%s' for user @%s (%d, history_len=%d)...",
                 agent_config.get('name', '?'), sender_username or '?', user_id, len(history))
 
-    _pending_ai_sends.add((account_id, user_id))
+    # _pending_ai_sends already locked at guard check (line 291)
     try:
         ai_reply = await ai_rmx.generate_chat_response(history, combined_prompt, ai_provider, ai_keys, **kwargs)
-    except Exception as ex_gen:
-        logger.error("[AIFollowUp] AI generate_chat_response error for user %d: %s", user_id, ex_gen)
-        _pending_ai_sends.discard((account_id, user_id))
+
+        if not ai_reply:
+            return False
+
+        new_status = "active"
+        if "[HANDOVER_REQUIRED]" in ai_reply:
+            new_status = "needs_human"
+            ai_reply = ai_reply.replace("[HANDOVER_REQUIRED]", "").strip()
+            asyncio.create_task(_notify_main_account_handover(
+                account_id, user_id, sender_username,
+                reason="AI triggered [HANDOVER_REQUIRED]"
+            ))
+        elif "[ONBOARDED]" in ai_reply:
+            new_status = "onboarded"
+            ai_reply = ai_reply.replace("[ONBOARDED]", "").strip()
+
+        intent_score = 30
+        lead_tier = "Tier C"
+        summary_text = ""
+        if re.search(r'METRICS\s*:', ai_reply, re.IGNORECASE):
+            try:
+                metrics_match = re.search(r'\[METRICS:\s*(\{.*\})\]', ai_reply, re.DOTALL | re.IGNORECASE)
+                if not metrics_match:
+                    metrics_match = re.search(r'METRICS:\s*(\{.*\})', ai_reply, re.DOTALL | re.IGNORECASE)
+                if metrics_match:
+                    metrics_json = json.loads(metrics_match.group(1))
+                    intent_score = int(metrics_json.get("intent_score", 30))
+                    lead_tier = str(metrics_json.get("lead_tier", "Tier C"))
+                    summary_text = str(metrics_json.get("summary", ""))
+            except Exception as ex_m:
+                logger.debug("[AIFollowUp] Error parsing METRICS tag: %s", ex_m)
+
+            ai_reply = re.sub(r'\[?METRICS\s*:.*$', '', ai_reply, flags=re.DOTALL | re.IGNORECASE).strip()
+
+        await db.update_followup_lead_metrics(account_id, user_id, intent_score, lead_tier, summary_text)
+
+        ai_reply = sanitize_telegram_html(ai_reply)
+        if not ai_reply:
+            return False
+
+        delay = min(22.0, max(8.0, len(ai_reply) * 0.04 + random.uniform(5.0, 10.0)))
+        logger.info("[AIFollowUp] Simulating human reading & typing for %.1fs before sending AI reply to user %d...", delay, user_id)
+
+        client = tg.get_client(account_id)
+        if client and event and getattr(event, "message", None) and getattr(event.message, "id", None):
+            try:
+                reaction_chance = float(await db.get_setting("ai_reaction_chance", "0.35"))
+                if random.random() < reaction_chance:
+                    react_emoji = random.choice(["❤️", "👍", "🔥", "👌", "💯", "⚡", "🤝"])
+                    chat_peer = await event.get_input_chat()
+                    await client(SendReactionRequest(
+                        peer=chat_peer,
+                        msg_id=event.message.id,
+                        reaction=[ReactionEmoji(emoticon=react_emoji)],
+                    ))
+            except Exception:
+                pass
+
+        if client:
+            try:
+                # First wait a few seconds as human reading time
+                read_time = min(delay * 0.4, 6.0)
+                if read_time > 0:
+                    await asyncio.sleep(read_time)
+                # Then show typing action for the remaining duration
+                type_time = max(1.0, delay - read_time)
+                async with client.action(user_id, 'typing'):
+                    await asyncio.sleep(type_time)
+            except Exception:
+                if delay > 0:
+                    await asyncio.sleep(delay)
+        elif delay > 0:
+            await asyncio.sleep(delay)
+
+        await tg.send_text_message(account_id, user_id, ai_reply)
+        asyncio.create_task(_remove_ai_send_after_delay(account_id, user_id))
+        await db.append_followup_chat_message(account_id, user_id, "assistant", ai_reply, inc_reply_count=True)
+        asyncio.create_task(_async_update_kol_profile(account_id, user_id, full_history, ai_provider, ai_keys, kwargs))
+
+        if new_status != "active":
+            await db.update_followup_chat_status(account_id, user_id, new_status)
+        logger.info("[AIFollowUp] ✅ AI reply sent to user @%s (%d) (Tier: %s, Score: %d)", sender_username or '?', user_id, lead_tier, intent_score)
+        return True
+    except Exception as ex_send:
+        logger.error("[AIFollowUp] Error in AI reply pipeline for user %d: %s", user_id, ex_send)
         return False
-
-    if not ai_reply:
-        _pending_ai_sends.discard((account_id, user_id))
-        return False
-
-    new_status = "active"
-    if "[HANDOVER_REQUIRED]" in ai_reply:
-        new_status = "needs_human"
-        ai_reply = ai_reply.replace("[HANDOVER_REQUIRED]", "").strip()
-        asyncio.create_task(_notify_main_account_handover(
-            account_id, user_id, sender_username,
-            reason="AI triggered [HANDOVER_REQUIRED]"
-        ))
-    elif "[ONBOARDED]" in ai_reply:
-        new_status = "onboarded"
-        ai_reply = ai_reply.replace("[ONBOARDED]", "").strip()
-
-    intent_score = 30
-    lead_tier = "Tier C"
-    summary_text = ""
-    if re.search(r'METRICS\s*:', ai_reply, re.IGNORECASE):
-        try:
-            metrics_match = re.search(r'\[METRICS:\s*(\{.*\})\]', ai_reply, re.DOTALL | re.IGNORECASE)
-            if not metrics_match:
-                metrics_match = re.search(r'METRICS:\s*(\{.*\})', ai_reply, re.DOTALL | re.IGNORECASE)
-            if metrics_match:
-                metrics_json = json.loads(metrics_match.group(1))
-                intent_score = int(metrics_json.get("intent_score", 30))
-                lead_tier = str(metrics_json.get("lead_tier", "Tier C"))
-                summary_text = str(metrics_json.get("summary", ""))
-        except Exception as ex_m:
-            logger.debug("[AIFollowUp] Error parsing METRICS tag: %s", ex_m)
-
-        ai_reply = re.sub(r'\[?METRICS\s*:.*$', '', ai_reply, flags=re.DOTALL | re.IGNORECASE).strip()
-
-    await db.update_followup_lead_metrics(account_id, user_id, intent_score, lead_tier, summary_text)
-
-    ai_reply = sanitize_telegram_html(ai_reply)
-    if not ai_reply:
-        _pending_ai_sends.discard((account_id, user_id))
-        return False
-
-    delay = min(22.0, max(8.0, len(ai_reply) * 0.04 + random.uniform(5.0, 10.0)))
-    logger.info("[AIFollowUp] Simulating human reading & typing for %.1fs before sending AI reply to user %d...", delay, user_id)
-
-    client = tg.get_client(account_id)
-    if client and event and getattr(event, "message", None) and getattr(event.message, "id", None):
-        try:
-            reaction_chance = float(await db.get_setting("ai_reaction_chance", "0.35"))
-            if random.random() < reaction_chance:
-                react_emoji = random.choice(["❤️", "👍", "🔥", "👌", "💯", "⚡", "🤝"])
-                chat_peer = await event.get_input_chat()
-                await client(SendReactionRequest(
-                    peer=chat_peer,
-                    msg_id=event.message.id,
-                    reaction=[ReactionEmoji(emoticon=react_emoji)],
-                ))
-        except Exception:
-            pass
-
-    if client:
-        try:
-            # First wait a few seconds as human reading time
-            read_time = min(delay * 0.4, 6.0)
-            if read_time > 0:
-                await asyncio.sleep(read_time)
-            # Then show typing action for the remaining duration
-            type_time = max(1.0, delay - read_time)
-            async with client.action(user_id, 'typing'):
-                await asyncio.sleep(type_time)
-        except Exception:
-            if delay > 0:
-                await asyncio.sleep(delay)
-    elif delay > 0:
-        await asyncio.sleep(delay)
-
-    await tg.send_text_message(account_id, user_id, ai_reply)
-    asyncio.create_task(_remove_ai_send_after_delay(account_id, user_id))
-    await db.append_followup_chat_message(account_id, user_id, "assistant", ai_reply, inc_reply_count=True)
-    asyncio.create_task(_async_update_kol_profile(account_id, user_id, full_history, ai_provider, ai_keys, kwargs))
-
-    if new_status != "active":
-        await db.update_followup_chat_status(account_id, user_id, new_status)
-    logger.info("[AIFollowUp] ✅ AI reply sent to user @%s (%d) (Tier: %s, Score: %d)", sender_username or '?', user_id, lead_tier, intent_score)
-    return True
+    finally:
+        # Guarantee cleanup — prevent permanent lock on any error path
+        # Only discard if _remove_ai_send_after_delay was NOT already scheduled (i.e. send failed)
+        if (account_id, user_id) in _pending_ai_sends:
+            _pending_ai_sends.discard((account_id, user_id))
 
 
 def _make_handler(account_id: int):

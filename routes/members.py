@@ -1931,6 +1931,7 @@ async def _run_campaign(campaign_id: int):
                         skipped += 1
                         await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username,
                                                     "skipped", f"Không resolve được: {str(pe2)[:80]}")
+                        await asyncio.sleep(base_delay)  # Always respect delay to avoid FloodWait
                         continue
 
                 # ── Bot filter: Layer 2 (Telegram API peer verification) ──
