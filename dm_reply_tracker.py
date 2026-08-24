@@ -272,9 +272,10 @@ async def generate_and_send_ai_reply_for_chat(
         takeover_str = chat_check.get("human_takeover_at")
         if takeover_str:
             try:
-                dt_tk = datetime.fromisoformat(takeover_str.replace("Z", "+00:00"))
-                now_dt = datetime.now(timezone.utc) if dt_tk.tzinfo else datetime.now()
-                elapsed = (now_dt - dt_tk).total_seconds()
+                # SQLite datetime('now') is UTC without tzinfo — always compare in UTC
+                dt_tk = datetime.fromisoformat(takeover_str).replace(tzinfo=timezone.utc)
+                now_utc = datetime.now(timezone.utc)
+                elapsed = (now_utc - dt_tk).total_seconds()
                 if elapsed < 3600:
                     logger.info("[AIFollowUp] 🛑 Human admin active (takeover %ds ago) — skipping AI reply for user %d",
                                 int(elapsed), user_id)
@@ -676,9 +677,10 @@ def _make_handler(account_id: int):
                     should_resume = False
                     if takeover_at_str:
                         try:
-                            dt_takeover = datetime.fromisoformat(takeover_at_str.replace("Z", "+00:00"))
-                            now_dt = datetime.now(timezone.utc) if dt_takeover.tzinfo else datetime.now()
-                            if (now_dt - dt_takeover).total_seconds() >= 3600:
+                            # SQLite datetime('now') is UTC without tzinfo — always compare in UTC
+                            dt_takeover = datetime.fromisoformat(takeover_at_str).replace(tzinfo=timezone.utc)
+                            now_utc = datetime.now(timezone.utc)
+                            if (now_utc - dt_takeover).total_seconds() >= 3600:
                                 should_resume = True
                         except Exception:
                             pass
