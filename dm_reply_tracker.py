@@ -557,15 +557,15 @@ def _make_handler(account_id: int):
         # Bot check
         if is_bot_account(sender_username, sender_name, message_text):
             logger.debug("[Inbox] Ignored bot message from @%s (%s)", sender_username, sender_name)
-            await db.record_dm_reply(
-                watcher_id=None,
-                account_id=account_id,
-                sender_user_id=sender_id,
-                sender_username=sender_username,
-                sender_name=sender_name,
-                message_text=message_text,
-                platform="telegram",
-            )
+            await db.add_dm_reply({
+                "watcher_id": None,
+                "account_id": account_id,
+                "sender_user_id": sender_id,
+                "sender_username": sender_username,
+                "sender_name": sender_name,
+                "message_text": message_text,
+                "platform": "telegram",
+            })
             chat = await db.get_or_create_followup_chat(
                 account_id=account_id,
                 user_id=sender_id,
@@ -580,15 +580,15 @@ def _make_handler(account_id: int):
         watcher_log = await db.find_watcher_log_for_user(sender_id)
         watcher_id = watcher_log["watcher_id"] if watcher_log else None
 
-        await db.record_dm_reply(
-            watcher_id=watcher_id,
-            account_id=account_id,
-            sender_user_id=sender_id,
-            sender_username=sender_username,
-            sender_name=sender_name,
-            message_text=message_text,
-            platform="telegram",
-        )
+        await db.add_dm_reply({
+            "watcher_id": watcher_id,
+            "account_id": account_id,
+            "sender_user_id": sender_id,
+            "sender_username": sender_username,
+            "sender_name": sender_name,
+            "message_text": message_text,
+            "platform": "telegram",
+        })
 
         # Blacklist check
         if await db.is_user_blacklisted(user_id=sender_id, username=sender_username):

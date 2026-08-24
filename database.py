@@ -2315,6 +2315,27 @@ async def add_dm_reply(data: dict) -> int:
         return cursor.lastrowid
 
 
+async def record_dm_reply(
+    watcher_id: int | None = None,
+    account_id: int = 0,
+    sender_user_id: int = 0,
+    sender_username: str | None = None,
+    sender_name: str | None = None,
+    message_text: str = "",
+    platform: str = "telegram",
+) -> int:
+    """Helper alias for add_dm_reply supporting keyword arguments."""
+    return await add_dm_reply({
+        "watcher_id": watcher_id,
+        "account_id": account_id,
+        "sender_user_id": sender_user_id,
+        "sender_username": sender_username,
+        "sender_name": sender_name,
+        "message_text": message_text,
+        "platform": platform,
+    })
+
+
 async def get_dm_replies(
     limit: int = 50,
     offset: int = 0,
