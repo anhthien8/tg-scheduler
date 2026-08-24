@@ -321,11 +321,20 @@ async def generate_and_send_ai_reply_for_chat(
 
     if not agent_config:
         account_obj = await db.get_account(account_id)
-        if account_obj and account_obj.get("ai_agent_id"):
-            acc_agent = await db.get_ai_agent(account_obj["ai_agent_id"])
+        acc_agent_id = account_obj.get("ai_agent_id") if account_obj else None
+
+        # If account explicitly has NO agent assigned (Tắt AI), do NOT fallback
+        if not acc_agent_id and not target_campaign_id:
+            logger.info("[AIFollowUp] Account #%d has AI disabled — refusing to send AI reply for user %d",
+                        account_id, user_id)
+            return False
+
+        if acc_agent_id:
+            acc_agent = await db.get_ai_agent(acc_agent_id)
             if acc_agent and acc_agent.get("is_active", 1):
                 agent_config = acc_agent
 
+    # Fallback to any active agent ONLY if account/campaign had an agent but config was missing
     if not agent_config:
         active_agents = await db.get_all_ai_agents(active_only=True)
         if active_agents:
@@ -700,6 +709,13 @@ def _make_handler(account_id: int):
                 # Handover keywords check
                 account_obj = await db.get_account(account_id)
                 agent_id = account_obj.get("ai_agent_id") if account_obj else None
+
+                # ── If this account has AI turned off ("Tắt"), skip AI reply entirely ──
+                if not agent_id:
+                    logger.info("[AIFollowUp] Account #%d has AI Agent disabled (Tắt) — skipping AI reply for user %d",
+                                account_id, sender_id)
+                    return
+
                 agent_config = await db.get_ai_agent(agent_id) if agent_id else None
 
                 agent_handover_kws = agent_config.get("handover_keywords", []) if agent_config else []
