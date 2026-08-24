@@ -382,7 +382,11 @@ async def generate_and_send_ai_reply_for_chat(
         "1. DYNAMIC LANGUAGE MATCHING MANDATE: Automatically detect the language used by the user in their message (e.g., Chinese/中文, English, Vietnamese, Russian, Spanish, etc.) and ALWAYS reply in that EXACT SAME LANGUAGE!\n"
         "2. TELEGRAM FORMATTING: Do NOT output literal '\\n' text characters. Use actual line breaks. Do NOT use raw markdown like **bold**. Use standard HTML <b>bold</b> or <i>italic</i> for formatting.\n"
         "3. KNOWLEDGE BASE ACCURACY: If the user asks about policies, rates, commissions, benefits, or exchange details, ALWAYS extract and cite specific, exact numbers and facts directly from the KNOWLEDGE BASE section below.\n"
-        "4. ANTI-REPETITION & HUMAN CONVERSATION FLOW: Carefully read previous messages. NEVER repeat greetings, introductions, or offer packages you already explained unless explicitly asked. NEVER re-ask questions the user already answered. Respond directly, casually, and concisely to their latest point like a real human BD partner.\n"
+        "4. STRICT CONTEXTUAL CONTINUATION & REPUTATION INTEGRITY: You are continuing an ongoing conversation as Will, an experienced and reputable BD partner at WEEX. Carefully examine the entire conversation history and the user's latest message.\n"
+        "   - Directly address what the user said or asked with high accuracy, substance, and professional brevity.\n"
+        "   - NEVER hallucinate, never output random unrelated greetings, and never repeat points already made.\n"
+        "   - If the user's message is short or casual, respond naturally without an aggressive pitch.\n"
+        "   - Protect Will's professional reputation by sounding authentic, grounded in context, and genuinely helpful.\n"
         "5. LEAD EVALUATION METRICS: At the VERY END of your response, append a hidden metadata JSON tag on its own line: [METRICS: {\"intent_score\": <0-100>, \"lead_tier\": \"<Tier A|Tier B|Tier C>\", \"summary\": \"<1-sentence lead need summary>\"}].\n"
         "   - Tier A (Intent 80-100): High volume trader/KOL (>10k subs or >$5M vol), ready for meeting, negotiating terms.\n"
         "   - Tier B (Intent 40-79): Interested in exchange benefits, asking detailed questions.\n"
@@ -407,7 +411,7 @@ async def generate_and_send_ai_reply_for_chat(
             for r in learned_rules:
                 combined_prompt += f"• When user asks about: {r['question_pattern']} -> Follow this answer/policy: {r['learned_answer']}\n"
 
-    history = full_history[-10:] if len(full_history) > 10 else full_history
+    history = full_history[-15:] if len(full_history) > 15 else full_history
     logger.info("[AIFollowUp] 🤖 Generating AI reply using Agent '%s' for user @%s (%d, history_len=%d)...",
                 agent_config.get('name', '?'), sender_username or '?', user_id, len(history))
 
@@ -735,7 +739,7 @@ async def _followup_periodic_loop():
     logger.info("[AIFollowUp] 🔄 Continuous AI follow-up background worker active.")
     while True:
         try:
-            await asyncio.sleep(30)  # Check every 30 seconds
+            await asyncio.sleep(300)  # Check every 5 minutes
             await process_drip_followups()
         except asyncio.CancelledError:
             break
@@ -802,7 +806,7 @@ async def process_drip_followups() -> dict:
 
         for t in to_chats:
             hist = json.loads(t.get("history_json", "[]"))
-            if hist and hist[-1].get("role") == "user":
+            if hist and hist[-1].get("role") == "user" and (hist[-1].get("content") or "").strip():
                 logger.info("[AIFollowUp] ⏰ 60m timeout: Human admin silent after user msg for user @%s (%d) — auto-resuming & generating AI reply!",
                             t.get("username", "?"), t["user_id"])
                 await db.update_followup_chat_status(t["account_id"], t["user_id"], "active")
@@ -838,7 +842,7 @@ async def process_drip_followups() -> dict:
 
         for sc in stuck_chats:
             hist = json.loads(sc.get("history_json", "[]"))
-            if hist and hist[-1].get("role") == "user":
+            if hist and hist[-1].get("role") == "user" and (hist[-1].get("content") or "").strip():
                 if (sc["account_id"], sc["user_id"]) not in _pending_ai_sends:
                     client = tg.get_client(sc["account_id"])
                     if client and client.is_connected():
