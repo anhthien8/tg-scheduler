@@ -619,7 +619,25 @@ def _make_handler(account_id: int):
         last_name = getattr(sender, "last_name", "") or ""
         sender_name = f"{first_name} {last_name}".strip() or sender_username or str(sender_id)
 
-        message_text = event.raw_text or event.message.message or ""
+        raw_msg = event.raw_text or event.message.message or ""
+        
+        has_video = bool(getattr(event.message, "video", None) or getattr(event.message, "video_note", None) or getattr(event.message, "gif", None))
+        has_photo = bool(getattr(event.message, "photo", None))
+        has_document = bool(getattr(event.message, "document", None) and not has_video)
+        
+        msg_lower = (raw_msg or "").lower()
+        if "video" in msg_lower and any(w in msg_lower for w in ("done", "check", "sent", "send", "uploaded", "here")):
+            has_video = True
+
+        media_tag = ""
+        if has_video:
+            media_tag = "[Attached Video Proof]"
+        elif has_photo:
+            media_tag = "[Attached Screenshot/Photo Proof]"
+        elif has_document:
+            media_tag = "[Attached Document Proof]"
+
+        message_text = f"{raw_msg} {media_tag}".strip() if media_tag else raw_msg
 
         # Bot check
         if is_bot_account(sender_username, sender_name, message_text):
