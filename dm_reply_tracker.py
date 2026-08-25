@@ -44,7 +44,7 @@ _MAX_SEEN = 5000  # cap to prevent unbounded growth
 # Pending AI sends set: (account_id, user_id)
 _pending_ai_sends: set[tuple[int, int]] = set()
 
-# Background periodic worker task for 60m auto-resume and drip follow-ups
+# Background periodic worker task for 24h auto-resume and drip follow-ups
 _periodic_worker_task: asyncio.Task | None = None
 
 
@@ -281,7 +281,7 @@ async def generate_and_send_ai_reply_for_chat(
         logger.info("[AIFollowUp] 🚫 User %s (id=%d) is blacklisted — skipping AI reply", sender_username or "?", user_id)
         return False
 
-    # 0b. Check if human admin is actively chatting (human_takeover_at < 60m)
+    # 0b. Check if human admin is actively chatting (human_takeover_at < 24h)
     chat_check = await db.get_followup_chat(account_id, user_id)
     if chat_check:
         takeover_str = chat_check.get("human_takeover_at")
@@ -291,8 +291,8 @@ async def generate_and_send_ai_reply_for_chat(
                 dt_tk = datetime.fromisoformat(takeover_str).replace(tzinfo=timezone.utc)
                 now_utc = datetime.now(timezone.utc)
                 elapsed = (now_utc - dt_tk).total_seconds()
-                if elapsed < 3600:
-                    logger.info("[AIFollowUp] 🛑 Human admin active (takeover %ds ago) — skipping AI reply for user %d",
+                if elapsed < 86400:  # 24 hours
+                    logger.info("[AIFollowUp] 🛑 Human admin active (takeover %ds ago, <24h) — skipping AI reply for user %d",
                                 int(elapsed), user_id)
                     return False
             except Exception:
@@ -432,6 +432,13 @@ async def generate_and_send_ai_reply_for_chat(
         "   - ANTI-NAGGING & NO FORCED CTA: TUYỆT ĐỐI KHÔNG chèo kéo, ép buộc hoặc giục giã KOL hành động (NGHIÊM CẤM các câu hỏi ép như 'Ready to post?', 'Bạn đã sẵn sàng đăng chưa?', 'Bao giờ bạn lên bài?').\n"
         "   - CONCISE DIRECT ANSWERS: Nếu đối tác hỏi câu hỏi đơn giản (như KYC, nạp rút, link ref), HÃY TRẢ LỜI NGẮN GỌN, TỰ NHIÊN VÀ DỪNG LẠI. Không cố tình nhồi nhét câu hỏi cuối tin nếu không cần thiết!\n"
         "   - ANTI-CHECKLIST / ANTI-WIZARD: TUYỆT ĐỐI KHÔNG dùng văn phong biểu mẫu hay liệt kê bước tiếp theo dạng robot (như 'UID received. Setting up...', 'Next step: 1..., 2...'). Hãy nói chuyện như một người bạn BD tự nhiên (ví dụ: 'Got your UID bro! Will bind commission for you now. Feel free to check out the campaign when you have time 👍').\n"
+        "   - VIDEO HANDLING (HUMAN BUFFER STRATEGY): Khi đối tác gửi Video (hoặc nói 'video done', 'check video'):\n"
+        "     * Dùng lý do mạng điện thoại đang load video để đệm thời gian: (English: 'Got the video bro! Loading it on mobile, let me check the volume details and get back to you shortly 👍' / Tiếng Việt: 'Đã nhận video nhé bro! Mạng bên mình đang load xíu, để mình soi kỹ số liệu rồi báo lại ngay nhé 👍').\n"
+        "     * TỰ ĐỘNG gắn [HANDOVER_REQUIRED] để Will người thật trực tiếp xem video.\n"
+        "     * TUYỆT ĐỐI CẤM không bao giờ được hỏi xin lại video nữa!\n"
+        "   - PHOTO / SCREENSHOT HANDLING: Khi đối tác gửi Ảnh chụp màn hình (dashboard, nhóm, stats):\n"
+        "     * Ghi nhận ngắn gọn (ví dụ: 'Got the screenshot bro! Let me check the stats 👍'). Nếu có câu hỏi kèm theo thì trả lời câu hỏi đó.\n"
+        "     * TUYỆT ĐỐI CẤM không bao giờ hỏi lại proof/video một khi đối tác đã gửi ảnh chụp số liệu!\n"
         "   - DEMANDING / DIFFICULT CASES ESCALATION: Nếu KOL đòi hỏi quá khó khăn (deal vượt khung, đòi ngân sách/upfront lớn, tài trợ phức tạp), hãy nói khéo léo để đá về phía ban giám đốc sàn phê duyệt riêng (e.g. 'Case này đặc biệt và vượt thẩm quyền thông thường của mình rồi, để mình chuyển tiếp proposal chi tiết của bạn lên Ban Giám Đốc / Partnership Committee của sàn WEEX để duyệt riêng nhé!') và kích hoạt [HANDOVER_REQUIRED].\n"
         "   - NO HALLUCINATION & NO SPAM: NEVER hallucinate, never output random unrelated greetings, and never repeat points already made.\n"
         "5. LEAD EVALUATION METRICS: At the VERY END of your response, append a hidden metadata JSON tag on its own line: [METRICS: {\"intent_score\": <0-100>, \"lead_tier\": \"<Tier A|Tier B|Tier C>\", \"summary\": \"<1-sentence lead need summary>\"}].\n"
@@ -698,7 +705,7 @@ def _make_handler(account_id: int):
 
                 current_status = chat.get("status", "active")
 
-                # 60m Timeout check on incoming message — use human_takeover_at
+                # 24h Timeout check on incoming message — use human_takeover_at
                 if current_status in ("needs_human", "paused_admin"):
                     # Prefer human_takeover_at; fallback to updated_at for legacy rows
                     takeover_at_str = chat.get("human_takeover_at") or chat.get("updated_at")
@@ -708,12 +715,12 @@ def _make_handler(account_id: int):
                             # SQLite datetime('now') is UTC without tzinfo — always compare in UTC
                             dt_takeover = datetime.fromisoformat(takeover_at_str).replace(tzinfo=timezone.utc)
                             now_utc = datetime.now(timezone.utc)
-                            if (now_utc - dt_takeover).total_seconds() >= 3600:
+                            if (now_utc - dt_takeover).total_seconds() >= 86400:  # 24 hours
                                 should_resume = True
                         except Exception:
                             pass
                     if should_resume:
-                        logger.info("[AIFollowUp] ⏰ 60m elapsed since human takeover for user %d — auto-resuming!", sender_id)
+                        logger.info("[AIFollowUp] ⏰ 24h elapsed since human takeover for user %d — auto-resuming!", sender_id)
                         await db.update_followup_chat_status(account_id, sender_id, "active")
                         current_status = "active"
 
@@ -721,7 +728,7 @@ def _make_handler(account_id: int):
                 chat = await db.append_followup_chat_message(account_id, sender_id, "user", message_text)
 
                 if current_status in ("paused_admin", "onboarded", "needs_human", "bot_ignored"):
-                    logger.info("[AIFollowUp] User %d status '%s' (<60m since human takeover) — recorded msg, skipping AI reply",
+                    logger.info("[AIFollowUp] User %d status '%s' (<24h since human takeover) — recorded msg, skipping AI reply",
                                 sender_id, current_status)
                     return
 
@@ -853,7 +860,7 @@ def unregister_account(account_id: int) -> None:
 
 async def process_drip_followups() -> dict:
     """
-    1. Scan human takeover chats (>60m since update) where user is waiting for a reply -> Auto-resume & Send AI Reply!
+    1. Scan human takeover chats (>24h since update) where user is waiting for a reply -> Auto-resume & Send AI Reply!
     2. Scan stuck active chats (>2m since user message with 0 replies generated) -> Send AI Reply!
     3. Scan inactive followup chats (>48h / >5d) -> Process Drip Follow-ups!
     """
@@ -861,15 +868,15 @@ async def process_drip_followups() -> dict:
     sent_count = 0
     errors = []
 
-    # ── 1. Auto-resume chats paused for human takeover if >60m elapsed ──
+    # ── 1. Auto-resume chats paused for human takeover if >24h elapsed ──
     try:
         async with db.get_db() as db_conn:
             db_conn.row_factory = aiosqlite.Row
             cur_to = await db_conn.execute("""
                 SELECT * FROM ai_followup_chats
                 WHERE status IN ('needs_human', 'paused_admin')
-                  AND (human_takeover_at IS NULL OR datetime(human_takeover_at) <= datetime('now', '-60 minutes'))
-                  AND datetime(updated_at) <= datetime('now', '-60 minutes')
+                  AND (human_takeover_at IS NULL OR datetime(human_takeover_at) <= datetime('now', '-24 hours'))
+                  AND datetime(updated_at) <= datetime('now', '-24 hours')
                 LIMIT 20
             """)
             to_chats = [dict(r) for r in await cur_to.fetchall()]
@@ -877,7 +884,7 @@ async def process_drip_followups() -> dict:
         for t in to_chats:
             hist = json.loads(t.get("history_json", "[]"))
             if hist and hist[-1].get("role") == "user" and (hist[-1].get("content") or "").strip():
-                logger.info("[AIFollowUp] ⏰ 60m timeout: Human admin silent after user msg for user @%s (%d) — auto-resuming & generating AI reply!",
+                logger.info("[AIFollowUp] ⏰ 24h timeout: Human admin silent after user msg for user @%s (%d) — auto-resuming & generating AI reply!",
                             t.get("username", "?"), t["user_id"])
                 await db.update_followup_chat_status(t["account_id"], t["user_id"], "active")
                 client = tg.get_client(t["account_id"])
@@ -895,7 +902,7 @@ async def process_drip_followups() -> dict:
                 # Admin or assistant was the last to speak -> simply flip back to active
                 await db.update_followup_chat_status(t["account_id"], t["user_id"], "active")
     except Exception as e_to:
-        logger.error("[AIFollowUp] Error processing 60m auto-resume: %s", e_to)
+        logger.error("[AIFollowUp] Error processing 24h auto-resume: %s", e_to)
 
     # ── 2. Recover stuck active chats (>2m since user message) ──
     try:
