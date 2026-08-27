@@ -4059,7 +4059,15 @@ async def update_followup_lead_metrics(
         return True
 
 
-async def get_all_followup_chats(status_filter: str | None = None, limit: int = 50, offset: int = 0) -> list:
+async def get_followup_chat_counts() -> dict:
+    """Lightweight count by status — no data transfer."""
+    async with get_db() as db:
+        cursor = await db.execute("SELECT status, COUNT(*) as cnt FROM ai_followup_chats GROUP BY status")
+        rows = await cursor.fetchall()
+        return {r[0]: r[1] for r in rows}
+
+
+async def get_all_followup_chats(status_filter: str | None = None, limit: int = 50, offset: int = 0, include_history: bool = False) -> list:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
         where_clause = ""
@@ -4070,14 +4078,19 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
 
         params.extend([limit, offset])
         cursor = await db.execute(f"""
-            SELECT * FROM ai_followup_chats
+            SELECT id, account_id, user_id, username, name, campaign_id, watcher_id,
+                   status, reply_count, created_at, updated_at, intent_score,
+                   lead_tier, summary, last_drip_stage, human_takeover_at
+                   {", history_json" if include_history else ""}
+            FROM ai_followup_chats
             {where_clause}
             ORDER BY updated_at DESC
             LIMIT ? OFFSET ?
         """, params)
         rows = [dict(r) for r in await cursor.fetchall()]
-        for r in rows:
-            r["history"] = json.loads(r.get("history_json", "[]"))
+        if include_history:
+            for r in rows:
+                r["history"] = json.loads(r.get("history_json", "[]"))
         return rows
 
 

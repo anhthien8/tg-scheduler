@@ -611,7 +611,7 @@ set('dash-kpi-sent',today.sent||0);set('dash-kpi-sent-sub',`Toàn bộ: ${stats.
 set('dash-kpi-replies',today.replies||0);set('dash-kpi-replies-sub',today.failed?`${today.failed} thất bại hôm nay`:'Không có thất bại hôm nay');
 set('dash-kpi-accounts',stats.total_accounts);set('dash-kpi-accounts-sub',`${stats.active_schedules}/${stats.total_schedules} lịch hoạt động`);
 // Leads cần người thật — fetch riêng, không block dashboard
-fetch('/api/ai-followup/chats?limit=200').then(r=>r.json()).then(d=>{const chats=d.chats||[];const need=chats.filter(c=>c.status==='needs_human').length;set('dash-kpi-leads',need);const sub=document.getElementById('dash-kpi-leads-sub');if(sub)sub.textContent=`${chats.length} lead đang theo dõi`;const card=document.getElementById('dash-kpi-leads-card');const val=document.getElementById('dash-kpi-leads');if(val)val.className='stat-value '+(need>0?'red':'green')}).catch(()=>{set('dash-kpi-leads','—');const sub=document.getElementById('dash-kpi-leads-sub');if(sub)sub.textContent='Chưa bật AI Follow-Up'});
+fetch('/api/ai-followup/stats').then(r=>r.json()).then(d=>{const need=(d.counts&&d.counts.needs_human)||0;set('dash-kpi-leads',need);const sub=document.getElementById('dash-kpi-leads-sub');if(sub)sub.textContent=`${d.total||0} lead đang theo dõi`;const val=document.getElementById('dash-kpi-leads');if(val)val.className='stat-value '+(need>0?'red':'green')}).catch(()=>{set('dash-kpi-leads','—');const sub=document.getElementById('dash-kpi-leads-sub');if(sub)sub.textContent='Chưa bật AI Follow-Up'});
 this._renderDashChart(Array.isArray(daily)?daily:[]);
 this._renderDashHealth(Array.isArray(health)?health:[]);
 const active=sd.schedules.filter(s=>s.next_run);const tbody=document.getElementById('upcoming-body');

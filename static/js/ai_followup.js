@@ -118,7 +118,7 @@ const AIFollowUp = {
   // ── Leads: load + stats + chips + pagination ─────────────────────
   async loadChats() {
     try {
-      const res = await fetch('/api/ai-followup/chats?limit=200');
+      const res = await fetch('/api/ai-followup/chats?limit=200&include_history=false');
       if (!res.ok) throw new Error('Lỗi tải danh sách lead');
       const data = await res.json();
       this._chats = data.chats || [];
@@ -239,7 +239,7 @@ const AIFollowUp = {
   },
 
   // ── Chat modal ────────────────────────────────────────────────────
-  openChat(accountId, userId) {
+  async openChat(accountId, userId) {
     const c = this._chats.find(x => x.account_id === accountId && x.user_id === userId);
     if (!c) return;
     this._modalChat = c;
@@ -262,20 +262,27 @@ const AIFollowUp = {
         <div style="font-size:13px;color:var(--text);line-height:1.5">${esc(c.summary || 'Chưa có tóm tắt nhu cầu khách hàng.')}</div>
       </div>`;
 
-    const history = c.history || [];
-    if (!history.length) {
-      box.innerHTML = summaryBanner + '<div style="text-align:center;color:var(--text2);padding:20px">Chưa có tin nhắn nào</div>';
-    } else {
-      box.innerHTML = summaryBanner + history.map(msg => {
-        const isUser = msg.role === 'user';
-        const timeText = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('vi-VN') : '';
-        return `
-          <div style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-start' : 'flex-end'};margin-bottom:12px">
-            <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${isUser ? '👤 ' + esc(uName) : '🤖 AI Sales Agent'} • ${timeText}</div>
-            <div style="background:${isUser ? 'var(--accent-dim)' : 'var(--purple-dim)'};border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(msg.content || '')}</div>
-          </div>`;
-      }).join('');
-      box.scrollTop = box.scrollHeight;
+    box.innerHTML = summaryBanner + '<div style="text-align:center;color:var(--text2);padding:20px">⏳ Đang tải lịch sử chat...</div>';
+    try {
+      const histRes = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/history`);
+      const histData = await histRes.json();
+      const history = histData.history || [];
+      if (!history.length) {
+        box.innerHTML = summaryBanner + '<div style="text-align:center;color:var(--text2);padding:20px">Chưa có tin nhắn nào</div>';
+      } else {
+        box.innerHTML = summaryBanner + history.map(msg => {
+          const isUser = msg.role === 'user';
+          const timeText = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('vi-VN') : '';
+          return `
+            <div style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-start' : 'flex-end'};margin-bottom:12px">
+              <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${isUser ? '👤 ' + esc(uName) : '🤖 AI Sales Agent'} • ${timeText}</div>
+              <div style="background:${isUser ? 'var(--accent-dim)' : 'var(--purple-dim)'};border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(msg.content || '')}</div>
+            </div>`;
+        }).join('');
+        box.scrollTop = box.scrollHeight;
+      }
+    } catch (e) {
+      box.innerHTML = summaryBanner + '<div style="text-align:center;color:var(--red);padding:20px">Lỗi tải lịch sử chat</div>';
     }
 
     this._renderModalActions();

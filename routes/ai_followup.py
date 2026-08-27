@@ -72,14 +72,23 @@ async def save_settings(req: AIFollowUpSettings):
     return {"status": "ok", "message": "Đã lưu cài đặt AI Follow-Up Agent"}
 
 
+@router.get("/stats")
+async def get_stats():
+    """Lightweight stats — counts by status. No chat data, no history."""
+    counts = await db.get_followup_chat_counts()
+    total = sum(counts.values())
+    return {"counts": counts, "total": total}
+
+
 @router.get("/chats")
 async def get_chats(
     status: Optional[str] = Query(None, description="Filter status: active, paused_admin, onboarded, needs_human"),
     limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    include_history: bool = Query(False, description="Include chat history (heavy)")
 ):
-    """Get list of active/handover chats."""
-    chats = await db.get_all_followup_chats(status_filter=status, limit=limit, offset=offset)
+    """Get list of active/handover chats. Pass include_history=true for full message history."""
+    chats = await db.get_all_followup_chats(status_filter=status, limit=limit, offset=offset, include_history=include_history)
     return {"chats": chats, "count": len(chats)}
 
 
@@ -102,6 +111,15 @@ async def trigger_drip_followup():
     import dm_reply_tracker
     res = await dm_reply_tracker.process_drip_followups()
     return {"status": "ok", "result": res}
+
+
+@router.get("/chats/{account_id}/{user_id}/history")
+async def get_chat_history(account_id: int, user_id: int):
+    """Get full message history for a single chat (lazy-loaded by modal)."""
+    chat = await db.get_followup_chat(account_id, user_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    return {"history": chat.get("history", []), "summary": chat.get("summary", ""), "lead_tier": chat.get("lead_tier", "Tier C"), "intent_score": chat.get("intent_score", 0)}
 
 
 @router.get("/chats/{account_id}/{user_id}/summary")
