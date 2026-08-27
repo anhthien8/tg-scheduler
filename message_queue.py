@@ -9,6 +9,7 @@ from telethon import errors as tg_errors
 
 import database as db
 import telegram_client as tg
+import alerts
 
 logger = logging.getLogger("tg-scheduler")
 
@@ -230,6 +231,7 @@ async def queue_worker():
 
             except tg_errors.PeerFloodError as e:
                 logger.warning(f"⚠️ PeerFloodError for account {account_id} -> {chat_title}. Failing immediately.")
+                await alerts.flood_guard(account_id)  # auto-pause + cảnh báo Telegram
                 friendly_error = translate_error("PeerFlood")
                 await db.add_send_log(schedule_id, account_id, msg.get("id"),
                                       chat_id, chat_title, "failed", friendly_error)
@@ -255,7 +257,11 @@ async def queue_worker():
                             f"failed {block_result['fail_count']} times. Stopping sends to this target."
                         )
                     # Feature #2: check if account should be flagged
-                    await db.check_and_flag_account(account_id)
+                    if await db.check_and_flag_account(account_id):
+                        await alerts.send_alert(
+                            f"flag_{account_id}",
+                            f"⚠️ Tài khoản #{account_id} vừa bị CẢNH BÁO: ≥5 lỗi trong 24h. Kiểm tra trang Logs."
+                        )
 
             delay = random.uniform(MIN_DELAY, MAX_DELAY)
             await asyncio.sleep(delay)

@@ -230,6 +230,18 @@ async def lifespan(app: FastAPI):
     )
     logger.info(f"Daily summary scheduled at {summary_time}")
 
+    # DB backup: 1 bản lúc khởi động + cron hằng ngày 03:00 (giữ 7 bản)
+    import alerts
+    alerts.run_backup()
+    sch.get_scheduler().add_job(
+        alerts.run_backup,
+        trigger=CronTrigger(hour=3, minute=0, timezone=sch.TZ),
+        id="db_backup",
+        name="DB Backup",
+        replace_existing=True,
+    )
+    logger.info("DB backup scheduled daily at 03:00")
+
     # Start message queue worker
     mq.start_worker()
 

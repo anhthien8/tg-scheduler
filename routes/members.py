@@ -15,6 +15,7 @@ from typing import Optional
 
 import database as db
 import telegram_client as tg
+import alerts
 import ai_remix as ai_rmx
 import template_rotation as tmpl_rot
 import image_randomizer as img_rand
@@ -2105,12 +2106,12 @@ async def _run_campaign(campaign_id: int):
             except tg_errors.PeerFloodError:
                 # Account is globally rate-limited — VERY DANGEROUS
                 logger.error(f"[Campaign {campaign_id}] 🚨 PeerFlood on account {acc_id}! Tạm loại khỏi danh sách gửi.")
-                wait_time = random.uniform(120, 300)
-                flooded_accounts[acc_id] = time.time() + wait_time
+                await alerts.flood_guard(acc_id)  # auto-pause + cảnh báo Telegram
+                flooded_accounts[acc_id] = float('inf')  # loại khỏi rotation campaign này
                 failed += 1
                 consecutive_errors += 1
                 await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
-                                            "PeerFlood — tài khoản bị giới hạn, tạm loại khỏi chiến dịch")
+                                            "PeerFlood — tài khoản bị giới hạn, đã tự động tắt")
                 continue
 
             except Exception as e:

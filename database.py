@@ -2048,8 +2048,12 @@ async def get_blacklisted_usernames_set() -> set:
 # ACCOUNT FLAGGING — Feature #2
 # ============================================================
 
-async def check_and_flag_account(account_id: int):
-    """Flag account if it has >= 5 failures in last 24h."""
+async def check_and_flag_account(account_id: int) -> bool:
+    """Flag account if it has >= 5 failures in last 24h.
+
+    Returns True chỉ khi account VỪA bị flag (trước đó chưa flag) —
+    dùng để gửi cảnh báo 1 lần, không spam mỗi lần fail.
+    """
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
         # Count recent failures
@@ -2063,15 +2067,21 @@ async def check_and_flag_account(account_id: int):
         # Check if already has is_flagged column
         cols = [c["name"] for c in await (await db.execute("PRAGMA table_info(accounts)")).fetchall()]
         if "is_flagged" not in cols:
-            return  # migration not done yet
+            return False  # migration not done yet
 
         if fail_count >= 5:
+            prev = await (await db.execute(
+                "SELECT is_flagged FROM accounts WHERE id=?", (account_id,)
+            )).fetchone()
+            already = bool(prev["is_flagged"]) if prev else False
             await db.execute(
                 """UPDATE accounts SET is_flagged=1,
                    flag_reason=? WHERE id=?""",
                 (f"{fail_count} lỗi trong 24h gần nhất", account_id)
             )
             await db.commit()
+            return not already
+        return False
 
 
 async def unflag_account(account_id: int):

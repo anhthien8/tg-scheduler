@@ -12,6 +12,7 @@ from telethon import events, errors as tg_errors
 
 import database as db
 import telegram_client as tg
+import alerts
 import ai_remix as ai_rmx
 import image_randomizer as img_rand
 from personalization import apply_personalization
@@ -616,6 +617,10 @@ async def _do_send_dm_with_fallback(
             if e.seconds > 600:
                 await db.pause_account(acc_id, f"FloodWait {e.seconds}s - auto-paused")
                 logger.warning(f"[Watcher {watcher_id}] Account {acc_id} AUTO-PAUSED: FloodWait {e.seconds}s")
+                await alerts.send_alert(
+                    f"floodwait_{acc_id}",
+                    f"⏳ Tài khoản #{acc_id} bị FloodWait {e.seconds}s — đã tự tắt. Bật lại trong UI khi hết hạn."
+                )
             else:
                 logger.warning(f"[Watcher {watcher_id}] Account {acc_id} ✗ FloodWait {e.seconds}s, trying next account")
             continue
@@ -625,6 +630,7 @@ async def _do_send_dm_with_fallback(
             # (trying multiple accounts for same user = coordinated spam signal)
             last_error = _translate_dm_error("PeerFlood too many DMs from this account")
             _mark_peerflood(acc_id)
+            await alerts.flood_guard(acc_id)  # auto-pause + cảnh báo Telegram
             logger.warning(f"[Watcher {watcher_id}] Account {acc_id} ✗ PeerFlood, blocked for {PEERFLOOD_COOLDOWN_SECS//60} min. NOT retrying same target.")
             break  # STOP — don't try other accounts for same target
 
