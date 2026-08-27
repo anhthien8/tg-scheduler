@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TG Scheduler</title>
   <meta name="description" content="Telegram Userbot Multi-Account Message Scheduler">
-  <link rel="stylesheet" href="/static/css/style.css?v=401">
+  <link rel="stylesheet" href="/static/css/style.css?v=407">
 </head>
 <body>
 
@@ -170,49 +170,80 @@
     <main class="main">
       <!-- Dashboard View -->
       <div id="view-dashboard">
-        <h2 class="page-title">Tổng quan</h2>
-        <div class="stats-grid" id="stats-grid">
-          <div class="stat-card">
-            <div class="stat-label">Tài khoản</div>
-            <div class="stat-value accent" id="stat-accounts">0</div>
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">Tổng quan</h2>
+          <button class="btn btn-ghost btn-sm" onclick="App.loadDashboard()" title="Tải lại dữ liệu">🔄 Làm mới</button>
+        </div>
+
+        <!-- KPI cards -->
+        <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+          <div class="stat-card kpi-card" role="button" tabindex="0" onclick="App.navigate('analytics')" onkeydown="if(event.key==='Enter')App.navigate('analytics')">
+            <div class="stat-label">📤 DM đã gửi hôm nay</div>
+            <div class="stat-value accent" id="dash-kpi-sent">0</div>
+            <div class="kpi-sub" id="dash-kpi-sent-sub">—</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-label">Lịch hoạt động</div>
-            <div class="stat-value accent" id="stat-active">0</div>
+          <div class="stat-card kpi-card" role="button" tabindex="0" onclick="App.navigate('inbox')" onkeydown="if(event.key==='Enter')App.navigate('inbox')">
+            <div class="stat-label">💬 Trả lời hôm nay</div>
+            <div class="stat-value green" id="dash-kpi-replies">0</div>
+            <div class="kpi-sub" id="dash-kpi-replies-sub">—</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-label">Tổng lịch</div>
-            <div class="stat-value" id="stat-total">0</div>
+          <div class="stat-card kpi-card" id="dash-kpi-leads-card" role="button" tabindex="0" onclick="App.navigate('ai-followup')" onkeydown="if(event.key==='Enter')App.navigate('ai-followup')">
+            <div class="stat-label">⚠️ Lead cần người thật</div>
+            <div class="stat-value" id="dash-kpi-leads">0</div>
+            <div class="kpi-sub" id="dash-kpi-leads-sub">—</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-label">Gửi hôm nay</div>
-            <div class="stat-value green" id="stat-today">0</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Thành công</div>
-            <div class="stat-value green" id="stat-success">0</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Thất bại</div>
-            <div class="stat-value red" id="stat-failed">0</div>
+          <div class="stat-card kpi-card" role="button" tabindex="0" onclick="App.navigate('accounts')" onkeydown="if(event.key==='Enter')App.navigate('accounts')">
+            <div class="stat-label">👤 Tài khoản</div>
+            <div class="stat-value" id="dash-kpi-accounts">0</div>
+            <div class="kpi-sub" id="dash-kpi-accounts-sub">—</div>
           </div>
         </div>
 
-        <h3 style="font-size:15px;font-weight:600;margin-bottom:12px">Lịch gửi sắp tới</h3>
-        <div class="table-wrap" id="upcoming-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Tên</th>
-                <th>Tài khoản</th>
-                <th>Loại</th>
-                <th>Giờ</th>
-                <th>Lần gửi tiếp</th>
-                <th>Đã gửi</th>
-              </tr>
-            </thead>
-            <tbody id="upcoming-body"></tbody>
-          </table>
+        <!-- Chart 14 ngày -->
+        <div class="card" style="margin-bottom:var(--sp-4)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+            <h3 style="font-size:14px;font-weight:600">Hoạt động 14 ngày qua</h3>
+            <span style="display:flex;gap:14px;font-size:11px;color:var(--text2)">
+              <span><span style="color:#6366f1">●</span> Đã gửi</span>
+              <span><span style="color:#22c55e">●</span> Trả lời</span>
+              <span><span style="color:#ef4444">●</span> Thất bại</span>
+            </span>
+          </div>
+          <canvas id="dash-chart" style="width:100%;height:200px;display:block" aria-label="Biểu đồ hoạt động 14 ngày"></canvas>
+        </div>
+
+        <div class="dash-cols">
+          <!-- Lịch sắp tới -->
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px">
+              <h3 style="font-size:14px;font-weight:600">📅 Lịch gửi sắp tới</h3>
+              <span id="dash-schedules-count" style="font-size:12px;color:var(--text2)"></span>
+            </div>
+            <div class="table-wrap" id="upcoming-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tên</th>
+                    <th>Tài khoản</th>
+                    <th>Loại</th>
+                    <th>Giờ</th>
+                    <th>Lần gửi tiếp</th>
+                    <th>Đã gửi</th>
+                  </tr>
+                </thead>
+                <tbody id="upcoming-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Sức khỏe tài khoản -->
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px">
+              <h3 style="font-size:14px;font-weight:600">🩺 Sức khỏe tài khoản</h3>
+              <button class="btn btn-ghost btn-sm" onclick="App.navigate('analytics')">Chi tiết →</button>
+            </div>
+            <div id="dash-health-list"></div>
+          </div>
         </div>
       </div>
 
@@ -630,39 +661,45 @@
           </div>
         </div>
         <p style="color:var(--text2);margin-bottom:.6rem;font-size:.9rem">
-          Người dùng trong danh sách này sẽ <strong>không bao giờ</strong> nhận được DM từ AI (auto-reply, drip follow-up, keyword watcher, campaign).
+          Người dùng trong danh sách này sẽ <strong>không bao giờ</strong> nhận được DM từ hệ thống (campaign, keyword watcher, AI auto-reply, drip follow-up).
         </p>
 
         <!-- Bulk Add Panel (hidden by default) -->
-        <div id="blacklist-bulk-panel" class="hidden" style="background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.3);border-radius:12px;padding:1rem;margin-bottom:1rem;">
-          <label class="form-label" style="font-size:.85rem;color:#a78bfa">Nhập danh sách username (mỗi dòng 1 username, hoặc phân cách bằng dấu phẩy):</label>
+        <div id="blacklist-bulk-panel" class="hidden" style="background:var(--purple-dim);border:1px solid rgba(168,85,247,.3);border-radius:var(--radius);padding:var(--sp-4);margin-bottom:var(--sp-4);">
+          <label class="form-label" for="blacklist-bulk-input" style="font-size:.85rem;color:var(--accent-text)">Nhập danh sách username (mỗi dòng 1 username, hoặc phân cách bằng dấu phẩy):</label>
           <textarea id="blacklist-bulk-input" class="form-input" rows="4" placeholder="user1&#10;user2&#10;user3" style="font-family:monospace;font-size:.85rem;margin-bottom:.5rem;resize:vertical"></textarea>
-          <div style="display:flex;gap:.5rem;align-items:center">
-            <input type="text" id="blacklist-bulk-reason" class="form-input" placeholder="Lý do (tuỳ chọn)" style="flex:1;font-size:.85rem">
+          <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+            <input type="text" id="blacklist-bulk-reason" class="form-input" placeholder="Lý do chung (tuỳ chọn)" aria-label="Lý do chung cho danh sách" style="flex:1;min-width:200px;font-size:.85rem">
             <button class="btn btn-primary" onclick="App.addBulkBlacklist()" style="white-space:nowrap">🚀 Thêm tất cả</button>
           </div>
         </div>
 
         <!-- Search bar -->
-        <div style="margin-bottom:.8rem">
-          <input type="text" id="blacklist-search" class="form-input" placeholder="🔍 Tìm kiếm username, user ID, lý do..." oninput="App.filterBlacklist()" style="font-size:.85rem;max-width:400px">
+        <div style="margin-bottom:.8rem;display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap">
+          <input type="search" id="blacklist-search" class="form-input" placeholder="🔍 Tìm theo username, ID hoặc lý do..." aria-label="Tìm kiếm trong blacklist" oninput="App.filterBlacklist()" style="font-size:.85rem;max-width:400px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--text2);cursor:pointer;user-select:none">
+            <input type="checkbox" id="blacklist-show-bots" onchange="App.toggleBlacklistBots()" style="accent-color:var(--accent)">
+            Hiện group/bot
+          </label>
         </div>
 
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>User ID</th>
-                <th>Username</th>
+                <th>Tài khoản</th>
                 <th>Lý do</th>
                 <th>Ngày thêm</th>
-                <th>Hành động</th>
+                <th style="width:100px">Hành động</th>
               </tr>
             </thead>
-            <tbody id="blacklist-body"><tr><td colspan="5" style="text-align:center;color:var(--text2);padding:24px">Đang tải...</td></tr></tbody>
+            <tbody id="blacklist-body"><tr><td colspan="4" style="text-align:center;color:var(--text2);padding:24px">Đang tải...</td></tr></tbody>
           </table>
         </div>
-        <div id="blacklist-count" style="margin-top:.5rem;font-size:.8rem;color:var(--text2)"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);margin-top:.5rem;flex-wrap:wrap">
+          <div id="blacklist-count" style="font-size:.8rem;color:var(--text2)" role="status"></div>
+          <div id="blacklist-pager" style="display:flex;gap:var(--sp-2);align-items:center;font-size:.8rem;color:var(--text2)"></div>
+        </div>
       </div>
 
     
@@ -1460,6 +1497,35 @@
     </div>
   </div>
 
+  <!-- ══ Add Blacklist Modal ══ -->
+  <div class="modal-overlay" id="blacklist-add-modal">
+    <div class="modal" style="width:440px">
+      <div class="modal-header">
+        <span class="modal-title">🚫 Thêm user vào Blacklist</span>
+        <button class="modal-close" onclick="App.closeAddBlacklist()" aria-label="Đóng">&times;</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:var(--sp-4)">
+        <div>
+          <label class="form-label" for="bl-add-username">Username <span style="color:var(--text2);font-weight:400">(không cần @)</span></label>
+          <input type="text" id="bl-add-username" class="form-input" placeholder="vd: nguyenvana" autocomplete="off">
+        </div>
+        <div>
+          <label class="form-label" for="bl-add-userid">User ID <span style="color:var(--text2);font-weight:400">(số, tuỳ chọn — nếu có)</span></label>
+          <input type="text" id="bl-add-userid" class="form-input" inputmode="numeric" placeholder="vd: 123456789" autocomplete="off">
+        </div>
+        <div>
+          <label class="form-label" for="bl-add-reason">Lý do <span style="color:var(--text2);font-weight:400">(tuỳ chọn)</span></label>
+          <input type="text" id="bl-add-reason" class="form-input" placeholder="vd: khách yêu cầu không liên hệ">
+        </div>
+        <p style="font-size:.8rem;color:var(--text2);margin:0">Cần ít nhất <strong>username</strong> hoặc <strong>user ID</strong>.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="App.closeAddBlacklist()">Hủy</button>
+        <button class="btn btn-primary" onclick="App.submitAddBlacklist()">🚫 Chặn user</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ══ Watcher Modal ══ -->
   <div class="modal-overlay" id="watcher-modal">
     <div class="modal" style="width:660px;max-height:92vh;overflow-y:auto">
@@ -1608,7 +1674,7 @@
   <script src="/static/js/ai_agents.js?v=400"></script>
   <script src="/static/js/ai_followup.js?v=400"></script>
   <script src="/static/js/changelog.js?v=400"></script>
-  <script src="/static/js/app.js?v=400"></script>
+  <script src="/static/js/app.js?v=406"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

@@ -403,6 +403,29 @@ code {
   opacity: 1;
 }
 
+/* Dashboard KPI cards */
+.kpi-card { cursor: pointer; }
+.kpi-card:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.kpi-sub {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dashboard 2-column layout */
+.dash-cols {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: var(--sp-4);
+  align-items: start;
+}
+@media (max-width: 1024px) {
+  .dash-cols { grid-template-columns: 1fr; }
+}
+
 .stat-label {
   font-size: 11px;
   color: var(--text2);
@@ -1772,4 +1795,96 @@ tr:hover td {
 .hint-badge:hover::after, .hint-badge:focus::after {
   opacity: 1;
   transform: translateX(-50%) scale(1);
+/* ══════════════════════════════════════════════════════════════════
+   v3 POLISH — accessibility + modern shell (additive, no JS changes)
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Keyboard focus (WCAG 2.1 AA) ──────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.form-input:focus-visible, .form-select:focus-visible, .form-textarea:focus-visible,
+.search-input:focus-visible, .ai-key-input:focus-visible {
+  outline: none; /* already have box-shadow ring */
+}
+
+/* ── Reduced motion ────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Sidebar: modern pill active state ─────────────────────────── */
+.nav-item {
+  border-left: none;
+  border-radius: var(--radius-sm);
+  margin: 2px var(--sp-3);
+  padding: 9px var(--sp-3);
+}
+.nav-item:hover {
+  border-left: none;
+  background: var(--bg-hover);
+}
+.nav-item.active {
+  border-left: none;
+  background: var(--accent-dim);
+  color: var(--accent-text);
+}
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.nav-section {
+  padding: var(--sp-4) var(--sp-5) var(--sp-1);
+}
+
+/* ── Tables: softer header, better row scan ────────────────────── */
+th {
+  background: transparent;
+  border-bottom: 1px solid var(--border-hover);
+  color: var(--text3);
+}
+.data-table th, .table th {
+  background: transparent;
+  border-bottom: 1px solid var(--border-hover);
+  color: var(--text3);
+}
+td { border-bottom-color: var(--border); }
+tr:hover td { background: rgba(255,255,255,0.025); }
+
+/* ── Buttons: focus ring + disabled state ──────────────────────── */
+.btn:disabled, .btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+.btn:disabled:active { transform: none; }
+
+/* ── Cards: subtle lift consistency ────────────────────────────── */
+.card {
+  background: var(--bg2);
+}
+
+/* ── Better text selection ─────────────────────────────────────── */
+::selection {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+/* ── Stat value tabular numbers ────────────────────────────────── */
+.stat-value {
+  font-variant-numeric: tabular-nums;
 }

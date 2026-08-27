@@ -124,86 +124,100 @@ if(page==='changelog'){
 if(page==='ai-followup'){
   if(!document.getElementById('view-ai-followup')){
     const aiHtml = `<div id="view-ai-followup">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <div class="toolbar">
         <div>
-          <h2 class="page-title" style="margin-bottom:4px">🤖 AI Sales Agent (Follow-Up & Onboarding)</h2>
-          <p class="page-subtitle" style="margin:0">Tự động nhắn tin tương tác, giải đáp thắc mắc và chốt deal/onboard người dùng khi họ phản hồi DM</p>
+          <h2 class="page-title" style="margin-bottom:2px">💬 Lead & AI Follow-Up</h2>
+          <p style="margin:0;font-size:.85rem;color:var(--text2)">AI tự chat, giải đáp và chốt deal khi khách trả lời DM</p>
         </div>
-      </div>
-
-      <!-- Agent Settings Card -->
-      <div class="card" style="padding:20px;margin-bottom:24px;border:1px solid rgba(139,92,246,0.3);border-radius:14px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <h3 style="margin:0;font-size:16px;display:flex;align-items:center;gap:8px">
-            <span>⚙️ Kịch Bản & Cấu Hình Agent</span>
-          </h3>
-          <label class="toggle">
-            <input type="checkbox" id="aifu-enabled">
+        <div class="toolbar-left">
+          <label class="toggle" title="Bật/tắt AI Follow-Up (lưu ngay)">
+            <input type="checkbox" id="aifu-enabled" onchange="AIFollowUp.quickToggle()">
             <span class="toggle-slider"></span>
           </label>
-        </div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div>
-            <label class="form-label" style="font-weight:600">🎯 Sales Persona & Strategy (Kịch bản tư vấn)</label>
-            <textarea id="aifu-sys-prompt" class="form-input" rows="6" placeholder="Nhập vai AI chuyên gia tư vấn..."></textarea>
-            <div style="font-size:11px;color:var(--text2);margin-top:4px">Mô tả tính cách, xưng hô và cách khéo léo chốt deal/gửi link onboard.</div>
-          </div>
-          <div>
-            <label class="form-label" style="font-weight:600">📚 Knowledge Base (Thông tin Sản Phẩm & Giá)</label>
-            <textarea id="aifu-kb" class="form-input" rows="6" placeholder="Thông tin sản phẩm, bảng giá, FAQ, link onboard..."></textarea>
-            <div style="font-size:11px;color:var(--text2);margin-top:4px">AI sẽ sử dụng thông tin này để trả lời thắc mắc của khách hàng.</div>
-          </div>
-        </div>
-
-        <div style="display:grid;grid-template-columns:1fr 2fr;gap:16px;margin-top:16px">
-          <div>
-            <label class="form-label" style="font-weight:600">🔢 Số câu AI tự trả lời tối đa / user</label>
-            <input type="number" id="aifu-max-replies" class="form-input" min="1" max="20" value="5">
-          </div>
-          <div>
-            <label class="form-label" style="font-weight:600">🛑 Từ khóa bàn giao người thật (phân cách bằng dấu phẩy)</label>
-            <input type="text" id="aifu-handover-kw" class="form-input" placeholder="gặp admin, tư vấn viên, số điện thoại, lừa đảo...">
-          </div>
-        </div>
-
-        <div style="text-align:right;margin-top:16px">
-          <button class="btn btn-primary" onclick="AIFollowUp.saveSettings()">💾 Lưu Cấu Hình Sales Agent</button>
+          <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.loadChats()" title="Tải lại danh sách lead">🔄 Làm mới</button>
         </div>
       </div>
 
-      <!-- Live Lead Chat History Table -->
-      <div class="card" style="padding:20px;border-radius:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-          <h3 style="margin:0;font-size:16px">💬 Danh Sách Lead Tương Tác & Handover</h3>
-          <div style="display:flex;gap:10px;align-items:center">
-            <select id="aifu-chat-status-filter" class="form-select" style="max-width:180px" onchange="AIFollowUp.loadChats()">
-              <option value="">Tất cả trạng thái</option>
-              <option value="active">🤖 AI Active</option>
-              <option value="needs_human">⚠️ Cần Người Thật</option>
-              <option value="onboarded">✅ Onboarded</option>
-              <option value="paused_admin">⏸ Tắt AI (Handover)</option>
-            </select>
-            <button class="btn btn-sm btn-ghost" onclick="AIFollowUp.loadChats()">🔄 Làm mới</button>
+      <!-- Tab bar -->
+      <div style="display:flex;gap:var(--sp-2);margin-bottom:var(--sp-4)">
+        <button class="btn btn-primary btn-sm" id="aifu-tab-leads-btn" onclick="AIFollowUp.switchTab('leads')">👥 Leads</button>
+        <button class="btn btn-ghost btn-sm" id="aifu-tab-settings-btn" onclick="AIFollowUp.switchTab('settings')">⚙️ Cấu hình AI</button>
+      </div>
+
+      <!-- ══ TAB: LEADS ══ -->
+      <div id="aifu-tab-leads">
+        <div class="stats-grid" style="margin-bottom:var(--sp-4)">
+          <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.filterByStatus('needs_human')" title="Bấm để lọc">
+            <div class="stat-label">⚠️ Cần người thật</div>
+            <div class="stat-value red" id="aifu-stat-human">–</div>
+          </div>
+          <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.filterByStatus('active')" title="Bấm để lọc">
+            <div class="stat-label">🤖 AI đang chat</div>
+            <div class="stat-value accent" id="aifu-stat-active">–</div>
+          </div>
+          <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.filterByStatus('onboarded')" title="Bấm để lọc">
+            <div class="stat-label">✅ Đã onboard</div>
+            <div class="stat-value green" id="aifu-stat-onboarded">–</div>
+          </div>
+          <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.filterByStatus('')" title="Bấm để xem tất cả">
+            <div class="stat-label">Tổng lead</div>
+            <div class="stat-value" id="aifu-stat-total">–</div>
           </div>
         </div>
+
+        <div id="aifu-status-chips" style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-3)"></div>
 
         <div class="table-wrap">
           <table class="data-table">
             <thead>
               <tr>
-                <th>Người Dùng</th>
-                <th>Tài Khoản Tele</th>
-                <th>Số Lượt Chat</th>
-                <th>Trạng Thái</th>
-                <th>Cập Nhật Lần Cuối</th>
-                <th>Hành Động</th>
+                <th>Lead</th>
+                <th>Tier / Intent</th>
+                <th>Số câu</th>
+                <th>Trạng thái</th>
+                <th>Cập nhật</th>
+                <th style="width:170px">Hành động</th>
               </tr>
             </thead>
             <tbody id="aifu-chats-table-body">
-              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text2)">Đang tải cuộc trò chuyện...</td></tr>
+              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text2)">Đang tải lead...</td></tr>
             </tbody>
           </table>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);margin-top:.5rem;flex-wrap:wrap">
+          <div id="aifu-count" style="font-size:.8rem;color:var(--text2)" role="status"></div>
+          <div id="aifu-pager" style="display:flex;gap:var(--sp-2);align-items:center;font-size:.8rem;color:var(--text2)"></div>
+        </div>
+      </div>
+
+      <!-- ══ TAB: SETTINGS ══ -->
+      <div id="aifu-tab-settings" class="hidden">
+        <div class="card" style="padding:20px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div>
+              <label class="form-label" for="aifu-sys-prompt" style="font-weight:600">🎯 Kịch bản tư vấn (Sales Persona)</label>
+              <textarea id="aifu-sys-prompt" class="form-input" rows="6" placeholder="Nhập vai AI chuyên gia tư vấn..."></textarea>
+              <div style="font-size:11px;color:var(--text2);margin-top:4px">Tính cách, xưng hô và cách khéo léo chốt deal / gửi link onboard.</div>
+            </div>
+            <div>
+              <label class="form-label" for="aifu-kb" style="font-weight:600">📚 Knowledge Base (Sản phẩm & Giá)</label>
+              <textarea id="aifu-kb" class="form-input" rows="6" placeholder="Thông tin sản phẩm, bảng giá, FAQ, link onboard..."></textarea>
+              <div style="font-size:11px;color:var(--text2);margin-top:4px">AI dùng thông tin này để trả lời thắc mắc của khách.</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 2fr;gap:16px;margin-top:16px">
+            <div>
+              <label class="form-label" for="aifu-max-replies" style="font-weight:600">🔢 Số câu AI tối đa / user</label>
+              <input type="number" id="aifu-max-replies" class="form-input" min="1" max="20" value="5">
+            </div>
+            <div>
+              <label class="form-label" for="aifu-handover-kw" style="font-weight:600">🛑 Từ khóa bàn giao người thật (phân cách dấu phẩy)</label>
+              <input type="text" id="aifu-handover-kw" class="form-input" placeholder="gặp admin, tư vấn viên, số điện thoại, lừa đảo...">
+            </div>
+          </div>
+          <div style="text-align:right;margin-top:16px">
+            <button class="btn btn-primary" onclick="AIFollowUp.saveSettings()">💾 Lưu cấu hình</button>
+          </div>
         </div>
       </div>
 
@@ -211,14 +225,12 @@ if(page==='ai-followup'){
       <div id="aifu-history-modal" class="modal-overlay">
         <div class="modal" style="max-width:650px">
           <div class="modal-header">
-            <h3 id="aifu-modal-title" style="margin:0">Lịch sử trò chuyện</h3>
-            <button class="modal-close" onclick="AIFollowUp.closeHistoryModal()">&times;</button>
+            <h3 id="aifu-modal-title" style="margin:0;font-size:15px">Lịch sử trò chuyện</h3>
+            <button class="modal-close" onclick="AIFollowUp.closeHistoryModal()" aria-label="Đóng">&times;</button>
           </div>
           <div class="modal-body" style="max-height:450px;overflow-y:auto;padding:16px" id="aifu-modal-chat-box">
           </div>
-          <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>
-          </div>
+          <div class="modal-footer" id="aifu-modal-actions"></div>
         </div>
       </div>
     </div>`;
@@ -588,18 +600,46 @@ document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'
 const viewEl=document.getElementById(`view-${page}`);
 if(viewEl)viewEl.classList.remove('hidden');
 
-if(page==='dashboard')this.loadDashboard();else if(page==='schedules')this.loadSchedules();else if(page==='accounts')this.loadAccounts();else if(page==='logs')this.loadLogs();else if(page==='watchers')this.loadWatchers();else if(page==='watcher-logs')this.loadWatcherLogs();else if(page==='channels')this.loadChannels();else if(page==='settings')this.loadSettings();else if(page==='reactions')Reactions.init();else if(page==='members')Members.init()},
+if(page==='dashboard')this.loadDashboard();else if(page==='schedules')this.loadSchedules();else if(page==='accounts')this.loadAccounts();else if(page==='logs')this.loadLogs();else if(page==='watchers')this.loadWatchers();else if(page==='watcher-logs')this.loadWatcherLogs();else if(page==='channels')this.loadChannels();else if(page==='settings')this.loadSettings();else if(page==='blacklist')this.loadBlacklist();else if(page==='reactions')Reactions.init();else if(page==='members')Members.init()},
 
 
-async loadDashboard(){try{const[stats,sd]=await Promise.all([API.getStats(),API.getSchedules({active_only: true, limit: 10})]);
-
-(document.getElementById('stat-accounts') || me_dummy).textContent = stats.total_accounts;(document.getElementById('stat-active') || document.createElement("div")).textContent=stats.active_schedules;(document.getElementById('stat-total') || document.createElement("div")).textContent=stats.total_schedules;(document.getElementById('stat-today') || document.createElement("div")).textContent=stats.today;(document.getElementById('stat-success') || document.createElement("div")).textContent=stats.success;(document.getElementById('stat-failed') || document.createElement("div")).textContent=stats.failed;
-
+async loadDashboard(){try{
+const[stats,sd,daily,health]=await Promise.all([API.getStats(),API.getSchedules({active_only:true,limit:10}),AnalyticsAPI.dailyStats(14).catch(()=>[]),AnalyticsAPI.accountHealth().catch(()=>[])]);
+const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v};
+const today=(Array.isArray(daily)?daily:[]).slice(-1)[0]||{};
+set('dash-kpi-sent',today.sent||0);set('dash-kpi-sent-sub',`Toàn bộ: ${stats.success} OK · ${stats.failed} lỗi`);
+set('dash-kpi-replies',today.replies||0);set('dash-kpi-replies-sub',today.failed?`${today.failed} thất bại hôm nay`:'Không có thất bại hôm nay');
+set('dash-kpi-accounts',stats.total_accounts);set('dash-kpi-accounts-sub',`${stats.active_schedules}/${stats.total_schedules} lịch hoạt động`);
+// Leads cần người thật — fetch riêng, không block dashboard
+fetch('/api/ai-followup/chats?limit=200').then(r=>r.json()).then(d=>{const chats=d.chats||[];const need=chats.filter(c=>c.status==='needs_human').length;set('dash-kpi-leads',need);const sub=document.getElementById('dash-kpi-leads-sub');if(sub)sub.textContent=`${chats.length} lead đang theo dõi`;const card=document.getElementById('dash-kpi-leads-card');const val=document.getElementById('dash-kpi-leads');if(val)val.className='stat-value '+(need>0?'red':'green')}).catch(()=>{set('dash-kpi-leads','—');const sub=document.getElementById('dash-kpi-leads-sub');if(sub)sub.textContent='Chưa bật AI Follow-Up'});
+this._renderDashChart(Array.isArray(daily)?daily:[]);
+this._renderDashHealth(Array.isArray(health)?health:[]);
 const active=sd.schedules.filter(s=>s.next_run);const tbody=document.getElementById('upcoming-body');
+const cnt=document.getElementById('dash-schedules-count');if(cnt)cnt.textContent=active.length?`${active.length} lịch đang chạy`:'';
+if(!active.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:24px">Không có lịch nào sắp tới</td></tr>'}
+else{tbody.innerHTML=active.map(s=>{const sends=s.max_sends?`${s.current_sends||0}/${s.max_sends}`:(s.current_sends||0);return`<tr><td>${esc(s.name)}</td><td>${esc(s.account_name||'—')}</td><td><span class="badge badge-blue">${s.schedule_type}</span></td><td>${s.time_of_day}</td><td>${formatDate(s.next_run)}</td><td>${sends}</td></tr>`}).join('')}
+}catch(e){this.toast('Lỗi: '+e.message,'error')}},
 
-if(!active.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:24px">Không có lịch nào sắp tới</td></tr>';return}
+_renderDashChart(data){const canvas=document.getElementById('dash-chart');if(!canvas)return;const ctx=canvas.getContext('2d');const dpr=window.devicePixelRatio||1;const W=canvas.width=canvas.parentElement.clientWidth*dpr;const H=canvas.height=200*dpr;canvas.style.height='200px';ctx.clearRect(0,0,W,H);
+if(!data.length){ctx.fillStyle='rgba(255,255,255,0.35)';ctx.font=`${12*dpr}px Inter,sans-serif`;ctx.textAlign='center';ctx.fillText('Chưa có dữ liệu',W/2,H/2);return}
+const pad={top:16*dpr,right:12*dpr,bottom:28*dpr,left:44*dpr};const chartW=W-pad.left-pad.right;const chartH=H-pad.top-pad.bottom;
+const maxVal=Math.max(1,...data.map(x=>Math.max(x.sent||0,x.failed||0,x.replies||0)));const xStep=data.length>1?chartW/(data.length-1):chartW;
+ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=1;ctx.font=`${10*dpr}px Inter,sans-serif`;
+for(let i=0;i<=4;i++){const y=pad.top+chartH*i/4;ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();ctx.fillStyle='rgba(255,255,255,0.4)';ctx.textAlign='right';ctx.fillText(Math.round(maxVal*(4-i)/4),pad.left-8*dpr,y+4*dpr)}
+const drawLine=(key,color)=>{ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=2*dpr;data.forEach((x,i)=>{const px=pad.left+i*xStep;const py=pad.top+chartH-(x[key]||0)/maxVal*chartH;i===0?ctx.moveTo(px,py):ctx.lineTo(px,py)});ctx.stroke();ctx.lineTo(pad.left+(data.length-1)*xStep,pad.top+chartH);ctx.lineTo(pad.left,pad.top+chartH);ctx.closePath();ctx.fillStyle=color.replace('1)','0.08)');ctx.fill()};
+drawLine('sent','rgba(99,102,241,1)');drawLine('replies','rgba(34,197,94,1)');drawLine('failed','rgba(239,68,68,1)');
+ctx.fillStyle='rgba(255,255,255,0.4)';ctx.textAlign='center';const labelStep=Math.max(1,Math.floor(data.length/7));
+data.forEach((x,i)=>{if(i%labelStep===0)ctx.fillText((x.date||'').slice(5),pad.left+i*xStep,H-8*dpr)})},
 
-tbody.innerHTML=active.map(s=>{const sends=s.max_sends?`${s.current_sends||0}/${s.max_sends}`:(s.current_sends||0);return`<tr><td>${esc(s.name)}</td><td>${esc(s.account_name||'—')}</td><td><span class="badge badge-blue">${s.schedule_type}</span></td><td>${s.time_of_day}</td><td>${formatDate(s.next_run)}</td><td>${sends}</td></tr>`}).join('')}catch(e){this.toast('Lỗi: '+e.message,'error')}},
+_renderDashHealth(list){const el=document.getElementById('dash-health-list');if(!el)return;
+if(!list.length){el.innerHTML='<div style="text-align:center;color:var(--text2);padding:20px;font-size:13px">Chưa có tài khoản nào</div>';return}
+const sorted=[...list].sort((a,b)=>(a.health_score||0)-(b.health_score||0)).slice(0,8);
+el.innerHTML=sorted.map(a=>{const score=a.health_score||0;const color=score>=80?'var(--green)':score>=50?'var(--orange)':'var(--red)';
+return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.account_name||'Account #'+a.account_id)} ${a.is_flagged?'<span style="color:var(--red)" title="Bị cảnh báo">🚩</span>':''}</div>
+<div style="height:3px;border-radius:2px;background:var(--bg3);margin-top:5px"><div style="height:100%;width:${score}%;border-radius:2px;background:${color}"></div></div>
+<div style="font-size:11px;color:var(--text2);margin-top:4px">📤 ${a.dm_sent_today||0} hôm nay · ✅ ${(a.success_rate||0).toFixed(0)}% · ⚠️ ${a.flood_count||0} flood</div></div>
+<span class="badge ${score>=80?'badge-green':score>=50?'badge-blue':'badge-red'}" style="flex-shrink:0">${score}</span></div>`}).join('')},
 
 async loadAccounts(){try{const[d,agentData]=await Promise.all([API.getAccounts(),API.get('/api/ai-agents').catch(()=>({agents:[]}))]);this.accounts=d.accounts||[];App._accounts=this.accounts;const grid=document.getElementById('accounts-grid');if(!grid)return;if(!this.accounts.length){grid.innerHTML='<div class="empty-state"><div class="empty-state-icon">👤</div><p class="empty-state-text">Chưa có tài khoản nào</p></div>';return}const aiAgents=agentData.agents||[];
 
@@ -685,13 +725,23 @@ async unpauseAccount(accId){if(!await customConfirm('Bỏ tạm dừng tài kho�
 
 async _populateLogAccountFilter(){const sel=document.getElementById('log-filter-account');if(!sel)return;const accs=this.accounts||App._accounts||[];if(!sel.options.length||sel.options.length===1){while(sel.options.length>1)sel.remove(1);accs.forEach(a=>{const opt=document.createElement('option');opt.value=a.id;opt.textContent=a.name||a.phone;sel.appendChild(opt);});} },
 
-async loadBlacklist(){try{const data=await fetch('/api/blacklist').then(r=>r.json());this._blacklistData=data;const badge=document.getElementById('blacklist-badge');if(badge){if(data.length>0){badge.textContent=data.length;badge.classList.remove('hidden')}else{badge.classList.add('hidden')}}const countEl=document.getElementById('blacklist-count');if(countEl)countEl.textContent=data.length?`Tổng: ${data.length} user bị loại trừ`:'';this._renderBlacklistTable(data)}catch(e){this.toast(e.message,'error')}},
+async loadBlacklist(){try{const data=await fetch('/api/blacklist').then(r=>r.json());this._blacklistData=data;const badge=document.getElementById('blacklist-badge');if(badge){if(data.length>0){badge.textContent=data.length;badge.classList.remove('hidden')}else{badge.classList.add('hidden')}}this._blPage=1;this._renderBlacklistPage()}catch(e){this.toast(e.message,'error')}},
 
-_renderBlacklistTable(data){const tbody=document.getElementById('blacklist-body');if(!data.length){tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:24px">Chưa có user nào trong blacklist</td></tr>';return;}tbody.innerHTML=data.map(b=>`<tr><td>${b.user_id||'—'}</td><td style="color:#a78bfa">${esc(b.username||'—')}</td><td style="color:var(--text2);font-size:.85rem">${esc(b.reason||'—')}</td><td style="font-size:.8rem">${formatDate(b.created_at)}</td><td><button onclick="App.removeBlacklist(${b.id})" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">🗑️ Xóa</button></td></tr>`).join('');},
+_renderBlacklistPage(){const q=(document.getElementById('blacklist-search')?.value||'').toLowerCase().trim();const all=this._blacklistData||[];const showBots=document.getElementById('blacklist-show-bots')?.checked;const base=showBots?all:all.filter(b=>!(b.user_id&&b.user_id<0));const hiddenBots=all.length-base.length;const filtered=q?base.filter(b=>(String(b.user_id||'').includes(q))||(b.username||'').toLowerCase().includes(q)||(b.reason||'').toLowerCase().includes(q)):base;const pages=Math.max(1,Math.ceil(filtered.length/20));if(this._blPage>pages)this._blPage=pages;this._renderBlacklistTable(filtered.slice((this._blPage-1)*20,this._blPage*20),filtered.length===0,q);const countEl=document.getElementById('blacklist-count');if(countEl){const botNote=hiddenBots&&!showBots?` · ẩn ${hiddenBots} group/bot`:'';countEl.textContent=q?`Hiển thị: ${filtered.length}/${base.length}${botNote}`:(base.length?`Tổng: ${base.length} user bị chặn${botNote}`:'')};const pager=document.getElementById('blacklist-pager');if(pager)pager.innerHTML=pages>1?`<button class="btn btn-ghost btn-sm" onclick="App.blPage(${this._blPage-1})" ${this._blPage<=1?'disabled':''}>‹ Trước</button><span>Trang ${this._blPage}/${pages}</span><button class="btn btn-ghost btn-sm" onclick="App.blPage(${this._blPage+1})" ${this._blPage>=pages?'disabled':''}>Sau ›</button>`:'';},
 
-filterBlacklist(){const q=(document.getElementById('blacklist-search')?.value||'').toLowerCase().trim();if(!this._blacklistData)return;if(!q){this._renderBlacklistTable(this._blacklistData);return}const filtered=this._blacklistData.filter(b=>(String(b.user_id||'').includes(q))||(b.username||'').toLowerCase().includes(q)||(b.reason||'').toLowerCase().includes(q));this._renderBlacklistTable(filtered);const countEl=document.getElementById('blacklist-count');if(countEl)countEl.textContent=`Hiển thị: ${filtered.length}/${this._blacklistData.length}`;},
+blPage(n){this._blPage=n;this._renderBlacklistPage()},
 
-showAddBlacklist(){const uid=prompt('Nhập User ID (số) — bỏ trống nếu chỉ có username:');const uname=prompt('Nhập username (không cần @):');const reason=prompt('Lý do (tuỳ chọn):')||'';if(!uid&&!uname)return;this.addBlacklist(uid?parseInt(uid):null,uname||null,reason)},
+_renderBlacklistTable(data,isEmpty,q){const tbody=document.getElementById('blacklist-body');if(isEmpty){tbody.innerHTML=q?`<tr><td colspan="4" style="text-align:center;color:var(--text2);padding:32px">Không tìm thấy user nào khớp "<strong>${esc(q)}</strong>"</td></tr>`:`<tr><td colspan="4" style="text-align:center;padding:32px"><div style="font-size:2rem;margin-bottom:8px">🎉</div><div style="color:var(--text);font-weight:600;margin-bottom:4px">Blacklist trống</div><div style="color:var(--text2);font-size:.85rem;margin-bottom:12px">Chưa có user nào bị chặn DM. Thêm user khi cần loại trừ khỏi mọi chiến dịch.</div><button class="btn btn-primary btn-sm" onclick="App.showAddBlacklist()">+ Thêm user đầu tiên</button></td></tr>`;return;}const colors=['#6366f1','#a855f7','#ec4899','#f59e0b','#22c55e','#06b6d4'];tbody.innerHTML=data.map(b=>{const name=b.username||`ID ${b.user_id}`;const letter=esc((name[0]||'?').toUpperCase());const color=colors[[...String(name)].reduce((s,c)=>s+c.charCodeAt(0),0)%colors.length];const uname=b.username?`@${esc(b.username)}`:'<span style="color:var(--text3)">(không có username)</span>';const uid=b.user_id?`<div style="font-size:.75rem;color:var(--text2);font-family:monospace">ID: ${b.user_id}</div>`:'';return `<tr><td><div style="display:flex;align-items:center;gap:10px"><span aria-hidden="true" style="width:32px;height:32px;border-radius:50%;background:${color}22;border:1px solid ${color}55;color:${color};display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;flex-shrink:0">${letter}</span><div><div style="font-weight:600;color:var(--accent-text)">${uname}</div>${uid}</div></div></td><td style="color:var(--text2);font-size:.85rem;max-width:280px">${esc(b.reason||'—')}</td><td style="font-size:.8rem;color:var(--text2);white-space:nowrap">${formatDate(b.created_at)}</td><td><button class="btn btn-danger btn-sm" onclick="App.removeBlacklist(${b.id})" aria-label="Xóa ${esc(name)} khỏi blacklist">🗑️ Xóa</button></td></tr>`}).join('');},
+
+filterBlacklist(){clearTimeout(this._blSearchTimer);this._blSearchTimer=setTimeout(()=>{if(!this._blacklistData)return;this._blPage=1;this._renderBlacklistPage()},250);},
+
+toggleBlacklistBots(){if(!this._blacklistData)return;this._blPage=1;this._renderBlacklistPage()},
+
+showAddBlacklist(){['bl-add-username','bl-add-userid','bl-add-reason'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=''});const o=document.getElementById('blacklist-add-modal');if(!o)return;o.classList.add('open');if(!this._blEscBound){this._blEscBound=true;document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('blacklist-add-modal')?.classList.contains('open'))this.closeAddBlacklist()})}setTimeout(()=>document.getElementById('bl-add-username')?.focus(),50)},
+
+closeAddBlacklist(){document.getElementById('blacklist-add-modal')?.classList.remove('open')},
+
+async submitAddBlacklist(){const uname=(document.getElementById('bl-add-username')?.value||'').trim().replace(/^@/,'');const uidRaw=(document.getElementById('bl-add-userid')?.value||'').trim();const reason=(document.getElementById('bl-add-reason')?.value||'').trim();if(!uname&&!uidRaw){this.toast('Nhập ít nhất username hoặc user ID','error');document.getElementById('bl-add-username')?.focus();return}if(uidRaw&&!/^\d+$/.test(uidRaw)){this.toast('User ID phải là số','error');document.getElementById('bl-add-userid')?.focus();return}await this.addBlacklist(uidRaw?parseInt(uidRaw):null,uname||null,reason);this.closeAddBlacklist()},
 
 async addBlacklist(userId,username,reason){try{await fetch('/api/blacklist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,username,reason})});this.toast('Đã thêm vào blacklist','success');this.loadBlacklist();}catch(e){this.toast(e.message,'error')}},
 
