@@ -13,7 +13,7 @@ import database as db
 import message_queue as mq
 
 logger = logging.getLogger("tg-scheduler")
-TZ = pytz.timezone(os.getenv("TIMEZONE", "Asia/Ho_Chi_Minh"))
+TZ = pytz.timezone(os.getenv("TIMEZONE") or "Asia/Ho_Chi_Minh")
 _scheduler: AsyncIOScheduler | None = None
 
 
