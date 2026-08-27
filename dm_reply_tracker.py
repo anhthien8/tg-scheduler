@@ -170,25 +170,24 @@ async def _async_distill_human_rule(account_id: int, user_id: int, message_text:
             if agent_config.get("model"): kwargs["model"] = agent_config["model"]
 
         rule = await ai_rmx.distill_human_takeover_rule(
-            user_question=last_user_q,
-            human_answer=message_text,
-            chat_history=history[-6:],
+            history=history[-6:],
+            human_reply=message_text,
             provider=ai_provider,
             api_keys=ai_keys,
             **kwargs
         )
 
-        if rule and rule.get("pattern") and rule.get("answer"):
+        if rule and rule.get("question") and rule.get("answer"):
             agent_id = agent_config.get("id") if agent_config else None
-            await db.create_learned_knowledge(
-                ai_agent_id=agent_id,
-                user_id=user_id,
-                question_pattern=rule["pattern"],
-                learned_answer=rule["answer"],
-                context_summary=f"Discovered from human takeover on acc #{account_id}"
-            )
-            logger.info("🎓 [Self-Learning] Extracted new rule for agent %s: '%s' -> '%s'",
-                        agent_id, rule["pattern"], rule["answer"])
+            if agent_id is not None:
+                await db.add_learned_knowledge(
+                    ai_agent_id=agent_id,
+                    source_user_id=user_id,
+                    question=rule["question"],
+                    answer=rule["answer"]
+                )
+                logger.info("🎓 [Self-Learning] Extracted new rule for agent %s: '%s' -> '%s'",
+                            agent_id, rule["question"], rule["answer"])
     except Exception as e:
         logger.debug("[Self-Learning] Distillation failed: %s", e)
 
@@ -315,15 +314,18 @@ async def generate_and_send_ai_reply_for_chat(
         watcher_id=watcher_id
     )
     if not chat:
+        _pending_ai_sends.discard((account_id, user_id))
         return False
 
     full_history = chat.get("history", [])
     if not full_history:
+        _pending_ai_sends.discard((account_id, user_id))
         return False
 
     # Ensure last message is from user (do not reply to yourself)
     if full_history[-1].get("role") != "user":
         logger.debug("[AIFollowUp] Last message is already from assistant for user %d — skipping", user_id)
+        _pending_ai_sends.discard((account_id, user_id))
         return False
 
     # 3. Resolve AI Agent config
@@ -344,6 +346,7 @@ async def generate_and_send_ai_reply_for_chat(
         if not acc_agent_id:
             logger.info("[AIFollowUp] Account #%d has AI disabled — refusing to send AI reply for user %d",
                         account_id, user_id)
+            _pending_ai_sends.discard((account_id, user_id))
             return False
 
         if acc_agent_id:
@@ -415,6 +418,7 @@ async def generate_and_send_ai_reply_for_chat(
 
     if not ai_keys:
         logger.warning("[AIFollowUp] ⚠️ Cannot generate AI reply for user %d: No API Keys configured!", user_id)
+        _pending_ai_sends.discard((account_id, user_id))
         return False
 
     sys_prompt = agent_config.get("system_prompt", "")

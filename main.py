@@ -26,6 +26,8 @@ from fastapi.responses import FileResponse
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.gzip import GZipResponder, IdentityResponder
+from starlette.datastructures import Headers
 import uvicorn
 
 class CacheControlledStaticFiles(StaticFiles):
@@ -62,8 +64,13 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 async def verify_api_key(key: str = Security(api_key_header)):
-    """Verify X-API-Key header. Only enforced when DASHBOARD_SECRET_KEY is set."""
-    if API_KEY and not secrets.compare_digest(key or "", API_KEY):
+    """Verify X-API-Key header. Always enforced — startup refuses to run without a key.
+
+    Dev bypass: set DISABLE_AUTH=1 in .env to skip the check (local development only).
+    """
+    if os.getenv("DISABLE_AUTH", "0") == "1":
+        return
+    if not secrets.compare_digest(key or "", API_KEY):
         raise HTTPException(status_code=403, detail="Unauthorized")
 
 
@@ -165,6 +172,16 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 50)
     logger.info("TG Scheduler starting up...")
 
+    # ── Security gate: never run without API auth ──
+    if not API_KEY:
+        logger.error("=" * 50)
+        logger.error("FATAL: DASHBOARD_SECRET_KEY is not set in .env")
+        logger.error("The dashboard API would be completely unauthenticated.")
+        logger.error("Add this line to your .env file:")
+        logger.error("  DASHBOARD_SECRET_KEY=%s", secrets.token_urlsafe(32))
+        logger.error("=" * 50)
+        raise SystemExit(1)
+
     # Init database
     await db.init_db()
     logger.info("Database initialized")
@@ -255,14 +272,52 @@ async def lifespan(app: FastAPI):
     logger.info("Goodbye!")
 
 
+# Media types already compressed — gzipping them wastes CPU and can grow the payload
+GZIP_EXCLUDED_CONTENT_TYPES = (
+    "text/event-stream",
+    "image/",
+    "video/",
+    "audio/",
+    "application/zip",
+    "application/gzip",
+    "application/octet-stream",
+)
+
+
+class BinaryAwareGZipResponder(GZipResponder):
+    """GZipResponder that also skips already-compressed binary media types."""
+
+    async def send_with_compression(self, message):
+        if message["type"] == "http.response.start":
+            await super().send_with_compression(message)
+            headers = Headers(raw=message["headers"])
+            content_type = headers.get("content-type", "").lower()
+            if content_type.startswith(GZIP_EXCLUDED_CONTENT_TYPES):
+                self.content_type_is_excluded = True
+            return
+        await super().send_with_compression(message)
+
+
 class SafeGZipMiddleware(GZipMiddleware):
+    """GZip middleware that (1) never compresses Range responses (would corrupt
+    byte offsets) and (2) skips already-compressed binary media types."""
+
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
-            headers = dict(scope.get("headers", []))
-            if b"range" in headers:
-                await self.app(scope, receive, send)
-                return
-        await super().__call__(scope, receive, send)
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Range requests must pass through uncompressed (offsets must stay valid)
+        if b"range" in dict(scope.get("headers", [])):
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        if "gzip" in headers.get("Accept-Encoding", ""):
+            responder = BinaryAwareGZipResponder(self.app, self.minimum_size, compresslevel=self.compresslevel)
+        else:
+            responder = IdentityResponder(self.app, self.minimum_size)
+        await responder(scope, receive, send)
 
 
 app = FastAPI(title="TG Scheduler", lifespan=lifespan)

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TG Scheduler</title>
   <meta name="description" content="Telegram Userbot Multi-Account Message Scheduler">
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v=401">
 </head>
 <body>
 
@@ -29,20 +29,20 @@
       <!-- Step 0: Add Account -->
       <div id="login-step-setup">
         <div class="form-group">
-          <label class="form-label">Tên tài khoản</label>
+          <label class="form-label" for="setup-name">Tên tài khoản</label>
           <input type="text" class="form-input" id="setup-name" placeholder="Ví dụ: Main, Bot1...">
         </div>
         <div class="form-group">
-          <label class="form-label">API ID</label>
+          <label class="form-label" for="setup-api-id">API ID</label>
           <input type="text" class="form-input" id="setup-api-id" placeholder="Ví dụ: 12345678">
           <p class="form-hint">Số nguyên từ my.telegram.org</p>
         </div>
         <div class="form-group">
-          <label class="form-label">API Hash</label>
+          <label class="form-label" for="setup-api-hash">API Hash</label>
           <input type="text" class="form-input" id="setup-api-hash" placeholder="Ví dụ: 0123456789abcdef...">
         </div>
         <div class="form-group">
-          <label class="form-label">Số điện thoại</label>
+          <label class="form-label" for="setup-phone">Số điện thoại</label>
           <input type="tel" class="form-input" id="setup-phone" placeholder="+84912345678">
         </div>
         <button class="btn btn-primary btn-full" id="btn-add-account" onclick="App.addFirstAccount()">
@@ -56,7 +56,7 @@
       <!-- Step 1: OTP -->
       <div id="login-step-otp" class="hidden">
         <div class="form-group">
-          <label class="form-label">Mã OTP</label>
+          <label class="form-label" for="login-code">Mã OTP</label>
           <input type="text" class="form-input" id="login-code" placeholder="12345" maxlength="6">
           <p class="form-hint">Nhập mã OTP đã gửi đến Telegram</p>
         </div>
@@ -68,7 +68,7 @@
       <!-- Step 2: 2FA -->
       <div id="login-step-2fa" class="hidden">
         <div class="form-group">
-          <label class="form-label">Mật khẩu 2FA</label>
+          <label class="form-label" for="login-password">Mật khẩu 2FA</label>
           <input type="password" class="form-input" id="login-password" placeholder="Mật khẩu xác thực 2 bước">
         </div>
         <button class="btn btn-primary btn-full" onclick="App.verify2FAFirst()">
@@ -85,78 +85,78 @@
       <div class="sidebar-logo">📨 TG Scheduler</div>
       <nav class="sidebar-nav">
         <!-- Dashboard -->
-        <div class="nav-item active" data-page="dashboard" onclick="App.navigate('dashboard')">
+        <button type="button" class="nav-item active" data-page="dashboard" onclick="App.navigate('dashboard')">
           📊 Tổng quan
-        </div>
+        </button>
 
         <!-- Telegram Group -->
         <div class="nav-section">Telegram</div>
-        <div class="nav-item" data-page="accounts" onclick="App.navigate('accounts')">
+        <button type="button" class="nav-item" data-page="accounts" onclick="App.navigate('accounts')">
           👤 Tài khoản
-        </div>
-        <div class="nav-item" data-page="schedules" onclick="App.navigate('schedules')">
+        </button>
+        <button type="button" class="nav-item" data-page="schedules" onclick="App.navigate('schedules')">
           📅 Lịch gửi
-        </div>
-        <div class="nav-item" data-page="channels" onclick="App.navigate('channels')">
+        </button>
+        <button type="button" class="nav-item" data-page="channels" onclick="App.navigate('channels')">
           📤 Quản lý kênh
-        </div>
+        </button>
 
         <!-- Automation Group -->
         <div class="nav-section">Automation</div>
-        <div class="nav-item" data-page="watchers" onclick="App.navigate('watchers')">
+        <button type="button" class="nav-item" data-page="watchers" onclick="App.navigate('watchers')">
           🎯 Keyword DM
-        </div>
-        <div class="nav-item" data-page="reactions" onclick="App.navigate('reactions')">
+        </button>
+        <button type="button" class="nav-item" data-page="reactions" onclick="App.navigate('reactions')">
           ❤️ Tăng Tương Tác
-        </div>
-        <div class="nav-item" data-page="inbox" onclick="App.navigate('inbox')" id="nav-inbox">
+        </button>
+        <button type="button" class="nav-item" data-page="inbox" onclick="App.navigate('inbox')" id="nav-inbox">
           📬 Inbox <span id="inbox-badge" class="inbox-badge hidden">0</span>
-        </div>
-        <div class="nav-item" data-page="blacklist" onclick="App.navigate('blacklist')" id="nav-blacklist">
+        </button>
+        <button type="button" class="nav-item" data-page="blacklist" onclick="App.navigate('blacklist')" id="nav-blacklist">
           🚫 Blacklist <span id="blacklist-badge" class="inbox-badge hidden">0</span>
-        </div>
-        <div class="nav-item" data-page="members" onclick="App.navigate('members')">
+        </button>
+        <button type="button" class="nav-item" data-page="members" onclick="App.navigate('members')">
           👥 Cào & DM
-        </div>
+        </button>
 
         <!-- AI Agents -->
         <div class="nav-section">AI Agents</div>
-        <div class="nav-item" data-page="ai-agents" onclick="App.navigate('ai-agents')">
+        <button type="button" class="nav-item" data-page="ai-agents" onclick="App.navigate('ai-agents')">
           🤖 Cấu hình AI Agents
-        </div>
-        <div class="nav-item" data-page="ai-followup" onclick="App.navigate('ai-followup')">
+        </button>
+        <button type="button" class="nav-item" data-page="ai-followup" onclick="App.navigate('ai-followup')">
           💬 Lead & AI Follow-Up
-        </div>
+        </button>
 
         <!-- Growth Features -->
         <div class="nav-section">Growth</div>
-        <div class="nav-item" data-page="analytics" onclick="App.navigate('analytics')">
+        <button type="button" class="nav-item" data-page="analytics" onclick="App.navigate('analytics')">
           📊 Analytics
-        </div>
-        <div class="nav-item" data-page="templates" onclick="App.navigate('templates')">
+        </button>
+        <button type="button" class="nav-item" data-page="templates" onclick="App.navigate('templates')">
           📋 Templates
-        </div>
-        <div class="nav-item" data-page="autoreply" onclick="App.navigate('autoreply')">
+        </button>
+        <button type="button" class="nav-item" data-page="autoreply" onclick="App.navigate('autoreply')">
           🤖 Auto-Reply
-        </div>
+        </button>
 
         <!-- Discord Group -->
         <div class="nav-section">Discord</div>
-        <div class="nav-item" data-page="discord" onclick="App.navigate('discord')">
+        <button type="button" class="nav-item" data-page="discord" onclick="App.navigate('discord')">
           🎮 Discord
-        </div>
+        </button>
 
         <!-- System Group -->
         <div class="nav-section">Hệ thống</div>
-        <div class="nav-item" data-page="logs" onclick="App.navigate('logs')">
+        <button type="button" class="nav-item" data-page="logs" onclick="App.navigate('logs')">
           📋 Lịch sử
-        </div>
-        <div class="nav-item" data-page="settings" onclick="App.navigate('settings')">
+        </button>
+        <button type="button" class="nav-item" data-page="settings" onclick="App.navigate('settings')">
           ⚙️ Cài đặt AI
-        </div>
-        <div class="nav-item" data-page="changelog" onclick="App.navigate('changelog')">
+        </button>
+        <button type="button" class="nav-item" data-page="changelog" onclick="App.navigate('changelog')">
           🚀 Cập Nhật <span class="badge" style="background:linear-gradient(135deg, #8b5cf6, #ec4899);color:#fff;font-size:10px;padding:2px 6px;border-radius:10px;margin-left:6px;font-weight:700">NEW</span>
-        </div>
+        </button>
       </nav>
       <div class="sidebar-footer">
         <div class="user-info" id="user-info">
@@ -831,12 +831,12 @@
           <!-- Row 3: Prompts (Main Feature) -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
             <div>
-              <label class="form-label" style="font-weight:600">📝 Remix Instruction (Outreach DM)</label>
+              <label class="form-label" style="font-weight:600" for="agent-remix-instruction">📝 Remix Instruction (Outreach DM) <span class="hint-badge" tabindex="0" data-tooltip="Hướng dẫn AI viết lại tin nhắn gửi đi cho tự nhiên và chuyên nghiệp">?</span></label>
               <textarea id="agent-remix-instruction" class="form-input" rows="5" placeholder="Hướng dẫn AI cách viết lại tin nhắn outreach DM...&#10;VD: Viết lại tin nhắn như một BD chuyên nghiệp về crypto exchange Weex..."></textarea>
               <div style="font-size:11px;color:var(--text2);margin-top:4px">AI sẽ dùng instruction này để viết lại (remix) tin nhắn DM outreach gửi đi.</div>
             </div>
             <div>
-              <label class="form-label" style="font-weight:600">🎯 System Prompt (Auto-Reply)</label>
+              <label class="form-label" style="font-weight:600" for="agent-system-prompt">🎯 System Prompt (Auto-Reply) <span class="hint-badge" tabindex="0" data-tooltip="Quy định vai trò, giọng điệu và cách ứng xử của AI khi chat với khách hàng">?</span></label>
               <textarea id="agent-system-prompt" class="form-input" rows="5" placeholder="Nhập vai AI chuyên gia tư vấn...&#10;VD: Bạn là BD của sàn Weex, xưng 'mình', gọi khách là 'bạn'..."></textarea>
               <div style="font-size:11px;color:var(--text2);margin-top:4px">Prompt này dùng khi AI tự động reply khách hàng sau khi họ trả lời DM.</div>
             </div>
@@ -844,24 +844,24 @@
 
           <!-- Row 4: Knowledge Base -->
           <div style="margin-bottom:16px">
-            <label class="form-label" style="font-weight:600">📚 Knowledge Base</label>
+            <label class="form-label" style="font-weight:600" for="agent-knowledge-base">📚 Knowledge Base <span class="hint-badge" tabindex="0" data-tooltip="Tài liệu thông tin về dự án hoặc sàn giao dịch để AI tra cứu câu trả lời">?</span></label>
             <textarea id="agent-knowledge-base" class="form-input" rows="5" placeholder="Thông tin sản phẩm, bảng giá, FAQ, link đăng ký, ưu đãi...&#10;AI sẽ sử dụng thông tin này để trả lời thắc mắc khách hàng."></textarea>
           </div>
 
           <!-- Row 5: Behavior -->
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
             <div>
-              <label class="form-label">🔑 Handover Keywords</label>
+              <label class="form-label" for="agent-handover-keywords">🔑 Handover Keywords <span class="hint-badge" tabindex="0" data-tooltip="Các từ khóa khiến AI dừng chat và chuyển quyền kiểm soát cho admin">?</span></label>
               <input type="text" id="agent-handover-keywords" class="form-input" placeholder="gặp admin, tư vấn viên, số điện thoại">
               <div style="font-size:11px;color:var(--text2);margin-top:4px">Cách nhau bằng dấu phẩy. Khi khách nhắn keyword này → chuyển cho người thật.</div>
             </div>
             <div>
-              <label class="form-label">💬 Max Replies</label>
+              <label class="form-label" for="agent-max-replies">💬 Max Replies <span class="hint-badge" tabindex="0" data-tooltip="Giới hạn số câu trả lời tự động để tránh AI spam khách hàng vô tận">?</span></label>
               <input type="number" id="agent-max-replies" class="form-input" min="1" max="50" value="10">
               <div style="font-size:11px;color:var(--text2);margin-top:4px">Tối đa số lượt AI tự trả lời trước khi dừng.</div>
             </div>
             <div>
-              <label class="form-label">🎭 Tone</label>
+              <label class="form-label" for="agent-tone">🎭 Tone <span class="hint-badge" tabindex="0" data-tooltip="Phong cách giao tiếp của AI">?</span></label>
               <select id="agent-tone" class="form-input">
                 <option value="friendly">😊 Friendly</option>
                 <option value="professional">💼 Professional</option>

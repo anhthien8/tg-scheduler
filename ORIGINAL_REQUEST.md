@@ -81,3 +81,58 @@ All database schema changes must be backward-compatible. No existing functionali
 - [ ] File encoding is UTF-8 throughout (no PowerShell Set-Content)
 - [ ] Server boots successfully with all 16 accounts connecting
 - [ ] Keyword watchers, DM campaigns, reactions, analytics, auto-reply all functional
+
+## Follow-up — 2026-08-26T18:50:33Z
+
+Build a flexible, efficient system for outreach, closing deals, and onboarding KOLs by using AI Agency Agents to perform UI/UX QA/QC, back-testing, unit testing, and logic verification of outreach, sales, and direct-message workflows.
+
+Working directory: ~/teamwork_projects/kol_growth_engine
+Integrity mode: development
+
+## Requirements
+
+### R1. QA/QC UI/UX
+Audit the user interface for usability, accessibility, and consistency. Produce actionable findings and fixes.
+
+### R2. Unit & Integration Tests
+Create comprehensive test coverage for outreach, sales, and DM logic. Ensure all tests pass reliably.
+
+### R3. Backtest Campaigns
+Implement backtesting capability to measure KPIs: open-rate, reply-rate, conversion, onboard rate.
+
+### R4. Logic Verification
+Verify the end-to-end flow: Outreach → Sale → DM → Close → Onboard. Identify gaps and inconsistencies.
+
+### R5. Architecture Improvements
+Propose and implement changes to make the system more flexible and scalable.
+
+## Verification Resources
+
+No existing test suites or scripts provided. Team must create all verification mechanisms from scratch.
+
+## Acceptance Criteria
+
+### UI/UX Quality
+- [ ] Accessibility audit: 0 critical violations (WCAG 2.1 AA)
+- [ ] All UI components have consistent styling, proper labels, and tooltips
+- [ ] UX heuristic review completed with documented findings and fixes applied
+
+### Test Coverage
+- [ ] Unit test suite passes 100% (`python run_tests.py` or equivalent)
+- [ ] Code coverage ≥ 80% for core outreach/sale/DM logic modules
+- [ ] Integration tests cover the full Outreach → Sale → DM → Close → Onboard flow
+
+### Backtest Capability
+- [ ] Backtest script runs successfully with sample campaign data
+- [ ] KPI report generated: open-rate, reply-rate, conversion rate, onboard rate
+- [ ] Results are reproducible (same input → same output)
+
+### Logic Verification
+- [ ] End-to-end flow documented as state machine or equivalent
+- [ ] All state transitions validated — no unreachable states or missing transitions
+- [ ] Edge cases handled: timeout, rejection, duplicate contact, concurrent campaigns
+
+### Architecture
+- [ ] System is modular: each major function (outreach, DM, onboarding) is independently deployable/testable
+- [ ] Architecture decision record (ADR) documenting key design choices
+- [ ] No single point of failure in critical path

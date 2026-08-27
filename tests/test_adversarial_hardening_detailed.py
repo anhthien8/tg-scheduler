@@ -123,95 +123,90 @@ async def test_transaction_abort_rollback_and_leak():
 
 async def test_analytics_cache_stampede():
     """
-    Test for cache stampede (thundering herd) vulnerability.
-    If multiple async tasks request a cold/expired key concurrently,
-    they will all bypass the cache and execute the heavy query simultaneously.
+    Singleflight protection: when multiple async tasks request a cold key
+    concurrently, only ONE database query must execute; the rest wait on the
+    per-key lock and share the cached result.
     """
     from routes.analytics import analytics_cache
     analytics_cache.cache.clear()
+    analytics_cache._locks.clear()
 
-    # Mock get_analytics_overview with a delay to allow concurrent requests to overlap
+    # Mock get_analytics_overview with a delay to force concurrent overlap
     async def mock_heavy_query():
         await asyncio.sleep(0.05)
         return {"total_dm_sent": 42}
 
     with patch("database.get_analytics_overview", side_effect=mock_heavy_query) as mock_db:
-        # Simulate concurrent requests hitting the endpoint
-        async def fetch_overview():
-            # Mimic routes/analytics.py behavior
-            cached = analytics_cache.get("overview")
-            if cached is not None:
-                return cached
-            data = await db.get_analytics_overview()
-            analytics_cache.set("overview", data)
-            return data
+        # 5 concurrent callers go through the same code path the route uses
+        results = await asyncio.gather(*(
+            analytics_cache.get_or_fetch("overview", db.get_analytics_overview)
+            for _ in range(5)
+        ))
 
-        # Launch 5 concurrent reads
-        results = await asyncio.gather(*(fetch_overview() for _ in range(5)))
-        
-        # Verify all retrieved the correct data
+        # All callers got the correct data
         for r in results:
             assert r["total_dm_sent"] == 42
-            
-        # Assert Cache Stampede: database function was called multiple times instead of once!
-        # This confirms the race condition where concurrent reads on a cold cache all hit the DB.
-        print(f"[DEBUG] DB queries executed during cold cache stampede: {mock_db.call_count}")
-        # Note: If no lock/semaphore is implemented, mock_db will have call_count > 1 (likely 5)
-        # We don't assert it strictly to equal 1 unless hardening was already implemented,
-        # but we document/log it to expose the gap.
-        # Actually, let's assert to expose if it fails, or just assert it is > 0.
-        assert mock_db.call_count >= 1
+
+        # Singleflight: exactly one DB query despite 5 concurrent cold reads
+        assert mock_db.call_count == 1, (
+            f"Cache stampede: {mock_db.call_count} DB queries for 5 concurrent cold reads"
+        )
 
 
 async def test_analytics_cache_memory_growth():
     """
-    Test memory accumulation in AsyncTTLCache.
-    Since eviction only occurs on get() calls for specific keys,
-    writing infinite unique keys (e.g. daily-stats?days=X) leads to unbounded memory consumption.
+    LRU bound: AsyncTTLCache must cap its size at maxsize so that writing
+    infinite unique keys (e.g. daily-stats?days=X) cannot grow memory unbounded.
     """
-    cache = AsyncTTLCache(ttl_seconds=1)
-    
-    # Set 1000 unique keys
+    cache = AsyncTTLCache(ttl_seconds=60, maxsize=256)
+
+    # Set 1000 unique keys — cache must stay bounded at maxsize
     for i in range(1000):
         cache.set(f"key_{i}", {"data": i})
-        
-    assert len(cache.cache) == 1000
-    
-    # Wait for TTL to expire
+
+    assert len(cache.cache) <= 256, f"Cache unbounded: {len(cache.cache)} entries"
+
+    # Most recently written keys survive; oldest were evicted
+    assert cache.get("key_999") == {"data": 999}
+    assert cache.get("key_0") is None
+
+    # Fresh entries still respect TTL expiry
+    short_cache = AsyncTTLCache(ttl_seconds=1, maxsize=256)
+    short_cache.set("k", {"v": 1})
+    assert short_cache.get("k") == {"v": 1}
     await asyncio.sleep(1.1)
-    
-    # Cache is expired, but size is still 1000 because eviction is passive (only on get)
-    assert len(cache.cache) == 1000
-    
-    # Querying a key evicts it
-    val = cache.get("key_0")
-    assert val is None
-    assert len(cache.cache) == 999  # Evicted key_0
+    assert short_cache.get("k") is None
 
 
 async def test_analytics_cache_fallback_and_failure():
     """
-    Verify that if the database is down or query fails,
-    the endpoint crashes instead of falling back to stale cache data.
+    Stale-while-revalidate: when the cache entry is expired AND the database
+    query fails, get_or_fetch must fall back to the stale cached value instead
+    of crashing the endpoint.
     """
     from routes.analytics import analytics_cache
     analytics_cache.cache.clear()
+    analytics_cache._locks.clear()
 
-    # Pre-populate cache
-    analytics_cache.set("overview", {"total_dm_sent": 100})
-    
-    # Let's simulate expired cache (set timestamp to 35 seconds ago)
+    # Pre-populate with an expired entry (35s old, TTL is 30s)
     analytics_cache.cache["overview"] = (time.time() - 35, {"total_dm_sent": 100})
 
-    # Mock database to fail
+    # Fresh get() returns None for expired entry...
+    assert analytics_cache.get("overview") is None
+    # ...but get_stale() still returns the value for fallback
+    assert analytics_cache.get_stale("overview") == {"total_dm_sent": 100}
+
+    # Database fails -> get_or_fetch serves stale data instead of raising
     with patch("database.get_analytics_overview", side_effect=Exception("Database connection failure")):
-        # If cache expired, calling get() returns None and deletes the key
-        val = analytics_cache.get("overview")
-        assert val is None
-        
-        # Then, route will call the database, fail, and crash
+        val = await analytics_cache.get_or_fetch("overview", db.get_analytics_overview)
+        assert val == {"total_dm_sent": 100}
+
+    # With NO stale data available, the error must propagate (no silent None)
+    analytics_cache.cache.clear()
+    analytics_cache._locks.clear()
+    with patch("database.get_analytics_overview", side_effect=Exception("Database connection failure")):
         with pytest.raises(Exception, match="Database connection failure"):
-            await db.get_analytics_overview()
+            await analytics_cache.get_or_fetch("overview", db.get_analytics_overview)
 
 
 # ==============================================================================
@@ -276,3 +271,38 @@ def test_utf8_endpoint_payloads(client):
     assert saved_tpl is not None
     assert saved_tpl["name"] == "Chiến dịch Tết 2026 🧨"
     assert saved_tpl["messages"][0]["content"] == "Chào {{first_name}}! Chúc mừng năm mới 🌸🏮"
+
+
+async def test_async_ttl_cache_locks_eviction():
+    """
+    Verify that AsyncTTLCache._locks doesn't grow unbounded under concurrent/sequential hits.
+    Locks should be evicted from self._locks after get_or_fetch completes.
+    """
+    cache = AsyncTTLCache(ttl_seconds=60, maxsize=256)
+    
+    # 1. Sequential hits
+    async def mock_fetch_success():
+        return "value"
+        
+    await cache.get_or_fetch("seq_key_1", mock_fetch_success)
+    await cache.get_or_fetch("seq_key_2", mock_fetch_success)
+    
+    assert len(cache._locks) == 0, f"Locks leaked on sequential hits: {list(cache._locks.keys())}"
+    
+    # 2. Concurrent hits
+    async def mock_fetch_delayed():
+        await asyncio.sleep(0.1)
+        return "delayed_value"
+        
+    # Launch concurrent requests
+    t1 = asyncio.create_task(cache.get_or_fetch("concurrent_key", mock_fetch_delayed))
+    t2 = asyncio.create_task(cache.get_or_fetch("concurrent_key", mock_fetch_delayed))
+    
+    # Wait for them to start and acquire lock (t1 or t2 will create the lock)
+    await asyncio.sleep(0.02)
+    assert len(cache._locks) == 1, "Lock should exist during concurrent execution"
+    
+    await asyncio.gather(t1, t2)
+    
+    # After execution finishes, lock should be evicted
+    assert len(cache._locks) == 0, f"Lock leaked on concurrent hits: {list(cache._locks.keys())}"

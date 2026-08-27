@@ -25,7 +25,7 @@
 
   /* Text */
   --text:   #e4e4ef;
-  --text2:  #6b6b80;
+  --text2:  #9ca3af;
   --text3:  #43434f;
 
   /* Accent — Indigo */
@@ -156,7 +156,7 @@ code {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 1.2px;
-  color: var(--text3);
+  color: var(--text2);
   user-select: none;
 }
 
@@ -179,6 +179,17 @@ code {
   border-left: 3px solid transparent;
   margin: 1px 0;
   position: relative;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+
+.nav-item:focus {
+  outline: none;
+  background: var(--bg-hover);
+  border-left-color: var(--border-focus);
 }
 
 .nav-item:hover {
@@ -668,7 +679,7 @@ tr:hover td {
 }
 
 .form-input::placeholder {
-  color: var(--text3);
+  color: var(--text2);
 }
 
 .form-textarea {
@@ -693,7 +704,7 @@ tr:hover td {
 
 .form-hint {
   font-size: 11px;
-  color: var(--text3);
+  color: var(--text2);
   margin-top: var(--sp-1);
   line-height: 1.5;
 }
@@ -855,6 +866,7 @@ tr:hover td {
 .toast.success { border-left: 3px solid var(--green); }
 .toast.error   { border-left: 3px solid var(--red); }
 .toast.info    { border-left: 3px solid var(--accent); }
+.toast.warning { border-left: 3px solid var(--orange); }
 
 @keyframes toastSlideIn {
   from { transform: translateX(100%) scale(0.9); opacity: 0; }
@@ -1090,7 +1102,7 @@ tr:hover td {
 }
 
 .search-input::placeholder {
-  color: var(--text3);
+  color: var(--text2);
 }
 
 /* ══ POLL OPTIONS ════════════════════════════════════════════════ */
@@ -1389,7 +1401,7 @@ tr:hover td {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: var(--text3);
+  color: var(--text2);
   font-weight: 600;
 }
 
@@ -1507,7 +1519,7 @@ tr:hover td {
 
 .cl-date {
   font-size: 13px;
-  color: var(--text3);
+  color: var(--text2);
   font-weight: 500;
 }
 
@@ -1709,4 +1721,55 @@ tr:hover td {
 .page-subtitle {
   font-size: 14px;
   color: var(--text2);
+}
+
+/* Accessibility Tooltips */
+.hint-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  font-size: 11px;
+  font-weight: bold;
+  cursor: help;
+  margin-left: 6px;
+  position: relative;
+}
+
+.hint-badge:focus {
+  outline: 2px solid var(--accent);
+  color: var(--text);
+}
+
+.hint-badge::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%) scale(0.8);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-hover);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: normal;
+  white-space: normal;
+  width: 200px;
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transition: all var(--duration) var(--ease);
+  z-index: 10;
+  text-transform: none;
+}
+
+.hint-badge:hover::after, .hint-badge:focus::after {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
 }

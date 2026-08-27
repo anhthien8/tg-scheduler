@@ -1,8 +1,10 @@
 """
 Analytics, CSV Export, Template Library, and Auto-Reply Rules routes.
 """
+import asyncio
 import csv
 import io
+import logging
 import time
 from typing import Dict, Any, Tuple
 from fastapi import APIRouter, HTTPException, Query
@@ -16,21 +18,70 @@ router = APIRouter(tags=["analytics"])
 
 # ── TTL Cache for Analytics ──────────────────────────────────────────────────
 
+logger = logging.getLogger("tg-scheduler.analytics")
+
+
 class AsyncTTLCache:
-    def __init__(self, ttl_seconds: int = 30):
+    """Bounded TTL cache with singleflight fetch and stale fallback.
+
+    - TTL expiry per key (expired entries kept briefly for stale fallback)
+    - maxsize with LRU eviction -> bounded memory
+    - get_or_fetch(): concurrent callers share ONE in-flight fetch (no stampede)
+    - on fetch failure, serves stale value if available (graceful degradation)
+    """
+
+    def __init__(self, ttl_seconds: int = 30, maxsize: int = 256):
         self.ttl = ttl_seconds
+        self.maxsize = maxsize
         self.cache: Dict[str, Tuple[float, Any]] = {}
+        self._locks: Dict[str, asyncio.Lock] = {}
 
     def get(self, key: str) -> Any:
-        if key in self.cache:
-            timestamp, value = self.cache[key]
-            if time.time() - timestamp < self.ttl:
-                return value
-            del self.cache[key]
+        entry = self.cache.get(key)
+        if entry is None:
+            return None
+        timestamp, value = entry
+        if time.time() - timestamp < self.ttl:
+            return value
         return None
 
+    def get_stale(self, key: str) -> Any:
+        """Return value even if expired (for failure fallback)."""
+        entry = self.cache.get(key)
+        return entry[1] if entry else None
+
     def set(self, key: str, value: Any):
+        # LRU eviction: drop the oldest entry when the cache is full
+        if key not in self.cache and len(self.cache) >= self.maxsize:
+            oldest = min(self.cache, key=lambda k: self.cache[k][0])
+            del self.cache[oldest]
         self.cache[key] = (time.time(), value)
+
+    async def get_or_fetch(self, key: str, fetch) -> Any:
+        """Return cached value, or run fetch() exactly once for concurrent callers."""
+        cached = self.get(key)
+        if cached is not None:
+            return cached
+
+        lock = self._locks.setdefault(key, asyncio.Lock())
+        try:
+            async with lock:
+                cached = self.get(key)  # re-check: another task may have filled it
+                if cached is not None:
+                    return cached
+                try:
+                    value = await fetch()
+                except Exception:
+                    stale = self.get_stale(key)
+                    if stale is not None:
+                        logger.warning("Analytics query failed; serving stale cache for %r", key)
+                        return stale
+                    raise
+                self.set(key, value)
+                return value
+        finally:
+            if self._locks.get(key) is lock:
+                self._locks.pop(key, None)
 
 
 analytics_cache = AsyncTTLCache(ttl_seconds=30)
@@ -61,16 +112,27 @@ async def generate_csv_rows(cols, async_data_generator):
 
 
 async def member_generator(scrape_job_id: str, first_chunk: list, chunk_size: int = 1000):
+    last_id = None
     for member in first_chunk:
+        last_id = member.get("id")
         yield member
-    offset = chunk_size
-    while True:
-        chunk = await db.get_scraped_members(scrape_job_id, limit=chunk_size, offset=offset)
-        if not chunk:
-            break
-        for member in chunk:
-            yield member
-        offset += chunk_size
+    if last_id is not None:
+        while True:
+            chunk = await db.get_scraped_members(scrape_job_id, limit=chunk_size, last_id=last_id)
+            if not chunk:
+                break
+            for member in chunk:
+                last_id = member.get("id")
+                yield member
+    else:
+        offset = chunk_size
+        while True:
+            chunk = await db.get_scraped_members(scrape_job_id, limit=chunk_size, offset=offset)
+            if not chunk:
+                break
+            for member in chunk:
+                yield member
+            offset += chunk_size
 
 
 @router.get("/api/export/members/{scrape_job_id}")
@@ -88,16 +150,32 @@ async def export_members_csv(scrape_job_id: str):
 
 
 async def campaign_logs_generator(campaign_id: int, first_chunk: list, chunk_size: int = 1000):
+    last_sent_at = None
+    last_id = None
     for log in first_chunk:
+        last_sent_at = log.get("sent_at")
+        last_id = log.get("id")
         yield log
-    offset = chunk_size
-    while True:
-        chunk = await db.get_dm_campaign_logs(campaign_id, limit=chunk_size, offset=offset)
-        if not chunk:
-            break
-        for log in chunk:
-            yield log
-        offset += chunk_size
+    if last_sent_at is not None and last_id is not None:
+        while True:
+            chunk = await db.get_dm_campaign_logs(
+                campaign_id, limit=chunk_size, last_sent_at=last_sent_at, last_id=last_id
+            )
+            if not chunk:
+                break
+            for log in chunk:
+                last_sent_at = log.get("sent_at")
+                last_id = log.get("id")
+                yield log
+    else:
+        offset = chunk_size
+        while True:
+            chunk = await db.get_dm_campaign_logs(campaign_id, limit=chunk_size, offset=offset)
+            if not chunk:
+                break
+            for log in chunk:
+                yield log
+            offset += chunk_size
 
 
 @router.get("/api/export/campaign-logs/{campaign_id}")
@@ -115,16 +193,27 @@ async def export_campaign_logs_csv(campaign_id: int):
 
 
 async def contacts_generator(first_chunk: list, chunk_size: int = 1000):
+    last_id = None
     for member in first_chunk:
+        last_id = member.get("id")
         yield member
-    offset = chunk_size
-    while True:
-        chunk = await db.get_all_scraped_contacts(limit=chunk_size, offset=offset)
-        if not chunk:
-            break
-        for member in chunk:
-            yield member
-        offset += chunk_size
+    if last_id is not None:
+        while True:
+            chunk = await db.get_all_scraped_contacts(limit=chunk_size, last_id=last_id)
+            if not chunk:
+                break
+            for member in chunk:
+                last_id = member.get("id")
+                yield member
+    else:
+        offset = chunk_size
+        while True:
+            chunk = await db.get_all_scraped_contacts(limit=chunk_size, offset=offset)
+            if not chunk:
+                break
+            for member in chunk:
+                yield member
+            offset += chunk_size
 
 
 @router.get("/api/export/contacts")
@@ -145,43 +234,23 @@ async def export_all_contacts_csv():
 
 @router.get("/api/analytics/overview")
 async def analytics_overview():
-    cached = analytics_cache.get("overview")
-    if cached is not None:
-        return cached
-    data = await db.get_analytics_overview()
-    analytics_cache.set("overview", data)
-    return data
+    return await analytics_cache.get_or_fetch("overview", db.get_analytics_overview)
 
 
 @router.get("/api/analytics/daily-stats")
 async def analytics_daily_stats(days: int = Query(default=30, ge=1, le=365)):
     key = f"daily_stats_{days}"
-    cached = analytics_cache.get(key)
-    if cached is not None:
-        return cached
-    data = await db.get_analytics_daily_stats(days)
-    analytics_cache.set(key, data)
-    return data
+    return await analytics_cache.get_or_fetch(key, lambda: db.get_analytics_daily_stats(days))
 
 
 @router.get("/api/analytics/account-health")
 async def analytics_account_health():
-    cached = analytics_cache.get("account_health")
-    if cached is not None:
-        return cached
-    data = await db.get_analytics_account_health()
-    analytics_cache.set("account_health", data)
-    return data
+    return await analytics_cache.get_or_fetch("account_health", db.get_analytics_account_health)
 
 
 @router.get("/api/analytics/campaign-performance")
 async def analytics_campaign_performance():
-    cached = analytics_cache.get("campaign_performance")
-    if cached is not None:
-        return cached
-    data = await db.get_analytics_campaign_performance()
-    analytics_cache.set("campaign_performance", data)
-    return data
+    return await analytics_cache.get_or_fetch("campaign_performance", db.get_analytics_campaign_performance)
 
 
 # ── Template Library ─────────────────────────────────────────────────────────

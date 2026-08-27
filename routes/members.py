@@ -1825,6 +1825,11 @@ async def _run_campaign(campaign_id: int):
             limit_premium if acc_prem_map.get(sid, False) else limit_normal
             for sid in sender_ids
         )
+        acc_daily_count_map = {
+            sid: await db.get_account_daily_dm_count(sid)
+            for sid in sender_ids
+        }
+
 
         for member in members:
             # Check if campaign was stopped
@@ -1900,9 +1905,10 @@ async def _run_campaign(campaign_id: int):
 
 
                 # Daily DM limit check per account
-                limit_reached, dm_count, dm_limit = await db.is_account_dm_limit_reached(
-                    acc_id, limit_premium=limit_premium, limit_normal=limit_normal
-                )
+                is_premium = acc_prem_map.get(acc_id, False)
+                dm_limit = limit_premium if is_premium else limit_normal
+                dm_count = acc_daily_count_map.get(acc_id, 0)
+                limit_reached = dm_count >= dm_limit
                 if limit_reached:
                     logger.warning(f"[Campaign {campaign_id}] Account {acc_id} daily limit ({dm_count}/{dm_limit})")
                     flooded_accounts[acc_id] = float('inf')
@@ -2048,6 +2054,7 @@ async def _run_campaign(campaign_id: int):
 
                 sent += 1
                 daily_sent += 1
+                acc_daily_count_map[acc_id] = acc_daily_count_map.get(acc_id, 0) + 1
                 consecutive_errors = 0  # Reset on success
                 await db.add_dm_campaign_log(
                     campaign_id, acc_id, user_id, username, "success",

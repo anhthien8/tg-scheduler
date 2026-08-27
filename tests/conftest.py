@@ -5,6 +5,27 @@ import types
 import pytest
 from datetime import datetime
 import random
+import asyncio
+import inspect
+
+_original_sleep = asyncio.sleep
+async def _mock_sleep(seconds, *args, **kwargs):
+    # Check stack to see if called from campaign/watcher logic
+    frame = inspect.currentframe()
+    is_campaign = False
+    while frame:
+        filename = frame.f_code.co_filename
+        if "members.py" in filename or "keyword_watcher.py" in filename:
+            is_campaign = True
+            break
+        frame = frame.f_back
+    
+    if is_campaign and seconds >= 1.0:
+        return await _original_sleep(0.001)
+    return await _original_sleep(seconds)
+asyncio.sleep = _mock_sleep
+
+
 
 # 1. Set environment variables before any other imports
 temp_dir = tempfile.TemporaryDirectory()
@@ -12,6 +33,8 @@ os.environ["DATA_DIR"] = temp_dir.name
 os.environ["DASHBOARD_SECRET_KEY"] = "test_secret_key"
 os.environ["PORT"] = "8899"
 os.environ["DEBUG_ENDPOINTS"] = "1"  # enable debug routes for testing
+os.environ["DISABLE_AUTH"] = "0"
+
 
 # 2. Mock telegram_client module
 tg_mock = types.ModuleType("telegram_client")
@@ -243,6 +266,10 @@ tg_mock.send_poll_message = send_poll_message
 async def get_dialogs(account_id: int, *args, **kwargs):
     return [{"chat_id": 12345, "chat_title": "Mock Group", "chat_type": "group", "username": "mock_grp", "participants_count": 10}]
 tg_mock.get_dialogs = get_dialogs
+
+async def ensure_connected(client, account_id, *args, **kwargs):
+    return True
+tg_mock.ensure_connected = ensure_connected
 
 sys.modules["telegram_client"] = tg_mock
 

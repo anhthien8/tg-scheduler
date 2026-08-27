@@ -294,12 +294,7 @@ async def test_16_create_schedule_invalid_type(client):
         "messages": [],
         "targets": []
     }
-    response = client.post("/api/schedules", json=payload)
-    # Pydantic validates data or db raises constraint. FastAPI model validation should reject it or db validation does.
-    # Note: ScheduleCreate has schedule_type: str. Let's see if the FastAPI endpoint validates the exact schema.
-    # Actually, the sqlite table has CHECK(schedule_type IN ('hourly','daily','weekly','monthly','once')).
-    # If the router processes it and tries to insert, SQLite raises an integrity error which the app raises as 500 or catches.
-    # Let's verify what response code we get.
+    # SQLite CHECK(schedule_type IN (...)) rejects the invalid type
     response = client.post("/api/schedules", json=payload)
     assert response.status_code in (400, 422, 500)
 

@@ -8,11 +8,51 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.0.4",
+        "date": "26/08/2026",
+        "title": "🔧 Gia Cố Hệ Thống: Chống Cache Stampede, Tối Ưu GZip & Ổn Định Bộ Nhớ",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Bản vá tăng cường độ ổn định từ đợt rà soát Adversarial Hardening: cache analytics chống thundering-herd với fallback dữ liệu cũ, GZip bỏ qua file nhị phân đã nén sẵn, giới hạn bộ nhớ cache LRU và dọn dẹp toàn bộ test suite.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Chống Cache Stampede (Singleflight)",
+                "desc": "Cache analytics nay dùng khóa per-key: khi nhiều request cùng truy cập một key lạnh, chỉ 1 truy vấn DB chạy, các request còn lại chờ và dùng chung kết quả — giảm tải DB tức thì.",
+                "tag": "Cache Hardening"
+            },
+            {
+                "type": "fix",
+                "title": "Fallback Dữ Liệu Cũ Khi DB Lỗi (Stale-While-Revalidate)",
+                "desc": "Nếu truy vấn analytics thất bại, hệ thống tự động trả về dữ liệu cache gần nhất thay vì báo lỗi 500, đảm bảo dashboard luôn hiển thị.",
+                "tag": "Resilience"
+            },
+            {
+                "type": "fix",
+                "title": "Giới Hạn Bộ Nhớ Cache (LRU 256 keys)",
+                "desc": "AsyncTTLCache nay có giới hạn tối đa 256 key với cơ chế LRU eviction, ngăn chặn rò rỉ bộ nhớ khi có quá nhiều tham số truy vấn khác nhau.",
+                "tag": "Memory Safety"
+            },
+            {
+                "type": "fix",
+                "title": "GZip Bỏ Qua File Nhị Phân (ADV-01)",
+                "desc": "Middleware GZip không còn nén ảnh/video/âm thanh/zip/octet-stream — những định dạng đã nén sẵn. Tiết kiệm CPU và tránh tăng kích thước payload vô ích.",
+                "tag": "Performance"
+            },
+            {
+                "type": "fix",
+                "title": "Dọn Dẹp & Siết Chặt Test Suite",
+                "desc": "Loại bỏ request trùng lặp trong test e2e, đổi tên route handler gây cảnh báo pytest, bổ sung assertion kiểm tra ảnh không bị gzip và thêm style toast warning còn thiếu.",
+                "tag": "QA Cleanup"
+            }
+        ]
+    },
+    {
         "version": "v3.0.3",
         "date": "05/08/2026",
         "title": "🛡️ Chặn Triệt Để 100% Tất Cả Các Loại Telegram Bot & Username Chứa 'bot'",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Nâng cấp bộ lọc bot đa tầng: kiểm tra thuộc tính .bot, chặn tất cả username/tên chứa từ 'bot' (case-insensitive) ở cả Keyword DM Watcher và Inbox AI Agent.",
         "changes": [
             {

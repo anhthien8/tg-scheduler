@@ -49,10 +49,14 @@ const Members = {
 
   // ── Account dropdown populate ──
   async populateAccounts() {
-    try {
-      const d = await API.getAccounts();
-      this._accounts = d.accounts || [];
-    } catch (e) { this._accounts = []; }
+    const now = Date.now();
+    if (!this._accounts?.length || !this._accountsCachedAt || (now - this._accountsCachedAt) > 30000) {
+      try {
+        const d = await API.getAccounts();
+        this._accounts = d.accounts || [];
+        this._accountsCachedAt = now;
+      } catch (e) { this._accounts = []; }
+    }
     const sel = document.getElementById('ms-account-select');
     if (!sel) return;
     const accounts = this._accounts;
@@ -1474,10 +1478,12 @@ const Members = {
   async populatePremiumCheckboxes() {
     const container = document.getElementById('sim-premium-checkboxes');
     if (!container) return;
-    if (!this._accounts.length) {
+    const now = Date.now();
+    if (!this._accounts?.length || !this._accountsCachedAt || (now - this._accountsCachedAt) > 30000) {
       try {
         const d = await API.getAccounts();
         this._accounts = d.accounts || [];
+        this._accountsCachedAt = now;
       } catch (e) { this._accounts = []; }
     }
     const premiums = this._accounts.filter(a => a.is_logged_in && a.is_premium);

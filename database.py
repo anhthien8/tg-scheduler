@@ -103,8 +103,8 @@ class ConnectionPool:
             for conn in self._connections:
                 try:
                     await conn.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Error closing connection: %s", e)
             self._connections.clear()
             while not self._queue.empty():
                 self._queue.get_nowait()
@@ -1892,9 +1892,9 @@ async def get_account_daily_dm_count(account_id: int) -> int:
     async with get_db() as db:
         row = await (await db.execute(
             """SELECT (
-                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND DATE(sent_at) = DATE('now'))
+                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND sent_at >= date('now'))
                 +
-                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND DATE(sent_at) = DATE('now'))
+                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND sent_at >= date('now'))
             ) as cnt""",
             (account_id, account_id)
         )).fetchone()
@@ -1920,9 +1920,9 @@ async def is_account_dm_limit_reached(account_id: int, limit_premium: int = None
 
         row = await (await db.execute(
             """SELECT (
-                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND DATE(sent_at) = DATE('now'))
+                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND sent_at >= date('now'))
                 +
-                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND DATE(sent_at) = DATE('now'))
+                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND sent_at >= date('now'))
             ) as cnt""",
             (account_id, account_id)
         )).fetchone()
@@ -2631,16 +2631,24 @@ async def get_scrape_jobs() -> list:
         return [dict(row) for row in await cursor.fetchall()]
 
 
-async def get_scraped_members(scrape_job_id: str, limit: int = 500, offset: int = 0) -> list:
+async def get_scraped_members(scrape_job_id: str, limit: int = 500, offset: int = 0, last_id: int = None) -> list:
     """Get members for a specific scrape job."""
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("""
-            SELECT * FROM scraped_members
-            WHERE scrape_job_id = ?
-            ORDER BY username ASC
-            LIMIT ? OFFSET ?
-        """, (scrape_job_id, limit, offset))
+        if last_id is not None:
+            cursor = await db.execute("""
+                SELECT * FROM scraped_members
+                WHERE scrape_job_id = ? AND id > ?
+                ORDER BY id ASC
+                LIMIT ?
+            """, (scrape_job_id, last_id, limit))
+        else:
+            cursor = await db.execute("""
+                SELECT * FROM scraped_members
+                WHERE scrape_job_id = ?
+                ORDER BY id ASC
+                LIMIT ? OFFSET ?
+            """, (scrape_job_id, limit, offset))
         return [dict(row) for row in await cursor.fetchall()]
 
 
@@ -2874,17 +2882,27 @@ async def add_dm_campaign_log(campaign_id: int, account_id: int,
         await db.commit()
 
 
-async def get_dm_campaign_logs(campaign_id: int, limit: int = 200, offset: int = 0) -> list:
+async def get_dm_campaign_logs(campaign_id: int, limit: int = 200, offset: int = 0, last_sent_at: str = None, last_id: int = None) -> list:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("""
-            SELECT l.*, a.name as account_name
-            FROM dm_campaign_logs l
-            LEFT JOIN accounts a ON l.account_id = a.id
-            WHERE l.campaign_id = ?
-            ORDER BY l.sent_at DESC
-            LIMIT ? OFFSET ?
-        """, (campaign_id, limit, offset))
+        if last_sent_at is not None and last_id is not None:
+            cursor = await db.execute("""
+                SELECT l.*, a.name as account_name
+                FROM dm_campaign_logs l
+                LEFT JOIN accounts a ON l.account_id = a.id
+                WHERE l.campaign_id = ? AND (l.sent_at < ? OR (l.sent_at = ? AND l.id < ?))
+                ORDER BY l.sent_at DESC, l.id DESC
+                LIMIT ?
+            """, (campaign_id, last_sent_at, last_sent_at, last_id, limit))
+        else:
+            cursor = await db.execute("""
+                SELECT l.*, a.name as account_name
+                FROM dm_campaign_logs l
+                LEFT JOIN accounts a ON l.account_id = a.id
+                WHERE l.campaign_id = ?
+                ORDER BY l.sent_at DESC, l.id DESC
+                LIMIT ? OFFSET ?
+            """, (campaign_id, limit, offset))
         return [dict(row) for row in await cursor.fetchall()]
 
 
@@ -2892,17 +2910,30 @@ async def get_dm_campaign_logs(campaign_id: int, limit: int = 200, offset: int =
 # CSV EXPORT HELPERS
 # ============================================================
 
-async def get_all_scraped_contacts(limit: int = 1000000, offset: int = 0) -> list:
+async def get_all_scraped_contacts(limit: int = 1000000, offset: int = 0, last_id: int = None) -> list:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("""
-            SELECT username, first_name, last_name, user_id, phone,
-                   is_premium, status, group_title, scraped_at
-            FROM scraped_members
-            GROUP BY user_id
-            ORDER BY scraped_at DESC
-            LIMIT ? OFFSET ?
-        """, (limit, offset))
+        if last_id is not None:
+            cursor = await db.execute("""
+                SELECT * FROM (
+                    SELECT MAX(id) as id, username, first_name, last_name, user_id, phone,
+                           is_premium, status, group_title, scraped_at
+                    FROM scraped_members
+                    GROUP BY user_id
+                )
+                WHERE id < ?
+                ORDER BY id DESC
+                LIMIT ?
+            """, (last_id, limit))
+        else:
+            cursor = await db.execute("""
+                SELECT MAX(id) as id, username, first_name, last_name, user_id, phone,
+                       is_premium, status, group_title, scraped_at
+                FROM scraped_members
+                GROUP BY user_id
+                ORDER BY id DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
         return [dict(row) for row in await cursor.fetchall()]
 
 
