@@ -20,6 +20,7 @@ import logging
 import random
 import json
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -37,15 +38,38 @@ logger = logging.getLogger("tg-scheduler.inbox")
 # handler_removers: account_id → (client, handler_fn)
 _handler_removers: dict[int, tuple[Any, Any]] = {}
 
-# Dedup set: (account_id, sender_user_id, message_id)
-_seen: set[tuple[int, int, int]] = set()
+# Dedup dict: (account_id, sender_user_id, message_id) -> timestamp (TTL prune, không clear-trắng)
+_seen: dict[tuple[int, int, int], float] = {}
 _MAX_SEEN = 5000  # cap to prevent unbounded growth
+_SEEN_TTL_SECS = 3600  # 1h — Telethon không redeliver sau vài phút
 
 # Pending AI sends set: (account_id, user_id)
 _pending_ai_sends: set[tuple[int, int]] = set()
 
 # Background periodic worker task for 24h auto-resume and drip follow-ups
 _periodic_worker_task: asyncio.Task | None = None
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background(coro) -> asyncio.Task:
+    """Giữ reference task đến khi xong; tránh GC hủy task nền giữa chừng."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+
+    def _done(completed: asyncio.Task) -> None:
+        _background_tasks.discard(completed)
+        if not completed.cancelled() and completed.exception():
+            logger.error("[AIFollowUp] Background task failed: %s", completed.exception())
+
+    task.add_done_callback(_done)
+    return task
+
+
+def _clear_background_tasks() -> None:
+    for task in list(_background_tasks):
+        if not task.done():
+            task.cancel()
+    _background_tasks.clear()
 
 
 async def _remove_ai_send_after_delay(account_id: int, user_id: int):
@@ -496,7 +520,7 @@ async def generate_and_send_ai_reply_for_chat(
         if "[HANDOVER_REQUIRED]" in ai_reply:
             new_status = "needs_human"
             ai_reply = ai_reply.replace("[HANDOVER_REQUIRED]", "").strip()
-            asyncio.create_task(_notify_main_account_handover(
+            _spawn_background(_notify_main_account_handover(
                 account_id, user_id, sender_username,
                 reason="AI triggered [HANDOVER_REQUIRED]"
             ))
@@ -529,7 +553,7 @@ async def generate_and_send_ai_reply_for_chat(
         if (lead_tier in ("Tier A", "Tier B") and intent_score >= 70 and current_reply_count >= 3
                 and new_status == "active"):
             new_status = "needs_human"
-            asyncio.create_task(_notify_main_account_handover(
+            _spawn_background(_notify_main_account_handover(
                 account_id, user_id, sender_username,
                 reason=f"Auto-escalation: {lead_tier} intent={intent_score}% after {current_reply_count} replies"
             ))
@@ -575,9 +599,9 @@ async def generate_and_send_ai_reply_for_chat(
             await asyncio.sleep(delay)
 
         await tg.send_text_message(account_id, user_id, ai_reply)
-        asyncio.create_task(_remove_ai_send_after_delay(account_id, user_id))
+        _spawn_background(_remove_ai_send_after_delay(account_id, user_id))
         await db.append_followup_chat_message(account_id, user_id, "assistant", ai_reply, inc_reply_count=True)
-        asyncio.create_task(_async_update_kol_profile(account_id, user_id, full_history, ai_provider, ai_keys, kwargs))
+        _spawn_background(_async_update_kol_profile(account_id, user_id, full_history, ai_provider, ai_keys, kwargs))
 
         if new_status != "active":
             await db.update_followup_chat_status(account_id, user_id, new_status)
@@ -625,7 +649,7 @@ def _make_handler(account_id: int):
                     )
                     await db.set_human_takeover(account_id, dest_id)
                     await db.append_followup_chat_message(account_id, dest_id, "assistant", f"[Human Admin]: {msg_content}")
-                    asyncio.create_task(_async_distill_human_rule(account_id, dest_id, msg_content))
+                    _spawn_background(_async_distill_human_rule(account_id, dest_id, msg_content))
             except Exception as ex_out:
                 logger.debug("[AIFollowUp] Error in outgoing human interception: %s", ex_out)
             return
@@ -635,11 +659,19 @@ def _make_handler(account_id: int):
         sender_id = event.sender_id
 
         dedup_key = (account_id, sender_id, msg_id)
+        now_ts = time.time()
         if dedup_key in _seen:
             return
+        # TTL prune expired + evict oldest nếu vẫn quá cap
         if len(_seen) >= _MAX_SEEN:
-            _seen.clear()
-        _seen.add(dedup_key)
+            expired = [k for k, ts in _seen.items() if now_ts - ts > _SEEN_TTL_SECS]
+            for k in expired:
+                _seen.pop(k, None)
+            if len(_seen) >= _MAX_SEEN:
+                oldest = sorted(_seen.items(), key=lambda kv: kv[1])[:len(_seen) // 2]
+                for k, _ in oldest:
+                    _seen.pop(k, None)
+        _seen[dedup_key] = now_ts
 
         sender = await event.get_sender()
         sender_username = getattr(sender, "username", None) or ""
@@ -802,7 +834,7 @@ def _make_handler(account_id: int):
                 if needs_handover:
                     logger.warning("[AIFollowUp] 🚨 Handover keyword matched for user %d (acc=%d)", sender_id, account_id)
                     await db.update_followup_chat_status(account_id, sender_id, "needs_human")
-                    asyncio.create_task(_notify_main_account_handover(
+                    _spawn_background(_notify_main_account_handover(
                         account_id, sender_id, sender_username,
                         reason=f"Handover keyword detected: '{message_text[:80]}'"
                     ))
@@ -810,7 +842,7 @@ def _make_handler(account_id: int):
                 elif chat.get("reply_count", 0) >= max_replies_val:
                     logger.warning("[AIFollowUp] 🚨 Max replies (%d) reached for user %d (acc=%d)", max_replies_val, sender_id, account_id)
                     await db.update_followup_chat_status(account_id, sender_id, "needs_human")
-                    asyncio.create_task(_notify_main_account_handover(
+                    _spawn_background(_notify_main_account_handover(
                         account_id, sender_id, sender_username,
                         reason=f"Max replies ({max_replies_val}) reached"
                     ))
@@ -935,7 +967,7 @@ async def process_drip_followups() -> dict:
                 await db.update_followup_chat_status(t["account_id"], t["user_id"], "active")
                 client = tg.get_client(t["account_id"])
                 if client and client.is_connected():
-                    asyncio.create_task(generate_and_send_ai_reply_for_chat(
+                    _spawn_background(generate_and_send_ai_reply_for_chat(
                         account_id=t["account_id"],
                         user_id=t["user_id"],
                         sender_username=t.get("username"),
@@ -972,7 +1004,7 @@ async def process_drip_followups() -> dict:
                     if client and client.is_connected():
                         logger.info("[AIFollowUp] 🔄 Recovering pending AI reply for user @%s (%d)...",
                                     sc.get("username", "?"), sc["user_id"])
-                        asyncio.create_task(generate_and_send_ai_reply_for_chat(
+                        _spawn_background(generate_and_send_ai_reply_for_chat(
                             account_id=sc["account_id"],
                             user_id=sc["user_id"],
                             sender_username=sc.get("username"),

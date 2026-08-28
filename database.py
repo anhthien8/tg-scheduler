@@ -16,6 +16,9 @@ logger = logging.getLogger("tg-scheduler.database")
 DB_DIR = os.getenv("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 DB_PATH = os.path.join(DB_DIR, "scheduler.db")
 
+# Timezone: DB lưu UTC (datetime('now')). Mọi query "hôm nay"/ngày phải tính theo giờ VN.
+VN_TZ = "+7 hours"
+
 class ConnectionPool:
     def __init__(self, db_path: str, max_connections: int = 10, timeout: float = 10.0):
         self.db_path = db_path
@@ -866,6 +869,7 @@ async def init_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_send_logs_account_id ON send_logs(account_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_reaction_logs_target_acc ON reaction_logs(target_id, account_id, msg_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_reaction_logs_account_id ON reaction_logs(account_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_reaction_logs_sent_at ON reaction_logs(sent_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_schedule_messages_schedule_id ON schedule_messages(schedule_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_schedule_targets_schedule_id ON schedule_targets(schedule_id)")
 
@@ -1001,6 +1005,18 @@ async def init_db():
 
     # Seed default templates after init
     await seed_default_templates()
+
+    # Prune reaction_logs >30 ngày (giữ DB gọn, query nhanh)
+    try:
+        async with get_db() as db:
+            cur = await db.execute(
+                "DELETE FROM reaction_logs WHERE sent_at < datetime('now', '-30 days')"
+            )
+            if cur.rowcount > 0:
+                await db.commit()
+                logging.getLogger(__name__).info("[DB] Pruned %d reaction_logs >30d", cur.rowcount)
+    except Exception as e:
+        logging.getLogger(__name__).warning("[DB] reaction_logs prune failed: %s", e)
 
 
 # ── Account CRUD ──
@@ -1395,7 +1411,7 @@ async def get_log_stats() -> dict:
             SELECT 
                 COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END), 0) as success,
                 COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0) as failed,
-                COALESCE(SUM(CASE WHEN status='success' AND date(sent_at)=date('now') THEN 1 ELSE 0 END), 0) as today
+                COALESCE(SUM(CASE WHEN status='success' AND date(sent_at)=date('now', '+7 hours') THEN 1 ELSE 0 END), 0) as today
             FROM send_logs
         """)
         log_row = await cursor.fetchone()
@@ -1731,7 +1747,7 @@ async def get_watcher_log_stats() -> dict:
         c = await db.execute("SELECT COUNT(*) FROM watcher_dm_logs WHERE status='skipped'")
         skipped = (await c.fetchone())[0]
         c = await db.execute(
-            "SELECT COUNT(*) FROM watcher_dm_logs WHERE status='success' AND date(sent_at)=date('now')")
+            "SELECT COUNT(*) FROM watcher_dm_logs WHERE status='success' AND date(sent_at)=date('now', '+7 hours'))")
         today = (await c.fetchone())[0]
         c = await db.execute("SELECT COUNT(*) FROM keyword_watchers WHERE is_active=1")
         active = (await c.fetchone())[0]
@@ -1893,9 +1909,9 @@ async def get_account_daily_dm_count(account_id: int) -> int:
     async with get_db() as db:
         row = await (await db.execute(
             """SELECT (
-                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND sent_at >= date('now'))
+                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours'))
                 +
-                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND sent_at >= date('now'))
+                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours'))
             ) as cnt""",
             (account_id, account_id)
         )).fetchone()
@@ -1921,9 +1937,9 @@ async def is_account_dm_limit_reached(account_id: int, limit_premium: int = None
 
         row = await (await db.execute(
             """SELECT (
-                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND sent_at >= date('now'))
+                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours'))
                 +
-                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND sent_at >= date('now'))
+                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours'))
             ) as cnt""",
             (account_id, account_id)
         )).fetchone()
@@ -3017,31 +3033,31 @@ async def get_analytics_daily_stats(days: int = 30) -> list:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("""
             WITH RECURSIVE dates(d) AS (
-                SELECT date('now', ? || ' days')
+                SELECT date('now', '+7 hours', ? || ' days')
                 UNION ALL
-                SELECT date(d, '+1 day') FROM dates WHERE d < date('now')
+                SELECT date(d, '+1 day') FROM dates WHERE d < date('now', '+7 hours')
             ),
             campaign_stats AS (
-                SELECT date(sent_at) as d,
+                SELECT date(sent_at, '+7 hours') as d,
                        SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as sent,
                        SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed
                 FROM dm_campaign_logs
                 WHERE sent_at >= datetime('now', ? || ' days')
-                GROUP BY date(sent_at)
+                GROUP BY date(sent_at, '+7 hours')
             ),
             watcher_stats AS (
-                SELECT date(sent_at) as d,
+                SELECT date(sent_at, '+7 hours') as d,
                        SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as sent,
                        SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed
                 FROM watcher_dm_logs
                 WHERE sent_at >= datetime('now', ? || ' days')
-                GROUP BY date(sent_at)
+                GROUP BY date(sent_at, '+7 hours')
             ),
             reply_stats AS (
-                SELECT date(received_at) as d, COUNT(*) as replies
+                SELECT date(received_at, '+7 hours') as d, COUNT(*) as replies
                 FROM dm_replies
                 WHERE received_at >= datetime('now', ? || ' days')
-                GROUP BY date(received_at)
+                GROUP BY date(received_at, '+7 hours')
             )
             SELECT dates.d as date,
                    COALESCE(cs.sent, 0) + COALESCE(ws.sent, 0) as sent,
@@ -3080,7 +3096,7 @@ async def get_analytics_account_health() -> list:
                 FROM (
                     SELECT
                         account_id,
-                        SUM(CASE WHEN status = 'success' AND DATE(sent_at) = DATE('now') THEN 1 ELSE 0 END) as sent_today,
+                        SUM(CASE WHEN status = 'success' AND DATE(sent_at) = DATE('now', '+7 hours') THEN 1 ELSE 0 END) as sent_today,
                         SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as sent_total,
                         SUM(CASE WHEN status = 'failed' AND (error_message LIKE '%Flood%' OR error_message LIKE '%PeerFlood%') THEN 1 ELSE 0 END) as flood_total,
                         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_total
@@ -3091,7 +3107,7 @@ async def get_analytics_account_health() -> list:
                     
                     SELECT
                         account_id,
-                        SUM(CASE WHEN status = 'success' AND DATE(sent_at) = DATE('now') THEN 1 ELSE 0 END) as sent_today,
+                        SUM(CASE WHEN status = 'success' AND DATE(sent_at) = DATE('now', '+7 hours') THEN 1 ELSE 0 END) as sent_today,
                         SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as sent_total,
                         SUM(CASE WHEN status = 'failed' AND (error_message LIKE '%Flood%' OR error_message LIKE '%PeerFlood%') THEN 1 ELSE 0 END) as flood_total,
                         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_total
