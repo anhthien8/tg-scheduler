@@ -1586,6 +1586,7 @@ async def _run_campaign(campaign_id: int):
         messages = campaign["messages"]
         delay_min = campaign["delay_min"]
         delay_max = campaign["delay_max"]
+        base_delay = random.uniform(delay_min, delay_max)  # init trước loop — exception handlers (1967/2172/2187) dùng trước lần gán ở cuối loop
         limit_premium = campaign.get("daily_limit_premium", 60) or 60
         limit_normal = min(int(campaign.get("daily_limit_normal", 10) or 10), 10)
         use_ai = campaign["use_ai_remix"]
