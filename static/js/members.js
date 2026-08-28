@@ -2406,38 +2406,9 @@ const Members = {
       return;
     }
 
-    // Apply the same depth + trading filters to get the visible leads
-    let filtered = this._similarLeads || [];
-    if (this._depthFilter !== 'all') {
-      filtered = filtered.filter(l => l.depth === this._depthFilter);
-    }
-    if (this._tradingFilter === 'has_contacts') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0);
-    } else if (this._tradingFilter === 'trading_vip') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 80);
-    } else if (this._tradingFilter === 'trading_all') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 60 && (l.trading_score || 0) < 80);
-    } else if (this._tradingFilter === 'potential_bd') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 45 && (l.trading_score || 0) < 60);
-    } else if (this._tradingFilter === 'news') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && l.category === 'news_general');
-    } else if (this._tradingFilter === 'no_contacts') {
-      filtered = filtered.filter(l => !l.contacts || l.contacts.length === 0);
-    }
-
-    // Collect contacts from filtered leads only, intersected with selected checkboxes
-    const filteredContactSet = new Set();
-    filtered.forEach(l => {
-      if (l.contacts) {
-        l.contacts.forEach(c => {
-          if (!this._isBotUsername(c) && this._selectedContacts.has(c)) {
-            filteredContactSet.add(c);
-          }
-        });
-      }
-    });
-
-    const cleanContacts = Array.from(filteredContactSet);
+    // Import ALL selected contacts directly — không re-filter theo tab/depth hiện tại.
+    // Selection đã được xác định bởi "Chọn nhanh" hoặc checkbox thủ công.
+    const cleanContacts = Array.from(this._selectedContacts).filter(c => !this._isBotUsername(c));
     if (!cleanContacts.length) {
       App.toast('Chưa chọn contact hợp lệ nào trong tab hiện tại!', 'error');
       return;
@@ -2451,18 +2422,7 @@ const Members = {
 
     const groupTitle = `Deep Crawl Contacts (${jobId})`;
 
-    // Confirm with exact count and active filter name
-    const filterLabels = {
-      'has_contacts': '🎯 Tất cả có Contact',
-      'trading_vip': '🔥 VIP Signals',
-      'trading_all': '📈 Trading & Scalping',
-      'potential_bd': '💎 Tiềm năng BD',
-      'news': '📰 Tin tức',
-      'no_contacts': '❌ Chưa có Contact',
-      'all': '🌐 Xem tất cả'
-    };
-    const tabLabel = filterLabels[this._tradingFilter] || this._tradingFilter;
-    if (!confirm(`Lưu ${cleanContacts.length} contacts từ tab "${tabLabel}" vào job "${jobId}"?`)) return;
+    if (!confirm(`Lưu ${cleanContacts.length} contacts đã chọn vào job "${jobId}"?`)) return;
 
     try {
       const res = await fetch('/api/members/import-contacts', {
