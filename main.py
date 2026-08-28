@@ -242,6 +242,17 @@ async def lifespan(app: FastAPI):
     )
     logger.info("DB backup scheduled daily at 03:00")
 
+    # Lead SLA check: every 30 min — ping if Tier A/B leads wait >2h
+    from apscheduler.triggers.interval import IntervalTrigger
+    sch.get_scheduler().add_job(
+        alerts.check_lead_sla,
+        trigger=IntervalTrigger(minutes=30),
+        id="lead_sla_check",
+        name="Lead SLA Check",
+        replace_existing=True,
+    )
+    logger.info("Lead SLA check scheduled every 30 min")
+
     # Start message queue worker
     mq.start_worker()
 

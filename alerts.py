@@ -82,6 +82,49 @@ async def flood_guard(account_id: int) -> bool:
         return False
 
 
+async def check_lead_sla():
+    """Tier A/B leads stuck in needs_human > 2h → ping. Dedup per lead per 6h."""
+    try:
+        if await db.get_setting("alerts_enabled", "1") != "1":
+            return
+        async with db.get_db() as conn:
+            conn.row_factory = __import__("aiosqlite").Row
+            cursor = await conn.execute("""
+                SELECT account_id, user_id, username, name, lead_tier, intent_score,
+                       human_takeover_at, summary
+                FROM ai_followup_chats
+                WHERE status = 'needs_human'
+                  AND lead_tier IN ('Tier A', 'Tier B')
+                  AND human_takeover_at IS NOT NULL
+            """)
+            rows = [dict(r) for r in await cursor.fetchall()]
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        stale = []
+        for r in rows:
+            try:
+                tk = datetime.fromisoformat(r["human_takeover_at"]).replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            if (now - tk).total_seconds() > 7200:  # > 2h
+                stale.append(r)
+        if not stale:
+            return
+        stale.sort(key=lambda r: -(r.get("intent_score") or 0))
+        lines = []
+        for r in stale[:5]:
+            tag = f"@{r['username']}" if r.get("username") else f"#{r['user_id']}"
+            name = r.get("name") or tag
+            lines.append(f"• {name} ({tag}) — {r['lead_tier']} {r.get('intent_score') or 0}%")
+        await send_alert(
+            "lead_sla",
+            f"⏰ {len(stale)} lead Tier A/B đang chờ người thật >2h:\n" + "\n".join(lines)
+            + "\n\nVào AI Follow-Up xử lý kẻo nguội lead!"
+        )
+    except Exception as e:
+        logger.error(f"[SLA] Lỗi: {e}")
+
+
 def run_backup() -> str | None:
     """SQLite online backup (đọc nhất quán dù DB đang chạy WAL). Giữ 7 bản mới nhất."""
     try:

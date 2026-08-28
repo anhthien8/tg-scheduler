@@ -451,7 +451,16 @@ async def generate_and_send_ai_reply_for_chat(
         "5. LEAD EVALUATION METRICS: At the VERY END of your response, append a hidden metadata JSON tag on its own line: [METRICS: {\"intent_score\": <0-100>, \"lead_tier\": \"<Tier A|Tier B|Tier C>\", \"summary\": \"<1-sentence lead need summary>\"}].\n"
         "   - Tier A (Intent 80-100): High volume trader/KOL (>10k subs or >$5M vol), ready for meeting, negotiating terms.\n"
         "   - Tier B (Intent 40-79): Interested in exchange benefits, asking detailed questions.\n"
-        "   - Tier C (Intent 0-39): Casual question, low interest, or greeting."
+        "   - Tier C (Intent 0-39): Casual question, low interest, or greeting.\n"
+        "6. HANDOVER TRIGGER (CRITICAL): Append [HANDOVER_REQUIRED] on its own line (before METRICS) when ANY of these apply:\n"
+        "   - Prospect asks for fixed fee, upfront payment, retainer, or sponsorship budget.\n"
+        "   - Prospect requests a call, meeting, or contract discussion.\n"
+        "   - Prospect asks to speak with a human, admin, or manager.\n"
+        "   - Prospect provides volume proof (screenshot/recording) that needs human verification.\n"
+        "   - Prospect is ready to onboard (has UID, asks for ref link setup, commission binding).\n"
+        "   - You have exchanged 3+ substantive replies and the lead is Tier A or B.\n"
+        "   - Any legal, compliance, payment dispute, or account ownership conflict.\n"
+        "   When appending [HANDOVER_REQUIRED], still write a natural closing message to the prospect (e.g. 'Let me loop in our partnership manager for this — they'll reach out shortly 👍'). The tag is invisible to the prospect."
     )
     combined_prompt = sys_prompt + format_rules
     if kb and kb.strip():
@@ -514,6 +523,18 @@ async def generate_and_send_ai_reply_for_chat(
             ai_reply = re.sub(r'\[?METRICS\s*:.*$', '', ai_reply, flags=re.DOTALL | re.IGNORECASE).strip()
 
         await db.update_followup_lead_metrics(account_id, user_id, intent_score, lead_tier, summary_text)
+
+        # ── Auto-escalation: Tier A/B + high intent + enough replies → needs_human ──
+        current_reply_count = chat.get("reply_count", 0) if chat else 0
+        if (lead_tier in ("Tier A", "Tier B") and intent_score >= 70 and current_reply_count >= 3
+                and new_status == "active"):
+            new_status = "needs_human"
+            asyncio.create_task(_notify_main_account_handover(
+                account_id, user_id, sender_username,
+                reason=f"Auto-escalation: {lead_tier} intent={intent_score}% after {current_reply_count} replies"
+            ))
+            logger.info("[AIFollowUp] 🚨 Auto-escalated user %d to needs_human (%s, %d%%, %d replies)",
+                        user_id, lead_tier, intent_score, current_reply_count)
 
         ai_reply = sanitize_telegram_html(ai_reply)
         if not ai_reply:

@@ -113,6 +113,19 @@ async def trigger_drip_followup():
     return {"status": "ok", "result": res}
 
 
+@router.post("/chats/{account_id}/{user_id}/verification")
+async def update_verification(account_id: int, user_id: int, req: dict):
+    """Update verification status: none, requested, submitted, verified, rejected."""
+    valid = ("none", "requested", "submitted", "verified", "rejected")
+    status = req.get("status", "")
+    if status not in valid:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Choose: {valid}")
+    ok = await db.update_followup_verification(account_id, user_id, status)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    return {"status": "ok", "verification_status": status}
+
+
 @router.get("/chats/{account_id}/{user_id}/history")
 async def get_chat_history(account_id: int, user_id: int):
     """Get full message history for a single chat (lazy-loaded by modal)."""

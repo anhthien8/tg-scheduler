@@ -296,7 +296,28 @@ const AIFollowUp = {
     const toggle = c.status === 'active'
       ? `<button class="btn btn-ghost" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'paused_admin')">⏸ Chat tay</button>`
       : `<button class="btn btn-ghost" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')">▶️ Bật AI</button>`;
-    el.innerHTML = `${toggle}<button class="btn btn-green" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'onboarded')">✅ Đã onboard</button><button class="btn btn-primary" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>`;
+    const vs = c.verification_status || 'none';
+    const vsLabel = {none:'🔍 Chưa verify', requested:'📤 Đã yêu cầu', submitted:'📎 Đã nộp', verified:'✅ Verified', rejected:'❌ Từ chối'}[vs] || vs;
+    const vsBtn = `<button class="btn btn-ghost" onclick="AIFollowUp.cycleVerification(${c.account_id},${c.user_id})" title="Click để đổi trạng thái verify">${vsLabel}</button>`;
+    el.innerHTML = `${toggle}${vsBtn}<button class="btn btn-green" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'onboarded')">✅ Đã onboard</button><button class="btn btn-primary" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>`;
+  },
+
+  async cycleVerification(accountId, userId) {
+    const c = this._modalChat;
+    if (!c) return;
+    const order = ['none','requested','submitted','verified','rejected'];
+    const cur = c.verification_status || 'none';
+    const next = order[(order.indexOf(cur) + 1) % order.length];
+    try {
+      const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/verification`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({status: next})
+      });
+      if (!res.ok) throw new Error('Lỗi cập nhật verification');
+      c.verification_status = next;
+      this._renderModalActions();
+      App.toast(`Verification: ${next}`, 'success');
+    } catch (e) { App.toast(e.message, 'error'); }
   },
 
   closeHistoryModal() {

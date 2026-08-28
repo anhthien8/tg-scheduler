@@ -738,7 +738,8 @@ async def init_db():
             ("summary", "TEXT DEFAULT ''"),
             ("last_drip_stage", "INTEGER DEFAULT 0"),
             ("last_user_message_at", "TEXT DEFAULT (datetime('now'))"),
-            ("human_takeover_at", "TEXT")
+            ("human_takeover_at", "TEXT"),
+            ("verification_status", "TEXT DEFAULT 'none'")
         ]:
             try:
                 await db.execute(f"ALTER TABLE ai_followup_chats ADD COLUMN {col_name} {col_def}")
@@ -4059,6 +4060,16 @@ async def update_followup_lead_metrics(
         return True
 
 
+async def update_followup_verification(account_id: int, user_id: int, status: str) -> bool:
+    """Update verification_status: none, requested, submitted, verified, rejected."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "UPDATE ai_followup_chats SET verification_status = ?, updated_at = datetime('now') WHERE account_id = ? AND user_id = ?",
+            (status, account_id, user_id)
+        )
+        return cursor.rowcount > 0
+
+
 async def get_followup_chat_counts() -> dict:
     """Lightweight count by status — no data transfer."""
     async with get_db() as db:
@@ -4080,7 +4091,7 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
         cursor = await db.execute(f"""
             SELECT id, account_id, user_id, username, name, campaign_id, watcher_id,
                    status, reply_count, created_at, updated_at, intent_score,
-                   lead_tier, summary, last_drip_stage, human_takeover_at
+                   lead_tier, summary, last_drip_stage, human_takeover_at, verification_status
                    {", history_json" if include_history else ""}
             FROM ai_followup_chats
             {where_clause}

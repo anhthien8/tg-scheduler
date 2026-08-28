@@ -317,6 +317,10 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
                 if exclude_bots and tg.is_bot_account(sender, getattr(sender, "username", None)):
                     continue
 
+                # Filter empty profiles (no username AND no name = throwaway/spam account)
+                if not getattr(sender, "username", None) and not getattr(sender, "first_name", None):
+                    continue
+
                 # Determine last seen
                 last_seen = None
                 status = getattr(sender, "status", None)
@@ -398,6 +402,10 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
 
                     # Filter bots
                     if exclude_bots and tg.is_bot_account(user, getattr(user, "username", None)):
+                        continue
+
+                    # Filter empty profiles (no username AND no name = throwaway/spam account)
+                    if not getattr(user, "username", None) and not getattr(user, "first_name", None):
                         continue
 
                     # Determine last seen
@@ -1733,6 +1741,17 @@ async def _run_campaign(campaign_id: int):
         blacklisted_ids = {b["user_id"] for b in bl if b.get("user_id")}
         blacklisted_usernames = await db.get_blacklisted_usernames_set()
 
+        # Pre-load bot_ignored user IDs (users who never replied / are bots)
+        _bot_ignored_ids: set[int] = set()
+        try:
+            async with db.get_db() as conn:
+                cursor = await conn.execute(
+                    "SELECT DISTINCT user_id FROM ai_followup_chats WHERE status = 'bot_ignored'"
+                )
+                _bot_ignored_ids = {row[0] for row in await cursor.fetchall() if row[0]}
+        except Exception:
+            pass
+
         # ── Pre-campaign SpamBot health check ──
         # Automatically exclude accounts that are currently spam-limited
         for sid in list(sender_ids):
@@ -1847,6 +1866,11 @@ async def _run_campaign(campaign_id: int):
                 skipped += 1
                 await db.add_dm_campaign_log(campaign_id, None, user_id, username, "skipped",
                                             "Tài khoản là Telegram Bot (lọc tự động)")
+                continue
+
+            # ── Bot filter: Layer 2 (skip users already marked bot_ignored) ──
+            if user_id in _bot_ignored_ids:
+                skipped += 1
                 continue
 
             # Skip already sent in current campaign
