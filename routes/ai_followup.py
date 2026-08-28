@@ -7,10 +7,12 @@ API Endpoints for AI Follow-Up Sales Agent settings and live lead chat managemen
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
+import asyncio
 import json
 
 import database as db
 import telegram_client as tg
+from dm_reply_tracker import personalize_weex_links, contains_weex_link
 
 router = APIRouter(prefix="/api/ai-followup", tags=["ai-followup"])
 
@@ -25,6 +27,74 @@ class AIFollowUpSettings(BaseModel):
 
 class UpdateChatStatusRequest(BaseModel):
     status: str  # 'active', 'paused_admin', 'onboarded', 'needs_human'
+
+
+class KOLProfileRequest(BaseModel):
+    affiliate_link: Optional[str] = None
+    vip_code: Optional[str] = None
+    distribution_enabled: Optional[bool] = None
+    distribution_regions: Optional[list[str]] = None
+    distribution_campaigns: Optional[list[str]] = None
+
+
+class KOLRecipient(BaseModel):
+    account_id: int
+    user_id: int
+
+
+class KOLBulkSendRequest(BaseModel):
+    recipients: list[KOLRecipient]
+    message: str
+
+
+@router.get("/kol-profiles/{account_id}/{user_id}")
+async def get_kol_profile(account_id: int, user_id: int):
+    return await db.get_kol_profile(account_id, user_id)
+
+
+@router.put("/kol-profiles/{account_id}/{user_id}")
+async def update_kol_profile(account_id: int, user_id: int, req: KOLProfileRequest):
+    if not await db.get_account(account_id):
+        raise HTTPException(status_code=404, detail="Không tìm thấy account")
+    await db.upsert_kol_profile(account_id, user_id, req.dict(exclude_unset=True))
+    return await db.get_kol_profile(account_id, user_id)
+
+
+@router.post("/kol-profiles/bulk-send")
+async def bulk_send_kol_messages(req: KOLBulkSendRequest):
+    text = (req.message or "").strip()
+    if not text or len(text) > 4000:
+        raise HTTPException(status_code=400, detail="Tin nhắn trống hoặc quá dài")
+    result = {"sent": [], "skipped": [], "errors": []}
+    for target in req.recipients:
+        profile = await db.get_kol_profile(target.account_id, target.user_id)
+        if contains_weex_link(text) and not profile.get("vip_code"):
+            result["skipped"].append({"account_id": target.account_id, "user_id": target.user_id, "reason": "missing vip_code"})
+            continue
+        personalized = personalize_weex_links(text, profile.get("vip_code", ""))
+        try:
+            await tg.send_text_message(target.account_id, target.user_id, personalized, parse_mode=None)
+            result["sent"].append({"account_id": target.account_id, "user_id": target.user_id})
+            await asyncio.sleep(0.2)
+        except Exception as exc:
+            result["errors"].append({"account_id": target.account_id, "user_id": target.user_id, "error": str(exc)})
+    return result
+
+
+# Aliases matching the Lead & AI Follow-Up frontend (chats/{account_id}/{user_id}/profile, bulk-send)
+@router.get("/chats/{account_id}/{user_id}/profile")
+async def get_chat_profile(account_id: int, user_id: int):
+    return await get_kol_profile(account_id, user_id)
+
+
+@router.post("/chats/{account_id}/{user_id}/profile")
+async def post_chat_profile(account_id: int, user_id: int, req: KOLProfileRequest):
+    return await update_kol_profile(account_id, user_id, req)
+
+
+@router.post("/bulk-send")
+async def bulk_send_chats(req: KOLBulkSendRequest):
+    return await bulk_send_kol_messages(req)
 
 
 @router.get("/settings")

@@ -4274,6 +4274,27 @@ async def get_kol_profile(account_id: int, user_id: int) -> dict:
         return {}
 
 
+async def get_kol_profiles(user_ids: list[int] | None = None) -> list[dict]:
+    """Return KOL profiles (account_id, user_id + merged profile fields)."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        query = "SELECT account_id, user_id, profile_json FROM kol_profiles"
+        params: list = []
+        if user_ids:
+            query += " WHERE user_id IN (" + ",".join("?" for _ in user_ids) + ")"
+            params = list(user_ids)
+        cursor = await db.execute(query, params)
+        rows = await cursor.fetchall()
+    out = []
+    for row in rows:
+        try:
+            profile = json.loads(row["profile_json"] or "{}")
+        except Exception:
+            profile = {}
+        out.append({"account_id": row["account_id"], "user_id": row["user_id"], **profile})
+    return out
+
+
 async def upsert_kol_profile(account_id: int, user_id: int, profile_data: dict) -> bool:
     if not profile_data:
         return False

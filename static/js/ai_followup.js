@@ -11,6 +11,7 @@ const AIFollowUp = {
   _statusFilter: '',
   _page: 1,
   _modalChat: null,
+  _selected: new Set(),
   PAGE_SIZE: 20,
 
   STATUS_META: {
@@ -129,7 +130,7 @@ const AIFollowUp = {
     } catch (e) {
       App.toast(e.message, 'error');
       const tb = document.getElementById('aifu-chats-table-body');
-      if (tb) tb.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--red)">${esc(e.message)}</td></tr>`;
+      if (tb) tb.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--red)">${esc(e.message)}</td></tr>`;
     }
   },
 
@@ -175,6 +176,7 @@ const AIFollowUp = {
     const pages = Math.max(1, Math.ceil(filtered.length / this.PAGE_SIZE));
     if (this._page > pages) this._page = pages;
     this.renderChats(filtered.slice((this._page - 1) * this.PAGE_SIZE, this._page * this.PAGE_SIZE), filtered.length === 0);
+    this.renderSelectionBar();
     const cnt = document.getElementById('aifu-count');
     if (cnt) cnt.textContent = this._statusFilter
       ? `Hiển thị: ${filtered.length}/${this._chats.length}`
@@ -194,7 +196,7 @@ const AIFollowUp = {
     const tb = document.getElementById('aifu-chats-table-body');
     if (!tb) return;
     if (isEmpty) {
-      tb.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:32px"><div style="font-size:2rem;margin-bottom:8px">📭</div><div style="color:var(--text);font-weight:600;margin-bottom:4px">Chưa có lead nào</div><div style="color:var(--text2);font-size:.85rem">Khi có người trả lời DM, AI Follow-Up sẽ tự chat và lead xuất hiện tại đây.</div></td></tr>`;
+      tb.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px"><div style="font-size:2rem;margin-bottom:8px">📭</div><div style="color:var(--text);font-weight:600;margin-bottom:4px">Chưa có lead nào</div><div style="color:var(--text2);font-size:.85rem">Khi có người trả lời DM, AI Follow-Up sẽ tự chat và lead xuất hiện tại đây.</div></td></tr>`;
       return;
     }
     tb.innerHTML = rows.map(c => {
@@ -210,6 +212,7 @@ const AIFollowUp = {
         ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'paused_admin')" title="Tắt AI, tự chat tay" aria-label="Tắt AI cho ${esc(uName)}">⏸</button>`
         : `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')" title="Bật AI chat tiếp" aria-label="Bật AI cho ${esc(uName)}">▶️</button>`;
       return `<tr>
+        <td style="width:34px;text-align:center"><input type="checkbox" aria-label="Chọn ${esc(uName)}" ${this._selected.has(`${c.account_id}:${c.user_id}`) ? 'checked' : ''} onchange="AIFollowUp.toggleSelection('${c.account_id}:${c.user_id}',this.checked)"></td>
         <td><div style="font-weight:600">${esc(uName)}</div><div style="font-size:11px;color:var(--text2);font-family:monospace">ID ${c.user_id} • Acc #${c.account_id}</div></td>
         <td><div style="display:flex;align-items:center;gap:6px">${tierBadge}<span style="font-size:11px;color:var(--text2)">${score}%</span></div><div style="width:70px;height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:${Math.min(100, Math.max(0, score))}%;height:100%;background:${score >= 80 ? 'var(--orange)' : score >= 50 ? 'var(--accent)' : 'var(--text3)'}"></div></div></td>
         <td>${c.reply_count || 0}</td>
@@ -218,6 +221,80 @@ const AIFollowUp = {
         <td><div style="display:flex;gap:6px"><button class="btn btn-primary btn-sm" onclick="AIFollowUp.openChat(${c.account_id},${c.user_id})">💬 Xem chat</button>${toggleBtn}</div></td>
       </tr>`;
     }).join('');
+  },
+
+  toggleSelection(key, checked) {
+    checked ? this._selected.add(key) : this._selected.delete(key);
+    this.renderSelectionBar();
+  },
+
+  togglePageSelection(checked) {
+    this._filtered().slice((this._page - 1) * this.PAGE_SIZE, this._page * this.PAGE_SIZE).forEach(c => {
+      const key = `${c.account_id}:${c.user_id}`;
+      checked ? this._selected.add(key) : this._selected.delete(key);
+    });
+    this.renderPage();
+  },
+
+  renderSelectionBar() {
+    const bar = document.getElementById('aifu-selection-bar');
+    if (!bar) return;
+    bar.classList.toggle('hidden', !this._selected.size);
+    const count = document.getElementById('aifu-selected-count');
+    if (count) count.textContent = `Đã chọn ${this._selected.size} lead`;
+  },
+
+  _selectedChats() {
+    return [...this._selected].map(key => this._chats.find(c => `${c.account_id}:${c.user_id}` === key)).filter(Boolean);
+  },
+
+  async assignSelected() {
+    const selected = this._selectedChats();
+    if (!selected.length) return;
+    const regions = window.prompt('Khu vực (phân cách dấu phẩy):', '');
+    if (regions === null) return;
+    const campaigns = window.prompt('Campaign (phân cách dấu phẩy):', '');
+    if (campaigns === null) return;
+    const payload = {
+      distribution_enabled: window.confirm('Bật phân phối cho các lead đã chọn?'),
+      distribution_regions: regions.split(',').map(v => v.trim()).filter(Boolean),
+      distribution_campaigns: campaigns.split(',').map(v => v.trim()).filter(Boolean)
+    };
+    try {
+      const responses = await Promise.all(selected.map(c => fetch(`/api/ai-followup/chats/${c.account_id}/${c.user_id}/profile`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) })));
+      if (responses.some(r => !r.ok)) throw new Error('Một số lead cập nhật thất bại');
+      App.toast(`Đã phân công ${selected.length} lead`, 'success');
+      this._selected.clear(); this.renderPage();
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  async bulkSendSelected() {
+    const selected = this._selectedChats();
+    if (!selected.length) return;
+    const message = window.prompt(`Tin nhắn gửi tới ${selected.length} lead:`);
+    if (!message?.trim()) return;
+    try {
+      const res = await fetch('/api/ai-followup/bulk-send', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ recipients:selected.map(c => ({account_id:c.account_id, user_id:c.user_id})), message:message.trim() }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Gửi thất bại');
+      App.toast(`Đã gửi ${data.sent?.length || 0}; bỏ qua ${data.skipped?.length || 0}; lỗi ${data.errors?.length || 0}`, data.errors?.length ? 'error' : 'success');
+      this._selected.clear(); this.renderPage();
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  async editProfile(accountId, userId) {
+    try {
+      const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/profile`);
+      if (!res.ok) throw new Error('Không thể tải hồ sơ lead');
+      const p = await res.json();
+      const vip = window.prompt('VIP code:', p.vip_code || ''); if (vip === null) return;
+      const affiliate = window.prompt('Affiliate link:', p.affiliate_link || ''); if (affiliate === null) return;
+      const regions = window.prompt('Khu vực (phân cách dấu phẩy):', (p.distribution_regions || []).join(', ')); if (regions === null) return;
+      const campaigns = window.prompt('Campaign (phân cách dấu phẩy):', (p.distribution_campaigns || []).join(', ')); if (campaigns === null) return;
+      const save = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/profile`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ vip_code:vip.trim(), affiliate_link:affiliate.trim(), distribution_enabled:window.confirm('Bật phân phối lead này?'), distribution_regions:regions.split(',').map(v=>v.trim()).filter(Boolean), distribution_campaigns:campaigns.split(',').map(v=>v.trim()).filter(Boolean) }) });
+      if (!save.ok) throw new Error('Lưu hồ sơ thất bại');
+      App.toast('Đã lưu hồ sơ và phân công lead', 'success');
+    } catch (e) { App.toast(e.message, 'error'); }
   },
 
   // ── Status update ─────────────────────────────────────────────────
@@ -299,7 +376,7 @@ const AIFollowUp = {
     const vs = c.verification_status || 'none';
     const vsLabel = {none:'🔍 Chưa verify', requested:'📤 Đã yêu cầu', submitted:'📎 Đã nộp', verified:'✅ Verified', rejected:'❌ Từ chối'}[vs] || vs;
     const vsBtn = `<button class="btn btn-ghost" onclick="AIFollowUp.cycleVerification(${c.account_id},${c.user_id})" title="Click để đổi trạng thái verify">${vsLabel}</button>`;
-    el.innerHTML = `${toggle}${vsBtn}<button class="btn btn-green" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'onboarded')">✅ Đã onboard</button><button class="btn btn-primary" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>`;
+    el.innerHTML = `${toggle}${vsBtn}<button class="btn btn-ghost" onclick="AIFollowUp.editProfile(${c.account_id},${c.user_id})">📍 Hồ sơ & phân công</button><button class="btn btn-green" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'onboarded')">✅ Đã onboard</button><button class="btn btn-primary" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>`;
   },
 
   async cycleVerification(accountId, userId) {

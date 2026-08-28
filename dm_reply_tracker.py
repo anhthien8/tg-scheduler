@@ -23,6 +23,7 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from telethon import events
 from telethon.tl.functions.messages import SendReactionRequest
@@ -33,6 +34,37 @@ import telegram_client as tg
 import ai_remix as ai_rmx
 
 logger = logging.getLogger("tg-scheduler.inbox")
+
+WEEX_LINK_RE = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
+
+
+def personalize_weex_links(text: str, vip_code: str) -> str:
+    """Replace/add vipCode only on weex.com links."""
+    if not text or not vip_code:
+        return text
+
+    def _replace(match: re.Match) -> str:
+        raw_url = match.group(0)
+        trailing = ""
+        while raw_url and raw_url[-1] in ".,!?;:)]}":
+            trailing = raw_url[-1] + trailing
+            raw_url = raw_url[:-1]
+        try:
+            parts = urlsplit(raw_url)
+        except Exception:
+            return match.group(0)
+        host = (parts.netloc or "").split("@")[-1].split(":", 1)[0].lower()
+        if host != "weex.com" and not host.endswith(".weex.com"):
+            return match.group(0)
+        query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k.lower() != "vipcode"]
+        query.append(("vipCode", vip_code.strip()))
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)) + trailing
+
+    return WEEX_LINK_RE.sub(_replace, text)
+
+
+def contains_weex_link(text: str) -> bool:
+    return personalize_weex_links(text or "", "__VIP__") != (text or "")
 
 # ── In-memory state ────────────────────────────────────────────────────────────
 # handler_removers: account_id → (client, handler_fn)
@@ -498,10 +530,12 @@ async def generate_and_send_ai_reply_for_chat(
         "1. DYNAMIC LANGUAGE MATCHING MANDATE (HIGHEST PRIORITY): Automatically detect the language used by the user in their LATEST message and ALWAYS reply in that EXACT SAME LANGUAGE. If the user writes in English, you MUST reply ONLY in English. If in Vietnamese, reply in Vietnamese. If in Chinese, reply in Chinese. NEVER mix languages. NEVER use Vietnamese phrases when the user writes in English!\n"
         "2. TELEGRAM FORMATTING: Do NOT output literal '\\n' text characters. Use actual line breaks. Do NOT use raw markdown like **bold**. Use standard HTML <b>bold</b> or <i>italic</i> for formatting.\n"
         "3. INTERNAL HANDOVER FLOW (HIGHEST PRIORITY): NEVER instruct, ask, or suggest that the prospect contact https://t.me/weexwill, @weexwill, or any other main account. Prospect stays chatting with this nick phụ. When prospect provides UID and campaign choice, acknowledge receipt naturally and append [HANDOVER_REQUIRED]; the app privately notifies the main account. Say only that the team will review/configure internally. NEVER say the commission is configured, never provide a SEND MESSAGE/contact card for the main account, and never expose this internal handover mechanism. If UID or campaign is missing, ask only for the missing item.\n"
-        "4. KNOWLEDGE BASE & COMMISSION QUOTING MANDATE:\n"
+        "4. TRUTHFULNESS MANDATE (FINTECH — ZERO TOLERANCE): You may be warm, casual and personable, but you must NEVER invent facts. STRICTLY FORBIDDEN to fabricate: a mutual friend or referral ('your friend referred you'), having watched/read their content when you have not, any UID, any campaign name, commission rates, trading volume, follower counts, earnings figures, payout status, or the claim that commission/binding is already configured. If the prospect asks how you found them, answer honestly: you found their public crypto profile/community and reached out directly. If you do not know something, say you will check with the team. A single fabricated fact destroys the partnership.\n"
+        "5. WARM-UP BEFORE OFFER (RAPPORT PHASE): On the first 1-3 exchanges, prioritise a natural human conversation over pitching. Open with a genuine, verifiable reason for reaching out, ask about their community/market view, and react to what they actually say. Do NOT dump commission numbers, campaign lists or CTAs until the prospect shows interest or asks what you want. Small talk, market chat and light humour are encouraged; invented personal history is not. If the prospect challenges your opener or asks 'who are you / how did you find me', drop everything else, own the mistake plainly if the opener was wrong, state the real source, introduce yourself by name and role, and offer to let them verify before continuing.\n"
+        "6. KNOWLEDGE BASE & COMMISSION QUOTING MANDATE:\n"
         "   - VIETNAMESE 🇻🇳, KOREAN 🇰🇷, CHINESE 🇨🇳 (or Verified Volume > 20M): Quote 70% - 80% commission.\n"
         "   - GLOBAL / ENGLISH / HIGH-RISK / NIGERIA 🇳🇬 / INDIA 🇮🇳 / OTHER (< 20M volume): STRICTLY ONLY quote 50% - 60% base commission. NEVER mention 70% or 80%! Highlight daily USDT withdrawals, No KYC, No Tax, and ask for their community link & monthly volume.\n"
-        "4. STRICT CONTEXTUAL CONTINUATION, NATURAL HUMAN TONE & ANTI-NAGGING:\n"
+        "7. STRICT CONTEXTUAL CONTINUATION, NATURAL HUMAN TONE & ANTI-NAGGING:\n"
         "   - NATURAL HUMAN TONE: Be friendly, open and approachable like a crypto industry peer (bro, mate, buddy). Do not use robotic, formal, or bureaucratic language.\n"
         "   - ANTI-NAGGING & NO FORCED CTA: NEVER push, pressure, or nag the KOL into taking action. BANNED phrases: 'Ready to post?', 'When will you publish?', 'Can you start now?'.\n"
         "   - CONCISE DIRECT ANSWERS: When the partner asks a simple question (KYC, deposit, ref link), give a short friendly answer and STOP. Do not stuff extra questions or CTAs at the end!\n"
@@ -518,11 +552,11 @@ async def generate_and_send_ai_reply_for_chat(
         "     * Vietnamese example: 'Case này đặc biệt và vượt thẩm quyền thông thường của mình rồi, để mình chuyển tiếp proposal chi tiết của bạn lên Ban Giám Đốc / Partnership Committee của sàn WEEX để duyệt riêng nhé!'\n"
         "     * Then append [HANDOVER_REQUIRED].\n"
         "   - NO HALLUCINATION & NO SPAM: NEVER hallucinate, never output random unrelated greetings, and never repeat points already made.\n"
-        "5. LEAD EVALUATION METRICS: At the VERY END of your response, append a hidden metadata JSON tag on its own line: [METRICS: {\"intent_score\": <0-100>, \"lead_tier\": \"<Tier A|Tier B|Tier C>\", \"summary\": \"<1-sentence lead need summary>\"}].\n"
+        "8. LEAD EVALUATION METRICS: At the VERY END of your response, append a hidden metadata JSON tag on its own line: [METRICS: {\"intent_score\": <0-100>, \"lead_tier\": \"<Tier A|Tier B|Tier C>\", \"summary\": \"<1-sentence lead need summary>\"}].\n"
         "   - Tier A (Intent 80-100): High volume trader/KOL (>10k subs or >$5M vol), ready for meeting, negotiating terms.\n"
         "   - Tier B (Intent 40-79): Interested in exchange benefits, asking detailed questions.\n"
         "   - Tier C (Intent 0-39): Casual question, low interest, or greeting.\n"
-        "6. HANDOVER TRIGGER (CRITICAL): Append [HANDOVER_REQUIRED] on its own line (before METRICS) when ANY of these apply:\n"
+        "9. HANDOVER TRIGGER (CRITICAL): Append [HANDOVER_REQUIRED] on its own line (before METRICS) when ANY of these apply:\n"
         "   - Prospect asks for fixed fee, upfront payment, retainer, or sponsorship budget.\n"
         "   - Prospect requests a call, meeting, or contract discussion.\n"
         "   - Prospect asks to speak with a human, admin, or manager.\n"
