@@ -89,18 +89,36 @@ async def _notify_main_account_handover(
 ):
     """Send handover notification to main @weexwill account (Saved Messages)."""
     try:
+        # Profile extraction chạy background cùng lúc với handover; chờ ngắn để alert có đủ UID/campaign.
+        profile = {}
+        for attempt in range(4):
+            profile = await db.get_kol_profile(account_id, sender_id) or {}
+            if profile.get("weex_uid") or profile.get("selected_campaign") or attempt == 3:
+                break
+            await asyncio.sleep(1)
         acc_info = await db.get_account(account_id)
         acc_name = (acc_info or {}).get("name", f"Account #{account_id}")
+        profile = profile or await db.get_kol_profile(account_id, sender_id) or {}
         user_tag = f"@{sender_username}" if sender_username else f"user_id={sender_id}"
         direct_link = f"https://t.me/{sender_username}" if sender_username else f"tg://user?id={sender_id}"
+        community_name = profile.get("community_name") or "Chưa có"
+        community_link = profile.get("community_link") or "Chưa có"
+        community_logo = profile.get("community_logo") or "Không có"
+        weex_uid = profile.get("weex_uid") or "Chưa cung cấp"
+        campaign = profile.get("selected_campaign") or "Chưa chọn"
+        performance = profile.get("trading_performance_1m") or "Chưa cung cấp"
 
         alert_text = (
-            f"🚨 HANDOVER ALERT\n\n"
-            f"👤 Lead: {user_tag}\n"
-            f"🔗 Direct Chat: {direct_link}\n"
-            f"📱 Account: {acc_name} (#{account_id})\n"
-            f"📋 Reason: {reason}\n\n"
-            f"Please check the AI Followup dashboard or tap the link to message them directly."
+            f"🚨 KOL CAMPAIGN PENDING\\n\\n"
+            f"👤 KOL: {user_tag} | {community_name} | Logo: {community_logo}\\n"
+            f"🔗 Cộng đồng: {community_link}\\n"
+            f"🆔 UID: {weex_uid}\\n"
+            f"🎯 Campaign: {campaign}\\n"
+            f"📊 Trading performance 1 tháng: {performance}\\n"
+            f"📱 Nick chat: Account #{account_id} | {acc_name}\\n"
+            f"🔗 Chat: {direct_link}\\n"
+            f"📋 Status: Chờ Will cấu hình\\n"
+            f"📝 Reason: {reason}"
         )
 
         # Send to main account's Saved Messages
@@ -517,6 +535,8 @@ async def generate_and_send_ai_reply_for_chat(
             return False
 
         new_status = "active"
+        # Extract profile trước alert để UID/campaign/community có mặt trong notification.
+        _spawn_background(_async_update_kol_profile(account_id, user_id, full_history, ai_provider, ai_keys, kwargs))
         if "[HANDOVER_REQUIRED]" in ai_reply:
             new_status = "needs_human"
             ai_reply = ai_reply.replace("[HANDOVER_REQUIRED]", "").strip()
@@ -601,8 +621,6 @@ async def generate_and_send_ai_reply_for_chat(
         await tg.send_text_message(account_id, user_id, ai_reply)
         _spawn_background(_remove_ai_send_after_delay(account_id, user_id))
         await db.append_followup_chat_message(account_id, user_id, "assistant", ai_reply, inc_reply_count=True)
-        _spawn_background(_async_update_kol_profile(account_id, user_id, full_history, ai_provider, ai_keys, kwargs))
-
         if new_status != "active":
             await db.update_followup_chat_status(account_id, user_id, new_status)
         logger.info("[AIFollowUp] ✅ AI reply sent to user @%s (%d) (Tier: %s, Score: %d)", sender_username or '?', user_id, lead_tier, intent_score)
