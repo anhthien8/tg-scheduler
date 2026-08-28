@@ -81,12 +81,39 @@ async def _remove_ai_send_after_delay(account_id: int, user_id: int):
 MAIN_ACCOUNT_ID = 3  # @weexwill / "Will Weex"
 
 
+async def _forward_kol_logo_to_main(account_id: int, sender_id: int, event) -> bool:
+    """Forward one KOL-sent photo to @weexwill Saved Messages, once per profile."""
+    try:
+        profile = await db.get_kol_profile(account_id, sender_id) or {}
+        if not profile.get("logo_request_pending") or profile.get("logo_forwarded_at"):
+            return False
+        source_client = tg.get_client(account_id)
+        main_client = tg.get_client(MAIN_ACCOUNT_ID)
+        if not source_client or not main_client or not main_client.is_connected():
+            return False
+        me = await main_client.get_me()
+        if not me:
+            return False
+        await main_client.send_message(me.id, "🖼 Community logo received from KOL — forwarded below")
+        await main_client.forward_messages(me.id, event.message, from_peer=await event.get_input_chat())
+        await db.upsert_kol_profile(account_id, sender_id, {
+            "logo_forwarded_at": datetime.now(timezone.utc).isoformat(),
+            "logo_request_pending": False,
+        })
+        logger.info("[Handover] Logo forwarded to main account for user %d", sender_id)
+        return True
+    except Exception as e:
+        logger.warning("[Handover] Logo forward failed for user %d: %s", sender_id, e)
+        return False
+
+
 async def _notify_main_account_handover(
     account_id: int,
     sender_id: int,
     sender_username: str | None,
     reason: str,
 ):
+
     """Send handover notification to main @weexwill account (Saved Messages)."""
     try:
         # Profile extraction chạy background cùng lúc với handover; chờ ngắn để alert có đủ UID/campaign.
@@ -470,7 +497,8 @@ async def generate_and_send_ai_reply_for_chat(
         "\n\n--- CRITICAL RESPONSE INSTRUCTIONS ---\n"
         "1. DYNAMIC LANGUAGE MATCHING MANDATE (HIGHEST PRIORITY): Automatically detect the language used by the user in their LATEST message and ALWAYS reply in that EXACT SAME LANGUAGE. If the user writes in English, you MUST reply ONLY in English. If in Vietnamese, reply in Vietnamese. If in Chinese, reply in Chinese. NEVER mix languages. NEVER use Vietnamese phrases when the user writes in English!\n"
         "2. TELEGRAM FORMATTING: Do NOT output literal '\\n' text characters. Use actual line breaks. Do NOT use raw markdown like **bold**. Use standard HTML <b>bold</b> or <i>italic</i> for formatting.\n"
-        "3. KNOWLEDGE BASE & COMMISSION QUOTING MANDATE:\n"
+        "3. INTERNAL HANDOVER FLOW (HIGHEST PRIORITY): NEVER instruct, ask, or suggest that the prospect contact https://t.me/weexwill, @weexwill, or any other main account. Prospect stays chatting with this nick phụ. When prospect provides UID and campaign choice, acknowledge receipt naturally and append [HANDOVER_REQUIRED]; the app privately notifies the main account. Say only that the team will review/configure internally. NEVER say the commission is configured, never provide a SEND MESSAGE/contact card for the main account, and never expose this internal handover mechanism. If UID or campaign is missing, ask only for the missing item.\n"
+        "4. KNOWLEDGE BASE & COMMISSION QUOTING MANDATE:\n"
         "   - VIETNAMESE 🇻🇳, KOREAN 🇰🇷, CHINESE 🇨🇳 (or Verified Volume > 20M): Quote 70% - 80% commission.\n"
         "   - GLOBAL / ENGLISH / HIGH-RISK / NIGERIA 🇳🇬 / INDIA 🇮🇳 / OTHER (< 20M volume): STRICTLY ONLY quote 50% - 60% base commission. NEVER mention 70% or 80%! Highlight daily USDT withdrawals, No KYC, No Tax, and ask for their community link & monthly volume.\n"
         "4. STRICT CONTEXTUAL CONTINUATION, NATURAL HUMAN TONE & ANTI-NAGGING:\n"
@@ -671,6 +699,13 @@ def _make_handler(account_id: int):
             except Exception as ex_out:
                 logger.debug("[AIFollowUp] Error in outgoing human interception: %s", ex_out)
             return
+
+        # Forward logo only when AI explicitly requested it once.
+        sender_id = event.sender_id
+        if getattr(event.message, "photo", None):
+            profile = await db.get_kol_profile(account_id, sender_id) or {}
+            if profile.get("logo_request_pending") and not profile.get("logo_forwarded_at"):
+                _spawn_background(_forward_kol_logo_to_main(account_id, sender_id, event))
 
         # Dedup check
         msg_id = event.message.id
