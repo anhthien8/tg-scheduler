@@ -10,6 +10,7 @@ from typing import Optional
 import json
 
 import database as db
+import telegram_client as tg
 
 router = APIRouter(prefix="/api/ai-followup", tags=["ai-followup"])
 
@@ -124,6 +125,25 @@ async def update_verification(account_id: int, user_id: int, req: dict):
     if not ok:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
     return {"status": "ok", "verification_status": status}
+
+
+class SendChatMessageRequest(BaseModel):
+    text: str
+
+
+@router.post("/chats/{account_id}/{user_id}/send")
+async def send_chat_message(account_id: int, user_id: int, req: SendChatMessageRequest):
+    """Gửi tin nhắn tay từ admin tới lead. Interceptor sẽ tự pause AI + ghi history."""
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Tin nhắn trống")
+    if len(text) > 4000:
+        raise HTTPException(status_code=400, detail="Tin nhắn quá dài (max 4000 ký tự)")
+    try:
+        await tg.send_text_message(account_id, user_id, text, parse_mode=None)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Gửi thất bại: {e}")
+    return {"ok": True}
 
 
 @router.get("/chats/{account_id}/{user_id}/history")

@@ -228,7 +228,11 @@ if(page==='ai-followup'){
             <h3 id="aifu-modal-title" style="margin:0;font-size:15px">Lịch sử trò chuyện</h3>
             <button class="modal-close" onclick="AIFollowUp.closeHistoryModal()" aria-label="Đóng">&times;</button>
           </div>
-          <div class="modal-body" style="max-height:450px;overflow-y:auto;padding:16px" id="aifu-modal-chat-box">
+          <div class="modal-body" style="max-height:400px;overflow-y:auto;padding:16px" id="aifu-modal-chat-box">
+          </div>
+          <div style="display:flex;gap:.5rem;padding:10px 16px;border-top:1px solid var(--border)">
+            <input id="aifu-chat-input" class="form-input" type="text" placeholder="Nhập tin nhắn gửi tới lead..." style="flex:1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();AIFollowUp.sendMessage()}">
+            <button class="btn btn-primary" onclick="AIFollowUp.sendMessage()" id="aifu-chat-send-btn">Gửi ➤</button>
           </div>
           <div class="modal-footer" id="aifu-modal-actions"></div>
         </div>

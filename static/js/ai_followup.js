@@ -320,6 +320,43 @@ const AIFollowUp = {
     } catch (e) { App.toast(e.message, 'error'); }
   },
 
+  async sendMessage() {
+    const c = this._modalChat;
+    const input = document.getElementById('aifu-chat-input');
+    const btn = document.getElementById('aifu-chat-send-btn');
+    if (!c || !input) return;
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+    try {
+      const res = await fetch(`/api/ai-followup/chats/${c.account_id}/${c.user_id}/send`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({text})
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Gửi thất bại');
+      // Append bubble vào chat box
+      const box = document.getElementById('aifu-modal-chat-box');
+      if (box) {
+        const timeText = new Date().toLocaleTimeString('vi-VN');
+        box.insertAdjacentHTML('beforeend', `
+          <div style="display:flex;flex-direction:column;align-items:flex-end;margin-bottom:12px">
+            <div style="font-size:11px;color:var(--text2);margin-bottom:3px">🧑‍💼 Bạn (chat tay) • ${timeText}</div>
+            <div style="background:var(--purple-dim);border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(text)}</div>
+          </div>`);
+        box.scrollTop = box.scrollHeight;
+      }
+      // Interceptor tự pause AI + ghi history — báo nhẹ
+      App.toast('✅ Đã gửi — AI tạm dừng để bạn chat tay', 'success');
+    } catch (e) {
+      input.value = text; // giữ lại text nếu lỗi
+      App.toast('❌ ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Gửi ➤'; }
+    }
+  },
+
   closeHistoryModal() {
     document.getElementById('aifu-history-modal')?.classList.remove('open');
     this._modalChat = null;
