@@ -2934,11 +2934,12 @@ const Reactions = (() => {
     return e.replace(/[\uFE0E\uFE0F]/g, '');
   }
 
+  let _targetsCache = [];
+
   async function init() {
     _buildEmojiPicker();
-    await _buildAccountList();
-    await loadTargets();
-    await loadLogs();
+    // Song song — không chờ tuần tự nữa
+    await Promise.all([_buildAccountList(), loadTargets(), loadLogs()]);
   }
 
   function _buildEmojiPicker() {
@@ -3041,36 +3042,65 @@ const Reactions = (() => {
     finally { if(btn){btn.disabled=false;btn.textContent='⚡ Thêm & Auto-Join';} }
   }
 
+  const _RATIO_OPTS = [[1.0,'100%'],[0.75,'75%'],[0.5,'50%'],[0.25,'25%']];
+
   async function loadTargets() {
     const tbody = document.getElementById('rt-targets-body');
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center">Đang tải...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center">Đang tải...</td></tr>';
     try {
       const { targets } = await ReactionsAPI.getTargets();
-      if (!targets || !targets.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text2)">Chưa có kênh nào</td></tr>'; return;
+      _targetsCache = targets || [];
+      if (!_targetsCache.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text2)">Chưa có kênh nào</td></tr>'; return;
       }
-      tbody.innerHTML = targets.map(t => `
+      tbody.innerHTML = _targetsCache.map(t => {
+        const ratioOpts = _RATIO_OPTS.map(([v,l]) =>
+          `<option value="${v}" ${Math.abs((t.view_ratio??1)-v)<0.001?'selected':''}>${l}</option>`).join('');
+        return `
         <tr>
           <td><strong>${_esc(t.channel_title||t.channel_link)}</strong><br><small style="color:var(--text2)">${_esc(t.channel_link)}</small></td>
           <td>${(t.account_ids||[]).length} acc</td>
           <td style="font-size:1.2rem">${(t.reactions||['👍']).join(' ')}</td>
-          <td style="color:var(--text2)">${t.delay_min}s – ${t.delay_max}s</td>
+          <td>
+            <div style="display:flex;align-items:center;gap:.3rem">
+              <input id="rt-dmin-${t.id}" type="number" min="1" value="${t.delay_min}" class="form-input" style="width:58px;padding:.25rem .4rem;font-size:.85rem">
+              <span style="color:var(--text2)">–</span>
+              <input id="rt-dmax-${t.id}" type="number" min="1" value="${t.delay_max}" class="form-input" style="width:58px;padding:.25rem .4rem;font-size:.85rem">
+              <span style="color:var(--text2);font-size:.75rem">s</span>
+            </div>
+          </td>
+          <td>
+            <div style="display:flex;align-items:center;gap:.4rem">
+              <input id="rt-ven-${t.id}" type="checkbox" ${t.view_enabled?'checked':''} style="width:15px;height:15px;accent-color:var(--accent)">
+              <select id="rt-vratio-${t.id}" class="form-input" style="width:74px;padding:.25rem .3rem;font-size:.8rem">${ratioOpts}</select>
+            </div>
+          </td>
           <td id="rt-views-${t.id}"><span style="color:var(--text2);font-size:.8rem">⏳</span></td>
           <td><span class="status-badge ${t.is_active?'success':'failed'}" onclick="Reactions.toggleActive(${t.id},${t.is_active})" style="cursor:pointer">${t.is_active?'● Bật':'○ Tắt'}</span></td>
           <td>
+            <button class="btn btn-sm btn-primary" onclick="Reactions.saveTarget(${t.id})" title="Lưu delay + view">💾</button>
             <button class="btn btn-sm" onclick="Reactions.manualJoin(${t.id})" title="Re-join">🔗</button>
             <button class="btn btn-sm" style="background:var(--red,.8)" onclick="Reactions.deleteTarget(${t.id})" title="Xóa">🗑</button>
           </td>
-        </tr>`).join('');
-    } catch(e) { tbody.innerHTML = `<tr><td colspan="6" style="color:red">Lỗi: ${e.message}</td></tr>`; }
-    // Async: load view counts for each active target in background
-    setTimeout(async () => {
-      try {
-        const { targets } = await ReactionsAPI.getTargets();
-        (targets || []).filter(t => t.is_active).forEach(t => _fetchViews(t.id));
-      } catch {}
-    }, 200);
+        </tr>`;
+      }).join('');
+    } catch(e) { tbody.innerHTML = `<tr><td colspan="8" style="color:red">Lỗi: ${e.message}</td></tr>`; }
+    // Views: fetch nền, không block render, dùng cache targets (không gọi lại API)
+    _targetsCache.filter(t => t.is_active).forEach(t => _fetchViews(t.id));
+  }
+
+  async function saveTarget(id) {
+    const dmin = parseInt(document.getElementById(`rt-dmin-${id}`)?.value) || 5;
+    const dmax = parseInt(document.getElementById(`rt-dmax-${id}`)?.value) || 30;
+    const ven  = document.getElementById(`rt-ven-${id}`)?.checked ? 1 : 0;
+    const vr   = parseFloat(document.getElementById(`rt-vratio-${id}`)?.value || '1.0');
+    if (dmax < dmin) { App.toast('Delay max phải ≥ delay min', 'error'); return; }
+    try {
+      const res = await ReactionsAPI.updateTarget(id, { delay_min: dmin, delay_max: dmax, view_enabled: ven, view_ratio: vr });
+      if (res.ok) App.toast('✅ Đã lưu cấu hình kênh', 'success');
+      else App.toast('❌ Lưu thất bại', 'error');
+    } catch(e) { App.toast('❌ ' + e.message, 'error'); }
   }
 
   async function toggleActive(id, cur) {
@@ -3139,7 +3169,7 @@ const Reactions = (() => {
     }
   }
 
-  return { init, addTarget, loadTargets, loadLogs, toggleActive, deleteTarget, manualJoin, fetchViews: _fetchViews };
+  return { init, addTarget, loadTargets, loadLogs, toggleActive, deleteTarget, manualJoin, saveTarget, fetchViews: _fetchViews };
 })();
 
 // ══════════════════════════════════════════════════════════════════
