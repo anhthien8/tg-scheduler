@@ -112,6 +112,9 @@ async def _remove_ai_send_after_delay(account_id: int, user_id: int):
 # ── Main account ID for handover notifications ────────────────────────────────
 MAIN_ACCOUNT_ID = 3  # @weexwill / "Will Weex"
 
+# {(account_id, sender_id): timestamp} — prevent duplicate handover alerts
+_handover_alert_sent: dict[tuple, float] = {}
+
 
 async def _forward_kol_logo_to_main(account_id: int, sender_id: int, event) -> bool:
     """Forward one KOL-sent photo to @weexwill Saved Messages, once per profile."""
@@ -148,6 +151,14 @@ async def _notify_main_account_handover(
 
     """Send handover notification to main @weexwill account (Saved Messages)."""
     try:
+        # Dedup: skip if we already alerted for this sender in the last 5 minutes
+        dedup_key = (account_id, sender_id)
+        now = time.time()
+        last_alert = _handover_alert_sent.get(dedup_key, 0)
+        if now - last_alert < 300:  # 5 min cooldown
+            logger.debug("[Handover] Alert dedup skip for user %d (%.0fs ago)", sender_id, now - last_alert)
+            return
+        _handover_alert_sent[dedup_key] = now
         # Profile extraction chạy background cùng lúc với handover; chờ ngắn để alert có đủ UID/campaign.
         profile = {}
         for attempt in range(4):
@@ -168,16 +179,26 @@ async def _notify_main_account_handover(
         performance = profile.get("trading_performance_1m") or "Chưa cung cấp"
 
         alert_text = (
-            f"🚨 KOL CAMPAIGN PENDING\\n\\n"
-            f"👤 KOL: {user_tag} | {community_name} | Logo: {community_logo}\\n"
-            f"🔗 Cộng đồng: {community_link}\\n"
-            f"🆔 UID: {weex_uid}\\n"
-            f"🎯 Campaign: {campaign}\\n"
-            f"📊 Trading performance 1 tháng: {performance}\\n"
-            f"📱 Nick chat: Account #{account_id} | {acc_name}\\n"
-            f"🔗 Chat: {direct_link}\\n"
-            f"📋 Status: Chờ Will cấu hình\\n"
-            f"📝 Reason: {reason}"
+            f"🚨 KOL CAMPAIGN PENDING\n\n"
+            f"👤 {user_tag}"
+        )
+        # Only include fields that have real data
+        if community_name != "Chưa có":
+            alert_text += f" · {community_name}"
+        if community_logo != "Không có":
+            alert_text += f" · Logo: {community_logo}"
+        alert_text += "\n"
+        if community_link != "Chưa có":
+            alert_text += f"🔗 {community_link}\n"
+        if weex_uid != "Chưa cung cấp":
+            alert_text += f"🆔 UID: {weex_uid}\n"
+        if campaign != "Chưa chọn":
+            alert_text += f"🎯 Campaign: {campaign}\n"
+        if performance != "Chưa cung cấp":
+            alert_text += f"📊 Performance 1M: {performance}\n"
+        alert_text += (
+            f"📱 {acc_name} · {direct_link}\n"
+            f"📝 {reason}"
         )
 
         # Send to main account's Saved Messages
