@@ -697,11 +697,20 @@ async def generate_and_send_ai_reply_for_chat(
             _pending_ai_sends.discard((account_id, user_id))
 
 
+def _is_internal_account_user(user_id: int) -> bool:
+    """True when user_id belongs to any Telegram account managed by this app."""
+    return any(
+        int(me.get("user_id", 0)) == int(user_id)
+        for me in tg._me_cache.values()
+        if me and me.get("user_id")
+    )
+
+
 def _make_handler(account_id: int):
     """Factory creating the event handler for a specific account."""
 
     async def _handler(event: events.NewMessage.Event):
-        # Only private 1-on-1 messages
+
         if not event.is_private:
             return
 
@@ -744,6 +753,11 @@ def _make_handler(account_id: int):
         # Dedup check
         msg_id = event.message.id
         sender_id = event.sender_id
+
+        # Skip AI completely when two internal accounts (nick phụ / nick chính) message each other
+        if _is_internal_account_user(sender_id):
+            logger.debug("[AIFollowUp] Sender %d is internal managed account — skip AI", sender_id)
+            return
 
         dedup_key = (account_id, sender_id, msg_id)
         now_ts = time.time()
