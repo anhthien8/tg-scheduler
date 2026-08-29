@@ -2809,7 +2809,11 @@ App.leaveSelected = async function() {
 
   const names = App._chChannels.filter(c => selected.includes(c.chat_id)).map(c => c.chat_title);
 
-  if (!confirm(`\u26A0\uFE0F R\u1EDDi ${selected.length} k\u00EAnh/nh\u00F3m \u0111\u00E3 ch\u1ECDn?\n\n${names.join('\n')}\n\nThao t\u00E1c n\u00E0y kh\u00F4ng th\u1EC3 ho\u00E0n t\u00E1c!`)) return;
+  const botCount = App._chChannels.filter(c => selected.includes(c.chat_id) && c.chat_type === 'bot').length;
+  const actionWord = botCount === selected.length ? 'Xo\u00E1' : 'R\u1EDDi/Xo\u00E1';
+  const kindWord = botCount === selected.length ? 'bot' : 'k\u00EAnh/nh\u00F3m/bot';
+
+  if (!confirm(`\u26A0\uFE0F ${actionWord} ${selected.length} ${kindWord} \u0111\u00E3 ch\u1ECDn?\n\n${names.join('\n')}\n\nThao t\u00E1c n\u00E0y kh\u00F4ng th\u1EC3 ho\u00E0n t\u00E1c!`)) return;
 
 
 

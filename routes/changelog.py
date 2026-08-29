@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.1.9",
+        "date": "30/08/2026",
+        "title": "🤖 Lọc Và Xóa Bot Hàng Loạt",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Trang Quản lý kênh có thêm bộ lọc Bot để chọn hàng loạt và xóa nhanh các cuộc trò chuyện với bot.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Bộ Lọc Bot",
+                "desc": "Thêm lựa chọn 🤖 Bot trong dropdown loại. Chọn Bot, tick tất cả rồi dùng nút hành động hàng loạt để xóa nhanh.",
+                "tag": "Quản lý kênh"
+            },
+            {
+                "type": "improvement",
+                "title": "Xác Nhận Hành Động Đúng Theo Loại",
+                "desc": "Khi chọn bot, hộp xác nhận hiển thị 'Xóa bot' thay vì 'Rời kênh/nhóm'. Backend hiện có sẽ xóa lịch sử hội thoại bot đúng cách.",
+                "tag": "UX"
+            }
+        ]
+    },
+    {
         "version": "v3.1.8",
         "date": "30/08/2026",
         "title": "🔄 Auto-Resume Chiến Dịch Sau SpamBot + Gọn Bảng Campaign",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Campaign bị dừng do SpamBot/PeerFlood hoặc hết daily limit giờ tự chạy lại khi account hết bị khóa. Bảng DM Campaign gọn hơn, icon có tooltip mô tả rõ ràng.",
         "changes": [
             {
