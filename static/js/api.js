@@ -303,6 +303,7 @@ const MembersAPI = {
   deleteCampaign:    (id)         => apiDelete(`/api/members/campaigns/${id}`),
   cloneCampaign:     (id, data)   => apiPost(`/api/members/campaigns/${id}/clone`, data || {}),
   updateCampaignMessages: (id, data) => apiPut(`/api/members/campaigns/${id}/messages`, data),
+  setAutoResume:      (id, enabled) => apiPost(`/api/members/campaigns/${id}/auto-resume`, { enabled }),
   getCampaignLogs:   (id, limit = 200) =>
     apiGet(`/api/members/campaigns/${id}/logs?limit=${limit}`),
 };

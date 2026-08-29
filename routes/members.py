@@ -66,6 +66,7 @@ class CampaignCreate(BaseModel):
     target_timezone: str | None = None    # IANA: "America/New_York"
     ai_agent_id: int | None = None
     auto_translate_native: int = 1
+    auto_resume: bool = True
 
 
 class CampaignUpdateMessages(BaseModel):
@@ -78,6 +79,11 @@ class CampaignUpdateMessages(BaseModel):
     exclude_previous_dms: Optional[bool] = None
     ai_agent_id: Optional[int] = None
     auto_translate_native: Optional[int] = None
+    auto_resume: Optional[bool] = None
+
+
+class AutoResumeUpdate(BaseModel):
+    enabled: bool
 
 
 class CampaignCloneRequest(BaseModel):
@@ -1360,6 +1366,7 @@ async def create_campaign(req: CampaignCreate):
         "status": status,
         "scheduled_at": req.scheduled_at,
         "target_timezone": req.target_timezone,
+        "auto_resume": req.auto_resume,
     })
 
     # Register APScheduler job if scheduled
@@ -1484,6 +1491,16 @@ async def stop_campaign(campaign_id: int):
     return {"status": "stopped"}
 
 
+@router.post("/campaigns/{campaign_id}/auto-resume")
+async def set_campaign_auto_resume(campaign_id: int, req: AutoResumeUpdate):
+    """Enable or disable automatic resume for a campaign in paused_auto state."""
+    campaign = await db.get_dm_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign không tồn tại")
+    await db.set_dm_campaign_auto_resume(campaign_id, req.enabled)
+    return {"status": "ok", "auto_resume": req.enabled}
+
+
 @router.post("/campaigns/{campaign_id}/cancel-schedule")
 async def cancel_campaign_schedule(campaign_id: int):
     """Cancel a scheduled campaign, reverting it to draft."""
@@ -1512,7 +1529,7 @@ async def update_campaign_messages(campaign_id: int, req: CampaignUpdateMessages
     campaign = await db.get_dm_campaign(campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign không tồn tại")
-    if campaign["status"] not in ("draft", "paused", "error"):
+    if campaign["status"] not in ("draft", "paused", "paused_auto", "error"):
         raise HTTPException(status_code=400,
                             detail="Chỉ có thể sửa campaign khi đang tạm dừng hoặc chưa chạy")
     if not req.messages:
@@ -1528,6 +1545,7 @@ async def update_campaign_messages(campaign_id: int, req: CampaignUpdateMessages
         use_ai_remix=req.use_ai_remix,
         exclude_previous_dms=req.exclude_previous_dms,
         ai_agent_id=req.ai_agent_id,
+        auto_resume=req.auto_resume,
     )
     return {"status": "updated", "message": "Đã cập nhật tin nhắn campaign"}
 
@@ -1772,8 +1790,10 @@ async def _run_campaign(campaign_id: int):
         available_after_check = [s for s in sender_ids if s not in flooded_accounts or current_time >= flooded_accounts[s]]
         if not available_after_check:
             logger.error(f"[Campaign {campaign_id}] 🛑 All sender accounts are spam-limited! Cannot start campaign.")
-            await db.update_dm_campaign_status(campaign_id, "paused",
+            await db.update_dm_campaign_status(campaign_id, "paused_auto",
                                                 sent=sent, failed=failed, skipped=skipped)
+            await db.add_dm_campaign_log(campaign_id, None, 0, None, "skipped",
+                                         "🔒 Tất cả account sender đang bị SpamBot giới hạn. Campaign sẽ tự chạy tiếp khi có account được mở khóa (auto-resume).")
             _active_campaigns.pop(campaign_id, None)
             return
 
@@ -1890,8 +1910,10 @@ async def _run_campaign(campaign_id: int):
             # Check daily limit across all sender accounts
             if daily_sent >= total_daily_limit:
                 logger.info(f"[Campaign {campaign_id}] Total daily limit reached ({daily_sent}/{total_daily_limit}), stopping")
-                await db.update_dm_campaign_status(campaign_id, "paused",
+                await db.update_dm_campaign_status(campaign_id, "paused_auto",
                                                     sent=sent, failed=failed, skipped=skipped)
+                await db.add_dm_campaign_log(campaign_id, None, 0, None, "skipped",
+                                             f"📅 Đã đạt giới hạn DM trong ngày ({daily_sent}/{total_daily_limit}). Campaign sẽ tự chạy tiếp khi có quota mới (auto-resume).")
                 _active_campaigns.pop(campaign_id, None)
                 return
 
@@ -1912,8 +1934,10 @@ async def _run_campaign(campaign_id: int):
                 available_senders = [sid for sid in sender_ids if sid not in flooded_accounts or current_time >= flooded_accounts[sid]]
                 if not available_senders:
                     logger.warning(f"[Campaign {campaign_id}] Tất cả các tài khoản gửi đều bị giới hạn/flood/offline. Tạm dừng chiến dịch.")
-                    await db.update_dm_campaign_status(campaign_id, "paused",
+                    await db.update_dm_campaign_status(campaign_id, "paused_auto",
                                                         sent=sent, failed=failed, skipped=skipped)
+                    await db.add_dm_campaign_log(campaign_id, None, 0, None, "skipped",
+                                                 "🔒 Tất cả account sender không khả dụng. Campaign sẽ tự chạy tiếp khi có account sẵn sàng.")
                     _active_campaigns.pop(campaign_id, None)
                     all_accounts_exhausted = True
                     break

@@ -561,6 +561,16 @@ async def init_db():
                 pass  # column already exists
         await db.commit()
 
+        # ── DM Campaign auto-resume (SpamBot unlock) migration ───────────────────────
+        for _col, _coldef in [
+            ("auto_resume", "INTEGER DEFAULT 1"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE dm_campaigns ADD COLUMN {_col} {_coldef}")
+            except Exception:
+                pass  # column already exists
+        await db.commit()
+
         # ── Member Scraping ───────────────────────────────────────────────
         await db.execute("""
             CREATE TABLE IF NOT EXISTS scraped_members (
@@ -631,6 +641,7 @@ async def init_db():
                 target_timezone TEXT DEFAULT NULL,
                 exclude_campaign_ids TEXT DEFAULT '[]',
                 ai_agent_id     INTEGER DEFAULT NULL,
+                auto_resume     INTEGER DEFAULT 1,
                 status          TEXT DEFAULT 'draft',
                 total_targets   INTEGER DEFAULT 0,
                 sent_count      INTEGER DEFAULT 0,
@@ -2762,8 +2773,8 @@ async def create_dm_campaign(data: dict) -> int:
             (name, scrape_job_id, sender_account_ids, messages,
              delay_min, delay_max, daily_limit_premium, daily_limit_normal,
              use_ai_remix, exclude_previous_dms, total_targets, status,
-             scheduled_at, target_timezone, ai_agent_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             scheduled_at, target_timezone, ai_agent_id, auto_resume)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["name"], data["scrape_job_id"],
             json.dumps(data.get("sender_account_ids", [])),
@@ -2778,6 +2789,7 @@ async def create_dm_campaign(data: dict) -> int:
             data.get("scheduled_at"),
             data.get("target_timezone"),
             data.get("ai_agent_id"),
+            1 if data.get("auto_resume", True) else 0,
         ))
         await db.commit()
         return cursor.lastrowid
@@ -2859,13 +2871,33 @@ async def update_dm_campaign_status(campaign_id: int, status: str,
         )
         await db.commit()
 
+
+async def get_auto_resume_dm_campaigns() -> list[dict]:
+    """Campaigns waiting for a SpamBot-limited sender to recover."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM dm_campaigns WHERE status='paused_auto' AND COALESCE(auto_resume, 1)=1"
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+async def set_dm_campaign_auto_resume(campaign_id: int, enabled: bool) -> None:
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE dm_campaigns SET auto_resume=?, updated_at=datetime('now') WHERE id=?",
+            (1 if enabled else 0, campaign_id),
+        )
+        await db.commit()
+
+
 async def update_dm_campaign_messages(campaign_id: int, messages: list,
                                        delay_min: int = None, delay_max: int = None,
                                        daily_limit_premium: int = None,
                                        daily_limit_normal: int = None,
                                        use_ai_remix: bool = None,
                                        exclude_previous_dms: bool = None,
-                                       ai_agent_id: int = None):
+                                       ai_agent_id: int = None,
+                                       auto_resume: bool = None):
     """Update campaign messages and settings (only when paused/draft)."""
     async with get_db() as db:
         updates = ["messages = ?", "updated_at = datetime('now')"]
@@ -2891,6 +2923,9 @@ async def update_dm_campaign_messages(campaign_id: int, messages: list,
         if ai_agent_id is not None:
             updates.append("ai_agent_id = ?")
             params.append(ai_agent_id if ai_agent_id != 0 else None)
+        if auto_resume is not None:
+            updates.append("auto_resume = ?")
+            params.append(1 if auto_resume else 0)
         params.append(campaign_id)
         await db.execute(
             f"UPDATE dm_campaigns SET {', '.join(updates)} WHERE id = ?",

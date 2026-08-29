@@ -194,3 +194,75 @@ async def load_all_jobs():
             continue
         add_schedule_job(sch)
     logger.info(f"Loaded {len(schedules)} active schedule jobs")
+
+
+# ── Auto-resume: periodically check paused_auto campaigns ────────────────────
+
+_AUTO_RESUME_JOB_ID = "dm_campaign_auto_resume"
+_AUTO_RESUME_INTERVAL_MINUTES = 15
+
+
+async def _auto_resume_campaigns():
+    """Check paused_auto campaigns and restart if any sender account is available."""
+    campaigns = await db.get_auto_resume_dm_campaigns()
+    if not campaigns:
+        return
+
+    import json
+    import telegram_client as tg
+    from routes.members import _run_campaign, _active_campaigns
+
+    for cmp in campaigns:
+        cid = cmp["id"]
+        if _active_campaigns.get(cid):
+            continue  # already running or queued
+
+        sender_ids = json.loads(cmp.get("sender_account_ids", "[]"))
+        if not sender_ids:
+            continue
+
+        # Check if at least one sender account is connected and not spam-limited
+        any_available = False
+        for sid in sender_ids:
+            client = tg.get_client(sid)
+            if not client or not client.is_connected():
+                continue
+            try:
+                spam = await tg.check_spam_status(sid)
+                if spam.get("status") == "free":
+                    any_available = True
+                    break
+                else:
+                    logger.info(f"[AutoResume] Campaign {cid}: account {sid} still limited")
+            except Exception as e:
+                logger.warning(f"[AutoResume] Campaign {cid}: SpamBot check failed for {sid}: {e}")
+                continue
+
+        if any_available:
+            logger.info(f"[AutoResume] 🚀 Resuming campaign {cid} — found available sender account")
+            await db.update_dm_campaign_status(cid, "running")
+            import asyncio
+            task = asyncio.create_task(_run_campaign(cid))
+            _active_campaigns[cid] = task
+            await db.add_dm_campaign_log(cid, None, 0, None, "skipped",
+                                         "🔄 Campaign tự động chạy tiếp — tìm thấy account sender đã hết bị giới hạn.")
+        else:
+            logger.info(f"[AutoResume] Campaign {cid}: no available senders yet, will check again in {_AUTO_RESUME_INTERVAL_MINUTES}m")
+
+
+def start_auto_resume_job():
+    """Register the periodic auto-resume job."""
+    scheduler = get_scheduler()
+    if scheduler.get_job(_AUTO_RESUME_JOB_ID):
+        return  # already registered
+
+    from apscheduler.triggers.interval import IntervalTrigger
+    scheduler.add_job(
+        _auto_resume_campaigns,
+        trigger=IntervalTrigger(minutes=_AUTO_RESUME_INTERVAL_MINUTES, timezone=TZ),
+        id=_AUTO_RESUME_JOB_ID,
+        name="Auto-resume paused_auto DM campaigns",
+        replace_existing=True,
+        misfire_grace_time=120,
+    )
+    logger.info(f"📅 Auto-resume job registered (every {_AUTO_RESUME_INTERVAL_MINUTES}m)")

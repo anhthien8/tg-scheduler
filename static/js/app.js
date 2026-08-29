@@ -672,8 +672,9 @@ el.innerHTML=sorted.map(a=>{const score=a.health_score||0;const color=score>=80?
 return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
 <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.account_name||'Account #'+a.account_id)} ${a.is_flagged?'<span style="color:var(--red)" title="Bị cảnh báo">🚩</span>':''}</div>
 <div style="height:3px;border-radius:2px;background:var(--bg3);margin-top:5px"><div style="height:100%;width:${score}%;border-radius:2px;background:${color}"></div></div>
-<div style="font-size:11px;color:var(--text2);margin-top:4px">📤 ${a.dm_sent_today||0} hôm nay · ✅ ${(a.success_rate||0).toFixed(0)}% · ⚠️ ${a.flood_count||0} flood</div></div>
-<span class="badge ${score>=80?'badge-green':score>=50?'badge-blue':'badge-red'}" style="flex-shrink:0">${score}</span></div>`}).join('')},
+<div style="font-size:11px;color:var(--text2);margin-top:4px">
+<span title="Số DM đã gửi thành công trong hôm nay">📤 ${a.dm_sent_today||0} hôm nay</span> · <span title="Tỷ lệ gửi thành công: DM gửi được / tổng số DM đã thử">✅ ${(a.success_rate||0).toFixed(0)}%</span> · <span title="Số lần bị Telegram chặn do gửi quá nhanh (FloodWait/PeerFlood). Càng cao càng dễ bị khóa">⚠️ ${a.flood_count||0} flood</span></div></div>
+<span class="badge ${score>=80?'badge-green':score>=50?'badge-blue':'badge-red'}" style="flex-shrink:0" title="Điểm sức khỏe tài khoản (0-100). Từ 80 trở lên là an toàn, dưới 50 nên giảm tốc độ gửi">${score}</span></div>`}).join('')},
 
 // ── Dashboard Tasks (Việc cần làm) ──────────────────────────────
 _dashTasks: [],

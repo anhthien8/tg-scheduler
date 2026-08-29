@@ -512,49 +512,61 @@ const Members = {
       const skipped = c.skipped_count || 0;
       const processed = sent + failed + skipped;
       const progress = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+      const autoResume = c.auto_resume === undefined ? 1 : c.auto_resume;
 
       let actions = '';
-      if (c.status === 'draft' || c.status === 'paused' || c.status === 'error') {
-        actions += `<button class="btn btn-primary btn-sm" onclick="Members.startCampaign(${c.id})">▶ Chạy</button>`;
-        actions += `<button class="btn btn-ghost btn-sm" onclick="Members.editCampaignMessages(${c.id})" title="Sửa tin nhắn">✏️</button>`;
+      if (c.status === 'draft' || c.status === 'paused' || c.status === 'paused_auto' || c.status === 'error') {
+        actions += `<button class="btn btn-primary btn-sm" onclick="Members.startCampaign(${c.id})" title="Chạy campaign">▶</button>`;
+        actions += `<button class="btn btn-ghost btn-sm" onclick="Members.editCampaignMessages(${c.id})" title="Sửa tin nhắn & cài đặt">✏️</button>`;
       }
       if (c.status === 'running') {
-        actions += `<button class="btn btn-danger btn-sm" onclick="Members.stopCampaign(${c.id})">⏸ Dừng</button>`;
+        actions += `<button class="btn btn-danger btn-sm" onclick="Members.stopCampaign(${c.id})" title="Dừng campaign">⏸</button>`;
       }
       if (c.status === 'scheduled') {
-        actions += `<button class="btn btn-ghost btn-sm" onclick="Members.cancelSchedule(${c.id})" style="color:var(--danger)">Hủy lịch</button>`;
+        actions += `<button class="btn btn-ghost btn-sm" onclick="Members.cancelSchedule(${c.id})" title="Hủy lịch hẹn giờ" style="color:var(--danger)">🚫</button>`;
       }
-      actions += `<button class="btn btn-ghost btn-sm" onclick="Members.cloneCampaign(${c.id})" title="Nhân bản (Clone) chiến dịch">📑</button>`;
-      actions += `<button class="btn btn-ghost btn-sm" onclick="Members.viewCampaignLogs(${c.id},'${esc(c.name)}')">📋</button>`;
-      actions += `<button class="btn btn-danger btn-sm" onclick="Members.deleteCampaign(${c.id})">🗑</button>`;
+      actions += `<button class="btn btn-ghost btn-sm" onclick="Members.cloneCampaign(${c.id})" title="Nhân bản campaign">📑</button>`;
+      actions += `<button class="btn btn-ghost btn-sm" onclick="Members.viewCampaignLogs(${c.id},'${esc(c.name)}')" title="Xem log gửi tin">📋</button>`;
+      actions += `<button class="btn btn-danger btn-sm" onclick="Members.deleteCampaign(${c.id})" title="Xóa campaign">🗑</button>`;
 
-      let scheduleInfo = '';
+      // Sub-line under name: source + schedule + auto-resume state
+      const sourceFull = c.scrape_job_id || '';
+      const sourceShort = sourceFull.length > 22 ? sourceFull.substring(0, 22) + '…' : sourceFull;
+      const metaParts = [`<span title="Nguồn: ${esc(sourceFull)}">📁 ${esc(sourceShort)}</span>`];
+
       if (c.status === 'scheduled' && c.scheduled_at) {
-        const time = new Date(c.scheduled_at + 'Z').toLocaleString('vi-VN');
-        const tz = c.target_timezone ? `<br><small style="color:var(--text2)">${Members._tzLabel(c.target_timezone)}</small>` : '';
-        scheduleInfo = `<div style="font-size:11px;margin-top:4px;color:var(--accent)">⏰ ${time}${tz}</div>`;
+        const time = new Date(c.scheduled_at + 'Z').toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+        const tz = c.target_timezone ? ` ${Members._tzLabel(c.target_timezone)}` : '';
+        metaParts.push(`<span style="color:var(--accent)">⏰ ${time}${tz}</span>`);
       }
+      if (c.status === 'paused_auto') {
+        metaParts.push(autoResume
+          ? `<span style="color:#10b981" title="Hệ thống tự kiểm tra mỗi 15 phút và chạy tiếp khi account hết bị khóa">🔄 Auto-resume BẬT</span>`
+          : `<span style="color:var(--text2)" title="Campaign sẽ không tự chạy tiếp — cần bấm ▶ thủ công">⏹ Auto-resume TẮT</span>`);
+        metaParts.push(`<a href="javascript:void(0)" onclick="Members.toggleAutoResume(${c.id}, ${autoResume ? 0 : 1})" style="color:var(--primary);text-decoration:underline">${autoResume ? 'Tắt' : 'Bật'}</a>`);
+      }
+
+      const statsTitle = `Thành công: ${sent} • Lỗi: ${failed} • Bỏ qua: ${skipped}`;
 
       const rowHtml = `
-        <td>${i + 1}</td>
-        <td>
-          ${esc(c.name)}
-          ${scheduleInfo}
+        <td style="color:var(--text2);font-size:12px">${i + 1}</td>
+        <td style="max-width:230px">
+          <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(c.name)}">${esc(c.name)}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">${metaParts.join('')}</div>
         </td>
-        <td style="font-size:12px">${esc(c.scrape_job_id.substring(0, 20))}...</td>
-        <td>${statusBadge}</td>
-        <td>
+        <td style="white-space:nowrap">${statusBadge}</td>
+        <td style="min-width:190px" title="${statsTitle}">
           <div style="display:flex;align-items:center;gap:8px">
-            <div style="flex:1;background:var(--bg2);border-radius:4px;height:8px;overflow:hidden">
+            <div style="flex:1;background:var(--bg2);border-radius:4px;height:6px;overflow:hidden">
               <div style="width:${progress}%;height:100%;background:linear-gradient(90deg, #8b5cf6, #6366f1);border-radius:4px;transition:width .3s"></div>
             </div>
-            <span style="font-size:12px;font-weight:600;color:var(--text1)">${processed}/${total} (${progress}%)</span>
+            <span style="font-size:12px;font-weight:600;color:var(--text1);white-space:nowrap">${processed}/${total}</span>
           </div>
-          <div style="font-size:11px;color:var(--text2);margin-top:3px">
-            ✅ Thành công: <b>${sent}</b> | ❌ Lỗi: <b>${failed}</b> | ⏭ Bỏ qua: <b>${skipped}</b>
+          <div style="font-size:11px;color:var(--text2);margin-top:3px;white-space:nowrap">
+            <span style="color:#10b981">${sent}</span> · <span style="color:#ef4444">${failed}</span> · <span style="color:var(--text2)">${skipped}</span>
           </div>
         </td>
-        <td><div class="btn-group">${actions}</div></td>
+        <td style="white-space:nowrap"><div class="btn-group">${actions}</div></td>
       `;
 
       let existingRow = tbody.querySelector(`tr[data-id="${c.id}"]`);
@@ -563,12 +575,14 @@ const Members = {
         if (existingIdx !== (i + 1) ||
             existingRow.getAttribute('data-updated-at') !== c.updated_at ||
             existingRow.getAttribute('data-status') !== c.status ||
+            existingRow.getAttribute('data-autoresume') !== String(autoResume) ||
             existingRow.getAttribute('data-sent') !== String(sent) ||
             existingRow.getAttribute('data-failed') !== String(failed) ||
             existingRow.getAttribute('data-skipped') !== String(skipped)) {
           existingRow.innerHTML = rowHtml;
           existingRow.setAttribute('data-updated-at', c.updated_at);
           existingRow.setAttribute('data-status', c.status);
+          existingRow.setAttribute('data-autoresume', String(autoResume));
           existingRow.setAttribute('data-index', i + 1);
           existingRow.setAttribute('data-sent', String(sent));
           existingRow.setAttribute('data-failed', String(failed));
@@ -579,6 +593,7 @@ const Members = {
         tr.setAttribute('data-id', c.id);
         tr.setAttribute('data-updated-at', c.updated_at);
         tr.setAttribute('data-status', c.status);
+        tr.setAttribute('data-autoresume', String(autoResume));
         tr.setAttribute('data-index', i + 1);
         tr.setAttribute('data-sent', String(sent));
         tr.setAttribute('data-failed', String(failed));
@@ -595,15 +610,28 @@ const Members = {
   },
 
   _statusBadge(status) {
+    const st = 'font-size:11px;padding:3px 8px;min-width:96px;display:inline-block;text-align:center';
     const map = {
-      draft: '<span class="badge" style="background:var(--text2)">📝 Draft</span>',
-      running: '<span class="badge badge-blue">🔄 Running</span>',
-      paused: '<span class="badge" style="background:#f59e0b">⏸ Paused</span>',
-      completed: '<span class="badge badge-green">✅ Done</span>',
-      error: '<span class="badge badge-red">❌ Error</span>',
-      scheduled: '<span class="badge" style="background:#8b5cf6">⏰ Scheduled</span>',
+      draft: `<span class="badge" style="background:var(--text2);${st}">📝 Nháp</span>`,
+      running: `<span class="badge badge-blue" style="${st}">🔄 Đang chạy</span>`,
+      paused: `<span class="badge" style="background:#f59e0b;${st}" title="Tạm dừng thủ công">⏸ Tạm dừng</span>`,
+      paused_auto: `<span class="badge" style="background:#0ea5e9;${st}" title="Dừng do SpamBot/limit — sẽ tự chạy tiếp khi account sẵn sàng">🔒 Chờ mở khóa</span>`,
+      completed: `<span class="badge badge-green" style="${st}">✅ Hoàn tất</span>`,
+      error: `<span class="badge badge-red" style="${st}">❌ Lỗi</span>`,
+      scheduled: `<span class="badge" style="background:#8b5cf6;${st}">⏰ Hẹn giờ</span>`,
     };
-    return map[status] || `<span class="badge">${status}</span>`;
+    return map[status] || `<span class="badge" style="${st}">${status}</span>`;
+  },
+
+  async toggleAutoResume(id, enabled) {
+    try {
+      await MembersAPI.setAutoResume(id, !!enabled);
+      App.toast(enabled ? '🔄 Đã bật auto-resume' : '⏹ Đã tắt auto-resume', 'success');
+      this._lastCampaignsUpdate = null;
+      this.loadCampaigns();
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
   },
 
   // ── Campaign Actions ──
@@ -704,7 +732,7 @@ const Members = {
       const d = await MembersAPI.getCampaign(id);
       const c = d.campaign;
       if (!c) { App.toast('Campaign không tồn tại', 'error'); return; }
-      if (!['draft', 'paused', 'error'].includes(c.status)) {
+      if (!['draft', 'paused', 'paused_auto', 'error'].includes(c.status)) {
         App.toast('Chỉ sửa được khi campaign đang tạm dừng', 'error');
         return;
       }
@@ -729,6 +757,10 @@ const Members = {
       const excludePrevEl = document.getElementById('cmp-exclude-previous');
       if (excludePrevEl) {
         excludePrevEl.checked = c.exclude_previous_dms !== undefined ? !!c.exclude_previous_dms : true;
+      }
+      const autoResumeEl = document.getElementById('cmp-auto-resume');
+      if (autoResumeEl) {
+        autoResumeEl.checked = c.auto_resume !== undefined ? !!c.auto_resume : true;
       }
 
       // Hide scrape job selector (can't change target)
@@ -837,6 +869,7 @@ const Members = {
     const agentIdVal = document.getElementById('cmp-ai-agent')?.value;
     const aiAgentId = agentIdVal ? parseInt(agentIdVal) : null;
     const autoNative = document.getElementById('cmp-auto-translate-native')?.checked ? 1 : 0;
+    const autoResume = document.getElementById('cmp-auto-resume')?.checked ?? true;
     const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
 
     // Collect sender accounts
@@ -873,6 +906,7 @@ const Members = {
         ai_agent_id: aiAgentId,
         auto_translate_native: autoNative,
         exclude_previous_dms: excludePrev,
+        auto_resume: autoResume,
       });
       App.toast('✅ Đã cập nhật tin nhắn campaign!', 'success');
       this._editingCampaignId = null;
@@ -1265,6 +1299,7 @@ const Members = {
     const agentIdVal2 = document.getElementById('cmp-ai-agent')?.value;
     const aiAgentId = agentIdVal2 ? parseInt(agentIdVal2) : null;
     const autoNative = document.getElementById('cmp-auto-translate-native')?.checked ? 1 : 0;
+    const autoResume = document.getElementById('cmp-auto-resume')?.checked ?? true;
     const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
 
     // --- NEW SCHEDULE FIELDS ---
@@ -1314,6 +1349,7 @@ const Members = {
         ai_agent_id: aiAgentId,
         auto_translate_native: autoNative,
         exclude_previous_dms: excludePrev,
+        auto_resume: autoResume,
         // --- NEW FIELDS ---
         schedule_enabled: scheduleEnabled,
         scheduled_at: scheduleEnabled ? scheduledAt : undefined,
@@ -2980,7 +3016,7 @@ const Members = {
       const d = await InviteAPI.getCampaign(id);
       const c = d.campaign;
       if (!c) { App.toast('Campaign không tồn tại', 'error'); return; }
-      if (!['draft', 'paused', 'error'].includes(c.status)) {
+      if (!['draft', 'paused', 'paused_auto', 'error'].includes(c.status)) {
         App.toast('Chỉ sửa được khi campaign đang tạm dừng', 'error');
         return;
       }

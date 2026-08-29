@@ -43,7 +43,7 @@ const Changelog = {
           <button class="btn btn-sm ${this._activeFilter === 'fix' ? 'btn-primary' : 'btn-outline'}" onclick="window.Changelog.setFilter('fix')">🐞 Sửa lỗi</button>
         </div>
         <div style="font-size:13px;color:var(--text2)">
-          <span>Phiên bản hiện tại: <strong style="color:var(--primary)">v3.1.7</strong></span>
+          <span>Phiên bản hiện tại: <strong style="color:var(--primary)">v3.1.8</strong></span>
         </div>
       </div>
 

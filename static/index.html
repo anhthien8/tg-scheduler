@@ -1025,8 +1025,7 @@
                 <thead>
                   <tr>
                     <th>#</th>
-                    <th>Tên</th>
-                    <th>Nguồn</th>
+                    <th>Tên / Nguồn</th>
                     <th>Trạng thái</th>
                     <th>Tiến độ</th>
                     <th>Hành động</th>
@@ -1282,6 +1281,22 @@
               <select id="cmp-ai-agent" class="form-input" style="font-size:0.83rem;padding:6px 10px;height:36px;background:rgba(0,0,0,0.25);">
                 <option value="">-- Khôi phục AI Agent mặc định --</option>
               </select>
+            </div>
+          </div>
+
+          <!-- Auto Resume Box -->
+          <div style="display:flex;align-items:flex-start;gap:12px;padding:12px;background:rgba(0,0,0,0.25);border:1px solid rgba(14,165,233,0.25);border-radius:8px;">
+            <label class="toggle" style="margin-top:2px;flex-shrink:0;">
+              <input type="checkbox" id="cmp-auto-resume" checked>
+              <span class="toggle-slider"></span>
+            </label>
+            <div style="flex:1;">
+              <div style="font-size:0.84rem;font-weight:700;color:#0ea5e9;display:flex;align-items:center;gap:6px;">
+                <span>🔄</span> <span>Tự Động Chạy Tiếp (Auto Resume)</span>
+              </div>
+              <div style="font-size:0.75rem;color:#9ca3af;margin-top:3px;line-height:1.4;">
+                Khi tất cả tài khoản bị SpamBot/PeerFlood hoặc hết daily limit, hệ thống sẽ tự kiểm tra mỗi 15 phút và chạy tiếp chiến dịch khi có account sẵn sàng.
+              </div>
             </div>
           </div>
 
@@ -1687,14 +1702,14 @@
     </div>
   </div>
 
-  <script src="/static/js/api.js?v=400"></script>
+  <script src="/static/js/api.js?v=401"></script>
   <script src="/static/js/discord.js?v=400"></script>
-  <script src="/static/js/members.js?v=401"></script>
+  <script src="/static/js/members.js?v=402"></script>
   <script src="/static/js/analytics.js?v=400"></script>
   <script src="/static/js/ai_agents.js?v=400"></script>
   <script src="/static/js/ai_followup.js?v=411"></script>
-  <script src="/static/js/changelog.js?v=405"></script>
-  <script src="/static/js/app.js?v=413"></script>
+  <script src="/static/js/changelog.js?v=406"></script>
+  <script src="/static/js/app.js?v=414"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

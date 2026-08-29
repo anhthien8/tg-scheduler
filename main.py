@@ -192,6 +192,9 @@ async def lifespan(app: FastAPI):
 
     # Start scheduler
     sch.start_scheduler()
+
+    # Register auto-resume job for paused_auto campaigns
+    sch.start_auto_resume_job()
     await sch.load_all_jobs()
 
     # Reload scheduled DM campaigns

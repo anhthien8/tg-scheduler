@@ -8,11 +8,45 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.1.8",
+        "date": "30/08/2026",
+        "title": "🔄 Auto-Resume Chiến Dịch Sau SpamBot + Gọn Bảng Campaign",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Campaign bị dừng do SpamBot/PeerFlood hoặc hết daily limit giờ tự chạy lại khi account hết bị khóa. Bảng DM Campaign gọn hơn, icon có tooltip mô tả rõ ràng.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Tự Động Chạy Tiếp Khi Hết Bị Khóa",
+                "desc": "Khi tất cả sender bị SpamBot/PeerFlood chặn hoặc hết daily limit, campaign chuyển sang trạng thái 'Chờ mở khóa'. Hệ thống kiểm tra mỗi 15 phút, tự chạy tiếp ngay khi có account sẵn sàng.",
+                "tag": "Auto Resume"
+            },
+            {
+                "type": "feature",
+                "title": "Toggle Auto-Resume Trên Từng Campaign",
+                "desc": "Bật/tắt 'Tự Động Chạy Tiếp' riêng cho từng chiến dịch trong modal tạo/sửa, hoặc nhanh trên dòng campaign đang chờ mở khóa.",
+                "tag": "Cấu hình"
+            },
+            {
+                "type": "improvement",
+                "title": "Bảng Campaign Gọn Hơn",
+                "desc": "Gộp cột Tên + Nguồn, badge trạng thái đồng nhất kích thước, thống kê chi tiết chuyển vào tooltip, nút hành động chỉ icon có mô tả khi rê chuột.",
+                "tag": "UI"
+            },
+            {
+                "type": "improvement",
+                "title": "Icon Có Tooltip Mô Tả",
+                "desc": "Icon thống kê trên dashboard (📤 DM hôm nay, ✅ tỷ lệ thành công, ⚠️ số lần flood, điểm sức khỏe) giờ hiển thị mô tả khi rê chuột.",
+                "tag": "UI"
+            }
+        ]
+    },
+    {
         "version": "v3.1.7",
         "date": "29/08/2026",
         "title": "👤 Hiển Thị Rõ Nick Phụ Đang Chat Với KOL",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Modal Xem chat nay hiển thị tên tài khoản phụ đang dùng để chat với KOL, không chỉ hiện Acc #ID. Bubble AI/chat tay cũng ghi rõ account gửi tin.",
         "changes": [
             {
