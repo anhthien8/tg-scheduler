@@ -728,7 +728,7 @@ grid.innerHTML = this.accounts.map(a => {
   </div>`;
 }).join('')}catch(e){this.toast(e.message,'error')}},
 
-openAddAccountModal(){(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-phone') || me_dummy).value = '';const proxyEl=document.getElementById('acc-proxy');if(proxyEl)proxyEl.value='';(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
+openAddAccountModal(){this._bulkQueue=null;this._bulkDone=[];this._bulkFailed=[];(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-phone') || me_dummy).value = '';const proxyEl=document.getElementById('acc-proxy');if(proxyEl)proxyEl.value='';const bulk=document.getElementById('acc-bulk-input');if(bulk)bulk.value='';document.getElementById('acc-bulk-progress')?.classList.add('hidden');document.getElementById('acc-bulk-skip')?.classList.add('hidden');this.setAccountAddMode('single');(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
 
 closeAccountModal(){(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')},
 
@@ -770,13 +770,57 @@ async removeBlacklist(id){if(!await customConfirm('Xóa user này khỏi blackli
 
 async addAccount(){const phone=(document.getElementById('acc-phone')?.value || "").trim();if(!phone)return this.toast('Nhập số điện thoại','error');const proxyUrl=(document.getElementById('acc-proxy')?.value || "").trim()||null;try{const r=await API.addAccount({phone,proxy_url:proxyUrl||null});this.loginAccountId=r.account_id;this.loginPhone=phone;const c=await API.sendCode(phone,r.account_id);this.phoneCodeHash=c.phone_code_hash;(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');this.toast('OTP đã gửi','success')}catch(e){this.toast(e.message||String(e),'error')}},
 
+setAccountAddMode(mode){this._accAddMode=mode;const single=mode==='single';document.getElementById('acc-single-fields')?.classList.toggle('hidden',!single);document.getElementById('acc-bulk-fields')?.classList.toggle('hidden',single);document.getElementById('acc-mode-single')?.classList.toggle('btn-primary',single);document.getElementById('acc-mode-single')?.classList.toggle('btn-ghost',!single);document.getElementById('acc-mode-bulk')?.classList.toggle('btn-primary',!single);document.getElementById('acc-mode-bulk')?.classList.toggle('btn-ghost',single);},
+
+async startBulkAccounts(){const raw=(document.getElementById('acc-bulk-input')?.value||'').trim();if(!raw)return this.toast('Nhập ít nhất 1 số điện thoại','error');
+  this._bulkQueue=raw.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const[phone,proxy]=l.split('|').map(s=>(s||'').trim());return{phone,proxy:proxy||null}});
+  if(!this._bulkQueue.length)return this.toast('Danh sách trống','error');
+  this._bulkDone=[];this._bulkFailed=[];
+  document.getElementById('acc-bulk-skip')?.classList.remove('hidden');
+  await this._bulkAdvance();
+},
+
+async _bulkAdvance(){
+  if(!this._bulkQueue.length){this.toast(`Xong: ${this._bulkDone.length} OK${this._bulkFailed.length?`, ${this._bulkFailed.length} lỗi`:''}`,'success');this.closeAccountModal();this.loadAccounts();return}
+  const{phone,proxy}=this._bulkQueue[0];
+  const progEl=document.getElementById('acc-bulk-progress');if(progEl){progEl.classList.remove('hidden');progEl.textContent=`Đang xử lý ${this._bulkDone.length+this._bulkFailed.length+1}/${this._bulkDone.length+this._bulkFailed.length+this._bulkQueue.length}: ${phone}`}
+  try{
+    const r=await API.addAccount({phone,proxy_url:proxy});
+    this.loginAccountId=r.account_id;this.loginPhone=phone;
+    const c=await API.sendCode(phone,r.account_id);this.phoneCodeHash=c.phone_code_hash;
+    (document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
+    const otpPhoneEl=document.getElementById('acc-otp-phone');if(otpPhoneEl)otpPhoneEl.textContent=`(${phone})`;
+    this.toast(`OTP đã gửi cho ${phone}`,'success');
+  }catch(e){
+    this.toast(`Lỗi ${phone}: ${e.message||e}`,'error');
+    this._bulkFailed.push(phone);this._bulkQueue.shift();
+    await this._bulkAdvance();
+  }
+},
+
+async skipBulkAccount(){if(!this._bulkQueue?.length)return;const{phone}=this._bulkQueue.shift();this._bulkFailed.push(phone);await this._bulkAdvance();},
+
 async verifyAccount(){const code=(document.getElementById('acc-code')?.value || "").trim();if(!code)return this.toast('Nhập OTP','error');
 
 try{const r=await API.verify(this.loginPhone,code,this.phoneCodeHash,this.loginAccountId);if(r.needs_password){(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');return}
 
-this.toast('Đăng nhập thành công!','success');this.closeAccountModal();this.loadAccounts()}catch(e){if(e.message.includes('2FA')){(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden')}else this.toast(e.message,'error')}},
+this.toast('Đăng nhập thành công!','success');
+const otpInput=document.getElementById('acc-code');if(otpInput)otpInput.value='';
+if(this._bulkQueue?.length){
+  this._bulkDone.push(this.loginPhone);this._bulkQueue.shift();
+  await this._bulkAdvance();
+}else{
+  this.closeAccountModal();this.loadAccounts();
+}}catch(e){if(e.message.includes('2FA')){(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden')}else this.toast(e.message,'error')}},
 
-async verify2FAAccount(){const pw=document.getElementById('acc-password')?.value;try{await API.verify(this.loginPhone,(document.getElementById('acc-code')?.value || "").trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('OK!','success');this.closeAccountModal();this.loadAccounts()}catch(e){this.toast(e.message,'error')}},
+async verify2FAAccount(){const pw=document.getElementById('acc-password')?.value;try{await API.verify(this.loginPhone,(document.getElementById('acc-code')?.value || "").trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('OK!','success');
+const pwInput=document.getElementById('acc-password');if(pwInput)pwInput.value='';
+if(this._bulkQueue?.length){
+  this._bulkDone.push(this.loginPhone);this._bulkQueue.shift();
+  await this._bulkAdvance();
+}else{
+  this.closeAccountModal();this.loadAccounts();
+}}catch(e){this.toast(e.message,'error')}},
 
 async loginAccount(id,phone){this.loginAccountId=id;this.loginPhone=phone;try{const c=await API.sendCode(phone,id);this.phoneCodeHash=c.phone_code_hash;this.openAddAccountModal();(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');this.toast('OTP đã gửi','success')}catch(e){this.toast(e.message,'error')}},
 

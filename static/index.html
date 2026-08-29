@@ -1447,29 +1447,39 @@
       <div class="modal-body">
         <!-- Step 1: Info -->
         <div id="acc-step-info">
-          <div style="background:rgba(91,141,239,0.08);border:1px solid rgba(91,141,239,0.2);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:var(--text2)">
-            🔐 Hệ thống tự động cấu hình API — bạn chỉ cần nhập số điện thoại
+          <div style="display:flex;gap:4px;margin-bottom:14px;background:var(--bg3);padding:3px;border-radius:8px">
+            <button id="acc-mode-single" class="btn btn-primary btn-sm" style="flex:1" onclick="App.setAccountAddMode('single')">Một tài khoản</button>
+            <button id="acc-mode-bulk" class="btn btn-ghost btn-sm" style="flex:1" onclick="App.setAccountAddMode('bulk')">Hàng loạt</button>
           </div>
-          <div class="form-group">
-            <label class="form-label">Số điện thoại</label>
-            <input type="tel" class="form-input" id="acc-phone" placeholder="+84912345678" autocomplete="off">
-          </div>
-          <div class="form-group">
-            <label class="form-label">🔒 Proxy URL <span style="font-size:.8rem;color:var(--text-secondary);font-weight:400">(tuỳ chọn)</span></label>
-            <input type="text" id="acc-proxy" class="form-input" placeholder="socks5://user:pass@host:1080 hoặc để trống">
-            <div style="font-size:.75rem;color:var(--text-secondary);margin-top:.3rem">
-              Hỗ trợ: <code>socks5://</code> · <code>socks4://</code> · <code>http://</code> · <code>mtproto://host:port/secret</code>
+          <div id="acc-single-fields">
+            <div class="form-group">
+              <label class="form-label">Số điện thoại</label>
+              <input type="tel" class="form-input" id="acc-phone" placeholder="+84912345678" autocomplete="off">
             </div>
+            <div class="form-group">
+              <label class="form-label">Proxy URL <span style="font-size:.8rem;color:var(--text-secondary);font-weight:400">(tuỳ chọn)</span></label>
+              <input type="text" id="acc-proxy" class="form-input" placeholder="socks5://user:pass@host:1080">
+            </div>
+            <button class="btn btn-primary btn-full" onclick="App.addAccount()">Gửi OTP</button>
           </div>
-          <button class="btn btn-primary btn-full" onclick="App.addAccount()">📲 Gửi OTP</button>
+          <div id="acc-bulk-fields" class="hidden">
+            <label class="form-label">Danh sách tài khoản</label>
+            <textarea id="acc-bulk-input" class="form-input" rows="8" style="resize:vertical;min-height:140px;font-family:monospace;font-size:12px" placeholder="+84912345678&#10;+84987654321 | socks5://user:pass@host:1080"></textarea>
+            <div style="font-size:11px;color:var(--text2);margin:6px 0 12px">Mỗi dòng: <code>số điện thoại | proxy</code>. Proxy có thể bỏ trống. OTP được xác nhận lần lượt.</div>
+            <button class="btn btn-primary btn-full" onclick="App.startBulkAccounts()">Bắt đầu thêm hàng loạt</button>
+          </div>
         </div>
         <!-- Step 2: OTP -->
         <div id="acc-step-otp" class="hidden">
+          <div id="acc-bulk-progress" class="hidden" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
           <div class="form-group">
-            <label class="form-label">Mã OTP</label>
-            <input type="text" class="form-input" id="acc-code" placeholder="12345" maxlength="6">
+            <label class="form-label">Mã OTP <span id="acc-otp-phone" style="color:var(--accent-text);font-weight:400"></span></label>
+            <input type="text" class="form-input" id="acc-code" placeholder="12345" maxlength="6" inputmode="numeric">
           </div>
-          <button class="btn btn-primary" style="width:100%" onclick="App.verifyAccount()">Xác nhận OTP</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" style="flex:1" onclick="App.verifyAccount()">Xác nhận OTP</button>
+            <button id="acc-bulk-skip" class="btn btn-ghost hidden" onclick="App.skipBulkAccount()">Bỏ qua</button>
+          </div>
         </div>
         <!-- Step 3: 2FA -->
         <div id="acc-step-2fa" class="hidden">
@@ -1675,7 +1685,7 @@
   <script src="/static/js/ai_agents.js?v=400"></script>
   <script src="/static/js/ai_followup.js?v=408"></script>
   <script src="/static/js/changelog.js?v=400"></script>
-  <script src="/static/js/app.js?v=410"></script>
+  <script src="/static/js/app.js?v=411"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">
