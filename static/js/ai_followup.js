@@ -241,9 +241,10 @@ const AIFollowUp = {
       const toggleBtn = c.status === 'active'
         ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'paused_admin')" title="Tắt AI, tự chat tay" aria-label="Tắt AI cho ${esc(uName)}">⏸</button>`
         : `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')" title="Bật AI chat tiếp" aria-label="Bật AI cho ${esc(uName)}">▶️</button>`;
+      const accLabel = c.account_name || `Acc #${c.account_id}`;
       return `<tr>
         <td style="width:34px;text-align:center"><input type="checkbox" aria-label="Chọn ${esc(uName)}" ${this._selected.has(`${c.account_id}:${c.user_id}`) ? 'checked' : ''} onchange="AIFollowUp.toggleSelection('${c.account_id}:${c.user_id}',this.checked)"></td>
-        <td><div style="font-weight:600">${esc(uName)}</div><div style="font-size:11px;color:var(--text2);font-family:monospace">ID ${c.user_id} • Acc #${c.account_id}</div></td>
+        <td><div style="font-weight:600">${esc(uName)}</div><div style="font-size:11px;color:var(--text2);font-family:monospace">ID ${c.user_id} • 👤 ${esc(accLabel)}</div></td>
         <td><div style="display:flex;align-items:center;gap:6px">${tierBadge}<span style="font-size:11px;color:var(--text2)">${score}%</span></div><div style="width:70px;height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:${Math.min(100, Math.max(0, score))}%;height:100%;background:${score >= 80 ? 'var(--orange)' : score >= 50 ? 'var(--accent)' : 'var(--text3)'}"></div></div></td>
         <td>${c.reply_count || 0}</td>
         <td><span class="${meta.badge}">${meta.label}</span></td>
@@ -368,7 +369,8 @@ const AIFollowUp = {
 
     const uName = c.name || (c.username ? `@${c.username}` : `User #${c.user_id}`);
     const title = document.getElementById('aifu-modal-title');
-    if (title) title.textContent = `💬 Chat với ${uName} (Acc #${accountId})`;
+    const accountLabel = c.account_name || `Account #${accountId}`;
+    if (title) title.textContent = `💬 ${accountLabel} đang chat với ${uName}`;
 
     const box = document.getElementById('aifu-modal-chat-box');
     const tier = c.lead_tier || 'Tier C';
@@ -398,7 +400,7 @@ const AIFollowUp = {
           }) : 'Không rõ thời gian';
           return `
             <div style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-start' : 'flex-end'};margin-bottom:12px">
-              <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${isUser ? '👤 ' + esc(uName) : '🤖 AI Sales Agent'} • ${timeText}</div>
+              <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${isUser ? '👤 ' + esc(uName) : '🤖 ' + esc(accountLabel) + ' · AI'} • ${timeText}</div>
               <div style="background:${isUser ? 'var(--accent-dim)' : 'var(--purple-dim)'};border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(msg.content || '')}</div>
             </div>`;
         }).join('');
@@ -462,10 +464,11 @@ const AIFollowUp = {
       // Append bubble vào chat box
       const box = document.getElementById('aifu-modal-chat-box');
       if (box) {
-        const timeText = new Date().toLocaleTimeString('vi-VN');
+        const accLabel = c.account_name || `Account #${c.account_id}`;
+        const timeText = new Date().toLocaleString('vi-VN', { timeZone:'Asia/Ho_Chi_Minh', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
         box.insertAdjacentHTML('beforeend', `
           <div style="display:flex;flex-direction:column;align-items:flex-end;margin-bottom:12px">
-            <div style="font-size:11px;color:var(--text2);margin-bottom:3px">🧑‍💼 Bạn (chat tay) • ${timeText}</div>
+            <div style="font-size:11px;color:var(--text2);margin-bottom:3px">🧑‍💼 ${esc(accLabel)} · chat tay • ${timeText}</div>
             <div style="background:var(--purple-dim);border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(text)}</div>
           </div>`);
         box.scrollTop = box.scrollHeight;

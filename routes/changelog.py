@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.1.7",
+        "date": "29/08/2026",
+        "title": "👤 Hiển Thị Rõ Nick Phụ Đang Chat Với KOL",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Modal Xem chat nay hiển thị tên tài khoản phụ đang dùng để chat với KOL, không chỉ hiện Acc #ID. Bubble AI/chat tay cũng ghi rõ account gửi tin.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Tên Account Trong Tiêu Đề Chat",
+                "desc": "Tiêu đề modal đổi từ 'Chat với KOL (Acc #6)' sang 'Tên account đang chat với KOL', giúp biết ngay nick phụ nào đang xử lý lead.",
+                "tag": "Chat UX"
+            },
+            {
+                "type": "improvement",
+                "title": "Bubble AI / Chat Tay Ghi Rõ Account Gửi",
+                "desc": "Label tin nhắn AI và tin chat tay nay hiển thị tên account phụ thay vì chỉ ghi 'AI Sales Agent' hoặc 'Bạn'.",
+                "tag": "Account Identity"
+            },
+            {
+                "type": "fix",
+                "title": "API Lead List Trả account_name",
+                "desc": "Query ai_followup_chats join accounts để frontend nhận được tên account phụ tương ứng với account_id.",
+                "tag": "API"
+            }
+        ]
+    },
+    {
         "version": "v3.1.6",
         "date": "29/08/2026",
         "title": "🕒 Hiển Thị Ngày Giờ Đầy Đủ Trong Lịch Sử Chat",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Modal Xem chat trong Lead & AI Follow-Up nay hiển thị đầy đủ ngày/tháng/năm và giờ Việt Nam cho từng tin nhắn, đồng thời sắp xếp lịch sử theo timestamp thật.",
         "changes": [
             {

@@ -4113,18 +4113,20 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
         where_clause = ""
         params = []
         if status_filter:
-            where_clause = "WHERE status = ?"
+            where_clause = "WHERE c.status = ?"
             params.append(status_filter)
 
         params.extend([limit, offset])
         cursor = await db.execute(f"""
-            SELECT id, account_id, user_id, username, name, campaign_id, watcher_id,
-                   status, reply_count, created_at, updated_at, intent_score,
-                   lead_tier, summary, last_drip_stage, human_takeover_at, verification_status
-                   {", history_json" if include_history else ""}
-            FROM ai_followup_chats
+            SELECT c.id, c.account_id, c.user_id, c.username, c.name, c.campaign_id, c.watcher_id,
+                   c.status, c.reply_count, c.created_at, c.updated_at, c.intent_score,
+                   c.lead_tier, c.summary, c.last_drip_stage, c.human_takeover_at, c.verification_status,
+                   a.name AS account_name
+                   {", c.history_json" if include_history else ""}
+            FROM ai_followup_chats c
+            LEFT JOIN accounts a ON a.id = c.account_id
             {where_clause}
-            ORDER BY updated_at DESC
+            ORDER BY c.updated_at DESC
             LIMIT ? OFFSET ?
         """, params)
         rows = [dict(r) for r in await cursor.fetchall()]
