@@ -8,11 +8,27 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.1.5",
+        "date": "29/08/2026",
+        "title": "🤖 Bật/Tắt AI Hàng Loạt Cho Lead",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Chọn nhiều lead trong Lead & AI Follow-Up rồi bật hoặc tắt AI cho tất cả cùng lúc ngay trên action bar.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Bulk AI Control",
+                "desc": "Action bar khi chọn lead có thêm hai nút Bật AI và Tắt AI. Hệ thống yêu cầu xác nhận, cập nhật song song và báo tổng số thành công/thất bại.",
+                "tag": "AI Follow-Up"
+            }
+        ]
+    },
+    {
         "version": "v3.1.4",
         "date": "29/08/2026",
         "title": "✅ Việc Cần Làm Ngay Trên Trang Tổng Quan",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Dashboard có thêm checklist Việc cần làm để ghi nhanh công việc vận hành, đánh dấu hoàn thành và xóa trực tiếp mà không cần rời trang Tổng quan.",
         "changes": [
             {

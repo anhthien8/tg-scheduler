@@ -312,6 +312,19 @@ const AIFollowUp = {
     } catch (e) { App.toast(e.message, 'error'); }
   },
 
+  async bulkToggleAI(status) {
+    const selected = this._selectedChats();
+    if (!selected.length) return;
+    const label = status === 'active' ? 'Bật AI' : 'Tắt AI';
+    if (!window.confirm(`${label} cho ${selected.length} lead đã chọn?`)) return;
+    try {
+      const responses = await Promise.all(selected.map(c => fetch(`/api/ai-followup/chats/${c.account_id}/${c.user_id}/status`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ status }) })));
+      const failed = responses.filter(r => !r.ok).length;
+      App.toast(`${label}: ${selected.length - failed} OK${failed ? `, ${failed} lỗi` : ''}`, failed ? 'error' : 'success');
+      this._selected.clear(); this.loadChats();
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
   async editProfile(accountId, userId) {
     try {
       const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/profile`);
