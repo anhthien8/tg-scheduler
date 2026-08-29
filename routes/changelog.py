@@ -8,11 +8,123 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.1.3",
+        "date": "29/08/2026",
+        "title": "📦 Thêm Hàng Loạt Tài Khoản Telegram",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Modal Thêm tài khoản nay có chế độ Hàng loạt: dán danh sách số điện thoại (kèm proxy tuỳ chọn), app tự gửi OTP lần lượt và chờ bạn nhập từng mã — không phải mở modal nhiều lần.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Bulk Add — Thêm Nhiều Tài Khoản 1 Lần",
+                "desc": "Tab 'Hàng loạt' trong modal: nhập mỗi dòng 'số điện thoại | proxy', app xử lý tuần tự, hiển thị tiến độ và nút Bỏ qua cho từng số. Kết quả tổng hợp (OK / lỗi) sau khi xong.",
+                "tag": "Bulk Import"
+            },
+            {
+                "type": "improvement",
+                "title": "OTP Step Hiển Thị Số Điện Thoại Đang Xử Lý",
+                "desc": "Label mã OTP nay kèm theo số điện thoại hiện tại để tránh nhầm lẫn khi thêm nhiều tài khoản liên tiếp.",
+                "tag": "UX"
+            }
+        ]
+    },
+    {
+        "version": "v3.1.2",
+        "date": "29/08/2026",
+        "title": "📡 Auto-Forward Bài Channel KOL Theo Assignment",
+        "is_latest": False,
+        "badge": "",
+        "summary": "Tự động forward bài mới từ channel nguồn (VD @weexkolglobal) đến KOL onboarded theo phân công region/campaign. Mỗi KOL nhận link WEEX riêng gắn vipCode của họ.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "KOL Channel Watcher — Auto-Forward Bài Mới",
+                "desc": "Listener nhận bài từ channel nguồn, lọc KOL theo tag [vn]/[global]/[region:kr]/[campaign:summer] trong 3 dòng đầu bài. Bài không tag → gửi cho mọi KOL đang bật.",
+                "tag": "KOL Distribution"
+            },
+            {
+                "type": "feature",
+                "title": "Dedup Broadcast — Không Gửi Lại Bài Cũ Sau Restart",
+                "desc": "Bảng kol_broadcast_log ghi nhận message_id đã gửi. Restart server không gây gửi trùng bài.",
+                "tag": "Reliability"
+            },
+            {
+                "type": "feature",
+                "title": "vipCode Cá Nhân Hoá Mỗi KOL",
+                "desc": "Link WEEX trong bài tự động thay vipCode riêng của từng KOL. KOL thiếu vipCode và bài có link WEEX → skip, ghi log.",
+                "tag": "Personalization"
+            },
+            {
+                "type": "feature",
+                "title": "Cài Đặt Channel Trong UI",
+                "desc": "Tab Cấu hình AI → card Auto-forward bài channel: bật/tắt, đặt channel nguồn, chọn account listen. Thay đổi có hiệu lực ngay không cần restart.",
+                "tag": "Settings"
+            }
+        ]
+    },
+    {
+        "version": "v3.1.1",
+        "date": "29/08/2026",
+        "title": "🤖 AI Không Tự Bật Khi Nick Nội Bộ Nhắn Nhau",
+        "is_latest": False,
+        "badge": "",
+        "summary": "Khắc phục lỗi AI follow-up kích hoạt khi 2 nick nội bộ (nick chính / nick phụ) nhắn tin test với nhau, gây phát sinh reply giả và đôi khi hướng sai về account chính.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Guard Sender Nội Bộ — Skip AI Hoàn Toàn",
+                "desc": "Kiểm tra sender_id có thuộc danh sách account đang quản lý không (_me_cache). Nếu có → return ngay, không append chat, không gọi AI, không reply.",
+                "tag": "AI Guard"
+            }
+        ]
+    },
+    {
+        "version": "v3.1.0",
+        "date": "29/08/2026",
+        "title": "🎯 KOL Distribution Pipeline: Phân Công, Bulk Send & Personalization",
+        "is_latest": False,
+        "badge": "",
+        "summary": "Hệ thống phân phối nội dung KOL hoàn chỉnh: admin gán region/campaign một lần, gửi hàng loạt với link WEEX cá nhân hoá vipCode. AI warm-up trung thực, cấm bịa dữ liệu fintech.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "KOL Profile: affiliate_link, vipCode, phân công region/campaign",
+                "desc": "Lưu persistent, sửa được trong modal Hồ sơ & phân công. Chỉ sửa URL weex.com, giữ nguyên query params khác.",
+                "tag": "KOL Management"
+            },
+            {
+                "type": "feature",
+                "title": "Bulk Send Có Lọc vipCode",
+                "desc": "Chọn nhiều lead → Gửi hàng loạt. Tự skip KOL thiếu vipCode khi bài có link WEEX. Trả về sent/skipped/errors.",
+                "tag": "Bulk Send"
+            },
+            {
+                "type": "fix",
+                "title": "AI Warm-Up Trung Thực — Truthfulness Mandate",
+                "desc": "Cấm tuyệt đối bịa referral, UID, campaign, hoa hồng, volume, follower, thu nhập. 1–3 lượt đầu chỉ warm-up, không pitch. Rule handover nội bộ — không hướng KOL sang @weexwill.",
+                "tag": "AI Safety"
+            },
+            {
+                "type": "fix",
+                "title": "Thông Báo Handover: Xuống Dòng Thật, Ẩn Field Trống, Dedup 5 Phút",
+                "desc": "Sửa lỗi \\\\n literal trong Saved Messages. Ẩn hàng chưa có dữ liệu. Không gửi trùng cùng KOL trong 5 phút.",
+                "tag": "Handover Alert"
+            },
+            {
+                "type": "improvement",
+                "title": "Card Tài Khoản Telegram Compact",
+                "desc": "Gộp badge Online/status thành chấm màu trên avatar. Meta (ID, giới hạn DM) inline. AI Agent select 1 dòng. Nút action nhỏ gọn — card đều chiều cao hơn.",
+                "tag": "UI"
+            }
+        ]
+    },
+    {
         "version": "v3.0.4",
         "date": "26/08/2026",
         "title": "🔧 Gia Cố Hệ Thống: Chống Cache Stampede, Tối Ưu GZip & Ổn Định Bộ Nhớ",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Bản vá tăng cường độ ổn định từ đợt rà soát Adversarial Hardening: cache analytics chống thundering-herd với fallback dữ liệu cũ, GZip bỏ qua file nhị phân đã nén sẵn, giới hạn bộ nhớ cache LRU và dọn dẹp toàn bộ test suite.",
         "changes": [
             {
