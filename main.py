@@ -49,6 +49,7 @@ from routes import ai_agents as ai_agents_routes
 from routes import changelog as changelog_routes
 import reaction_watcher as rw
 import dm_reply_tracker as drt
+import kol_channel_watcher as kcw
 
 # Logging setup
 logging.basicConfig(
@@ -115,6 +116,9 @@ async def connect_accounts_background():
 
         # Start DM reply tracker (inbox)
         await drt.start_reply_tracker()
+
+        # Start KOL channel auto-forward watcher (optional)
+        await kcw.start_kol_channel_watcher()
 
         # Connect Discord bots
         try:

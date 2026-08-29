@@ -794,6 +794,19 @@ async def init_db():
         """)
 
         await db.execute("""
+            CREATE TABLE IF NOT EXISTS kol_broadcast_log (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_chat_id  INTEGER NOT NULL,
+                source_message_id INTEGER NOT NULL,
+                sent_count      INTEGER DEFAULT 0,
+                skipped_count   INTEGER DEFAULT 0,
+                post_preview    TEXT DEFAULT '',
+                created_at      TEXT DEFAULT (datetime('now')),
+                UNIQUE(source_chat_id, source_message_id)
+            )
+        """)
+
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS agent_learned_knowledge (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 ai_agent_id     INTEGER NOT NULL,
@@ -4313,6 +4326,57 @@ async def upsert_kol_profile(account_id: int, user_id: int, profile_data: dict) 
         """, (account_id, user_id, json_str))
         await db.commit()
         return True
+
+
+async def get_kols_for_distribution() -> list[dict]:
+    """Return onboarded KOLs whose persistent distribution assignment is enabled."""
+    async with get_db() as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute("""
+            SELECT c.account_id, c.user_id, p.profile_json
+            FROM ai_followup_chats c
+            JOIN kol_profiles p
+              ON p.account_id = c.account_id AND p.user_id = c.user_id
+            WHERE c.status = 'onboarded'
+        """)
+        rows = await cursor.fetchall()
+    result = []
+    for row in rows:
+        try:
+            profile = json.loads(row["profile_json"] or "{}")
+        except Exception:
+            profile = {}
+        if profile.get("distribution_enabled") is True:
+            result.append({
+                "account_id": row["account_id"],
+                "user_id": row["user_id"],
+                "profile": profile,
+            })
+    return result
+
+
+async def is_kol_broadcast_sent(source_chat_id: int, source_message_id: int) -> bool:
+    async with get_db() as conn:
+        cursor = await conn.execute(
+            "SELECT 1 FROM kol_broadcast_log WHERE source_chat_id = ? AND source_message_id = ?",
+            (source_chat_id, source_message_id),
+        )
+        return await cursor.fetchone() is not None
+
+
+async def log_kol_broadcast(
+    source_chat_id: int, source_message_id: int, sent_count: int,
+    skipped_count: int, post_preview: str = ""
+) -> None:
+    """Persist channel post dedup + aggregate send result."""
+    async with get_db() as conn:
+        await conn.execute("""
+            INSERT INTO kol_broadcast_log
+                (source_chat_id, source_message_id, sent_count, skipped_count, post_preview)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(source_chat_id, source_message_id) DO NOTHING
+        """, (source_chat_id, source_message_id, sent_count, skipped_count, post_preview))
+        await conn.commit()
 
 
 async def add_learned_knowledge(ai_agent_id: int, source_user_id: int, question: str, answer: str, status: str = "approved") -> int:

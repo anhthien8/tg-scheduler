@@ -97,6 +97,48 @@ async def bulk_send_chats(req: KOLBulkSendRequest):
     return await bulk_send_kol_messages(req)
 
 
+class KOLChannelSettings(BaseModel):
+    enabled: bool = False
+    source: str = ""
+    account_id: str = ""
+
+
+@router.get("/kol-channel-settings")
+async def get_kol_channel_settings():
+    return {
+        "enabled": (await db.get_setting("kol_channel_enabled", "false") or "").lower() in ("true", "1"),
+        "source": await db.get_setting("kol_channel_source", ""),
+        "account_id": await db.get_setting("kol_channel_account_id", ""),
+    }
+
+
+@router.post("/kol-channel-settings")
+async def save_kol_channel_settings(req: KOLChannelSettings):
+    import kol_channel_watcher as kcw
+    await db.set_setting("kol_channel_enabled", "true" if req.enabled else "false")
+    await db.set_setting("kol_channel_source", req.source.strip())
+    await db.set_setting("kol_channel_account_id", req.account_id.strip())
+    # Re-register listener with new settings
+    kcw.unregister_channel_listener()
+    if req.enabled and req.source.strip() and req.account_id.strip().isdigit():
+        await kcw.start_kol_channel_watcher()
+    return {"ok": True, "message": "Đã lưu cài đặt KOL Channel Watcher"}
+
+
+@router.get("/kol-broadcast-log")
+async def get_kol_broadcast_log(limit: int = 30, offset: int = 0):
+    """Recent broadcast events — for dashboard monitoring."""
+    import aiosqlite
+    async with db.get_db() as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute(
+            "SELECT * FROM kol_broadcast_log ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        )
+        rows = [dict(r) for r in await cursor.fetchall()]
+    return {"logs": rows, "count": len(rows)}
+
+
 @router.get("/settings")
 async def get_settings():
     """Get AI Follow-Up Agent configuration settings."""

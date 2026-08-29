@@ -23,7 +23,7 @@ const AIFollowUp = {
   },
 
   async init() {
-    await this.loadSettings();
+    await Promise.all([this.loadSettings(), this.loadKolChannelSettings()]);
     this.switchTab('leads');
     await this.loadChats();
   },
@@ -63,6 +63,36 @@ const AIFollowUp = {
     if (maxRepliesEl) maxRepliesEl.value = this.settings.max_replies_per_user || 5;
     const handoverEl = document.getElementById('aifu-handover-kw');
     if (handoverEl) handoverEl.value = (this.settings.handover_keywords || []).join(', ');
+  },
+
+  // ── KOL Channel Auto-Forward Settings ──────────────────────────────
+  async loadKolChannelSettings() {
+    try {
+      const res = await fetch('/api/ai-followup/kol-channel-settings');
+      if (!res.ok) return;
+      const d = await res.json();
+      const el = id => document.getElementById(id);
+      if (el('kolch-enabled')) el('kolch-enabled').checked = !!d.enabled;
+      if (el('kolch-source')) el('kolch-source').value = d.source || '';
+      if (el('kolch-account')) el('kolch-account').value = d.account_id || '';
+    } catch (_) {}
+  },
+
+  async saveKolChannelSettings() {
+    try {
+      const el = id => document.getElementById(id);
+      const res = await fetch('/api/ai-followup/kol-channel-settings', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          enabled: el('kolch-enabled')?.checked || false,
+          source: (el('kolch-source')?.value || '').trim(),
+          account_id: (el('kolch-account')?.value || '').trim()
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Lưu thất bại');
+      App.toast(data.message || 'Đã lưu', 'success');
+    } catch (e) { App.toast(e.message, 'error'); }
   },
 
   _collectSettingsForm() {

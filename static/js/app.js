@@ -226,6 +226,26 @@ if(page==='ai-followup'){
             <button class="btn btn-primary" onclick="AIFollowUp.saveSettings()">💾 Lưu cấu hình</button>
           </div>
         </div>
+        <div class="card" style="padding:20px;margin-top:16px">
+          <h3 style="margin:0 0 4px;font-size:14px">📡 Auto-forward bài channel cho KOL</h3>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Bài mới từ channel nguồn sẽ tự gửi tới KOL đã onboard theo phân công khu vực/campaign, tự gắn vipCode vào link WEEX. Tag bài: [vn] [global] [campaign:ten].</div>
+          <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:12px;align-items:end">
+            <label class="toggle" title="Bật/tắt auto-forward">
+              <input type="checkbox" id="kolch-enabled"><span class="toggle-slider"></span>
+            </label>
+            <div>
+              <label class="form-label" for="kolch-source" style="font-weight:600">Channel nguồn</label>
+              <input type="text" id="kolch-source" class="form-input" placeholder="@weexkolglobal">
+            </div>
+            <div>
+              <label class="form-label" for="kolch-account" style="font-weight:600">Account ID lắng nghe</label>
+              <input type="number" id="kolch-account" class="form-input" placeholder="1">
+            </div>
+          </div>
+          <div style="text-align:right;margin-top:12px">
+            <button class="btn btn-primary btn-sm" onclick="AIFollowUp.saveKolChannelSettings()">💾 Lưu KOL Channel</button>
+          </div>
+        </div>
       </div>
 
       <!-- Chat History Modal -->
