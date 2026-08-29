@@ -688,55 +688,41 @@ grid.innerHTML = this.accounts.map(a => {
   ).join('');
 
   return `
-  <div class="account-card ${isOff ? 'account-card-disabled' : ''}" data-account-id="${a.id}" style="background:var(--bg-card);border:1px solid ${isOff ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.08)'};border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;position:relative;${isOff ? 'opacity:0.82;' : ''}">
-    
-    <!-- Top Header: Avatar + Info + Badges -->
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div style="position:relative;width:42px;height:42px;border-radius:50%;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;color:#818cf8">
-          ${esc(initial)}
-          <span style="position:absolute;bottom:0;right:0;width:11px;height:11px;border-radius:50%;background:${isOff ? '#ef4444' : (logged ? '#10b981' : '#f59e0b')};border:2px solid var(--bg-card)"></span>
+  <div class="account-card ${isOff ? 'account-card-disabled' : ''}" data-account-id="${a.id}" style="background:var(--bg-card);border:1px solid ${isOff ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.08)'};border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;position:relative;${isOff ? 'opacity:0.82;' : ''}">
+
+    <!-- Header: Avatar + Name + meta inline -->
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="position:relative;width:38px;height:38px;flex-shrink:0;border-radius:50%;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#818cf8" title="${isOff ? 'Đã tắt' : (logged ? 'Online' : 'Disconnected')}">
+        ${esc(initial)}
+        <span style="position:absolute;bottom:-1px;right:-1px;width:11px;height:11px;border-radius:50%;background:${isOff ? '#ef4444' : (logged ? '#10b981' : '#f59e0b')};border:2px solid var(--bg-card)"></span>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-weight:700;font-size:14px;color:var(--text1);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(name)}</span>
+          ${isOff ? '<span style="font-size:11px;font-weight:600;color:#f87171;flex-shrink:0">Đã tắt</span>' : ''}
+          ${a.is_flagged ? `<span style="cursor:pointer;font-size:12px;flex-shrink:0" onclick="App.unflagAccount(${a.id})" title="${esc(a.flag_reason || '')} — click để bỏ cảnh báo">🚩</span>` : ''}
         </div>
-        <div>
-          <div style="font-weight:700;font-size:15px;color:var(--text1);line-height:1.2">${esc(name)}</div>
-          <div style="font-size:12px;color:var(--text2);margin-top:2px">${esc(uname)}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+          ${esc(uname)} · ID <span style="font-family:monospace">${a.api_id}</span> · <span style="color:${a.is_premium ? '#fbbf24' : 'var(--text2)'}">${dmLimit} DM/ngày</span>
         </div>
       </div>
-
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-        <span class="badge ${isOff ? 'badge-red' : (logged ? 'badge-green' : 'badge-amber')}" style="font-size:11px;padding:2px 8px">
-          ${isOff ? '🔴 Đã tắt' : (logged ? '🟢 Online' : '🟠 Disconnected')}
-        </span>
-        <span style="cursor:pointer;background:${a.is_premium ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.06)'};border:1px solid ${a.is_premium ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.1)'};border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;color:${a.is_premium ? '#fbbf24' : '#9ca3af'}" onclick="App.togglePremium(${a.id}, ${!a.is_premium})" title="Click để chuyển trạng thái Premium (${a.is_premium ? 50 : 10}→${a.is_premium ? 10 : 50} DM/ngày)">
-          ${a.is_premium ? '⭐ Premium' : '⬜ Thường'}
-        </span>
-        ${a.is_flagged ? `<span style="background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.5);border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;color:#f87171;cursor:pointer" onclick="App.unflagAccount(${a.id})" title="${esc(a.flag_reason || '')}">⚠️ Cảnh báo</span>` : ''}
-      </div>
+      <span style="cursor:pointer;font-size:14px;flex-shrink:0;${a.is_premium ? '' : 'opacity:.4'}" onclick="App.togglePremium(${a.id}, ${!a.is_premium})" title="${a.is_premium ? 'Premium — click để chuyển Thường (50→10 DM/ngày)' : 'Thường — click để nâng Premium (10→50 DM/ngày)'}">${a.is_premium ? '⭐' : '☆'}</span>
     </div>
 
-    <!-- Technical Meta Strip -->
-    <div style="background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.05);border-radius:8px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--text2)">
-      <div>ID: <span style="color:var(--text1);font-family:monospace;font-weight:600">${a.api_id}</span></div>
-      <div>Giới hạn: <span style="color:${a.is_premium ? '#fbbf24' : 'var(--text1)'};font-weight:600">${dmLimit} DM/ngày</span></div>
-    </div>
+    <!-- AI Agent: one compact select -->
+    <select class="form-input" style="width:100%;height:30px;font-size:12px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:#f3f4f6;padding:0 8px" onchange="App.setAccountAiAgent(${a.id}, this.value)" title="AI Agent phụ trách">
+      <option value="">🚫 Tắt AI</option>
+      ${agentOptions}
+    </select>
 
-    <!-- AI Agent Selector Box -->
-    <div style="background:rgba(15,23,42,0.5);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px 12px">
-      <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">🤖 AI Agent Phụ Trách</div>
-      <select class="form-input" style="width:100%;height:32px;font-size:12px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:#f3f4f6;padding:0 8px" onchange="App.setAccountAiAgent(${a.id}, this.value)">
-        <option value="">🚫 Tắt (Không dùng AI)</option>
-        ${agentOptions}
-      </select>
-    </div>
-
-    <!-- Action Buttons Row -->
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06)">
-      ${isOff ? 
-        `<button class="btn btn-success btn-sm" style="flex:1" onclick="App.toggleAccountActive(${a.id}, true)" title="Bật lại tài khoản">▶️ Bật Account</button>` : 
-        `<button class="btn btn-ghost btn-sm" style="flex:1;border:1px solid rgba(239,68,68,0.3);color:#f87171;background:rgba(239,68,68,0.08)" onclick="App.toggleAccountActive(${a.id}, false)" title="Tắt tạm dừng">⏸️ Tắt Account</button>`
+    <!-- Actions: compact row -->
+    <div style="display:flex;align-items:center;gap:6px;border-top:1px solid rgba(255,255,255,0.06);padding-top:8px">
+      ${isOff ?
+        `<button class="btn btn-success btn-sm" style="flex:1;padding:4px 8px" onclick="App.toggleAccountActive(${a.id}, true)" title="Bật lại tài khoản">▶ Bật</button>` :
+        `<button class="btn btn-ghost btn-sm" style="flex:1;padding:4px 8px;color:#f87171" onclick="App.toggleAccountActive(${a.id}, false)" title="Tắt tạm dừng">⏸ Tắt</button>`
       }
-      ${!logged ? `<button class="btn btn-primary btn-sm" onclick="App.loginAccount(${a.id}, '${a.phone}')">🔑 Login</button>` : ''}
-      <button class="btn btn-ghost btn-sm" style="color:#ef4444;border:1px solid rgba(239,68,68,0.2)" onclick="App.deleteAccount(${a.id})" title="Xóa tài khoản">🗑️ Xóa</button>
+      ${!logged ? `<button class="btn btn-primary btn-sm" style="padding:4px 8px" onclick="App.loginAccount(${a.id}, '${a.phone}')" title="Đăng nhập lại">🔑</button>` : ''}
+      <button class="btn btn-ghost btn-sm" style="padding:4px 8px;color:#ef4444" onclick="App.deleteAccount(${a.id})" title="Xóa tài khoản">🗑</button>
     </div>
 
   </div>`;
