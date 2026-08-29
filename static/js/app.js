@@ -645,6 +645,7 @@ set('dash-kpi-accounts',stats.total_accounts);set('dash-kpi-accounts-sub',`${sta
 fetch('/api/ai-followup/stats').then(r=>r.json()).then(d=>{const need=(d.counts&&d.counts.needs_human)||0;set('dash-kpi-leads',need);const sub=document.getElementById('dash-kpi-leads-sub');if(sub)sub.textContent=`${d.total||0} lead đang theo dõi`;const val=document.getElementById('dash-kpi-leads');if(val)val.className='stat-value '+(need>0?'red':'green')}).catch(()=>{set('dash-kpi-leads','—');const sub=document.getElementById('dash-kpi-leads-sub');if(sub)sub.textContent='Chưa bật AI Follow-Up'});
 this._renderDashChart(Array.isArray(daily)?daily:[]);
 this._renderDashHealth(Array.isArray(health)?health:[]);
+this.loadDashboardTasks();
 const active=sd.schedules.filter(s=>s.next_run);const tbody=document.getElementById('upcoming-body');
 const cnt=document.getElementById('dash-schedules-count');if(cnt)cnt.textContent=active.length?`${active.length} lịch đang chạy`:'';
 if(!active.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:24px">Không có lịch nào sắp tới</td></tr>'}
@@ -671,6 +672,48 @@ return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border
 <div style="height:3px;border-radius:2px;background:var(--bg3);margin-top:5px"><div style="height:100%;width:${score}%;border-radius:2px;background:${color}"></div></div>
 <div style="font-size:11px;color:var(--text2);margin-top:4px">📤 ${a.dm_sent_today||0} hôm nay · ✅ ${(a.success_rate||0).toFixed(0)}% · ⚠️ ${a.flood_count||0} flood</div></div>
 <span class="badge ${score>=80?'badge-green':score>=50?'badge-blue':'badge-red'}" style="flex-shrink:0">${score}</span></div>`}).join('')},
+
+// ── Dashboard Tasks (Việc cần làm) ──────────────────────────────
+_dashTasks: [],
+
+async loadDashboardTasks(){
+  try{
+    const r=await fetch('/api/settings/dashboard_tasks');const d=await r.json();
+    this._dashTasks=d.value?JSON.parse(d.value):[];
+  }catch{this._dashTasks=[];}
+  this._renderDashboardTasks();
+},
+
+async _saveDashTasks(){
+  await fetch('/api/settings/dashboard_tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(this._dashTasks)})});
+},
+
+_renderDashboardTasks(){
+  const el=document.getElementById('dash-tasks-list');if(!el)return;
+  if(!this._dashTasks.length){el.innerHTML='<div style="text-align:center;color:var(--text2);padding:20px;font-size:13px">🎉 Không có việc cần làm</div>';return}
+  el.innerHTML=this._dashTasks.map((t,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);${t.done?'opacity:.5':''}">
+      <input type="checkbox" ${t.done?'checked':''} onchange="App.toggleDashTask(${i})" style="width:16px;height:16px;cursor:pointer;accent-color:var(--primary);flex-shrink:0">
+      <span style="flex:1;font-size:13px;${t.done?'text-decoration:line-through;color:var(--text2)':''}">${esc(t.text)}</span>
+      <button class="btn btn-ghost btn-sm" style="padding:2px 4px;font-size:12px;color:var(--text2)" onclick="App.removeDashTask(${i})" title="Xóa">×</button>
+    </div>`).join('');
+},
+
+async addDashboardTask(){
+  const text=prompt('Nội dung việc cần làm:');if(!text?.trim())return;
+  this._dashTasks.unshift({text:text.trim(),done:false,created:new Date().toISOString()});
+  await this._saveDashTasks();this._renderDashboardTasks();
+},
+
+async toggleDashTask(i){
+  if(this._dashTasks[i])this._dashTasks[i].done=!this._dashTasks[i].done;
+  await this._saveDashTasks();this._renderDashboardTasks();
+},
+
+async removeDashTask(i){
+  this._dashTasks.splice(i,1);
+  await this._saveDashTasks();this._renderDashboardTasks();
+},
 
 async loadAccounts(){try{const[d,agentData]=await Promise.all([API.getAccounts(),API.get('/api/ai-agents').catch(()=>({agents:[]}))]);this.accounts=d.accounts||[];App._accounts=this.accounts;const grid=document.getElementById('accounts-grid');if(!grid)return;if(!this.accounts.length){grid.innerHTML='<div class="empty-state"><div class="empty-state-icon">👤</div><p class="empty-state-text">Chưa có tài khoản nào</p></div>';return}const aiAgents=agentData.agents||[];
 

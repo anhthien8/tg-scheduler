@@ -415,15 +415,20 @@ code {
   text-overflow: ellipsis;
 }
 
-/* Dashboard 2-column layout */
+/* Dashboard 3-column layout */
 .dash-cols {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
+  grid-template-columns: 1fr 1.4fr 1fr;
   gap: var(--sp-4);
   align-items: start;
 }
+@media (max-width: 1400px) {
+  .dash-cols { grid-template-columns: 1.4fr 1fr; }
+  #dash-tasks-card { grid-column: 1 / -1; }
+}
 @media (max-width: 1024px) {
   .dash-cols { grid-template-columns: 1fr; }
+  #dash-tasks-card { grid-column: auto; }
 }
 
 .stat-label {

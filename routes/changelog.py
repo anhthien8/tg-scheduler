@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.1.4",
+        "date": "29/08/2026",
+        "title": "✅ Việc Cần Làm Ngay Trên Trang Tổng Quan",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Dashboard có thêm checklist Việc cần làm để ghi nhanh công việc vận hành, đánh dấu hoàn thành và xóa trực tiếp mà không cần rời trang Tổng quan.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Checklist Việc Cần Làm",
+                "desc": "Thêm việc mới, tick hoàn thành (gạch ngang) và xóa từng việc trực tiếp trên dashboard. Dữ liệu lưu persistent trong Settings DB, giữ nguyên sau restart.",
+                "tag": "Dashboard"
+            },
+            {
+                "type": "improvement",
+                "title": "Dashboard Responsive 3 Cột",
+                "desc": "Desktop rộng hiển thị Việc cần làm · Lịch gửi · Sức khỏe tài khoản trên cùng hàng. Tự chuyển 2 cột hoặc 1 cột trên màn hình nhỏ.",
+                "tag": "Responsive UX"
+            }
+        ]
+    },
+    {
         "version": "v3.1.3",
         "date": "29/08/2026",
         "title": "📦 Thêm Hàng Loạt Tài Khoản Telegram",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Modal Thêm tài khoản nay có chế độ Hàng loạt: dán danh sách số điện thoại (kèm proxy tuỳ chọn), app tự gửi OTP lần lượt và chờ bạn nhập từng mã — không phải mở modal nhiều lần.",
         "changes": [
             {
