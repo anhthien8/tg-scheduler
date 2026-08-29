@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.1.6",
+        "date": "29/08/2026",
+        "title": "🕒 Hiển Thị Ngày Giờ Đầy Đủ Trong Lịch Sử Chat",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Modal Xem chat trong Lead & AI Follow-Up nay hiển thị đầy đủ ngày/tháng/năm và giờ Việt Nam cho từng tin nhắn, đồng thời sắp xếp lịch sử theo timestamp thật.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Timestamp Đầy Đủ Cho Tin Nhắn",
+                "desc": "Thay toLocaleTimeString bằng toLocaleString vi-VN, timeZone Asia/Ho_Chi_Minh, định dạng dd/mm/yyyy HH:mm:ss để biết tin nhắn thuộc ngày nào.",
+                "tag": "Chat History"
+            },
+            {
+                "type": "fix",
+                "title": "Sắp Xếp Tin Nhắn Theo Thời Gian Thật",
+                "desc": "Lịch sử chat được sort client-side theo timestamp tăng dần trước khi render, tránh trường hợp tin 12:15 đứng trước tin 11:24 nếu dữ liệu trả về chưa đúng thứ tự.",
+                "tag": "Ordering"
+            }
+        ]
+    },
+    {
         "version": "v3.1.5",
         "date": "29/08/2026",
         "title": "🤖 Bật/Tắt AI Hàng Loạt Cho Lead",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Chọn nhiều lead trong Lead & AI Follow-Up rồi bật hoặc tắt AI cho tất cả cùng lúc ngay trên action bar.",
         "changes": [
             {

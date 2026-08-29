@@ -386,13 +386,16 @@ const AIFollowUp = {
     try {
       const histRes = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/history`);
       const histData = await histRes.json();
-      const history = histData.history || [];
+      const history = [...(histData.history || [])].sort((a,b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
       if (!history.length) {
         box.innerHTML = summaryBanner + '<div style="text-align:center;color:var(--text2);padding:20px">Chưa có tin nhắn nào</div>';
       } else {
         box.innerHTML = summaryBanner + history.map(msg => {
           const isUser = msg.role === 'user';
-          const timeText = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('vi-VN') : '';
+          const timeText = msg.timestamp ? new Date(msg.timestamp).toLocaleString('vi-VN', {
+            timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+          }) : 'Không rõ thời gian';
           return `
             <div style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-start' : 'flex-end'};margin-bottom:12px">
               <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${isUser ? '👤 ' + esc(uName) : '🤖 AI Sales Agent'} • ${timeText}</div>
