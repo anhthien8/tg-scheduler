@@ -492,6 +492,52 @@ async def chatgpt_oauth_callback():
     return HTMLResponse(content=html)
 
 
+class CommandBotConfig(BaseModel):
+    enabled: bool
+    token: str = ""
+    admin_ids: str = ""   # comma-separated Telegram user IDs
+
+
+@router.get("/command-bot/config")
+async def get_command_bot_config():
+    return {
+        "enabled": await db.get_setting("command_bot_enabled", "0") == "1",
+        "token": await db.get_setting("command_bot_token", ""),
+        "admin_ids": await db.get_setting("command_bot_admin_ids", ""),
+    }
+
+
+@router.post("/command-bot/config")
+async def save_command_bot_config(payload: CommandBotConfig):
+    await db.set_setting("command_bot_enabled", "1" if payload.enabled else "0")
+    await db.set_setting("command_bot_token", payload.token.strip())
+    await db.set_setting("command_bot_admin_ids", payload.admin_ids.strip())
+
+    import command_bot
+    await command_bot.stop_command_bot()
+    started = False
+    error = None
+    if payload.enabled:
+        try:
+            started = await command_bot.start_command_bot()
+        except Exception as e:
+            error = str(e)
+            logger.error(f"Command bot start failed: {e}")
+
+    return {"message": "Saved", "running": started, "error": error}
+
+
+@router.get("/command-bot/status")
+async def command_bot_status():
+    import command_bot
+    return {"running": command_bot.is_running()}
+
+
+@router.get("/command-bot/logs")
+async def command_bot_logs(limit: int = 30):
+    return {"actions": await db.get_command_actions(limit)}
+
+
 @router.get("/{key}")
 async def get_setting(key: str):
     value = await db.get_setting(key, None)

@@ -8,11 +8,51 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.2.0",
+        "date": "02/09/2026",
+        "title": "🤖 Telegram Command Bot — Điều Hành Từ Nick Chính",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Nick chính giờ có thể điều khiển toàn bộ hệ thống ngay trong Telegram: gửi tin từ nick phụ cho KOL, xem trạng thái, resume/pause campaign, bật tắt AI — không cần mở app.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Bot Điều Hành Riêng",
+                "desc": "Tạo bot qua @BotFather, cấu hình trong Cài đặt. Chỉ Telegram User ID của admin mới dùng được lệnh.",
+                "tag": "Command Bot"
+            },
+            {
+                "type": "feature",
+                "title": "Gửi Tin Từ Nick Phụ Ngay Trong Telegram",
+                "desc": "Luồng /send: chọn account → chọn KOL → nhập nội dung → xem trước → xác nhận gửi. KOL chỉ thấy tin đến từ nick phụ đang quản lý, không thấy bot hay nick chính.",
+                "tag": "Command Bot"
+            },
+            {
+                "type": "feature",
+                "title": "Lệnh Nhanh",
+                "desc": "/status /accounts /campaigns /kol /resume /pause /ai-on /ai-off /check — thao tác toàn hệ thống bằng nút bấm hoặc lệnh gõ tay.",
+                "tag": "Command Bot"
+            },
+            {
+                "type": "feature",
+                "title": "Handover Alert Có Nút Hành Động",
+                "desc": "Khi KOL cần Will xử lý, cảnh báo gửi thẳng vào bot kèm nút Gửi tin ngay cho đúng KOL đó.",
+                "tag": "Handover"
+            },
+            {
+                "type": "improvement",
+                "title": "Nhật Ký Lệnh Đầy Đủ",
+                "desc": "Mọi thao tác qua bot đều được ghi log: ai gửi, từ account nào, đến ai, nội dung, kết quả — xem trong Cài đặt.",
+                "tag": "Audit"
+            }
+        ]
+    },
+    {
         "version": "v3.1.9",
         "date": "30/08/2026",
         "title": "🤖 Lọc Và Xóa Bot Hàng Loạt",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Trang Quản lý kênh có thêm bộ lọc Bot để chọn hàng loạt và xóa nhanh các cuộc trò chuyện với bot.",
         "changes": [
             {

@@ -637,6 +637,53 @@
             <p id="test-remix-output" style="font-size:14px;color:var(--text);white-space:pre-wrap"></p>
           </div>
 
+        <!-- Telegram Command Bot Config -->
+        <div class="card" style="margin-top:28px;padding:20px">
+          <div class="form-group" style="margin-bottom:0">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <label class="form-label" style="font-size:15px;font-weight:600;margin:0">🤖 Telegram Command Bot (Điều hành từ nick chính)</label>
+              <span id="cmd-bot-badge" class="badge badge-gray" style="font-size:11px">Đang tắt</span>
+            </div>
+            <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
+              Tạo bot qua <code>@BotFather</code> để nhận cảnh báo handover, điều khiển nick phụ gửi tin, quản lý campaign trực tiếp từ Telegram của bạn.
+            </p>
+
+            <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
+              <label class="toggle-switch" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cmd-bot-enabled" onchange="App.toggleCommandBotEnabled(this.checked)">
+                <span style="font-size:13px;font-weight:500">Bật Telegram Command Bot</span>
+              </label>
+            </div>
+
+            <div id="cmd-bot-fields" class="hidden">
+              <div style="margin-bottom:12px">
+                <label class="form-label" style="font-size:13px">Bot Token (từ @BotFather)</label>
+                <div style="display:flex;gap:8px">
+                  <input type="password" class="form-input" id="cmd-bot-token"
+                         placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                         style="flex:1;font-family:monospace;font-size:13px">
+                  <button class="btn btn-ghost btn-sm" onclick="App.toggleCmdBotTokenVisibility()" title="Hiện/ẩn token">👁</button>
+                </div>
+              </div>
+
+              <div style="margin-bottom:14px">
+                <label class="form-label" style="font-size:13px">Telegram User IDs của Admin (phân cách bằng dấu phẩy)</label>
+                <input type="text" class="form-input" id="cmd-bot-admin-ids"
+                       placeholder="VD: 123456789, 987654321 (lấy qua @userinfobot)"
+                       style="font-family:monospace;font-size:13px">
+                <p class="form-hint">Chỉ những ID này mới có quyền gửi lệnh và thao tác từ bot.</p>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button class="btn btn-primary btn-sm" onclick="App.saveCommandBotConfig()">💾 Lưu & Khởi động Bot</button>
+                <button class="btn btn-ghost btn-sm" onclick="App.checkCommandBotStatus()">🔄 Kiểm tra trạng thái</button>
+                <button class="btn btn-ghost btn-sm" onclick="App.openCommandBotLogs()">📜 Xem nhật ký lệnh</button>
+                <span id="cmd-bot-status-msg" style="font-size:12px;color:var(--text2)"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- API Key Management -->
         <div class="card" style="margin-top:28px;padding:20px">
           <div class="form-group" style="margin-bottom:0">
@@ -1709,8 +1756,8 @@
   <script src="/static/js/analytics.js?v=400"></script>
   <script src="/static/js/ai_agents.js?v=400"></script>
   <script src="/static/js/ai_followup.js?v=411"></script>
-  <script src="/static/js/changelog.js?v=407"></script>
-  <script src="/static/js/app.js?v=415"></script>
+  <script src="/static/js/changelog.js?v=408"></script>
+  <script src="/static/js/app.js?v=416"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

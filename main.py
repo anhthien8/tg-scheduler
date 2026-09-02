@@ -195,6 +195,13 @@ async def lifespan(app: FastAPI):
 
     # Register auto-resume job for paused_auto campaigns
     sch.start_auto_resume_job()
+
+    # Start Telegram Command Bot (admin remote control)
+    try:
+        import command_bot
+        await command_bot.start_command_bot()
+    except Exception as e:
+        logger.warning(f"Command bot startup error: {e}")
     await sch.load_all_jobs()
 
     # Reload scheduled DM campaigns

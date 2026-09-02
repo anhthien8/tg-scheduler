@@ -2960,12 +2960,104 @@ App.toggleApiKeyVisibility = function() {
   }
 };
 
-// Patch loadSettings to also load API key UI + Daily Summary
+// Patch loadSettings to also load API key UI + Daily Summary + Command Bot
 const _origLoadSettings = App.loadSettings;
 App.loadSettings = async function() {
   if (_origLoadSettings) await _origLoadSettings.call(this);
   App.loadApiKeyUi();
   App.loadDailySummary();
+  App.loadCommandBotConfig();
+};
+
+// ══════════════════════════════════════════════════════════
+//  TELEGRAM COMMAND BOT SETTINGS
+// ══════════════════════════════════════════════════════════
+
+App.toggleCommandBotEnabled = function(enabled) {
+  const fields = document.getElementById('cmd-bot-fields');
+  if (fields) fields.classList.toggle('hidden', !enabled);
+};
+
+App.setCommandBotBadge = function(running, enabled) {
+  const badge = document.getElementById('cmd-bot-badge');
+  if (!badge) return;
+  badge.className = 'badge ' + (running ? 'badge-success' : enabled ? 'badge-warning' : 'badge-gray');
+  badge.textContent = running ? 'Đang chạy' : enabled ? 'Chưa chạy' : 'Đang tắt';
+};
+
+App.loadCommandBotConfig = async function() {
+  try {
+    const res = await fetch('/api/settings/command-bot/config', { headers: API.getHeaders() });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const cfg = await res.json();
+    const enabled = document.getElementById('cmd-bot-enabled');
+    const token = document.getElementById('cmd-bot-token');
+    const admins = document.getElementById('cmd-bot-admin-ids');
+    if (enabled) enabled.checked = !!cfg.enabled;
+    if (token) token.value = cfg.token || '';
+    if (admins) admins.value = cfg.admin_ids || '';
+    App.toggleCommandBotEnabled(!!cfg.enabled);
+    App.checkCommandBotStatus(false);
+  } catch (e) {
+    console.warn('loadCommandBotConfig failed', e);
+  }
+};
+
+App.saveCommandBotConfig = async function() {
+  const msg = document.getElementById('cmd-bot-status-msg');
+  const payload = {
+    enabled: !!document.getElementById('cmd-bot-enabled')?.checked,
+    token: document.getElementById('cmd-bot-token')?.value || '',
+    admin_ids: document.getElementById('cmd-bot-admin-ids')?.value || ''
+  };
+  if (msg) msg.textContent = 'Đang lưu...';
+  try {
+    const res = await fetch('/api/settings/command-bot/config', {
+      method: 'POST',
+      headers: { ...API.getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || ('HTTP ' + res.status));
+    App.setCommandBotBadge(!!data.running, payload.enabled);
+    if (msg) msg.textContent = payload.enabled
+      ? (data.running ? '✅ Đã lưu và bot đang chạy.' : '⚠️ Đã lưu nhưng bot chưa chạy.')
+      : '✅ Đã tắt bot.';
+  } catch (e) {
+    App.setCommandBotBadge(false, payload.enabled);
+    if (msg) msg.textContent = '❌ Lỗi: ' + e.message;
+  }
+};
+
+App.checkCommandBotStatus = async function(showMsg = true) {
+  const msg = document.getElementById('cmd-bot-status-msg');
+  try {
+    const res = await fetch('/api/settings/command-bot/status', { headers: API.getHeaders() });
+    const data = await res.json();
+    const enabled = !!document.getElementById('cmd-bot-enabled')?.checked;
+    App.setCommandBotBadge(!!data.running, enabled);
+    if (showMsg && msg) msg.textContent = data.running ? '✅ Bot đang chạy.' : '⚠️ Bot chưa chạy.';
+  } catch (e) {
+    if (showMsg && msg) msg.textContent = '❌ Không kiểm tra được trạng thái bot.';
+  }
+};
+
+App.toggleCmdBotTokenVisibility = function() {
+  const input = document.getElementById('cmd-bot-token');
+  if (input) input.type = input.type === 'password' ? 'text' : 'password';
+};
+
+App.openCommandBotLogs = async function() {
+  try {
+    const res = await fetch('/api/settings/command-bot/logs?limit=20', { headers: API.getHeaders() });
+    const data = await res.json();
+    const rows = (data.actions || []).map(a =>
+      `#${a.id} ${a.created_at} | ${a.action} | acc=${a.account_id || '-'} | target=${a.target_username || '-'} | ${a.result}`
+    ).join('\n') || 'Chưa có lệnh nào.';
+    alert(rows);
+  } catch (e) {
+    alert('Không tải được nhật ký lệnh.');
+  }
 };
 
 // ══════════════════════════════════════════════════════════

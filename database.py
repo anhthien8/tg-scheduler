@@ -874,6 +874,21 @@ async def init_db():
             )
         """)
 
+        # ── Telegram Command Bot Action Log ───────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS command_actions (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_user_id   INTEGER NOT NULL,
+                action          TEXT NOT NULL,
+                account_id      INTEGER,
+                target_username TEXT,
+                message_text    TEXT,
+                result          TEXT DEFAULT 'success',
+                details         TEXT,
+                created_at      TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
         # ── Performance Indexes ──────────────────────────────────────────────
         await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_campaign ON dm_campaign_logs(campaign_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_watcher_dm_logs_lookup ON watcher_dm_logs(watcher_id, target_user_id)")
@@ -1796,6 +1811,34 @@ async def set_setting(key: str, value: str):
             (key, value)
         )
         await db.commit()
+
+
+async def log_command_action(admin_user_id: int, action: str,
+                             account_id: int = None,
+                             target_username: str = None,
+                             message_text: str = None,
+                             result: str = "success",
+                             details: str = None):
+    """Audit every action issued through the Telegram command bot."""
+    async with get_db() as db:
+        await db.execute(
+            """INSERT INTO command_actions
+               (admin_user_id, action, account_id, target_username,
+                message_text, result, details)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (admin_user_id, action, account_id, target_username,
+             message_text, result, details),
+        )
+        await db.commit()
+
+
+async def get_command_actions(limit: int = 100) -> list[dict]:
+    """Latest command bot audit entries."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM command_actions ORDER BY id DESC LIMIT ?", (limit,)
+        )
+        return [dict(row) for row in await cursor.fetchall()]
 
 save_setting = set_setting
 

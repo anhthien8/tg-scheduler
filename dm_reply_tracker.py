@@ -201,6 +201,20 @@ async def _notify_main_account_handover(
             f"📝 {reason}"
         )
 
+        # Also push to Telegram Command Bot if enabled (main account can act from Telegram)
+        try:
+            import command_bot
+            await command_bot.send_handover_alert(
+                account_name=acc_name,
+                sender_username=sender_username or str(sender_id),
+                sender_name=community_name if community_name != "Chưa có" else user_tag,
+                reason=reason,
+                campaign_name=campaign if campaign != "Chưa chọn" else None,
+                ai_message=alert_text,
+            )
+        except Exception as e:
+            logger.debug("[Handover] Command bot alert skipped: %s", e)
+
         # Send to main account's Saved Messages
         main_client = tg.get_client(MAIN_ACCOUNT_ID)
         if main_client and main_client.is_connected():
