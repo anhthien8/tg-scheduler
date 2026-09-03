@@ -972,6 +972,33 @@ async def start_command_bot():
         session_dir = os.path.join(os.path.dirname(__file__), "sessions")
         bot_session = os.path.join(session_dir, "command_bot")
 
+        # Nếu token đã đổi so với lần trước → xóa session cũ để Telethon
+        # login lại đúng bot mới (session cũ giữ auth của bot cũ, token mới bị bỏ qua)
+        token_marker = bot_session + ".token_id"
+        token_id = token.split(":")[0]  # bot id, không phải secret
+        prev_token_id = None
+        try:
+            if os.path.exists(token_marker):
+                with open(token_marker, "r", encoding="utf-8") as f:
+                    prev_token_id = f.read().strip()
+        except Exception:
+            pass
+        if prev_token_id and prev_token_id != token_id:
+            for ext in (".session", ".session-journal"):
+                try:
+                    p = bot_session + ext
+                    if os.path.exists(p):
+                        os.remove(p)
+                        logger.info(f"[CommandBot] Token changed — removed stale session {p}")
+                except Exception as e:
+                    logger.warning(f"[CommandBot] Could not remove stale session: {e}")
+        try:
+            os.makedirs(session_dir, exist_ok=True)
+            with open(token_marker, "w", encoding="utf-8") as f:
+                f.write(token_id)
+        except Exception:
+            pass
+
         _bot = TelegramClient(bot_session, api_id, api_hash)
         await _bot.start(bot_token=token)
 
