@@ -222,8 +222,8 @@ def _register_handlers(client: TelegramClient):
         cid = int(event.pattern_match.group(1))
         await _handle_pause(event, cid)
 
-    # ── /ai-on @username / /ai-off @username ────────────────────────────────
-    @client.on(events.NewMessage(pattern=r"/ai-(on|off)\s+(@?\w+)"))
+    # ── /ai-on | /aion @username / /ai-off | /aioff @username ───────────────
+    @client.on(events.NewMessage(pattern=r"/ai-?(on|off)\s+(@?\w+)"))
     async def cmd_ai_toggle(event):
         if not _check_admin(event):
             return
