@@ -2099,6 +2099,42 @@ async def remove_from_dm_blacklist(blacklist_id: int):
         await db.commit()
 
 
+async def ignore_followup_chats_for_blacklisted(user_id: int = None, username: str = None) -> int:
+    """Khi 1 user vào blacklist: chuyển mọi chat AI follow-up của user đó sang
+    'bot_ignored' để lead biến mất khỏi mục AI đang xử lý (AI vốn đã bị chặn reply,
+    đây là sync trạng thái hiển thị). Returns số chat được cập nhật."""
+    clean = (username or "").lstrip("@").lower().strip()
+    async with get_db() as db:
+        cur = await db.execute(
+            """UPDATE ai_followup_chats
+               SET status='bot_ignored', updated_at=datetime('now')
+               WHERE status NOT IN ('bot_ignored','onboarded')
+                 AND ((? IS NOT NULL AND user_id=?)
+                      OR (? != '' AND LOWER(LTRIM(COALESCE(username,''),'@'))=?))""",
+            (user_id, user_id, clean, clean)
+        )
+        await db.commit()
+        return cur.rowcount
+
+
+async def sync_all_blacklisted_followup_chats() -> int:
+    """One-shot sync: đánh dấu bot_ignored cho mọi chat khớp blacklist hiện có."""
+    async with get_db() as db:
+        cur = await db.execute(
+            """UPDATE ai_followup_chats
+               SET status='bot_ignored', updated_at=datetime('now')
+               WHERE status NOT IN ('bot_ignored','onboarded')
+                 AND EXISTS (
+                     SELECT 1 FROM dm_blacklist b
+                     WHERE (b.user_id IS NOT NULL AND b.user_id = ai_followup_chats.user_id)
+                        OR (b.username IS NOT NULL AND b.username != ''
+                            AND LOWER(LTRIM(b.username,'@')) = LOWER(LTRIM(COALESCE(ai_followup_chats.username,''),'@')))
+                 )"""
+        )
+        await db.commit()
+        return cur.rowcount
+
+
 async def is_user_blacklisted(user_id: int = None, username: str = None) -> bool:
     """Check if a user is in the global DM blacklist by user_id and/or username."""
     async with get_db() as db:

@@ -27,7 +27,19 @@ async def add_blacklist(payload: BlacklistPayload):
     if not payload.user_id and not payload.username:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Cần có user_id hoặc username")
-    return await db.add_to_dm_blacklist(payload.user_id, payload.username, payload.reason or "")
+    row = await db.add_to_dm_blacklist(payload.user_id, payload.username, payload.reason or "")
+    # Sync: đưa lead ra khỏi mục AI đang xử lý ngay khi blacklist
+    ignored = await db.ignore_followup_chats_for_blacklisted(payload.user_id, payload.username)
+    if isinstance(row, dict):
+        row["ignored_chats"] = ignored
+    return row
+
+
+@router.post("/sync-followup")
+async def sync_blacklist_followup():
+    """Đồng bộ lại: đánh dấu bot_ignored cho mọi chat AI khớp blacklist hiện có."""
+    n = await db.sync_all_blacklisted_followup_chats()
+    return {"ok": True, "ignored_chats": n}
 
 
 @router.delete("/{blacklist_id}")
