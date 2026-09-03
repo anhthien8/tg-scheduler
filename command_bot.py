@@ -81,19 +81,20 @@ async def _get_managed_accounts() -> list[dict]:
 async def _get_recent_kol_targets(limit: int = 8) -> list[dict]:
     """Get recent KOLs that have chatted with managed accounts."""
     try:
-        chats = await db.get_all_followup_chats()
+        chats = await db.get_all_followup_chats(limit=30)
         seen = set()
         results = []
         for c in chats:
-            uid = c.get("sender_user_id")
-            if uid in seen:
+            uid = c.get("user_id") or c.get("sender_user_id")
+            if not uid or uid in seen:
                 continue
             seen.add(uid)
             results.append(c)
             if len(results) >= limit:
                 break
         return results
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Error fetching recent KOL targets: {e}")
         return []
 
 
@@ -492,15 +493,16 @@ async def _show_target_picker(event, state: dict):
     # Recent KOL targets
     if recent:
         for r in recent[:6]:
-            username = r.get("sender_username", "")
-            name = r.get("sender_name", "") or username
+            username = r.get("username") or r.get("sender_username") or ""
+            uid = r.get("user_id") or r.get("sender_user_id") or ""
+            name = r.get("name") or r.get("sender_name") or username or f"User #{uid}"
             acc_name = r.get("account_name", "")
-            label = f"@{username}" if username else f"ID:{r.get('sender_user_id', '?')}"
+            label = f"@{username}" if username else f"ID:{uid}"
             if name and name != username:
                 label = f"{name} ({label})"
             if acc_name:
                 label += f" · {acc_name}"
-            bdata = f"sel_tgt:recent:@{username}" if username else f"sel_tgt:recent:{r.get('sender_user_id', 0)}"
+            bdata = f"sel_tgt:recent:@{username}" if username else f"sel_tgt:recent:{uid}"
             buttons.append([Button.inline(label, data=bdata)])
 
     buttons.append([Button.inline("✏️ Nhập username mới", data="sel_tgt:new")])
@@ -764,20 +766,20 @@ async def _handle_kol_info(event, username: str):
         username_clean = username.lstrip("@")
         chats = await db.get_all_followup_chats()
         matches = [c for c in chats
-                   if (c.get("sender_username") or "").lower() == username_clean.lower()]
+                   if ((c.get("username") or c.get("sender_username") or "").lower() == username_clean.lower())]
 
         if not matches:
             await event.respond(f"❌ Không tìm thấy thông tin cho @{username_clean}")
             return
 
         c = matches[0]
-        name = c.get("sender_name") or username_clean
+        name = c.get("name") or c.get("sender_name") or username_clean
         text = (
             f"👤 **KOL: {name}** (@{username_clean})\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"💬 Nick phụ chat: **{c.get('account_name', '?')}**\n"
-            f"📊 Trạng thái AI: **{c.get('ai_status', '?')}**\n"
-            f"🕐 Tin cuối: {c.get('last_message_at', '?')}\n"
+            f"📊 Trạng thái: **{c.get('status', '?')}**\n"
+            f"🕐 Tin cuối: {c.get('updated_at', '?')}\n"
         )
 
         # Campaign info if any
@@ -803,7 +805,7 @@ async def _handle_kol_info(event, username: str):
 
 async def _handle_resume(event, cid: int):
     try:
-        await db.update_dm_campaign_status(cid, "paused")
+        await db.update_dm_campaign_status(cid, "running")
         # Trigger campaign run
         from routes.members import _run_campaign, _active_campaigns
         import asyncio
@@ -843,14 +845,14 @@ async def _handle_ai_toggle(event, action: str, username: str):
         new_status = "active" if action == "on" else "paused_admin"
         chats = await db.get_all_followup_chats()
         matches = [c for c in chats
-                   if (c.get("sender_username") or "").lower() == username_clean.lower()]
+                   if ((c.get("username") or c.get("sender_username") or "").lower() == username_clean.lower())]
         if not matches:
             await event.respond(f"❌ Không tìm thấy @{username_clean}")
             return
-        uid = matches[0].get("sender_user_id")
+        uid = matches[0].get("user_id") or matches[0].get("sender_user_id")
         aid = matches[0].get("account_id")
         if uid and aid:
-            await db.update_followup_status(aid, uid, new_status)
+            await db.update_followup_chat_status(aid, uid, new_status)
             label = "Bật" if action == "on" else "Tắt"
             await event.respond(f"✅ Đã {label} AI cho @{username_clean}")
             await _log_action(event.sender_id, f"ai_{action}", aid,
