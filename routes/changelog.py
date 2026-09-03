@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.2.2",
+        "date": "04/09/2026",
+        "title": "🤖 Fix Command Bot + 🚫 Nút Blacklist UI + 📋 Kanban QC Process",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Sửa toàn bộ 4 lỗi Command Bot (tên field KOL, `/resume`, `/aion`, `/kol`). Lead bị Blacklist tự động ẩn khỏi AI Followup. Thêm nút Blacklist 1-click & chat tay rõ ràng. Thiết lập Kanban + Reviewer QC.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Command Bot — Fix triệt để 4 lỗi runtime",
+                "desc": "Tự xóa session Telethon khi đổi token bot (tránh kẹt bot cũ); đọc đúng field KOL trong DB; fix lệnh /resume set running; fix /aion /aioff gọi đúng hàm DB; fix /kol đọc đúng status.",
+                "tag": "Command Bot"
+            },
+            {
+                "type": "feature",
+                "title": "Tự Động Ẩn Lead Blacklist + Nút 🚫 1-Click UI",
+                "desc": "Thêm lead vào Blacklist → tự động đánh dấu bot_ignored để không xuất hiện ở trang AI handle. Thêm nút 🚫 Blacklist trực tiếp từng dòng lead & chọn hàng loạt.",
+                "tag": "AI Follow-Up"
+            },
+            {
+                "type": "feature",
+                "title": "Quy Trình Kanban & Reviewer QC Tự Động",
+                "desc": "Quản lý công việc qua Obsidian Kanban (1-Projects/tg-scheduler/Kanban.md). Mỗi lần dev tính năng mới đều qua subagent Reviewer QC code tự động.",
+                "tag": "Quản lý Dự án"
+            }
+        ]
+    },
+    {
         "version": "v3.2.1",
         "date": "03/09/2026",
         "title": "🛡️ Bảo Vệ Uy Tín Nick Chính + Bật/Tắt Tài Khoản Hàng Loạt",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "AI bị chặn hoàn toàn trên nick chính — mọi chat trên nick chính đều do người thật trả lời. AI trên nick phụ có quy tắc mới: cấm trả lời vô nghĩa, cấm đùa cợt với admin sàn khác. Trang Tài khoản có chọn nhiều + bật/tắt hàng loạt.",
         "changes": [
             {
