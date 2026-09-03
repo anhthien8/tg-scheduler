@@ -1486,7 +1486,9 @@ async def start_campaign(campaign_id: int, background_tasks: BackgroundTasks):
 @router.post("/campaigns/{campaign_id}/stop")
 async def stop_campaign(campaign_id: int):
     """Stop a running campaign."""
-    _active_campaigns[campaign_id] = False
+    task = _active_campaigns.pop(campaign_id, None)
+    if task and isinstance(task, asyncio.Task) and not task.done():
+        task.cancel()
     await db.update_dm_campaign_status(campaign_id, "paused")
     return {"status": "stopped"}
 
@@ -1593,7 +1595,11 @@ async def check_all_accounts_spam():
 
 async def _run_campaign(campaign_id: int):
     """Background task: run a DM campaign, sending to each target member."""
-    _active_campaigns[campaign_id] = True
+    current_task = asyncio.current_task()
+    if current_task:
+        _active_campaigns[campaign_id] = current_task
+    else:
+        _active_campaigns[campaign_id] = True
     try:
         campaign = await db.get_dm_campaign(campaign_id)
         if not campaign:

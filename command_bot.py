@@ -987,13 +987,16 @@ async def start_command_bot():
             pass
         if prev_token_id and prev_token_id != token_id:
             for ext in (".session", ".session-journal"):
-                try:
-                    p = bot_session + ext
-                    if os.path.exists(p):
-                        os.remove(p)
-                        logger.info(f"[CommandBot] Token changed — removed stale session {p}")
-                except Exception as e:
-                    logger.warning(f"[CommandBot] Could not remove stale session: {e}")
+                p = bot_session + ext
+                for _ in range(5):
+                    try:
+                        if os.path.exists(p):
+                            os.remove(p)
+                            logger.info(f"[CommandBot] Token changed — removed stale session {p}")
+                        break
+                    except Exception as e:
+                        logger.warning(f"[CommandBot] Could not remove stale session (retrying): {e}")
+                        await asyncio.sleep(0.3)
         try:
             os.makedirs(session_dir, exist_ok=True)
             with open(token_marker, "w", encoding="utf-8") as f:

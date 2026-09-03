@@ -241,7 +241,7 @@ const AIFollowUp = {
       const toggleBtn = c.status === 'active'
         ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'paused_admin')" title="Tắt AI, tự chat tay" aria-label="Tắt AI cho ${esc(uName)}">⏸ Chat tay</button>`
         : `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')" title="Bật AI chat tiếp" aria-label="Bật AI cho ${esc(uName)}">▶️ Bật AI</button>`;
-      const blacklistBtn = `<button class="btn btn-danger btn-sm" onclick="AIFollowUp.addToBlacklistDirect(${c.account_id},${c.user_id},'${esc(c.username||'')}')" title="Đưa vào Blacklist (Cấm AI 100%)">🚫 Blacklist</button>`;
+      const blacklistBtn = `<button class="btn btn-danger btn-sm" data-acc="${c.account_id}" data-uid="${c.user_id}" data-username="${esc(c.username||'')}" onclick="AIFollowUp.addToBlacklistDirect(Number(this.dataset.acc),Number(this.dataset.uid),this.dataset.username)" title="Đưa vào Blacklist (Cấm AI 100%)">🚫 Blacklist</button>`;
       const accLabel = c.account_name || `Acc #${c.account_id}`;
       return `<tr>
         <td style="width:34px;text-align:center"><input type="checkbox" aria-label="Chọn ${esc(uName)}" ${this._selected.has(`${c.account_id}:${c.user_id}`) ? 'checked' : ''} onchange="AIFollowUp.toggleSelection('${c.account_id}:${c.user_id}',this.checked)"></td>
@@ -452,7 +452,7 @@ const AIFollowUp = {
     const toggle = c.status === 'active'
       ? `<button class="btn btn-ghost" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'paused_admin')">⏸ Chat tay</button>`
       : `<button class="btn btn-ghost" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')">▶️ Bật AI</button>`;
-    const blkBtn = `<button class="btn btn-danger" onclick="AIFollowUp.addToBlacklistDirect(${c.account_id},${c.user_id},'${(c.username||'').replace(/'/g,'')}');AIFollowUp.closeHistoryModal()" title="Cấm AI chat 100% với lead này">🚫 Blacklist</button>`;
+    const blkBtn = `<button class="btn btn-danger" data-acc="${c.account_id}" data-uid="${c.user_id}" data-username="${esc(c.username||'')}" onclick="AIFollowUp.addToBlacklistDirect(Number(this.dataset.acc),Number(this.dataset.uid),this.dataset.username);AIFollowUp.closeHistoryModal()" title="Cấm AI chat 100% với lead này">🚫 Blacklist</button>`;
     const vs = c.verification_status || 'none';
     const vsLabel = {none:'🔍 Chưa verify', requested:'📤 Đã yêu cầu', submitted:'📎 Đã nộp', verified:'✅ Verified', rejected:'❌ Từ chối'}[vs] || vs;
     const vsBtn = `<button class="btn btn-ghost" onclick="AIFollowUp.cycleVerification(${c.account_id},${c.user_id})" title="Click để đổi trạng thái verify">${vsLabel}</button>`;

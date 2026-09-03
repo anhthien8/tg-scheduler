@@ -2128,7 +2128,7 @@ async def sync_all_blacklisted_followup_chats() -> int:
                      SELECT 1 FROM dm_blacklist b
                      WHERE (b.user_id IS NOT NULL AND b.user_id = ai_followup_chats.user_id)
                         OR (b.username IS NOT NULL AND b.username != ''
-                            AND LOWER(LTRIM(b.username,'@')) = LOWER(LTRIM(COALESCE(ai_followup_chats.username,''),'@')))
+                            AND LOWER(TRIM(LTRIM(b.username,'@'))) = LOWER(TRIM(LTRIM(COALESCE(ai_followup_chats.username,''),'@'))))
                  )"""
         )
         await db.commit()
