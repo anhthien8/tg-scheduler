@@ -992,8 +992,8 @@ async def start_command_bot():
                     BotCommand("kol", "🔍 Xem thông tin KOL (@username)"),
                     BotCommand("resume", "▶️ Resume campaign (ID)"),
                     BotCommand("pause", "⏸ Pause campaign (ID)"),
-                    BotCommand("ai-on", "🤖 Bật AI cho KOL (@username)"),
-                    BotCommand("ai-off", "🤖 Tắt AI cho KOL (@username)"),
+                    BotCommand("aion", "🤖 Bật AI cho KOL (@username)"),
+                    BotCommand("aioff", "🤖 Tắt AI cho KOL (@username)"),
                     BotCommand("check", "🔍 Check SpamBot account (@name)"),
                 ]
             ))
