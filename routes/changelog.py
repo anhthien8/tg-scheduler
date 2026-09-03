@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.2.1",
+        "date": "03/09/2026",
+        "title": "🛡️ Bảo Vệ Uy Tín Nick Chính + Bật/Tắt Tài Khoản Hàng Loạt",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "AI bị chặn hoàn toàn trên nick chính — mọi chat trên nick chính đều do người thật trả lời. AI trên nick phụ có quy tắc mới: cấm trả lời vô nghĩa, cấm đùa cợt với admin sàn khác. Trang Tài khoản có chọn nhiều + bật/tắt hàng loạt.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "AI Không Bao Giờ Trả Lời Trên Nick Chính",
+                "desc": "Hard guard mới: mọi yêu cầu AI reply trên nick chính bị chặn tại gốc, chat tự chuyển needs_human để admin xử lý. Uy tín nick chính được bảo vệ tuyệt đối.",
+                "tag": "AI Follow-Up"
+            },
+            {
+                "type": "fix",
+                "title": "Cấm AI Trả Lời Vô Nghĩa",
+                "desc": "Rule mới: cấm reply 1 từ, đùa cợt, câu tôn giáo ('Mô phật'), meme. Nhận file không kèm text → xác nhận chuyên nghiệp. Gặp admin sàn khác → lịch sự, không pitch, chuyển người thật xử lý.",
+                "tag": "AI Follow-Up"
+            },
+            {
+                "type": "feature",
+                "title": "Bật/Tắt Tài Khoản Hàng Loạt",
+                "desc": "Trang Tài khoản: checkbox chọn từng account, Chọn tất cả, Bật/Tắt đã chọn, hoặc Bật tất cả/Tắt tất cả 1 click. Lý do tắt (SpamBot, thủ công) hiện ngay trên card.",
+                "tag": "Tài khoản"
+            }
+        ]
+    },
+    {
         "version": "v3.2.0",
         "date": "02/09/2026",
         "title": "🤖 Telegram Command Bot — Điều Hành Từ Nick Chính",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Nick chính giờ có thể điều khiển toàn bộ hệ thống ngay trong Telegram: gửi tin từ nick phụ cho KOL, xem trạng thái, resume/pause campaign, bật tắt AI — không cần mở app.",
         "changes": [
             {

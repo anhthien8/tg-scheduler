@@ -736,8 +736,9 @@ grid.innerHTML = this.accounts.map(a => {
   return `
   <div class="account-card ${isOff ? 'account-card-disabled' : ''}" data-account-id="${a.id}" style="background:var(--bg-card);border:1px solid ${isOff ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.08)'};border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;position:relative;${isOff ? 'opacity:0.82;' : ''}">
 
-    <!-- Header: Avatar + Name + meta inline -->
+    <!-- Header: Checkbox + Avatar + Name + meta inline -->
     <div style="display:flex;align-items:center;gap:10px">
+      <input type="checkbox" class="acc-select-cb" data-acc-id="${a.id}" onchange="App.onAccountSelectChange()" style="width:16px;height:16px;cursor:pointer;accent-color:var(--primary);flex-shrink:0" title="Chọn tài khoản">
       <div style="position:relative;width:38px;height:38px;flex-shrink:0;border-radius:50%;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#818cf8" title="${isOff ? 'Đã tắt' : (logged ? 'Online' : 'Disconnected')}">
         ${esc(initial)}
         <span style="position:absolute;bottom:-1px;right:-1px;width:11px;height:11px;border-radius:50%;background:${isOff ? '#ef4444' : (logged ? '#10b981' : '#f59e0b')};border:2px solid var(--bg-card)"></span>
@@ -745,7 +746,7 @@ grid.innerHTML = this.accounts.map(a => {
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-weight:700;font-size:14px;color:var(--text1);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(name)}</span>
-          ${isOff ? '<span style="font-size:11px;font-weight:600;color:#f87171;flex-shrink:0">Đã tắt</span>' : ''}
+          ${isOff ? `<span style="font-size:11px;font-weight:600;color:#f87171;flex-shrink:0" title="${esc(a.pause_reason || 'Đã tắt thủ công')}">⚠️ ${esc((a.pause_reason || 'Đã tắt').substring(0, 20))}</span>` : ''}
           ${a.is_flagged ? `<span style="cursor:pointer;font-size:12px;flex-shrink:0" onclick="App.unflagAccount(${a.id})" title="${esc(a.flag_reason || '')} — click để bỏ cảnh báo">🚩</span>` : ''}
         </div>
         <div style="font-size:11px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
@@ -2967,6 +2968,68 @@ App.loadSettings = async function() {
   App.loadApiKeyUi();
   App.loadDailySummary();
   App.loadCommandBotConfig();
+};
+
+// ══════════════════════════════════════════════════════════
+//  ACCOUNT BULK SELECT + TOGGLE
+// ══════════════════════════════════════════════════════════
+
+App._accSelected = new Set();
+
+App.onAccountSelectChange = function() {
+  App._accSelected = new Set();
+  document.querySelectorAll('.acc-select-cb:checked').forEach(cb => App._accSelected.add(+cb.dataset.accId));
+  const bar = document.getElementById('acc-selection-bar');
+  const cnt = document.getElementById('acc-selected-count');
+  if (bar) bar.classList.toggle('hidden', App._accSelected.size === 0);
+  if (cnt) cnt.textContent = App._accSelected.size;
+};
+
+App.toggleSelectAllAccounts = function() {
+  const cbs = document.querySelectorAll('.acc-select-cb');
+  const allChecked = [...cbs].every(cb => cb.checked);
+  cbs.forEach(cb => cb.checked = !allChecked);
+  App.onAccountSelectChange();
+};
+
+App.clearAccountSelection = function() {
+  document.querySelectorAll('.acc-select-cb').forEach(cb => cb.checked = false);
+  App._accSelected.clear();
+  App.onAccountSelectChange();
+};
+
+App.bulkToggleSelectedAccounts = async function(activate) {
+  const ids = [...App._accSelected];
+  if (!ids.length) return;
+  const action = activate ? 'BẬT' : 'TẮT';
+  if (!confirm(`${action} ${ids.length} tài khoản đã chọn?`)) return;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    try {
+      await API.toggleAccountActive(id, activate);
+      ok++;
+    } catch { fail++; }
+  }
+  App.toast(`${action} ${ok}/${ids.length} tài khoản${fail ? ` (${fail} lỗi)` : ''}`, fail ? 'warning' : 'success');
+  App.clearAccountSelection();
+  App.loadAccounts();
+};
+
+App.bulkToggleAccounts = async function(activate) {
+  const accounts = App._accounts || [];
+  const targets = activate ? accounts.filter(a => a.is_paused) : accounts.filter(a => !a.is_paused);
+  if (!targets.length) { App.toast(`Không có tài khoản nào cần ${activate ? 'bật' : 'tắt'}`, 'info'); return; }
+  const action = activate ? 'BẬT' : 'TẮT';
+  if (!confirm(`${action} tất cả ${targets.length} tài khoản ${activate ? 'đang tắt' : 'đang bật'}?`)) return;
+  let ok = 0, fail = 0;
+  for (const a of targets) {
+    try {
+      await API.toggleAccountActive(a.id, activate);
+      ok++;
+    } catch { fail++; }
+  }
+  App.toast(`${action} ${ok}/${targets.length} tài khoản${fail ? ` (${fail} lỗi)` : ''}`, fail ? 'warning' : 'success');
+  App.loadAccounts();
 };
 
 // ══════════════════════════════════════════════════════════

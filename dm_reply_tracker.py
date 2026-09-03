@@ -411,6 +411,18 @@ async def generate_and_send_ai_reply_for_chat(
     event: Any | None = None,
 ) -> bool:
     """Generate and send AI response for a chat session. Returns True if reply was sent."""
+    # 0a. HARD GUARD: main account is human-only. AI must NEVER auto-reply on nick chính —
+    # a sloppy AI reply there destroys the main account's credibility with KOLs.
+    if account_id == MAIN_ACCOUNT_ID:
+        logger.info(
+            "[AIFollowUp] 🛡️ Account #%d is the MAIN account — AI auto-reply blocked. "
+            "Marking chat needs_human for user %d", account_id, user_id)
+        try:
+            await db.update_followup_chat_status(account_id, user_id, "needs_human")
+        except Exception:
+            pass
+        return False
+
     # 0. Check blacklist
     if await db.is_user_blacklisted(user_id=user_id, username=sender_username or ""):
         logger.info("[AIFollowUp] 🚫 User %s (id=%d) is blacklisted — skipping AI reply", sender_username or "?", user_id)
@@ -567,10 +579,11 @@ async def generate_and_send_ai_reply_for_chat(
         "3. INTERNAL HANDOVER FLOW (HIGHEST PRIORITY): NEVER instruct, ask, or suggest that the prospect contact https://t.me/weexwill, @weexwill, or any other main account. Prospect stays chatting with this nick phụ. When prospect provides UID and campaign choice, acknowledge receipt naturally and append [HANDOVER_REQUIRED]; the app privately notifies the main account. Say only that the team will review/configure internally. NEVER say the commission is configured, never provide a SEND MESSAGE/contact card for the main account, and never expose this internal handover mechanism. If UID or campaign is missing, ask only for the missing item.\n"
         "4. TRUTHFULNESS MANDATE (FINTECH — ZERO TOLERANCE): You may be warm, casual and personable, but you must NEVER invent facts. STRICTLY FORBIDDEN to fabricate: a mutual friend or referral ('your friend referred you'), having watched/read their content when you have not, any UID, any campaign name, commission rates, trading volume, follower counts, earnings figures, payout status, or the claim that commission/binding is already configured. If the prospect asks how you found them, answer honestly: you found their public crypto profile/community and reached out directly. If you do not know something, say you will check with the team. A single fabricated fact destroys the partnership.\n"
         "5. WARM-UP BEFORE OFFER (RAPPORT PHASE): On the first 1-3 exchanges, prioritise a natural human conversation over pitching. Open with a genuine, verifiable reason for reaching out, ask about their community/market view, and react to what they actually say. Do NOT dump commission numbers, campaign lists or CTAs until the prospect shows interest or asks what you want. Small talk, market chat and light humour are encouraged; invented personal history is not. If the prospect challenges your opener or asks 'who are you / how did you find me', drop everything else, own the mistake plainly if the opener was wrong, state the real source, introduce yourself by name and role, and offer to let them verify before continuing.\n"
-        "6. KNOWLEDGE BASE & COMMISSION QUOTING MANDATE:\n"
+        "6. PROFESSIONAL REPLIES ONLY (NO NONSENSE): Every reply must be a meaningful, professional business message. STRICTLY FORBIDDEN: one-word jokes, religious phrases, memes, or throwaway replies ('Mô phật', 'lol', 'ok', a single emoji) — these destroy credibility. If someone sends a document/file with no text, acknowledge it professionally: 'Got the file, let me take a look 👍' (or same meaning in the user's language). If the counterparty appears to be another exchange's admin, support bot, or someone pitching THEIR product to you, stay brief and courteous, do NOT pitch WEEX, do NOT joke, and append [HANDOVER_REQUIRED] so a human decides.\n"
+        "7. KNOWLEDGE BASE & COMMISSION QUOTING MANDATE:\n"
         "   - VIETNAMESE 🇻🇳, KOREAN 🇰🇷, CHINESE 🇨🇳 (or Verified Volume > 20M): Quote 70% - 80% commission.\n"
         "   - GLOBAL / ENGLISH / HIGH-RISK / NIGERIA 🇳🇬 / INDIA 🇮🇳 / OTHER (< 20M volume): STRICTLY ONLY quote 50% - 60% base commission. NEVER mention 70% or 80%! Highlight daily USDT withdrawals, No KYC, No Tax, and ask for their community link & monthly volume.\n"
-        "7. STRICT CONTEXTUAL CONTINUATION, NATURAL HUMAN TONE & ANTI-NAGGING:\n"
+        "8. STRICT CONTEXTUAL CONTINUATION, NATURAL HUMAN TONE & ANTI-NAGGING:\n"
         "   - NATURAL HUMAN TONE: Be friendly, open and approachable like a crypto industry peer (bro, mate, buddy). Do not use robotic, formal, or bureaucratic language.\n"
         "   - ANTI-NAGGING & NO FORCED CTA: NEVER push, pressure, or nag the KOL into taking action. BANNED phrases: 'Ready to post?', 'When will you publish?', 'Can you start now?'.\n"
         "   - CONCISE DIRECT ANSWERS: When the partner asks a simple question (KYC, deposit, ref link), give a short friendly answer and STOP. Do not stuff extra questions or CTAs at the end!\n"
@@ -587,11 +600,11 @@ async def generate_and_send_ai_reply_for_chat(
         "     * Vietnamese example: 'Case này đặc biệt và vượt thẩm quyền thông thường của mình rồi, để mình chuyển tiếp proposal chi tiết của bạn lên Ban Giám Đốc / Partnership Committee của sàn WEEX để duyệt riêng nhé!'\n"
         "     * Then append [HANDOVER_REQUIRED].\n"
         "   - NO HALLUCINATION & NO SPAM: NEVER hallucinate, never output random unrelated greetings, and never repeat points already made.\n"
-        "8. LEAD EVALUATION METRICS: At the VERY END of your response, append a hidden metadata JSON tag on its own line: [METRICS: {\"intent_score\": <0-100>, \"lead_tier\": \"<Tier A|Tier B|Tier C>\", \"summary\": \"<1-sentence lead need summary>\"}].\n"
+        "9. LEAD EVALUATION METRICS: At the VERY END of your response, append a hidden metadata JSON tag on its own line: [METRICS: {\"intent_score\": <0-100>, \"lead_tier\": \"<Tier A|Tier B|Tier C>\", \"summary\": \"<1-sentence lead need summary>\"}].\n"
         "   - Tier A (Intent 80-100): High volume trader/KOL (>10k subs or >$5M vol), ready for meeting, negotiating terms.\n"
         "   - Tier B (Intent 40-79): Interested in exchange benefits, asking detailed questions.\n"
         "   - Tier C (Intent 0-39): Casual question, low interest, or greeting.\n"
-        "9. HANDOVER TRIGGER (CRITICAL): Append [HANDOVER_REQUIRED] on its own line (before METRICS) when ANY of these apply:\n"
+        "10. HANDOVER TRIGGER (CRITICAL): Append [HANDOVER_REQUIRED] on its own line (before METRICS) when ANY of these apply:\n"
         "   - Prospect asks for fixed fee, upfront payment, retainer, or sponsorship budget.\n"
         "   - Prospect requests a call, meeting, or contract discussion.\n"
         "   - Prospect asks to speak with a human, admin, or manager.\n"

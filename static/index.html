@@ -258,10 +258,30 @@
 
       <!-- Accounts View -->
       <div id="view-accounts" class="hidden">
-        <div class="toolbar">
-          <h2 class="page-title" style="margin-bottom:0">Tài khoản Telegram</h2>
+        <div class="toolbar" style="flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <h2 class="page-title" style="margin-bottom:0">Tài khoản Telegram</h2>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-sm" onclick="App.toggleSelectAllAccounts()" id="btn-select-all-acc">☑️ Chọn tất cả</button>
+              <button class="btn btn-success btn-sm" onclick="App.bulkToggleAccounts(true)" title="Bật tất cả tài khoản đang tắt">▶️ Bật tất cả</button>
+              <button class="btn btn-ghost btn-sm" style="color:#f87171" onclick="App.bulkToggleAccounts(false)" title="Tắt tất cả tài khoản">⏸️ Tắt tất cả</button>
+            </div>
+          </div>
           <button class="btn btn-primary" onclick="App.openAddAccountModal()">+ Thêm tài khoản</button>
         </div>
+
+        <!-- Bulk Selection Action Bar -->
+        <div id="acc-selection-bar" class="card hidden" style="margin-bottom:14px;padding:10px 14px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div style="font-size:13px;font-weight:600;color:var(--text1)">
+            <span id="acc-selected-count">0</span> tài khoản được chọn
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-success btn-sm" onclick="App.bulkToggleSelectedAccounts(true)">▶️ Bật đã chọn</button>
+            <button class="btn btn-ghost btn-sm" style="color:#f87171" onclick="App.bulkToggleSelectedAccounts(false)">⏸️ Tắt đã chọn</button>
+            <button class="btn btn-ghost btn-sm" onclick="App.clearAccountSelection()">Bỏ chọn</button>
+          </div>
+        </div>
+
         <div class="accounts-grid" id="accounts-grid">
           <!-- accounts rendered here -->
         </div>
@@ -1756,8 +1776,8 @@
   <script src="/static/js/analytics.js?v=400"></script>
   <script src="/static/js/ai_agents.js?v=400"></script>
   <script src="/static/js/ai_followup.js?v=411"></script>
-  <script src="/static/js/changelog.js?v=408"></script>
-  <script src="/static/js/app.js?v=416"></script>
+  <script src="/static/js/changelog.js?v=409"></script>
+  <script src="/static/js/app.js?v=417"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">
