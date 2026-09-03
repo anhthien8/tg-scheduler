@@ -170,7 +170,8 @@ if(page==='ai-followup'){
           <strong id="aifu-selected-count" style="margin-right:auto">Đã chọn 0 lead</strong>
           <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.assignSelected()">📍 Phân công</button>
           <button class="btn btn-green btn-sm" onclick="AIFollowUp.bulkToggleAI('active')">▶️ Bật AI</button>
-          <button class="btn btn-danger btn-sm" onclick="AIFollowUp.bulkToggleAI('paused_admin')">⏸ Tắt AI</button>
+          <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.bulkToggleAI('paused_admin')">⏸ Chat tay</button>
+          <button class="btn btn-danger btn-sm" onclick="AIFollowUp.bulkBlacklistSelected()">🚫 Blacklist (Cấm AI 100%)</button>
           <button class="btn btn-primary btn-sm" onclick="AIFollowUp.bulkSendSelected()">✉️ Gửi hàng loạt</button>
           <button class="btn btn-ghost btn-sm" onclick="AIFollowUp._selected.clear();AIFollowUp.renderPage()">Bỏ chọn</button>
         </div>
