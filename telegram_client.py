@@ -435,6 +435,17 @@ async def start_client(account_id: int) -> bool:
                     "phone": me.phone or ""
                 }
                 logger.info(f"Account {account_id}: connected as @{me.username} (id={me.id})")
+                # Sync tên thật từ Telegram vào DB nếu đã đổi (tránh tên cũ gây nhầm lẫn)
+                try:
+                    import database as _db
+                    real_name = " ".join(x for x in [me.first_name, me.last_name or ""] if x).strip()
+                    if real_name:
+                        acc = await _db.get_account(account_id)
+                        if acc and acc.get("name") != real_name:
+                            await _db.update_account_name(account_id, real_name)
+                            logger.info(f"Account {account_id}: name synced '{acc.get('name')}' → '{real_name}'")
+                except Exception as e:
+                    logger.debug(f"Account {account_id}: name sync skipped: {e}")
             except Exception as e:
                 logger.warning(f"Account {account_id}: Failed to get self details: {e}")
                 logger.info(f"Account {account_id}: connected (authorized)")
