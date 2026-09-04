@@ -18,7 +18,7 @@ CHANGELOG_DATA = [
             {
                 "type": "improvement",
                 "title": "Index DB cho AI Follow-Up & Reactions",
-                "desc": "Thêm index (status, updated_at) cho ai_followup_chats — hết full scan khi lọc lead. Thêm index (account_id, sent_at) cho reaction_logs — thống kê reactions 57K+ dòng từ 139ms xuống ~2ms.",
+                "desc": "Thêm index (updated_at DESC) cho ai_followup_chats — hết full scan khi sắp xếp lead theo thời gian gần nhất. Thêm index (account_id, sent_at) cho reaction_logs — thống kê reactions 57K+ dòng từ 139ms xuống ~2ms.",
                 "tag": "Hiệu năng"
             },
             {
