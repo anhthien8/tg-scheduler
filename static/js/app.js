@@ -726,7 +726,7 @@ grid.innerHTML = this.accounts.map(a => {
   const isOff = Boolean(a.is_paused);
   const ui = a.user_info;
   const name = ui ? [ui.first_name, ui.last_name].filter(Boolean).join(' ') : a.name;
-  const uname = ui ? `@${ui.username || ui.phone}` : `@${a.phone}`;
+  const uname = ui?.username ? `@${ui.username}` : `ID tài khoản #${a.id} · SĐT ${a.phone || 'chưa có'}`;
   const dmLimit = a.is_premium ? 50 : 10;
   const initial = name ? name.trim().charAt(0).toUpperCase() : 'T';
 
