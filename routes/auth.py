@@ -35,8 +35,12 @@ async def list_accounts():
             me = await tg.get_me(acc["id"], timeout=2.5)
             if me:
                 acc["user_info"] = me
+            elif acc["id"] in tg._me_cache:
+                acc["user_info"] = tg._me_cache[acc["id"]]
         except Exception:
             acc["is_logged_in"] = False
+            if acc["id"] in tg._me_cache:
+                acc["user_info"] = tg._me_cache[acc["id"]]
 
     await asyncio.gather(*(get_acc_status(acc) for acc in accounts), return_exceptions=True)
     return {"accounts": accounts}
