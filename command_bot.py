@@ -807,13 +807,17 @@ async def _handle_kol_info(event, username: str):
 
 async def _handle_resume(event, cid: int):
     try:
-        await db.update_dm_campaign_status(cid, "running")
-        # Trigger campaign run
+        # Chống gửi trùng: nếu campaign đã có task đang chạy thì không tạo thêm
         from routes.members import _run_campaign, _active_campaigns
         import asyncio
-        _active_campaigns[cid] = asyncio.create_task(_run_campaign(cid))
-        text = f"▶️ Đã resume campaign #{cid}"
-        logger.info(f"Command bot: resumed campaign #{cid}")
+        existing = _active_campaigns.get(cid)
+        if existing is True or (isinstance(existing, asyncio.Task) and not existing.done()):
+            text = f"⚠️ Campaign #{cid} đang chạy rồi — không tạo thêm."
+        else:
+            await db.update_dm_campaign_status(cid, "running")
+            _active_campaigns[cid] = asyncio.create_task(_run_campaign(cid))
+            text = f"▶️ Đã resume campaign #{cid}"
+            logger.info(f"Command bot: resumed campaign #{cid}")
     except Exception as e:
         text = f"❌ Resume thất bại #{cid}: {e}"
 
@@ -990,15 +994,22 @@ async def start_command_bot():
         if prev_token_id and prev_token_id != token_id:
             for ext in (".session", ".session-journal"):
                 p = bot_session + ext
-                for _ in range(5):
+                for attempt in range(5):
                     try:
                         if os.path.exists(p):
                             os.remove(p)
                             logger.info(f"[CommandBot] Token changed — removed stale session {p}")
                         break
                     except Exception as e:
+                        if attempt == 4:
+                            logger.error(f"[CommandBot] BLOCKED: Cannot remove stale session after 5 retries: {p}")
+                            return False
                         logger.warning(f"[CommandBot] Could not remove stale session (retrying): {e}")
                         await asyncio.sleep(0.3)
+                # Safety: nếu file vẫn tồn tại sau khi cleanup → không start bot
+                if os.path.exists(p):
+                    logger.error(f"[CommandBot] BLOCKED: Stale session still exists after cleanup: {p}")
+                    return False
         try:
             os.makedirs(session_dir, exist_ok=True)
             with open(token_marker, "w", encoding="utf-8") as f:
