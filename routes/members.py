@@ -28,6 +28,7 @@ router = APIRouter(prefix="/api/members", tags=["members"])
 
 # ── Active campaign tracking ──
 _active_campaigns: dict[int, bool] = {}  # campaign_id -> is_running
+_active_campaign_lock = asyncio.Lock()  # serialize check-and-start for all callers
 
 
 # ── Request Models ──────────────────────────────────────────────────────────
@@ -1469,16 +1470,18 @@ async def start_campaign(campaign_id: int, background_tasks: BackgroundTasks):
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign không tồn tại")
 
-    if campaign["status"] == "running":
-        task = _active_campaigns.get(campaign_id)
-        if task is True or (isinstance(task, asyncio.Task) and not task.done()):
-            raise HTTPException(status_code=400, detail="Campaign đang chạy")
-        logger.info(f"[Campaign {campaign_id}] Campaign marked running in DB but no active background task found. Re-starting task...")
+    async with _active_campaign_lock:
+        if campaign["status"] == "running":
+            task = _active_campaigns.get(campaign_id)
+            if task is True or (isinstance(task, asyncio.Task) and not task.done()):
+                raise HTTPException(status_code=400, detail="Campaign đang chạy")
+            logger.info(f"[Campaign {campaign_id}] Campaign marked running in DB but no active background task found. Re-starting task...")
 
-    # Mark as running
-    await db.update_dm_campaign_status(campaign_id, "running")
-    task = asyncio.create_task(_run_campaign(campaign_id))
-    _active_campaigns[campaign_id] = task
+        # Mark as running and register task atomically with the guard
+        await db.update_dm_campaign_status(campaign_id, "running")
+        task = asyncio.create_task(_run_campaign(campaign_id))
+        _active_campaigns[campaign_id] = task
+
 
     return {"status": "started", "message": "Campaign đã bắt đầu chạy"}
 

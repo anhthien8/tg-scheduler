@@ -807,17 +807,18 @@ async def _handle_kol_info(event, username: str):
 
 async def _handle_resume(event, cid: int):
     try:
-        # Chống gửi trùng: nếu campaign đã có task đang chạy thì không tạo thêm
-        from routes.members import _run_campaign, _active_campaigns
-        import asyncio
-        existing = _active_campaigns.get(cid)
-        if existing is True or (isinstance(existing, asyncio.Task) and not existing.done()):
-            text = f"⚠️ Campaign #{cid} đang chạy rồi — không tạo thêm."
-        else:
-            await db.update_dm_campaign_status(cid, "running")
-            _active_campaigns[cid] = asyncio.create_task(_run_campaign(cid))
-            text = f"▶️ Đã resume campaign #{cid}"
-            logger.info(f"Command bot: resumed campaign #{cid}")
+        # Chống gửi trùng: lock serialize check-and-start; 2 lệnh /resume đồng thời
+        # không thể cùng vượt qua check rồi tạo 2 task
+        from routes.members import _run_campaign, _active_campaigns, _active_campaign_lock
+        async with _active_campaign_lock:
+            existing = _active_campaigns.get(cid)
+            if existing is True or (isinstance(existing, asyncio.Task) and not existing.done()):
+                text = f"⚠️ Campaign #{cid} đang chạy rồi — không tạo thêm."
+            else:
+                await db.update_dm_campaign_status(cid, "running")
+                _active_campaigns[cid] = asyncio.create_task(_run_campaign(cid))
+                text = f"▶️ Đã resume campaign #{cid}"
+                logger.info(f"Command bot: resumed campaign #{cid}")
     except Exception as e:
         text = f"❌ Resume thất bại #{cid}: {e}"
 

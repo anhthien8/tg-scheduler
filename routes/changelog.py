@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.2.3",
+        "date": "04/09/2026",
+        "title": "🛡️ Chống gửi trùng Campaign + Fix hiển thị tên tài khoản",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Khóa chống race condition khi /resume và Start campaign (không thể tạo 2 task gửi trùng). Bot chặn khởi động nếu session cũ chưa xóa được khi đổi token. Dashboard & Bot hiển thị @username thật thay vì tên cũ trong DB; tên tự đồng bộ từ Telegram khi kết nối.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Chống gửi trùng tin nhắn campaign (race condition)",
+                "desc": "Lệnh /resume trên Bot và nút Start trên Dashboard giờ dùng chung khóa (asyncio.Lock) — 2 thao tác đồng thời không thể cùng tạo 2 task campaign gây gửi tin trùng cho KOL.",
+                "tag": "Command Bot"
+            },
+            {
+                "type": "fix",
+                "title": "Bot chặn khởi động nếu session cũ còn sót khi đổi token",
+                "desc": "Khi đổi token bot, nếu file session cũ không xóa được sau 5 lần thử thì bot KHÔNG khởi động với session cũ (tránh chạy nhầm bot cũ), log lỗi rõ ràng.",
+                "tag": "Command Bot"
+            },
+            {
+                "type": "fix",
+                "title": "Hiển thị đúng tên & @username tài khoản",
+                "desc": "Tên tài khoản tự đồng bộ từ Telegram vào DB mỗi khi kết nối. Dashboard hiển thị @username thật (fallback ID + SĐT), Bot hiển thị @username trên nút chọn tài khoản — hết cảnh 'Weex Phụ' không nhận ra là nick nào.",
+                "tag": "Tài khoản"
+            }
+        ]
+    },
+    {
         "version": "v3.2.2",
         "date": "04/09/2026",
         "title": "🤖 Fix Command Bot + 🚫 Nút Blacklist UI + 📋 Kanban QC Process",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Sửa toàn bộ 4 lỗi Command Bot (tên field KOL, `/resume`, `/aion`, `/kol`). Lead bị Blacklist tự động ẩn khỏi AI Followup. Thêm nút Blacklist 1-click & chat tay rõ ràng. Thiết lập Kanban + Reviewer QC.",
         "changes": [
             {
