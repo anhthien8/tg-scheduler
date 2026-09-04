@@ -441,7 +441,9 @@ async def _start_send_flow(event, target: str | None):
     for a in accounts:
         premium = "⭐" if a.get("is_premium") else ""
         name = a.get("name", f"Acc #{a['id']}")
-        label = f"{premium}{name}"
+        me = tg._me_cache.get(a["id"]) or {}
+        uname = me.get("username") or ""
+        label = f"{premium}{name}" + (f" @{uname}" if uname else "")
         row.append(Button.inline(label, data=f"sel_acc:{a['id']}"))
         if len(row) == 2:
             buttons.append(row)
