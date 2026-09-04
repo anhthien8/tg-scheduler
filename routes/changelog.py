@@ -8,11 +8,27 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.2.5",
+        "date": "04/09/2026",
+        "title": "🌍 Fix outreach sai ngôn ngữ (KOL Nga nhận tin tiếng Anh)",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Campaign outreach giờ tự nhận diện ngôn ngữ KOL qua 4 tín hiệu: lang_code, tên campaign (vd 'rus kol' → tiếng Nga), tên group nguồn, và bảng chữ cái trong tên (Cyrillic/Hán/Hàn/Ả Rập). Trước đây lang_code luôn trống nên AI mặc định gửi tiếng Anh cho cả KOL Nga.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Nhận diện ngôn ngữ KOL khi gửi tin outreach đầu tiên",
+                "desc": "Telegram không trả lang_code khi scrape members (15K+ member đều trống) → AI luôn viết tiếng Anh. Giờ detect qua: tên campaign chứa 'rus/russian/nga', tên group nguồn (community hint), và phân tích bảng chữ cái tên người nhận (Cyrillic → Nga, Hán tự → Trung, Hangul → Hàn, Ả Rập).",
+                "tag": "AI Outreach"
+            }
+        ]
+    },
+    {
         "version": "v3.2.4",
         "date": "04/09/2026",
         "title": "⚡ Tối ưu tốc độ: Index DB + Cache tài khoản",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Thêm index DB cho trang AI Follow-Up và thống kê Reactions (nhanh hơn ~100x khi dữ liệu lớn). Trang Tài khoản load tức thì nhờ cache thông tin Telegram thay vì gọi API mỗi lần mở.",
         "changes": [
             {

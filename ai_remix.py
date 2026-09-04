@@ -300,14 +300,40 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
         first_name = mem_info.get("first_name", "") or ""
         last_name = mem_info.get("last_name", "") or ""
         username = mem_info.get("username", "") or ""
+        likely_language = mem_info.get("likely_language", "") or ""
+        community_hint = mem_info.get("community_hint", "") or ""
+        # Heuristic language detection from name when lang_code is unavailable
+        detected_lang = lang_code
+        if not detected_lang and likely_language:
+            detected_lang = likely_language
+        if not detected_lang:
+            combined_name = f"{first_name} {last_name} {username}".strip()
+            # Cyrillic → Russian; CJK → Chinese; Hangul → Korean; Arabic/Persian script
+            cyrillic = sum(1 for c in combined_name if '\u0400' <= c <= '\u04ff')
+            latin = sum(1 for c in combined_name if c.isascii() and c.isalpha())
+            cjk = sum(1 for c in combined_name if '\u4e00' <= c <= '\u9fff')
+            hangul = sum(1 for c in combined_name if '\uac00' <= c <= '\ud7af')
+            arabic = sum(1 for c in combined_name if '\u0600' <= c <= '\u06ff' or '\u0750' <= c <= '\u077f')
+            total = cyrillic + latin + cjk + hangul + arabic
+            if total > 0:
+                if cyrillic / total > 0.4:
+                    detected_lang = "ru"
+                elif cjk / total > 0.4:
+                    detected_lang = "zh"
+                elif hangul / total > 0.4:
+                    detected_lang = "ko"
+                elif arabic / total > 0.4:
+                    detected_lang = "ar"
         lang_rule = (
             f"\n3. AUTO-LOCALIZATION / NATIVE LANGUAGE RULE:\n"
             f"   - Target recipient Telegram lang_code: '{lang_code}'\n"
-            f"   - Target recipient name: '{first_name} {last_name}', username: @{username}\n"
-            f"   - DETECT the recipient's likely native language based on lang_code ('{lang_code}') and name ('{first_name} {last_name}').\n"
+            f"   - Heuristic detected language: '{detected_lang}'\n"
+            + (f"   - Source community language hint: '{community_hint}'\n" if community_hint else "")
+            + f"   - Target recipient name: '{first_name} {last_name}', username: @{username}\n"
+            f"   - DETECT the recipient's likely native language based on: (a) lang_code '{lang_code}', (b) heuristic detection '{detected_lang}', (c) community hint, (d) name script analysis.\n"
             f"     (e.g., 'vi' -> Vietnamese, 'zh'/'zh-hans'/'zh-hant' -> Chinese, 'ru' -> Russian, 'tr' -> Turkish, 'fa'/'ar' -> Persian/Arabic, 'ko' -> Korean, 'ja' -> Japanese, 'es' -> Spanish, 'de' -> German, 'fr' -> French, 'en' -> English).\n"
             f"   - TRANSLATE and rephrase the outreach message into their native language naturally, engagingly, and authentically.\n"
-            f"   - If lang_code is unavailable or 'en', check name character script (Hanzi, Cyrillic, Arabic script). If still ambiguous, write in natural English.\n"
+            f"   - If ALL signals are unavailable or ambiguous, check name character script (Hanzi, Cyrillic, Arabic script). If still ambiguous, write in natural English.\n"
         )
     else:
         lang_rule = "\n3. Keep the SAME language as the original - do NOT translate.\n"

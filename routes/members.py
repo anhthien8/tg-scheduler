@@ -2037,11 +2037,15 @@ async def _run_campaign(campaign_id: int):
                             try:
                                 original_len = len(content)
                                 auto_native = bool(campaign.get("auto_translate_native", 1))
+                                campaign_hint = str(campaign.get("name", ""))
+                                campaign_lang = "ru" if any(x in campaign_hint.lower() for x in ("rus", "russian", "nga", "рос")) else ""
                                 mem_info = {
                                     "first_name": member.get("first_name"),
                                     "last_name": member.get("last_name"),
                                     "username": username,
-                                    "lang_code": member.get("lang_code")
+                                    "lang_code": member.get("lang_code"),
+                                    "likely_language": campaign_lang,
+                                    "community_hint": member.get("group_title", "")
                                 }
                                 remixed_content = await ai_rmx.remix_message(
                                     original_text=content,
