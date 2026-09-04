@@ -307,23 +307,22 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
         if not detected_lang and likely_language:
             detected_lang = likely_language
         if not detected_lang:
-            combined_name = f"{first_name} {last_name} {username}".strip()
+            # Prioritize display name; usernames often add Latin noise (e.g. Chinese user @alex123).
+            display_name = f"{first_name} {last_name}".strip() or username
             # Cyrillic → Russian; CJK → Chinese; Hangul → Korean; Arabic/Persian script
-            cyrillic = sum(1 for c in combined_name if '\u0400' <= c <= '\u04ff')
-            latin = sum(1 for c in combined_name if c.isascii() and c.isalpha())
-            cjk = sum(1 for c in combined_name if '\u4e00' <= c <= '\u9fff')
-            hangul = sum(1 for c in combined_name if '\uac00' <= c <= '\ud7af')
-            arabic = sum(1 for c in combined_name if '\u0600' <= c <= '\u06ff' or '\u0750' <= c <= '\u077f')
-            total = cyrillic + latin + cjk + hangul + arabic
-            if total > 0:
-                if cyrillic / total > 0.4:
-                    detected_lang = "ru"
-                elif cjk / total > 0.4:
-                    detected_lang = "zh"
-                elif hangul / total > 0.4:
-                    detected_lang = "ko"
-                elif arabic / total > 0.4:
-                    detected_lang = "ar"
+            cyrillic = sum(1 for c in display_name if '\u0400' <= c <= '\u04ff')
+            cjk = sum(1 for c in display_name if '\u4e00' <= c <= '\u9fff')
+            hangul = sum(1 for c in display_name if '\uac00' <= c <= '\ud7af')
+            arabic = sum(1 for c in display_name if '\u0600' <= c <= '\u06ff' or '\u0750' <= c <= '\u077f')
+            # Require at least two script characters to avoid guessing from one symbol.
+            if cyrillic >= 2:
+                detected_lang = "ru"
+            elif cjk >= 2:
+                detected_lang = "zh"
+            elif hangul >= 2:
+                detected_lang = "ko"
+            elif arabic >= 2:
+                detected_lang = "ar"
         lang_rule = (
             f"\n3. AUTO-LOCALIZATION / NATIVE LANGUAGE RULE:\n"
             f"   - Target recipient Telegram lang_code: '{lang_code}'\n"

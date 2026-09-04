@@ -7,6 +7,7 @@ import logging
 import uuid
 import time
 import random
+import re
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
@@ -2038,7 +2039,9 @@ async def _run_campaign(campaign_id: int):
                                 original_len = len(content)
                                 auto_native = bool(campaign.get("auto_translate_native", 1))
                                 campaign_hint = str(campaign.get("name", ""))
-                                campaign_lang = "ru" if any(x in campaign_hint.lower() for x in ("rus", "russian", "nga", "рос")) else ""
+                                # Word-boundary match — tránh false positive kiểu "Trust" chứa "rus"
+                                _hint_words = re.findall(r"[a-zа-яё]+", campaign_hint.lower())
+                                campaign_lang = "ru" if any(w in ("rus", "russian", "russia", "nga", "ru") or w.startswith("рос") or w.startswith("рус") for w in _hint_words) else ""
                                 mem_info = {
                                     "first_name": member.get("first_name"),
                                     "last_name": member.get("last_name"),
