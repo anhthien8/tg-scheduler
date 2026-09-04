@@ -922,7 +922,9 @@ async def init_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_replies_acc_unread ON dm_replies(account_id, is_read, received_at)")
 
         # ── v3.2.4 speed: cover common hot queries ──
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_aifu_status_updated ON ai_followup_chats(status, updated_at)")
+        # updated_at index serves ORDER BY updated_at DESC (status != '...' is an
+        # inequality so a (status, updated_at) prefix can't be used)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_aifu_updated ON ai_followup_chats(updated_at DESC)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_reaction_logs_acc_sent ON reaction_logs(account_id, sent_at)")
 
 
