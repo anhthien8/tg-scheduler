@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.2.4",
+        "date": "04/09/2026",
+        "title": "⚡ Tối ưu tốc độ: Index DB + Cache tài khoản",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Thêm index DB cho trang AI Follow-Up và thống kê Reactions (nhanh hơn ~100x khi dữ liệu lớn). Trang Tài khoản load tức thì nhờ cache thông tin Telegram thay vì gọi API mỗi lần mở.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Index DB cho AI Follow-Up & Reactions",
+                "desc": "Thêm index (status, updated_at) cho ai_followup_chats — hết full scan khi lọc lead. Thêm index (account_id, sent_at) cho reaction_logs — thống kê reactions 57K+ dòng từ 139ms xuống ~2ms.",
+                "tag": "Hiệu năng"
+            },
+            {
+                "type": "improvement",
+                "title": "Trang Tài khoản load tức thì",
+                "desc": "Dùng cache thông tin Telegram (_me_cache, đồng bộ khi account kết nối) thay vì gọi get_me() cho 15 account mỗi lần mở trang — giảm thời gian chờ từ vài giây xuống gần như tức thì.",
+                "tag": "Hiệu năng"
+            }
+        ]
+    },
+    {
         "version": "v3.2.3",
         "date": "04/09/2026",
         "title": "🛡️ Chống gửi trùng Campaign + Fix hiển thị tên tài khoản",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Khóa chống race condition khi /resume và Start campaign (không thể tạo 2 task gửi trùng). Bot chặn khởi động nếu session cũ chưa xóa được khi đổi token. Dashboard & Bot hiển thị @username thật thay vì tên cũ trong DB; tên tự đồng bộ từ Telegram khi kết nối.",
         "changes": [
             {

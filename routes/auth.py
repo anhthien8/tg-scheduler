@@ -28,19 +28,21 @@ async def list_accounts():
     accounts = await db.get_all_accounts()
     
     import asyncio
-    
+
     async def get_acc_status(acc):
+        # Ưu tiên _me_cache (đã sync khi connect) — tránh gọi get_me() mỗi request
+        cached = tg._me_cache.get(acc["id"])
+        if cached:
+            acc["is_logged_in"] = True
+            acc["user_info"] = cached
+            return
         try:
-            acc["is_logged_in"] = await tg.is_authorized(acc["id"], timeout=2.5)
-            me = await tg.get_me(acc["id"], timeout=2.5)
+            acc["is_logged_in"] = await tg.is_authorized(acc["id"], timeout=2.0)
+            me = await tg.get_me(acc["id"], timeout=2.0)
             if me:
                 acc["user_info"] = me
-            elif acc["id"] in tg._me_cache:
-                acc["user_info"] = tg._me_cache[acc["id"]]
         except Exception:
             acc["is_logged_in"] = False
-            if acc["id"] in tg._me_cache:
-                acc["user_info"] = tg._me_cache[acc["id"]]
 
     await asyncio.gather(*(get_acc_status(acc) for acc in accounts), return_exceptions=True)
     return {"accounts": accounts}

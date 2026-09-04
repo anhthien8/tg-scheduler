@@ -921,6 +921,10 @@ async def init_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_watcher_dm_logs_acc_stat_sent ON watcher_dm_logs(account_id, status, sent_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_replies_acc_unread ON dm_replies(account_id, is_read, received_at)")
 
+        # ── v3.2.4 speed: cover common hot queries ──
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_aifu_status_updated ON ai_followup_chats(status, updated_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_reaction_logs_acc_sent ON reaction_logs(account_id, sent_at)")
+
 
         # ══════════════════════════════════════════════════════════════
         # ══ Warmup / Seeding Tables ══════════════════════════════════
