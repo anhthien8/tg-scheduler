@@ -29,6 +29,23 @@ class WatcherPayload(BaseModel):
     reply_in_group: bool = False
     group_reply_text: str = "Check my DM 😊"
     group_reply_account_id: int | None = None
+    watch_type: str = "keyword"
+    join_dm_delay_min: int = 3
+    join_dm_delay_max: int = 15
+
+
+def _validate_watcher_payload(payload: "WatcherPayload"):
+    """Shared create/update validation. Raises HTTPException(400) on bad input."""
+    if payload.watch_type not in ("keyword", "join"):
+        raise HTTPException(status_code=400, detail="watch_type must be 'keyword' or 'join'")
+    # NOTE: empty keywords is allowed for BOTH types — the old API never required
+    # keywords (see test_27_create_watcher_empty_keywords), keep that behavior.
+    if payload.join_dm_delay_min < 1:
+        raise HTTPException(status_code=400, detail="join_dm_delay_min must be >= 1 minute")
+    if payload.join_dm_delay_max < payload.join_dm_delay_min:
+        raise HTTPException(status_code=400, detail="join_dm_delay_max must be >= join_dm_delay_min")
+    if payload.join_dm_delay_max > 120:
+        raise HTTPException(status_code=400, detail="join_dm_delay_max must be <= 120 minutes")
 
 
 @router.get("")
@@ -38,6 +55,7 @@ async def list_watchers():
 
 @router.post("")
 async def create_watcher(payload: WatcherPayload):
+    _validate_watcher_payload(payload)
     watcher_id = await db.create_watcher(payload.model_dump())
     await kw.reload_watcher(watcher_id)
     # Auto-join sender accounts into required groups
@@ -175,6 +193,7 @@ async def get_watcher(watcher_id: int):
 
 @router.put("/{watcher_id}")
 async def update_watcher(watcher_id: int, payload: WatcherPayload):
+    _validate_watcher_payload(payload)
     platform = await db.get_watcher_platform(watcher_id)
     if platform is None:
         raise HTTPException(status_code=404, detail="Watcher not found")

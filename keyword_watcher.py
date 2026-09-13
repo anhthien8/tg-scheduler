@@ -150,6 +150,33 @@ MSG_DEDUP_TTL_SECS = 60 * 10  # 10 minutes
 # {user_id}  — users currently being processed (anti-race-condition lock)
 _user_dm_in_progress: set = set()
 
+# Cached user_ids of our OWN accounts (used to skip users added by invite_engine)
+_self_user_ids: set[int] = set()
+_self_user_ids_loaded_at: float = 0.0
+_SELF_IDS_TTL_SECS = 60 * 60  # refresh hourly
+
+
+async def _get_self_user_ids() -> set:
+    """Return (and lazily cache) the Telegram user_ids of all our own accounts."""
+    global _self_user_ids_loaded_at
+    now = _time.time()
+    if _self_user_ids and now - _self_user_ids_loaded_at < _SELF_IDS_TTL_SECS:
+        return _self_user_ids
+    try:
+        accounts = await db.get_all_accounts()
+        for acc in accounts:
+            try:
+                acc_id = acc["id"]
+                me = await tg.get_me(acc_id)
+                if me and me.get("user_id"):
+                    _self_user_ids.add(int(me["user_id"]))
+            except Exception:
+                pass
+        _self_user_ids_loaded_at = now
+    except Exception as e:
+        logger.debug(f"[JoinWatcher] Could not load self user ids: {e}")
+    return _self_user_ids
+
 # Global DM rate-limit: only 1 DM at a time, random 2-20 min delay between sends
 import asyncio as _asyncio
 _dm_global_lock = None   # initialized lazily (asyncio loop must be running)
@@ -1041,6 +1068,213 @@ def _make_handler(watcher: dict):
     return handler
 
 
+def _make_join_handler(watcher: dict):
+    """Create a Telethon events.ChatAction handler closure for a 'join' watcher.
+
+    Auto-DMs users who join (or are added to) one of the configured groups,
+    after a random join_dm_delay_min..max minute delay (anti-spam).
+    """
+    watcher_id = watcher["id"]
+    group_ids = watcher.get("group_ids", [])
+    account_ids = watcher.get("sender_account_ids", [])
+    cooldown_hours = watcher.get("cooldown_hours", 24)
+    dm_once = bool(watcher.get("dm_once", False))
+    excluded = {u.lstrip("@").lower() for u in watcher.get("excluded_usernames", [])}
+    messages = watcher.get("messages", [])
+
+    # Delay bounds (minutes) — hard floor 1 min, never DM instantly after join
+    delay_min = max(1, int(watcher.get("join_dm_delay_min") or 3))
+    delay_max = max(delay_min, int(watcher.get("join_dm_delay_max") or 15))
+
+    # Precomputed set for O(1) hot-path chat_id check (handler fires for EVERY
+    # ChatAction on EVERY group of the account — must be cheap)
+    group_id_set = frozenset(clean_id(g) for g in group_ids)
+
+    async def process_join(event, user):
+        user_id = None
+        try:
+            user_id = user.id
+            username = getattr(user, "username", None) or str(user_id)
+            uname_lower = (getattr(user, "username", None) or "").lower()
+
+            # For user_added: skip if the adder is one of OUR accounts
+            # (invite_engine pulls users in — DMing them right after = spam signal)
+            if getattr(event, "user_added", False):
+                adder = getattr(event, "added_by", None)
+                adder_id = getattr(adder, "id", None) or getattr(
+                    getattr(event, "action_message", None), "sender_id", None
+                )
+                if adder_id:
+                    self_ids = await _get_self_user_ids()
+                    if adder_id in self_ids:
+                        logger.info(
+                            f"[Watcher {watcher_id}] Skipped join-DM to {user_id} — "
+                            f"added by our own account {adder_id}"
+                        )
+                        return
+
+            if tg.is_bot_account(user, username):
+                logger.info(f"[Watcher {watcher_id}] Skipped - joined @{username} (id={user_id}) is a Telegram Bot")
+                return
+
+            # Exclusion list check (by username or numeric id)
+            if uname_lower and uname_lower in excluded:
+                logger.info(f"[Watcher {watcher_id}] Skipped - @{uname_lower} is in exclusion list")
+                return
+            if str(user_id) in excluded:
+                logger.info(f"[Watcher {watcher_id}] Skipped - user_id {user_id} is in exclusion list")
+                return
+
+            # Auto-exclude group admins/bots
+            try:
+                admin_ids = await _get_group_admin_ids(event.client, clean_id(event.chat_id))
+                if user_id in admin_ids:
+                    logger.info(f"[Watcher {watcher_id}] Skipped - user_id {user_id} is a group admin/bot")
+                    return
+            except Exception as _e:
+                logger.warning(f"[Watcher {watcher_id}] Admin check failed: {_e}")
+
+            # Re-fetch watcher from DB to get latest is_active status
+            w = await db.get_watcher(watcher_id)
+            if not w or not w["is_active"]:
+                return
+
+            # Global DM blacklist
+            if await db.is_user_blacklisted(user_id=user_id, username=uname_lower):
+                logger.info(f"[Watcher {watcher_id}] User {user_id} blacklisted, skip join-DM")
+                return
+
+            # Cooldown / dm_once check
+            skip = await db.was_user_dmed_recently(
+                watcher_id, user_id, cooldown_hours, dm_once=dm_once
+            )
+            if skip:
+                logger.info(f"[Watcher {watcher_id}] Skipped join-DM to {username} - cooldown/dm_once")
+                return
+
+            if not messages:
+                logger.warning(f"[Watcher {watcher_id}] No messages configured, skipping")
+                return
+
+            # In-memory dedup + claim (sync, race-safe before any further await)
+            if _already_dmed(user_id):
+                logger.info(f"[Watcher {watcher_id}] Already DM'd/processing user {user_id} (in-mem), skipping")
+                return
+            _user_dm_in_progress.add(user_id)
+
+            # ── Anti-spam: NEVER DM instantly after join ─────────────────────
+            wait_secs = random.uniform(delay_min * 60, delay_max * 60)
+            logger.info(
+                f"[Watcher {watcher_id}] User {user_id} (@{username}) joined — "
+                f"waiting {wait_secs/60:.1f} min before DM"
+            )
+            await asyncio.sleep(wait_secs)
+
+            # Re-check the user is still in the group after the delay
+            perms = None
+            try:
+                from telethon.errors import UserNotParticipantError
+                perms = await event.client.get_permissions(event.chat_id, user_id)
+            except UserNotParticipantError:
+                logger.info(f"[Watcher {watcher_id}] User {user_id} left group before DM delay elapsed, skipping")
+                return
+            except Exception as _e:
+                # Can't verify membership — proceed (don't lose the lead on API hiccups)
+                logger.debug(f"[Watcher {watcher_id}] Membership re-check failed for {user_id}: {_e}")
+            if perms is not None and (getattr(perms, "is_admin", False) or getattr(perms, "is_creator", False)):
+                logger.info(f"[Watcher {watcher_id}] User {user_id} was promoted to admin during DM delay — skipping")
+                return
+
+            # Resolve group title
+            try:
+                chat = await event.get_chat()
+                group_title = getattr(chat, "title", str(event.chat_id))
+            except Exception:
+                group_title = str(event.chat_id)
+
+            # Build input peer — ChatAction user objects usually carry a real access_hash
+            from telethon.tl.types import InputPeerUser as _IPU
+            input_peer = None
+            _ah = getattr(user, "access_hash", 0) or 0
+            if _ah:
+                input_peer = _IPU(user_id=user_id, access_hash=_ah)
+            if input_peer is None:
+                try:
+                    input_peer = await event.get_input_user()
+                except Exception:
+                    pass
+            if input_peer is None:
+                try:
+                    input_peer = await event.client.get_input_entity(user_id)
+                except Exception:
+                    pass
+
+            logger.info(f"[Watcher {watcher_id}] Join-DM input_peer resolved: {input_peer}")
+
+            # event=None on purpose: ChatAction has no get_input_sender/sender —
+            # the 3-tier pre-resolve in _do_send_dm_with_fallback expects a
+            # NewMessage-like event. input_peer is already resolved above and
+            # carries a real access_hash, so fallback accounts work via
+            # InputPeerUser(id, hash) in _resolve_peer_for_client.
+            success, used_acc, err = await _send_dm_with_fallback(
+                account_ids=account_ids,
+                user_id=user_id,
+                messages=messages,
+                watcher_id=watcher_id,
+                username=username,
+                group_id=clean_id(event.chat_id),
+                group_title=group_title,
+                matched_keyword="[JOIN]",
+                event=None,
+                input_peer=input_peer,
+            )
+            _mark_dmed(user_id)
+            if not success:
+                logger.info(
+                    f"[Watcher {watcher_id}] All accounts failed join-DM to {username} "
+                    f"(user_id={user_id}). Error: {err}"
+                )
+            # No group reply for join watchers — there is no message to reply to.
+        except Exception as e:
+            logger.exception(f"[Watcher {watcher_id}] Error in process_join background task: {e}")
+            if user_id is not None:
+                _mark_dmed(user_id)
+        finally:
+            if user_id is not None:
+                _user_dm_in_progress.discard(user_id)
+
+    async def join_handler(event):
+        # HOT PATH: cheapest checks first, no await / no DB before these
+        if not (event.user_joined or event.user_added):
+            return
+        chat_id = clean_id(event.chat_id)
+        if chat_id not in group_id_set:
+            return
+
+        users = event.users or []
+        now_ts = _time.time()
+        # Purge expired dedup entries (keep dict small)
+        expired = [k for k, ts in _seen_msg_ids.items() if now_ts - ts > MSG_DEDUP_TTL_SECS]
+        for k in expired:
+            _seen_msg_ids.pop(k, None)
+
+        for user in users:
+            uid = getattr(user, "id", None)
+            if uid is None:
+                continue
+            # Multi-account dedup: join events have no stable msg_id across
+            # accounts, so key on ('join', chat, user). Claim BEFORE any await.
+            join_key = ("join", chat_id, uid)
+            if join_key in _seen_msg_ids:
+                continue
+            _seen_msg_ids[join_key] = now_ts
+            task = asyncio.create_task(process_join(event, user))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+
+    return join_handler
+
+
 def _register_watcher(watcher: dict):
     """Register Telethon handlers for all sender accounts of a watcher."""
     if watcher.get("platform", "telegram") != "telegram":
@@ -1056,7 +1290,13 @@ def _register_watcher(watcher: dict):
     _unregister_watcher(watcher_id)  # clean up old handlers first
 
     removers = []
-    handler_fn = _make_handler(watcher)
+    watch_type = watcher.get("watch_type", "keyword") or "keyword"
+    if watch_type == "join":
+        handler_fn = _make_join_handler(watcher)
+        _make_event = lambda: events.ChatAction()
+    else:
+        handler_fn = _make_handler(watcher)
+        _make_event = lambda: events.NewMessage(incoming=True)
 
     # Register on ALL configured sender accounts so any active one can catch events
     # (events are per-client, so all accounts in the group will receive them)
@@ -1065,10 +1305,10 @@ def _register_watcher(watcher: dict):
         if not client:
             logger.warning(f"[Watcher {watcher_id}] Account {acc_id} not found, skipping")
             continue
-        client.add_event_handler(handler_fn, events.NewMessage(incoming=True))
+        client.add_event_handler(handler_fn, _make_event())
         removers.append((client, handler_fn))
         logger.info(
-            f"[Watcher {watcher_id}] Registered on account {acc_id} "
+            f"[Watcher {watcher_id}] Registered ({watch_type}) on account {acc_id} "
             f"– groups: {group_ids}"
         )
 

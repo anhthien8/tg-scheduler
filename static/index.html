@@ -1652,8 +1652,33 @@
           </div>
         </div>
 
-        <!-- Keywords -->
+        <!-- Trigger type -->
         <div class="form-group">
+          <label class="form-label">Loại trigger</label>
+          <div class="seg-control" id="w-watch-type-seg">
+            <button type="button" class="seg-btn active" id="w-type-keyword" onclick="App.setWatcherType('keyword')">🔑 Từ khóa</button>
+            <button type="button" class="seg-btn" id="w-type-join" onclick="App.setWatcherType('join')">👋 Thành viên mới join</button>
+          </div>
+        </div>
+
+        <!-- Join delay (only for watch_type=join) -->
+        <div class="form-group hidden" id="w-join-delay-block">
+          <label class="form-label">Delay gửi DM sau khi join</label>
+          <div style="display:flex;gap:12px;align-items:center">
+            <div>
+              <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Delay tối thiểu (phút)</label>
+              <input type="number" class="form-input" id="w-join-delay-min" min="1" max="120" value="3" style="width:120px">
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Delay tối đa (phút)</label>
+              <input type="number" class="form-input" id="w-join-delay-max" min="1" max="120" value="15" style="width:120px">
+            </div>
+          </div>
+          <p class="form-hint">DM sẽ gửi sau khi user join một khoảng ngẫu nhiên trong khoảng này (chống spam-flag)</p>
+        </div>
+
+        <!-- Keywords -->
+        <div class="form-group" id="w-keywords-block">
           <label class="form-label">Từ khóa kích hoạt</label>
           <div style="display:flex;gap:8px">
             <input type="text" class="form-input" id="w-keyword-input" placeholder="VD: BD Weex" style="flex:1"

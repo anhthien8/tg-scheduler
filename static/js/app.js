@@ -1067,7 +1067,13 @@ logPage(p){this.logOffset=p*this.logLimit;this.loadLogs()},
 
 // ── Watcher ──────────────────────────────────────────────────────
 
-_watcherKeywords:[],_watcherExcludes:[],_watcherChats:[],_watcherSelectedGroups:new Set(),_watcherAccountOrder:[],_wlOffset:0,_wlLimit:40,
+_watcherKeywords:[],_watcherExcludes:[],_watcherChats:[],_watcherSelectedGroups:new Set(),_watcherAccountOrder:[],_watcherType:'keyword',_wlOffset:0,_wlLimit:40,
+
+setWatcherType(t){this._watcherType=t;
+  document.getElementById('w-type-keyword')?.classList.toggle('active',t==='keyword');
+  document.getElementById('w-type-join')?.classList.toggle('active',t==='join');
+  document.getElementById('w-keywords-block')?.classList.toggle('hidden',t==='join');
+  document.getElementById('w-join-delay-block')?.classList.toggle('hidden',t!=='join')},
 
 async loadWatchers(){try{
 
@@ -1095,7 +1101,11 @@ async loadWatchers(){try{
 
   tbody.innerHTML=ws.map(w=>{
 
-    const kws=w.keywords.map(k=>`<span class="badge badge-blue" style="font-size:11px">${esc(k)}</span>`).join(' ');
+    const isJoin=w.watch_type==='join';
+
+    const typeBadge=isJoin?'<span class="badge badge-purple" style="font-size:10px">👋 Join</span>':'<span class="badge badge-blue" style="font-size:10px">🔑 Keyword</span>';
+
+    const kws=isJoin?`<span class="badge badge-purple" style="font-size:11px">Delay ${w.join_dm_delay_min??3}–${w.join_dm_delay_max??15}p</span>`:w.keywords.map(k=>`<span class="badge badge-blue" style="font-size:11px">${esc(k)}</span>`).join(' ');
 
     const grpCount=w.group_ids.length;
 
@@ -1103,7 +1113,7 @@ async loadWatchers(){try{
 
     const dmOnceBadge=w.dm_once?'<span class="badge badge-red" style="font-size:10px;margin-left:4px">🔒 1 lần</span>':'';
 
-    return`<tr><td><label class="toggle"><input type="checkbox" ${w.is_active?'checked':''} onchange="App.toggleWatcher(${w.id})"><span class="toggle-slider"></span></label></td><td><strong>${esc(w.name)}</strong>${dmOnceBadge}</td><td style="max-width:200px">${kws}</td><td>${grpCount} nhóm</td><td style="font-size:12px">${accNames}</td><td>${w.dm_once?'∞ (1 lần)':w.cooldown_hours+'h'}</td><td><div class="btn-group"><button class="btn btn-ghost btn-sm" onclick="App.openTestDM(${w.id})" title="Test DM">🧪</button><button class="btn btn-ghost btn-sm" onclick="App.editWatcher(${w.id})" title="Sửa">✏️</button><button class="btn btn-danger btn-sm" onclick="App.deleteWatcher(${w.id})" title="Xóa">🗑</button></div></td></tr>`}).join('')
+    return`<tr><td><label class="toggle"><input type="checkbox" ${w.is_active?'checked':''} onchange="App.toggleWatcher(${w.id})"><span class="toggle-slider"></span></label></td><td><strong>${esc(w.name)}</strong> ${typeBadge}${dmOnceBadge}</td><td style="max-width:200px">${kws}</td><td>${grpCount} nhóm</td><td style="font-size:12px">${accNames}</td><td>${w.dm_once?'∞ (1 lần)':w.cooldown_hours+'h'}</td><td><div class="btn-group"><button class="btn btn-ghost btn-sm" onclick="App.openTestDM(${w.id})" title="Test DM">🧪</button><button class="btn btn-ghost btn-sm" onclick="App.editWatcher(${w.id})" title="Sửa">✏️</button><button class="btn btn-danger btn-sm" onclick="App.deleteWatcher(${w.id})" title="Xóa">🗑</button></div></td></tr>`}).join('')
 
 }catch(e){this.toast('Lỗi: '+e.message,'error')}},
 
@@ -1125,6 +1135,10 @@ async openWatcherModal(){
   (document.getElementById('w-messages-list') || me_dummy).innerHTML = '';
 
   this._watcherKeywords=[];this._watcherExcludes=[];this._watcherSelectedGroups=new Set();
+
+  (document.getElementById('w-join-delay-min') || me_dummy).value = '3';
+  (document.getElementById('w-join-delay-max') || me_dummy).value = '15';
+  this.setWatcherType('keyword');
 
   this._watcherActiveAccountId=null;
 
@@ -1152,6 +1166,10 @@ async editWatcher(id){try{
   ((document.getElementById('w-group-reply-section') && document.getElementById('w-group-reply-section')?.style) || me_dummy_style).display = w.reply_in_group?'block':'none';
 
   this._watcherKeywords=[...w.keywords];this._renderWatcherKeywords();
+
+  (document.getElementById('w-join-delay-min') || me_dummy).value = w.join_dm_delay_min ?? 3;
+  (document.getElementById('w-join-delay-max') || me_dummy).value = w.join_dm_delay_max ?? 15;
+  this.setWatcherType(w.watch_type || 'keyword');
 
   this._watcherExcludes=[...(w.excluded_usernames||[])];this._renderWatcherExcludes();
 
@@ -1331,7 +1349,18 @@ async saveWatcher(){
 
   if(!name)return this.toast('Nhập tên rule','error');
 
-  if(!this._watcherKeywords.length)return this.toast('Thêm ít nhất 1 từ khóa','error');
+  const watchType=this._watcherType||'keyword';
+
+  const joinDelayMin=parseInt(document.getElementById('w-join-delay-min')?.value)||3;
+
+  const joinDelayMax=parseInt(document.getElementById('w-join-delay-max')?.value)||15;
+
+  if(watchType==='join'){
+    if(joinDelayMin<1)return this.toast('Delay tối thiểu phải ≥ 1 phút','error');
+    if(joinDelayMax<joinDelayMin)return this.toast('Delay tối đa phải ≥ delay tối thiểu','error');
+  }else{
+    if(!this._watcherKeywords.length)return this.toast('Thêm ít nhất 1 từ khóa','error');
+  }
 
   if(!this._watcherSelectedGroups.size)return this.toast('Chọn ít nhất 1 nhóm','error');
 
@@ -1353,7 +1382,7 @@ async saveWatcher(){
   const replyInGroup=document.getElementById('w-reply-in-group')?.checked;
   const groupReplyText=(document.getElementById('w-group-reply-text')?.value || "").trim()||'Check my DM 😊';
 
-  const payload={name,sender_account_ids:accIds,keywords:this._watcherKeywords,excluded_usernames:this._watcherExcludes,group_ids:[...this._watcherSelectedGroups],cooldown_hours:cooldown,dm_once:dmOnce,reply_in_group:replyInGroup,group_reply_text:groupReplyText,is_active:1,messages};
+  const payload={name,sender_account_ids:accIds,keywords:watchType==='join'?[]:this._watcherKeywords,excluded_usernames:this._watcherExcludes,group_ids:[...this._watcherSelectedGroups],cooldown_hours:cooldown,dm_once:dmOnce,reply_in_group:replyInGroup,group_reply_text:groupReplyText,is_active:1,messages,watch_type:watchType,join_dm_delay_min:joinDelayMin,join_dm_delay_max:joinDelayMax};
 
   try{
     const savedId = editId ? parseInt(editId) : null;
@@ -1747,7 +1776,7 @@ async loadWatcherLogs(){const status=document.getElementById('wl-filter-status')
 
       const accName=l.account_id&&accMap[l.account_id]?esc(accMap[l.account_id].name):(l.account_id||'—');
 
-      return`<tr><td style="font-size:12px">${formatDate(l.sent_at)}</td><td>${l.watcher_id}</td><td>@${esc(l.target_username||String(l.target_user_id))}</td><td style="font-size:12px">${esc(l.group_title||String(l.group_id||''))}</td><td><span class="badge badge-blue" style="font-size:11px">${esc(l.matched_keyword||'')}</span></td><td style="font-size:12px">${accName}</td><td><span class="badge ${statusCls}">${l.status}</span></td><td style="font-size:12px;color:var(--text2)">${esc(l.error_message||'—')}</td></tr>`}).join('');
+      return`<tr><td style="font-size:12px">${formatDate(l.sent_at)}</td><td>${l.watcher_id}</td><td>@${esc(l.target_username||String(l.target_user_id))}</td><td style="font-size:12px">${esc(l.group_title||String(l.group_id||''))}</td><td><span class="badge ${l.matched_keyword==='[JOIN]'?'badge-purple':'badge-blue'}" style="font-size:11px">${l.matched_keyword==='[JOIN]'?'👋 Join':esc(l.matched_keyword||'')}</span></td><td style="font-size:12px">${accName}</td><td><span class="badge ${statusCls}">${l.status}</span></td><td style="font-size:12px;color:var(--text2)">${esc(l.error_message||'—')}</td></tr>`}).join('');
 
     const pag=document.getElementById('watcher-logs-pagination');const pages=Math.ceil(d.total/this._wlLimit);const cur=Math.floor(this._wlOffset/this._wlLimit);
 

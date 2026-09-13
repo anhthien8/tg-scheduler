@@ -8,11 +8,45 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.3.0",
+        "date": "13/09/2026",
+        "title": "👋 Join Watcher — Tự động DM thành viên mới join nhóm",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Loại watcher mới: tự động gửi DM chào mừng/giới thiệu khi có thành viên mới join nhóm chỉ định (tự join hoặc được add). Delay ngẫu nhiên 3–15 phút sau join (cấu hình được, chống spam-flag), tái dùng toàn bộ pipeline DM an toàn hiện có: fallback đa tài khoản, PeerFlood cooldown, giới hạn DM/ngày, dedup 24h, blacklist.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Watcher loại 'Thành viên mới join' (watch_type=join)",
+                "desc": "Form watcher thêm toggle 'Từ khóa / Thành viên mới join'. Chọn join: ẩn keywords, hiện 2 ô delay tối thiểu/tối đa (phút, 1–120). Hỗ trợ cả user tự join lẫn user được người khác add; nhiều user join cùng lúc xử lý đủ từng người. Log DM ghi nhãn [JOIN], hiển thị badge tím riêng trong trang Logs.",
+                "tag": "Join Watcher"
+            },
+            {
+                "type": "feature",
+                "title": "Bộ lọc an toàn: không DM admin/ban quản trị, bot, người do mình add",
+                "desc": "Tự loại trừ: admin + creator + bot của nhóm (fetch từ Telegram, cache 24h), user do chính tài khoản hệ thống add vào (tránh đụng chiến dịch invite), blacklist, excluded usernames, cooldown/dm_once. Sau khoảng delay còn re-check: user rời nhóm thì bỏ qua, user vừa được thăng admin trong lúc chờ cũng bỏ qua.",
+                "tag": "Join Watcher"
+            },
+            {
+                "type": "improvement",
+                "title": "Hot-path ChatAction tối ưu O(1)",
+                "desc": "Handler join nhận mọi ChatAction từ mọi nhóm của account nên check rẻ nhất chạy trước: user_joined/user_added rồi lookup chat_id qua frozenset precompute — không await, không query DB trước khi lọc xong. Dedup đa tài khoản theo khóa (join, chat, user) claim trước mọi await, chống race 4 account cùng bắn.",
+                "tag": "Hiệu năng"
+            },
+            {
+                "type": "improvement",
+                "title": "UI form watcher mượt hơn",
+                "desc": "Toggle loại trigger chỉ ẩn/hiện bằng classList — không rebuild DOM, listener gắn 1 lần, giữ debounce 250ms cho ô tìm kiếm nhóm. Danh sách watcher hiển thị badge 🔑 Keyword / 👋 Join, join watcher hiện 'Delay 3–15p' thay danh sách từ khóa.",
+                "tag": "UI"
+            }
+        ]
+    },
+    {
         "version": "v3.2.5",
         "date": "04/09/2026",
         "title": "🌍 Fix outreach sai ngôn ngữ (KOL Nga nhận tin tiếng Anh)",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Campaign outreach giờ tự nhận diện ngôn ngữ KOL qua 4 tín hiệu: lang_code, tên campaign (vd 'rus kol' → tiếng Nga), tên group nguồn, và bảng chữ cái trong tên (Cyrillic/Hán/Hàn/Ả Rập). Trước đây lang_code luôn trống nên AI mặc định gửi tiếng Anh cho cả KOL Nga.",
         "changes": [
             {

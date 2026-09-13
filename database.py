@@ -266,6 +266,9 @@ async def init_db():
             "ALTER TABLE keyword_watchers ADD COLUMN excluded_usernames TEXT NOT NULL DEFAULT '[]'",
             # BUG-01: rename account_ids → sender_account_ids (SQLite workaround via copy)
             "ALTER TABLE keyword_watchers ADD COLUMN sender_account_ids TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE keyword_watchers ADD COLUMN watch_type TEXT DEFAULT 'keyword'",
+            "ALTER TABLE keyword_watchers ADD COLUMN join_dm_delay_min INTEGER DEFAULT 3",
+            "ALTER TABLE keyword_watchers ADD COLUMN join_dm_delay_max INTEGER DEFAULT 15",
         ]:
             try:
                 await db.execute(col_sql)
@@ -1494,8 +1497,8 @@ async def create_watcher(data: dict) -> int:
         import json as _json
         cursor = await db.execute(
             """INSERT INTO keyword_watchers
-               (name, sender_account_ids, keywords, group_ids, cooldown_hours, dm_once, excluded_usernames, is_active, platform)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (name, sender_account_ids, keywords, group_ids, cooldown_hours, dm_once, excluded_usernames, is_active, platform, watch_type, join_dm_delay_min, join_dm_delay_max)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data["name"],
                 _json.dumps(data.get("sender_account_ids", [])),
@@ -1506,6 +1509,9 @@ async def create_watcher(data: dict) -> int:
                 _json.dumps([u.lstrip("@").lower() for u in data.get("excluded_usernames", [])]),
                 data.get("is_active", 1),
                 data.get("platform", "telegram"),
+                data.get("watch_type", "keyword"),
+                data.get("join_dm_delay_min", 3),
+                data.get("join_dm_delay_max", 15),
             )
         )
         watcher_id = cursor.lastrowid
@@ -1616,6 +1622,7 @@ async def update_watcher(watcher_id: int, data: dict) -> bool:
                SET name=?, sender_account_ids=?, keywords=?, group_ids=?,
                    cooldown_hours=?, dm_once=?, excluded_usernames=?,
                    reply_in_group=?, group_reply_text=?, group_reply_account_id=?,
+                   watch_type=?, join_dm_delay_min=?, join_dm_delay_max=?,
                    is_active=?, updated_at=datetime('now')
                WHERE id=?""",
             (
@@ -1629,6 +1636,9 @@ async def update_watcher(watcher_id: int, data: dict) -> bool:
                 1 if data.get("reply_in_group") else 0,
                 data.get("group_reply_text", "Check my DM 😊") or "Check my DM 😊",
                 data.get("group_reply_account_id"),
+                data.get("watch_type", "keyword"),
+                data.get("join_dm_delay_min", 3),
+                data.get("join_dm_delay_max", 15),
                 data.get("is_active", 1),
                 watcher_id,
             )
