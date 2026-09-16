@@ -457,6 +457,16 @@ async def init_db():
         except Exception:
             pass
 
+        # Random react count columns for reaction_targets (0 = all accounts react)
+        try:
+            await db.execute("ALTER TABLE reaction_targets ADD COLUMN react_count_min INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE reaction_targets ADD COLUMN react_count_max INTEGER DEFAULT 0")
+        except Exception:
+            pass
+
         await db.commit()
 
         # Auto-migrate reply_in_group columns
@@ -2292,14 +2302,16 @@ async def add_reaction_target(
     delay_max: int = 30,
     view_enabled: int = 0,
     view_ratio: float = 1.0,
+    react_count_min: int = 0,
+    react_count_max: int = 0,
 ) -> int:
     """Insert a new reaction target. Returns new row id."""
     import json
     async with get_db() as db:
         cur = await db.execute(
             """INSERT INTO reaction_targets
-               (channel_link, channel_id, channel_title, account_ids, reactions, delay_min, delay_max, view_enabled, view_ratio)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (channel_link, channel_id, channel_title, account_ids, reactions, delay_min, delay_max, view_enabled, view_ratio, react_count_min, react_count_max)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 channel_link,
                 channel_id,
@@ -2310,6 +2322,8 @@ async def add_reaction_target(
                 delay_max,
                 view_enabled,
                 view_ratio,
+                react_count_min,
+                react_count_max,
             ),
         )
         await db.commit()
@@ -2349,7 +2363,7 @@ async def get_reaction_target(target_id: int) -> dict | None:
         return d
 
 
-ALLOWED_REACTION_COLS = {"account_ids", "reactions", "delay_min", "delay_max", "is_active", "channel_title", "channel_id", "view_enabled", "view_ratio"}
+ALLOWED_REACTION_COLS = {"account_ids", "reactions", "delay_min", "delay_max", "is_active", "channel_title", "channel_id", "view_enabled", "view_ratio", "react_count_min", "react_count_max"}
 
 
 async def update_reaction_target(target_id: int, **kwargs) -> None:

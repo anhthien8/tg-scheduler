@@ -263,6 +263,19 @@ async def _react_all_accounts(target: dict, msg_id: int, channel_link: str) -> N
     shuffled = list(account_ids)
     random.shuffle(shuffled)
 
+    # Random subset: only k accounts react per post (0 = all, legacy behavior)
+    rc_min = int(target.get("react_count_min") or 0)
+    rc_max = int(target.get("react_count_max") or 0)
+    if rc_max > 0 and shuffled:
+        rc_min = max(1, min(rc_min, len(shuffled)))
+        rc_max = max(rc_min, min(rc_max, len(shuffled)))
+        k = random.randint(rc_min, rc_max)
+        shuffled = shuffled[:k]  # already shuffled → first k = random sample
+        logger.info(
+            f"[Reactions] Target {target['id']} | msg {msg_id}: "
+            f"reacting with {k}/{len(account_ids)} accounts"
+        )
+
     for i, acc_id in enumerate(shuffled):
         client = tg.get_client(acc_id)
         if not client or not client.is_connected():

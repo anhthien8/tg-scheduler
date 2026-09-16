@@ -3303,15 +3303,29 @@ const Reactions = (() => {
     return [...document.querySelectorAll('#rt-account-list input[type=checkbox]:checked')].map(c => parseInt(c.value));
   }
 
+  // Client-side mirror of API validation for react_count_min/max
+  function _validateReactCount(rcMin, rcMax) {
+    if (rcMax > 0) {
+      if (rcMin < 1) { alert('Số acc min phải ≥ 1 khi đặt max'); return false; }
+      if (rcMax < rcMin) { alert('Số acc max phải ≥ min'); return false; }
+    } else if (rcMin > 0) {
+      alert('Thiếu số acc max (phải > 0 khi min > 0)'); return false;
+    }
+    return true;
+  }
+
   async function addTarget() {
     const link = (document.getElementById('rt-link')?.value || "").trim();
     const delayMin = parseInt(document.getElementById('rt-delay-min')?.value) || 5;
     const delayMax = parseInt(document.getElementById('rt-delay-max')?.value) || 30;
     const viewEnabled = document.getElementById('rt-view-enabled')?.checked ? 1 : 0;
     const viewRatio = parseFloat(document.getElementById('rt-view-ratio')?.value || '1.0');
+    const rcMin = parseInt(document.getElementById('rt-rc-min')?.value) || 0;
+    const rcMax = parseInt(document.getElementById('rt-rc-max')?.value) || 0;
     const accIds = _getSelectedAccounts();
     if (!link) { alert('Vui lòng nhập link kênh'); return; }
     if (!accIds.length) { alert('Vui lòng chọn ít nhất 1 tài khoản'); return; }
+    if (!_validateReactCount(rcMin, rcMax)) return;
 
     const btn = document.querySelector('#view-reactions .btn-primary');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang join...'; }
@@ -3319,7 +3333,8 @@ const Reactions = (() => {
       const res = await ReactionsAPI.addTarget({
         channel_link: link, account_ids: accIds,
         reactions: [...selectedEmojis].map(_sanitizeEmoji), delay_min: delayMin, delay_max: delayMax, auto_join: true,
-        view_enabled: viewEnabled, view_ratio: viewRatio
+        view_enabled: viewEnabled, view_ratio: viewRatio,
+        react_count_min: rcMin, react_count_max: rcMax
       });
       if (res.ok) {
         (document.getElementById('rt-link') || me_dummy).value = '';
@@ -3357,13 +3372,20 @@ const Reactions = (() => {
         <tr>
           <td><strong>${_esc(t.channel_title||t.channel_link)}</strong><br><small style="color:var(--text2)">${_esc(t.channel_link)}</small></td>
           <td>${(t.account_ids||[]).length} acc</td>
-          <td style="font-size:1.2rem">${(t.reactions||['👍']).join(' ')}</td>
+          <td style="font-size:1.2rem">${(t.reactions||['👍']).join(' ')}${t.react_count_max>0?`<br><span style="font-size:.7rem;color:var(--text2);background:var(--surface);border:1px solid var(--border);border-radius:.3rem;padding:.1rem .3rem;white-space:nowrap">🎲 ${t.react_count_min}–${t.react_count_max} acc</span>`:''}</td>
           <td>
             <div style="display:flex;align-items:center;gap:.3rem">
               <input id="rt-dmin-${t.id}" type="number" min="1" value="${t.delay_min}" class="form-input" style="width:58px;padding:.25rem .4rem;font-size:.85rem">
               <span style="color:var(--text2)">–</span>
               <input id="rt-dmax-${t.id}" type="number" min="1" value="${t.delay_max}" class="form-input" style="width:58px;padding:.25rem .4rem;font-size:.85rem">
               <span style="color:var(--text2);font-size:.75rem">s</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:.3rem;margin-top:.3rem" title="Số acc thả mỗi bài (0 = tất cả)">
+              <span style="font-size:.75rem">🎲</span>
+              <input id="rt-rcmin-${t.id}" type="number" min="0" value="${t.react_count_min||0}" class="form-input" style="width:58px;padding:.25rem .4rem;font-size:.85rem">
+              <span style="color:var(--text2)">–</span>
+              <input id="rt-rcmax-${t.id}" type="number" min="0" value="${t.react_count_max||0}" class="form-input" style="width:58px;padding:.25rem .4rem;font-size:.85rem">
+              <span style="color:var(--text2);font-size:.75rem">acc</span>
             </div>
           </td>
           <td>
@@ -3391,9 +3413,12 @@ const Reactions = (() => {
     const dmax = parseInt(document.getElementById(`rt-dmax-${id}`)?.value) || 30;
     const ven  = document.getElementById(`rt-ven-${id}`)?.checked ? 1 : 0;
     const vr   = parseFloat(document.getElementById(`rt-vratio-${id}`)?.value || '1.0');
+    const rcMin = parseInt(document.getElementById(`rt-rcmin-${id}`)?.value) || 0;
+    const rcMax = parseInt(document.getElementById(`rt-rcmax-${id}`)?.value) || 0;
     if (dmax < dmin) { App.toast('Delay max phải ≥ delay min', 'error'); return; }
+    if (!_validateReactCount(rcMin, rcMax)) return;
     try {
-      const res = await ReactionsAPI.updateTarget(id, { delay_min: dmin, delay_max: dmax, view_enabled: ven, view_ratio: vr });
+      const res = await ReactionsAPI.updateTarget(id, { delay_min: dmin, delay_max: dmax, view_enabled: ven, view_ratio: vr, react_count_min: rcMin, react_count_max: rcMax });
       if (res.ok) App.toast('✅ Đã lưu cấu hình kênh', 'success');
       else App.toast('❌ Lưu thất bại', 'error');
     } catch(e) { App.toast('❌ ' + e.message, 'error'); }

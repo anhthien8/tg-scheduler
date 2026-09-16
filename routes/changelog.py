@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.3.1",
+        "date": "15/09/2026",
+        "title": "🎲 Random Reaction Count — Ngẫu nhiên số account thả cảm xúc",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Kênh tăng tương tác giờ cho cấu hình số lượng account thả reaction mỗi bài (min–max), random mỗi bài một số khác nhau thay vì luôn 100% account. Nhìn tự nhiên hơn, giảm nguy cơ bị Telegram nhận diện spam pattern.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Random số account thả reaction mỗi bài",
+                "desc": "Thêm 2 trường react_count_min / react_count_max cho mỗi kênh (0 = tất cả, giữ nguyên hành vi cũ). Khi post mới, random chọn k account trong [min, max], số account thực tế react mỗi bài khác nhau. VD: cấu hình 6–12 với 17 acc — bài này 8 acc react, bài sau 11, bài sau 6. Danh sách account được shuffle trước rồi lấy k phần tử đầu — mỗi bài một tổ hợp khác nhau.",
+                "tag": "Reactions"
+            },
+            {
+                "type": "feature",
+                "title": "UI + API validate cho react_count",
+                "desc": "Form thêm/sửa kênh có 2 ô 'Số acc thả mỗi bài: từ … đến …' kèm hint tiếng Việt. Validate client + server: min ≥ 1, max ≥ min khi max > 0; min > 0 mà max = 0 → lỗi. Bảng kênh hiện badge 🎲 min–max acc. Log chi tiết: '[Reactions] Target 5 | msg 123: reacting with 7/17 accounts'.",
+                "tag": "UI"
+            },
+            {
+                "type": "improvement",
+                "title": "Kanban Obsidian hiển thị chuẩn dạng board",
+                "desc": "Kanban.md cho project tg-scheduler được viết lại đúng định dạng obsidian-kanban plugin (kanban-plugin: board + markdown headings làm cột). Plugin đã có sẵn trong vault, giờ mở file là thấy board kéo-thả thay vì markdown text.",
+                "tag": "Tooling"
+            }
+        ]
+    },
+    {
         "version": "v3.3.0",
         "date": "13/09/2026",
         "title": "👋 Join Watcher — Tự động DM thành viên mới join nhóm",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Loại watcher mới: tự động gửi DM chào mừng/giới thiệu khi có thành viên mới join nhóm chỉ định (tự join hoặc được add). Delay ngẫu nhiên 3–15 phút sau join (cấu hình được, chống spam-flag), tái dùng toàn bộ pipeline DM an toàn hiện có: fallback đa tài khoản, PeerFlood cooldown, giới hạn DM/ngày, dedup 24h, blacklist.",
         "changes": [
             {

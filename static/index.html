@@ -828,6 +828,16 @@
               </select>
             </div>
           </div>
+          <!-- Random react count controls -->
+          <div style="margin-top:.75rem;padding:.6rem 1rem;background:var(--surface);border-radius:.5rem;border:1px solid var(--border);">
+            <label class="form-label">Số acc thả mỗi bài</label>
+            <div style="display:flex;gap:.5rem;align-items:center;margin-top:.3rem">
+              <input id="rt-rc-min" class="form-input" type="number" value="0" min="0" style="width:80px">
+              <span style="color:var(--text2)">→</span>
+              <input id="rt-rc-max" class="form-input" type="number" value="0" min="0" style="width:80px">
+            </div>
+            <p style="color:var(--text2);font-size:.8rem;margin-top:.4rem">0 = tất cả. VD 6–12: mỗi bài random 6–12 acc thả cảm xúc (tự nhiên hơn)</p>
+          </div>
           <div style="margin-top:1rem">
             <label class="form-label">Cảm xúc (click để chọn)</label>
             <div id="rt-emoji-picker" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.4rem">

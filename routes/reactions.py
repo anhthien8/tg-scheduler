@@ -28,6 +28,8 @@ class AddTargetRequest(BaseModel):
     auto_join:    bool = True    # automatically join with all accounts on add
     view_enabled: int   = 0      # 0=off, 1=on
     view_ratio:   float = 1.0    # fraction of accounts that view (0.0-1.0)
+    react_count_min: int = 0     # 0 = no limit (all accounts react)
+    react_count_max: int = 0
 
 
 class UpdateTargetRequest(BaseModel):
@@ -38,6 +40,19 @@ class UpdateTargetRequest(BaseModel):
     is_active:   int | None       = None
     view_enabled: int   | None    = None
     view_ratio:   float | None    = None
+    react_count_min: int | None   = None
+    react_count_max: int | None   = None
+
+
+def _validate_react_count(rc_min: int, rc_max: int) -> None:
+    """Raise 400 on invalid react count range (max > số acc is fine — engine clamps)."""
+    if rc_max > 0:
+        if rc_min < 1:
+            raise HTTPException(400, "react_count_min phải >= 1 khi đặt react_count_max")
+        if rc_max < rc_min:
+            raise HTTPException(400, "react_count_max phải >= react_count_min")
+    elif rc_min > 0:
+        raise HTTPException(400, "Thiếu react_count_max (phải > 0 khi react_count_min > 0)")
 
 
 # ── GET /api/reactions/targets ──────────────────────────────────────────────────
@@ -55,6 +70,8 @@ async def add_target(req: AddTargetRequest):
     link = req.channel_link.strip()
     if not link:
         raise HTTPException(400, "channel_link is required")
+
+    _validate_react_count(req.react_count_min, req.react_count_max)
 
     # Resolve channel metadata using first available account
     # For private invite links: resolve AFTER join (get_entity fails before joining)
@@ -87,6 +104,8 @@ async def add_target(req: AddTargetRequest):
         delay_max     = req.delay_max,
         view_enabled  = req.view_enabled,
         view_ratio    = req.view_ratio,
+        react_count_min = req.react_count_min,
+        react_count_max = req.react_count_max,
     )
 
     target = await db.get_reaction_target(target_id)
@@ -136,6 +155,10 @@ async def update_target(target_id: int, req: UpdateTargetRequest):
         raise HTTPException(404, "Target not found")
 
     updates = req.model_dump(exclude_none=True)
+    if "react_count_min" in updates or "react_count_max" in updates:
+        rc_min = updates.get("react_count_min", existing.get("react_count_min") or 0)
+        rc_max = updates.get("react_count_max", existing.get("react_count_max") or 0)
+        _validate_react_count(rc_min, rc_max)
     if updates:
         await db.update_reaction_target(target_id, **updates)
 
