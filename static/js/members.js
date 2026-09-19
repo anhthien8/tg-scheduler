@@ -515,7 +515,7 @@ const Members = {
       const autoResume = c.auto_resume === undefined ? 1 : c.auto_resume;
 
       let actions = '';
-      if (c.status === 'draft' || c.status === 'paused' || c.status === 'paused_auto' || c.status === 'error') {
+      if (c.status === 'draft' || c.status === 'paused' || c.status === 'paused_auto' || c.status === 'error' || c.status === 'completed') {
         actions += `<button class="btn btn-primary btn-sm" onclick="Members.startCampaign(${c.id})" title="Chạy campaign">▶</button>`;
         actions += `<button class="btn btn-ghost btn-sm" onclick="Members.editCampaignMessages(${c.id})" title="Sửa tin nhắn & cài đặt">✏️</button>`;
       }
@@ -732,8 +732,8 @@ const Members = {
       const d = await MembersAPI.getCampaign(id);
       const c = d.campaign;
       if (!c) { App.toast('Campaign không tồn tại', 'error'); return; }
-      if (!['draft', 'paused', 'paused_auto', 'error'].includes(c.status)) {
-        App.toast('Chỉ sửa được khi campaign đang tạm dừng', 'error');
+      if (!['draft', 'paused', 'paused_auto', 'error', 'completed'].includes(c.status)) {
+        App.toast('Chỉ sửa được khi campaign tạm dừng, chưa chạy hoặc đã hoàn thành', 'error');
         return;
       }
 
@@ -763,10 +763,22 @@ const Members = {
         autoResumeEl.checked = c.auto_resume !== undefined ? !!c.auto_resume : true;
       }
 
-      // Hide scrape job selector (can't change target)
+      // Scrape job selector — allow changing source (linh động chạy tiếp với nguồn mới)
       const jobSel = document.getElementById('cmp-scrape-job');
-      jobSel.innerHTML = `<option value="${esc(c.scrape_job_id)}" selected>${esc(c.scrape_job_id.substring(0, 30))}...</option>`;
-      jobSel.disabled = true;
+      if (!this._scrapeJobs?.length) { try { await this.loadScrapeJobs(); } catch (e) {} }
+      const jobOptions = (this._scrapeJobs || []).map(j =>
+        `<option value="${esc(j.scrape_job_id)}">${esc(j.group_title || j.group_id)} (${j.member_count} members)</option>`
+      );
+      if (!this._scrapeJobs?.some(j => j.scrape_job_id === c.scrape_job_id)) {
+        jobOptions.unshift(`<option value="${esc(c.scrape_job_id)}">${esc((c.scrape_job_id || '').substring(0, 30))}... (nguồn hiện tại)</option>`);
+      }
+      jobSel.innerHTML = jobOptions.join('');
+      jobSel.value = c.scrape_job_id;
+      const canChangeSource = ['draft', 'completed'].includes(c.status);
+      jobSel.disabled = !canChangeSource;
+      jobSel.title = canChangeSource
+        ? 'Có thể đổi nguồn Members khi campaign chưa chạy hoặc đã hoàn thành'
+        : 'Chỉ đổi nguồn Members khi campaign đã chạy xong. Campaign đang paused giữa chừng cần chạy tiếp nguồn cũ để tránh sai target.';
 
       // Load accounts & mark sender accounts
       const now = Date.now();
@@ -861,6 +873,7 @@ const Members = {
     const id = this._editingCampaignId;
     if (!id) { App.toast('Lỗi: không có campaign để sửa', 'error'); return; }
 
+    const jobId = document.getElementById('cmp-scrape-job')?.value;
     const delayMin = parseInt(document.getElementById('cmp-delay-min')?.value) || 30;
     const delayMax = parseInt(document.getElementById('cmp-delay-max')?.value) || 90;
     const dailyLimitPremium = parseInt(document.getElementById('cmp-daily-limit')?.value || document.getElementById('cmp-daily-limit-premium')?.value) || 50;
@@ -871,6 +884,8 @@ const Members = {
     const autoNative = document.getElementById('cmp-auto-translate-native')?.checked ? 1 : 0;
     const autoResume = document.getElementById('cmp-auto-resume')?.checked ?? true;
     const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
+
+    if (!jobId) { App.toast('Vui lòng chọn nguồn members', 'error'); return; }
 
     // Collect sender accounts
     const accCheckboxes = document.querySelectorAll('.cmp-acc-checkbox:checked');
@@ -898,6 +913,8 @@ const Members = {
     try {
       await MembersAPI.updateCampaignMessages(id, {
         messages,
+        scrape_job_id: jobId,
+        sender_account_ids: senderIds,
         delay_min: delayMin,
         delay_max: delayMax,
         daily_limit_premium: dailyLimitPremium,
@@ -908,7 +925,7 @@ const Members = {
         exclude_previous_dms: excludePrev,
         auto_resume: autoResume,
       });
-      App.toast('✅ Đã cập nhật tin nhắn campaign!', 'success');
+      App.toast('✅ Đã cập nhật Campaign (nguồn, tài khoản & tin nhắn)!', 'success');
       this._editingCampaignId = null;
       this.closeCampaignModal();
       this.loadCampaigns();

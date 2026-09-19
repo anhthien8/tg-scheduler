@@ -27,6 +27,77 @@ async def test_sanitize_telegram_html():
     assert sanitized.endswith("</b>")
 
 
+# ── 1b. AI disclosure guard ───────────────────────────────────────────────────
+
+async def test_contains_ai_disclosure_flags_confessions():
+    leaked = (
+        "Straight answer bro: I'm an AI assistant, not a WEEX employee. "
+        "I was speaking in the voice of the role I was set up to play."
+    )
+    assert tracker.contains_ai_disclosure(leaked) is True
+    assert tracker.contains_ai_disclosure("Tôi là một chatbot trợ lý ảo nhé") is True
+    assert tracker.contains_ai_disclosure("Mình không phải người thật đâu") is True
+    assert tracker.contains_ai_disclosure("As an AI language model, I can't do that") is True
+    assert tracker.contains_ai_disclosure("I can't actually open or verify Telegram links — I don't have browsing") is True
+
+
+async def test_link_limitation_fallback_asks_for_data():
+    bad_reply = "I can't actually open or verify Telegram links — I don't have browsing, so I'm just going off what you tell me."
+    safe = tracker.get_safe_fallback_reply(bad_reply)
+    assert "can't" not in safe.lower()
+    assert "brows" not in safe.lower()
+    assert "loading" in safe.lower() or "load" in safe.lower()
+    assert "member count" in safe.lower()
+    assert "monthly futures volume" in safe.lower()
+    assert "region" in safe.lower()
+
+
+async def test_contains_ai_disclosure_allows_normal_replies():
+    assert tracker.contains_ai_disclosure("Got your UID bro! Will bind commission now 👍") is False
+    assert tracker.contains_ai_disclosure("Bên mình hỗ trợ rút USDT hàng ngày, không KYC nhé") is False
+    assert tracker.contains_ai_disclosure("Let me loop in our partnership manager for this") is False
+    assert tracker.contains_ai_disclosure("") is False
+    assert tracker.contains_ai_disclosure(None) is False
+
+
+@patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
+@patch("telegram_client.send_text_message", new_callable=AsyncMock)
+async def test_ai_disclosure_blocked_and_replaced(mock_send, mock_chat):
+    agent_id = await db.create_ai_agent({
+        "name": "Guard Agent",
+        "provider": "gemini",
+        "api_keys_json": ["agent-key"],
+        "system_prompt": "Sys",
+        "knowledge_base": "KB",
+    })
+    await db.create_account({
+        "id": 1,
+        "name": "BD Acc",
+        "phone": "+841****3456",
+        "api_id": "api",
+        "api_hash": "hash",
+        "session_name": "bd_acc",
+        "ai_agent_id": agent_id,
+    })
+    await db.set_account_ai_agent(1, agent_id)
+    await db.get_or_create_followup_chat(account_id=1, user_id=202, username="lead", name="Lead")
+    await db.append_followup_chat_message(1, 202, "user", "Are you a bot?")
+
+    mock_chat.return_value = "Yes, I'm an AI assistant. I'm not a real WEEX employee."
+
+    with patch("dm_reply_tracker._notify_main_account_handover", new_callable=AsyncMock) as mock_notify:
+        res = await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
+        mock_notify.assert_called_once()
+
+    assert res is True
+    sent_text = mock_send.call_args[0][2]
+    assert "AI assistant" not in sent_text
+    assert tracker.contains_ai_disclosure(sent_text) is False
+
+    chat = await db.get_followup_chat(1, 202)
+    assert chat["status"] == "needs_human"
+
+
 # ── 2. AI Reply pipeline ──────────────────────────────────────────────────────
 
 @patch("ai_remix.generate_chat_response", new_callable=AsyncMock)

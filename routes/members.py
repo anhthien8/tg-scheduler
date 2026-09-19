@@ -73,6 +73,8 @@ class CampaignCreate(BaseModel):
 
 class CampaignUpdateMessages(BaseModel):
     messages: list[dict]
+    scrape_job_id: Optional[str] = None
+    sender_account_ids: Optional[list[int]] = None
     delay_min: Optional[int] = None
     delay_max: Optional[int] = None
     daily_limit_premium: Optional[int] = None
@@ -1535,11 +1537,26 @@ async def update_campaign_messages(campaign_id: int, req: CampaignUpdateMessages
     campaign = await db.get_dm_campaign(campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign không tồn tại")
-    if campaign["status"] not in ("draft", "paused", "paused_auto", "error"):
+    if campaign["status"] not in ("draft", "paused", "paused_auto", "error", "completed"):
         raise HTTPException(status_code=400,
-                            detail="Chỉ có thể sửa campaign khi đang tạm dừng hoặc chưa chạy")
+                            detail="Chỉ có thể sửa campaign khi tạm dừng, chưa chạy hoặc đã hoàn thành")
     if not req.messages:
         raise HTTPException(status_code=400, detail="Cần ít nhất 1 tin nhắn")
+
+    total_targets = None
+    source_changed = bool(req.scrape_job_id and req.scrape_job_id != campaign["scrape_job_id"])
+    if source_changed and campaign["status"] not in ("draft", "completed"):
+        raise HTTPException(
+            status_code=400,
+            detail="Chỉ được đổi nguồn Members khi campaign chưa chạy hoặc đã chạy xong",
+        )
+    if req.scrape_job_id:
+        total_targets = await db.count_scraped_members(req.scrape_job_id)
+        if total_targets == 0:
+            raise HTTPException(status_code=400, detail="Nguồn Members không tồn tại hoặc trống")
+
+    if req.sender_account_ids is not None and len(req.sender_account_ids) == 0:
+        raise HTTPException(status_code=400, detail="Cần chọn ít nhất 1 tài khoản gửi")
 
     msgs = [m if isinstance(m, dict) else m.dict() for m in req.messages]
     await db.update_dm_campaign_messages(
@@ -1552,8 +1569,11 @@ async def update_campaign_messages(campaign_id: int, req: CampaignUpdateMessages
         exclude_previous_dms=req.exclude_previous_dms,
         ai_agent_id=req.ai_agent_id,
         auto_resume=req.auto_resume,
+        scrape_job_id=req.scrape_job_id,
+        sender_account_ids=req.sender_account_ids,
+        total_targets=total_targets,
     )
-    return {"status": "updated", "message": "Đã cập nhật tin nhắn campaign"}
+    return {"status": "updated", "message": "Đã cập nhật Campaign"}
 
 
 

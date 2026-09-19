@@ -1,7 +1,7 @@
 var me_dummy = me_dummy || {}; var me_dummy_style = me_dummy_style || {};
 /**
  * static/js/ai_followup.js
- * Lead & AI Follow-Up — 2 tab: Leads (default) + Cấu hình AI.
+ * AI Agent — 2 tab: Leads (default) + Cấu hình AI.
  * Data fetch 1 lần (limit 200), filter + phân trang client-side.
  */
 
@@ -43,7 +43,7 @@ const AIFollowUp = {
   async loadSettings() {
     try {
       const res = await fetch('/api/ai-followup/settings');
-      if (!res.ok) throw new Error('Không thể tải cài đặt AI Follow-Up');
+      if (!res.ok) throw new Error('Không thể tải cài đặt AI Agent');
       this.settings = await res.json();
       this.renderSettings();
     } catch (e) {
@@ -139,7 +139,7 @@ const AIFollowUp = {
         handover_keywords: s.handover_keywords || []
       });
       this.settings = { ...s, enabled };
-      App.toast(enabled ? 'Đã BẬT AI Follow-Up' : 'Đã TẮT AI Follow-Up', enabled ? 'success' : 'info');
+      App.toast(enabled ? 'Đã BẬT AI Agent' : 'Đã TẮT AI Agent', enabled ? 'success' : 'info');
     } catch (e) {
       App.toast(e.message, 'error');
       this.renderSettings();
@@ -226,7 +226,7 @@ const AIFollowUp = {
     const tb = document.getElementById('aifu-chats-table-body');
     if (!tb) return;
     if (isEmpty) {
-      tb.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px"><div style="font-size:2rem;margin-bottom:8px">📭</div><div style="color:var(--text);font-weight:600;margin-bottom:4px">Chưa có lead nào</div><div style="color:var(--text2);font-size:.85rem">Khi có người trả lời DM, AI Follow-Up sẽ tự chat và lead xuất hiện tại đây.</div></td></tr>`;
+      tb.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px"><div style="font-size:2rem;margin-bottom:8px">📭</div><div style="color:var(--text);font-weight:600;margin-bottom:4px">Chưa có lead nào</div><div style="color:var(--text2);font-size:.85rem">Khi có người trả lời DM, AI Agent sẽ tự chat và lead xuất hiện tại đây.</div></td></tr>`;
       return;
     }
     tb.innerHTML = rows.map(c => {
@@ -261,7 +261,7 @@ const AIFollowUp = {
       const res = await fetch('/api/blacklist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, username: username || undefined, reason: 'Chuyển chat tay thủ công từ Lead Follow-Up' })
+        body: JSON.stringify({ user_id: userId, username: username || undefined, reason: 'Chuyển chat tay thủ công từ AI Agent' })
       });
       if (!res.ok) throw new Error('Cập nhật Blacklist thất bại');
       App.toast(`Đã đưa ${username ? '@' + username : userId} vào Blacklist (Chat tay 100%)`, 'success');
@@ -277,7 +277,7 @@ const AIFollowUp = {
       const responses = await Promise.all(selected.map(c => fetch('/api/blacklist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: c.user_id, username: c.username || undefined, reason: 'Blacklist hàng loạt từ Lead Follow-Up' })
+        body: JSON.stringify({ user_id: c.user_id, username: c.username || undefined, reason: 'Blacklist hàng loạt từ AI Agent' })
       })));
       const failed = responses.filter(r => !r.ok).length;
       App.toast(`Đã Blacklist: ${selected.length - failed} OK${failed ? `, ${failed} lỗi` : ''}`, failed ? 'error' : 'success');

@@ -3006,11 +3006,23 @@ async def update_dm_campaign_messages(campaign_id: int, messages: list,
                                        use_ai_remix: bool = None,
                                        exclude_previous_dms: bool = None,
                                        ai_agent_id: int = None,
-                                       auto_resume: bool = None):
-    """Update campaign messages and settings (only when paused/draft)."""
+                                       auto_resume: bool = None,
+                                       scrape_job_id: str = None,
+                                       sender_account_ids: list[int] = None,
+                                       total_targets: int = None):
+    """Update an inactive campaign's source, senders, messages, and settings."""
     async with get_db() as db:
         updates = ["messages = ?", "updated_at = datetime('now')"]
         params = [json.dumps(messages)]
+        if scrape_job_id is not None:
+            updates.append("scrape_job_id = ?")
+            params.append(scrape_job_id)
+        if sender_account_ids is not None:
+            updates.append("sender_account_ids = ?")
+            params.append(json.dumps(sender_account_ids))
+        if total_targets is not None:
+            updates.append("total_targets = ?")
+            params.append(total_targets)
         if delay_min is not None:
             updates.append("delay_min = ?")
             params.append(delay_min)

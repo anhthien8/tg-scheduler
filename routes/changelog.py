@@ -8,11 +8,45 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.3.2",
+        "date": "18/09/2026",
+        "title": "⚡ Campaign linh động nguồn Members + AI Agent UI gọn hơn",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Modal sửa Campaign giờ đổi được nguồn Members/Scrape Job và tài khoản gửi để chạy tiếp linh động hơn. Trang AI Follow-Up được đổi nhãn thành AI Agent, bố cục 2 tab dễ quét hơn, load data nhẹ hơn với phân trang client-side.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Sửa Campaign đổi được nguồn Members",
+                "desc": "Dropdown Nguồn Members trong modal sửa Campaign được mở khóa cho campaign ở trạng thái draft hoặc completed (chạy xong). Khi lưu, hệ thống cập nhật scrape_job_id, danh sách tài khoản gửi và total_targets theo nguồn mới. Campaign đang paused/paused_auto/error giữa chừng vẫn giữ nguồn cũ để tránh dữ liệu exclude_previous_dms sai lệch — chỉ sửa được tin nhắn/tài khoản gửi, không đổi nguồn.",
+                "tag": "Campaign"
+            },
+            {
+                "type": "improvement",
+                "title": "AI Agent UI gọn hơn",
+                "desc": "Đổi nhãn Lead & AI Follow-Up thành AI Agent; màn hình được tổ chức lại theo tab Leads/Cấu hình, có stat/filter/pagination 20 dòng để truy cập nhanh hơn và đỡ rối.",
+                "tag": "AI Agent"
+            },
+            {
+                "type": "fix",
+                "title": "Blacklist phân trang và load đúng khi mở trang",
+                "desc": "Trang Blacklist gọi loadBlacklist() khi navigate, render 20 dòng/trang và debounce search để tránh cảm giác đứng trang khi danh sách lớn.",
+                "tag": "Performance"
+            },
+            {
+                "type": "security",
+                "title": "Chặn AI Agent tự tiết lộ cơ chế nội bộ",
+                "desc": "Bổ sung prompt identity/discretion và code guard trước khi gửi. Guard bắt cả câu tự nhận AI/bot/chatbot/language model/system prompt LẪN câu kiểu 'tôi không mở được link, không có trình duyệt' — đặc trưng LLM không có tool. Nội dung vi phạm bị thay bằng phản hồi tự nhiên: nói mạng load chậm và xin thêm member count / volume futures tháng / khu vực chính, đồng thời chuyển chat sang needs_human để người thật tiếp quản.",
+                "tag": "AI Agent"
+            }
+        ]
+    },
+    {
         "version": "v3.3.1",
         "date": "15/09/2026",
         "title": "🎲 Random Reaction Count — Ngẫu nhiên số account thả cảm xúc",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Kênh tăng tương tác giờ cho cấu hình số lượng account thả reaction mỗi bài (min–max), random mỗi bài một số khác nhau thay vì luôn 100% account. Nhìn tự nhiên hơn, giảm nguy cơ bị Telegram nhận diện spam pattern.",
         "changes": [
             {
