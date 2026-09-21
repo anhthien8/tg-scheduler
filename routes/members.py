@@ -1545,15 +1545,20 @@ async def update_campaign_messages(campaign_id: int, req: CampaignUpdateMessages
 
     total_targets = None
     source_changed = bool(req.scrape_job_id and req.scrape_job_id != campaign["scrape_job_id"])
-    if source_changed and campaign["status"] not in ("draft", "completed"):
-        raise HTTPException(
-            status_code=400,
-            detail="Chỉ được đổi nguồn Members khi campaign chưa chạy hoặc đã chạy xong",
-        )
     if req.scrape_job_id:
         total_targets = await db.count_scraped_members(req.scrape_job_id)
         if total_targets == 0:
             raise HTTPException(status_code=400, detail="Nguồn Members không tồn tại hoặc trống")
+        if source_changed:
+            logger.info(
+                "[Campaign %s] Source changed %s → %s while status=%s; total_targets recalculated=%s",
+                campaign_id,
+                campaign["scrape_job_id"],
+                req.scrape_job_id,
+                campaign["status"],
+                total_targets,
+            )
+            # ponytail: giữ log cũ để dedup người đã gửi; nếu cần 'chạy lại từ đầu', thêm nút clone/reset riêng.
 
     if req.sender_account_ids is not None and len(req.sender_account_ids) == 0:
         raise HTTPException(status_code=400, detail="Cần chọn ít nhất 1 tài khoản gửi")

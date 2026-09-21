@@ -68,7 +68,12 @@ const Members = {
       return `<option value="${a.id}">${esc(label)}</option>`;
     }).join('');
     if (accounts.length > 0 && !sel.value) sel.value = accounts[0].id;
-    this.loadGroups();
+    // ponytail: lazy load groups khi user click thay vì gọi get_dialogs RPC (2+ giây) mỗi khi navigate
+    const groupSel = document.getElementById('ms-group-select');
+    if (groupSel && !this._groupsCache[sel.value]) {
+      groupSel.innerHTML = '<option value="">— Bấm để tải danh sách group —</option>';
+      groupSel.onfocus = () => { if (!this._groupsCache[sel.value]) this.loadGroups(); };
+    }
   },
 
   // ── Load groups for selected account ──
@@ -774,11 +779,9 @@ const Members = {
       }
       jobSel.innerHTML = jobOptions.join('');
       jobSel.value = c.scrape_job_id;
-      const canChangeSource = ['draft', 'completed'].includes(c.status);
-      jobSel.disabled = !canChangeSource;
-      jobSel.title = canChangeSource
-        ? 'Có thể đổi nguồn Members khi campaign chưa chạy hoặc đã hoàn thành'
-        : 'Chỉ đổi nguồn Members khi campaign đã chạy xong. Campaign đang paused giữa chừng cần chạy tiếp nguồn cũ để tránh sai target.';
+      // ponytail: cho phép đổi nguồn ở mọi trạng thái editable; nếu sau này cần guard chặt hơn, thêm lại whitelist ở đây
+      jobSel.disabled = false;
+      jobSel.title = 'Đổi nguồn Members — hệ thống tự tính lại total_targets khi lưu';
 
       // Load accounts & mark sender accounts
       const now = Date.now();

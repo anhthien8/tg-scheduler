@@ -718,7 +718,7 @@ async def test_45_update_campaign_messages(client):
     assert response.json()["status"] == "updated"
 
 
-async def test_45b_change_member_source_only_when_draft_or_completed(client):
+async def test_45b_change_member_source_for_paused_campaign(client):
     old_job = "job_source_old"
     new_job = "job_source_new"
     await db.save_scraped_members(new_job, 0, 0, "New Source", [
@@ -729,7 +729,7 @@ async def test_45b_change_member_source_only_when_draft_or_completed(client):
         "scrape_job_id": old_job,
         "sender_account_ids": [1],
         "messages": [{"msg_type": "text", "content": "Hello"}],
-        "total_targets": 1,
+        "total_targets": 99,
     })
     payload = {
         "scrape_job_id": new_job,
@@ -739,15 +739,11 @@ async def test_45b_change_member_source_only_when_draft_or_completed(client):
 
     await db.update_dm_campaign_status(campaign_id, "paused")
     paused = client.put(f"/api/members/campaigns/{campaign_id}/messages", json=payload)
-    assert paused.status_code == 400
-    assert "đã chạy xong" in paused.json()["detail"]
-
-    await db.update_dm_campaign_status(campaign_id, "completed")
-    completed = client.put(f"/api/members/campaigns/{campaign_id}/messages", json=payload)
-    assert completed.status_code == 200
+    assert paused.status_code == 200
     campaign = await db.get_dm_campaign(campaign_id)
     assert campaign["scrape_job_id"] == new_job
     assert campaign["total_targets"] == 1
+    assert campaign["status"] == "paused"
 
 
 # 46. Start scraping with invalid account ID.

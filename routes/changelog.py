@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.3.3",
+        "date": "21/09/2026",
+        "title": "⚡ Mở khóa nguồn Members + tải trang Members nhanh hơn",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Modal sửa Campaign cho phép đổi nguồn Members ở mọi trạng thái có thể chỉnh sửa. Trang Members không còn tự gọi Telegram get_dialogs khi mở trang, giúp Campaign/Scrape Jobs hiển thị nhanh hơn.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Đổi nguồn Members linh động hơn",
+                "desc": "Dropdown Nguồn Members trong modal sửa Campaign được mở khóa cho draft, paused, paused_auto, error và completed. Khi lưu, backend kiểm tra nguồn mới có member và tự tính lại total_targets.",
+                "tag": "Campaign"
+            },
+            {
+                "type": "performance",
+                "title": "Trang Members mở nhanh hơn",
+                "desc": "Danh sách group Telegram chỉ tải khi người dùng bấm vào ô Chọn Group. Việc này bỏ cuộc gọi get_dialogs chậm 2+ giây khỏi luồng mở trang Campaign.",
+                "tag": "Performance"
+            }
+        ]
+    },
+    {
         "version": "v3.3.2",
         "date": "18/09/2026",
         "title": "⚡ Campaign linh động nguồn Members + AI Agent UI gọn hơn",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Modal sửa Campaign giờ đổi được nguồn Members/Scrape Job và tài khoản gửi để chạy tiếp linh động hơn. Trang AI Follow-Up được đổi nhãn thành AI Agent, bố cục 2 tab dễ quét hơn, load data nhẹ hơn với phân trang client-side.",
         "changes": [
             {
