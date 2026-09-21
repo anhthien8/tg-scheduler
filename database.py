@@ -902,6 +902,28 @@ async def init_db():
             )
         """)
 
+        # ── Telegram Forum Sub-Topics Mapping ────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS telegram_topics (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id            INTEGER NOT NULL,
+                topic_id            INTEGER NOT NULL,
+                account_id          INTEGER NOT NULL,
+                user_id             INTEGER NOT NULL,
+                username            TEXT,
+                name                TEXT,
+                campaign_name       TEXT,
+                status              TEXT DEFAULT 'active',
+                last_lead_message   TEXT,
+                created_at          TEXT DEFAULT (datetime('now')),
+                updated_at          TEXT DEFAULT (datetime('now')),
+                UNIQUE(group_id, topic_id),
+                UNIQUE(group_id, account_id, user_id)
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_telegram_topics_lookup ON telegram_topics(group_id, account_id, user_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_telegram_topics_thread ON telegram_topics(group_id, topic_id)")
+
         # ── Performance Indexes ──────────────────────────────────────────────
         await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_campaign ON dm_campaign_logs(campaign_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_watcher_dm_logs_lookup ON watcher_dm_logs(watcher_id, target_user_id)")
@@ -4169,6 +4191,7 @@ async def append_followup_chat_message(
     inc_reply_count: bool = False
 ) -> dict | None:
     async with get_db() as db:
+        await db.execute("BEGIN IMMEDIATE")  # Serialize history read-modify-write across connections.
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             "SELECT * FROM ai_followup_chats WHERE account_id = ? AND user_id = ?",
@@ -4219,11 +4242,11 @@ async def set_human_takeover(account_id: int, user_id: int) -> bool:
     """Mark chat as human-controlled. AI will NOT reply until 60m of admin inactivity."""
     async with get_db() as db:
         await db.execute("""
-            UPDATE ai_followup_chats
-            SET status = 'needs_human',
-                human_takeover_at = datetime('now'),
+            INSERT INTO ai_followup_chats (account_id, user_id, status, human_takeover_at)
+            VALUES (?, ?, 'needs_human', datetime('now'))
+            ON CONFLICT(account_id, user_id) DO UPDATE SET
+                status = 'needs_human', human_takeover_at = datetime('now'),
                 updated_at = datetime('now')
-            WHERE account_id = ? AND user_id = ?
         """, (account_id, user_id))
         await db.commit()
         return True
@@ -4565,4 +4588,98 @@ async def delete_learned_knowledge(rule_id: int) -> bool:
         await db.execute("DELETE FROM agent_learned_knowledge WHERE id = ?", (rule_id,))
         await db.commit()
         return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Telegram Forum Sub-Topics (Sales War Room)
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def get_telegram_outreach_proof(account_id: int, user_id: int) -> dict | None:
+    """Check campaign and watcher success logs for this (account_id, user_id)."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        c_cur = await db.execute(
+            """SELECT 'campaign' AS source, c.name, l.sent_at
+               FROM dm_campaign_logs l
+               LEFT JOIN dm_campaigns c ON c.id = l.campaign_id
+               WHERE l.account_id = ? AND l.target_user_id = ? AND l.status = 'success'
+               ORDER BY l.sent_at DESC LIMIT 1""",
+            (account_id, user_id),
+        )
+        row = await c_cur.fetchone()
+        if row:
+            return dict(row)
+
+        w_cur = await db.execute(
+            """SELECT 'watcher' AS source, group_title AS name, sent_at
+               FROM watcher_dm_logs
+               WHERE account_id = ? AND target_user_id = ? AND status = 'success'
+               ORDER BY sent_at DESC LIMIT 1""",
+            (account_id, user_id),
+        )
+        row2 = await w_cur.fetchone()
+        return dict(row2) if row2 else None
+
+
+async def find_telegram_topic_for_user(group_id: int, account_id: int, user_id: int) -> dict | None:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM telegram_topics WHERE group_id = ? AND account_id = ? AND user_id = ?",
+            (group_id, account_id, user_id),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def get_telegram_topic_by_thread(group_id: int, topic_id: int) -> dict | None:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM telegram_topics WHERE group_id = ? AND topic_id = ?",
+            (group_id, topic_id),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def upsert_telegram_topic(data: dict) -> int:
+    """Insert or update a topic mapping. Returns row id."""
+    async with get_db() as db:
+        cursor = await db.execute("""
+            INSERT INTO telegram_topics (group_id, topic_id, account_id, user_id, username, name, campaign_name, status, last_lead_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(group_id, account_id, user_id)
+            DO UPDATE SET topic_id = excluded.topic_id,
+                          username = excluded.username,
+                          name     = excluded.name,
+                          campaign_name = COALESCE(excluded.campaign_name, campaign_name),
+                          status   = excluded.status,
+                          last_lead_message = COALESCE(excluded.last_lead_message, last_lead_message),
+                          updated_at = datetime('now')
+        """, (
+            data["group_id"], data["topic_id"], data["account_id"], data["user_id"],
+            data.get("username"), data.get("name"), data.get("campaign_name"),
+            data.get("status", "active"), data.get("last_lead_message"),
+        ))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def update_telegram_topic_status(group_id: int, topic_id: int, status: str):
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE telegram_topics SET status = ?, updated_at = datetime('now') WHERE group_id = ? AND topic_id = ?",
+            (status, group_id, topic_id),
+        )
+        await db.commit()
+
+
+async def update_telegram_topic_last_message(group_id: int, topic_id: int, message: str):
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE telegram_topics SET last_lead_message = ?, updated_at = datetime('now') WHERE group_id = ? AND topic_id = ?",
+            (message, group_id, topic_id),
+        )
+        await db.commit()
 

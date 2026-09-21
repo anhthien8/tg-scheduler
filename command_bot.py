@@ -18,6 +18,8 @@ from telethon.tl.functions.bots import SetBotCommandsRequest
 
 import database as db
 import telegram_client as tg
+import telegram_forum_inbox as fx
+
 
 logger = logging.getLogger("tg-scheduler.command_bot")
 
@@ -240,6 +242,11 @@ def _register_handlers(client: TelegramClient):
         name = event.pattern_match.group(1)
         await _handle_check_account(event, name)
 
+    # ── Forum topic admin messages ──────────────────────────────────────────
+    @client.on(events.NewMessage(func=lambda e: (e.is_group or getattr(e, "is_channel", False)) and not e.raw_text.startswith("/")))
+    async def on_group_message(event):
+        await _handle_forum_admin_message(event)
+
     # ── Plain text in send flow ─────────────────────────────────────────────
     @client.on(events.NewMessage(func=lambda e: e.is_private and not e.raw_text.startswith("/")))
     async def on_plain_text(event):
@@ -286,6 +293,14 @@ def _register_handlers(client: TelegramClient):
         uid = event.sender_id
 
         try:
+            # ── Forum inbox confirmations ──
+            if data.startswith("fr_ok:"):
+                await _handle_forum_confirm(event, data.split(":", 1)[1])
+                return
+            if data.startswith("fr_no:"):
+                await _handle_forum_cancel(event, data.split(":", 1)[1])
+                return
+
             # ── Navigation ──
             if data == "nav:send":
                 await event.delete()
@@ -897,6 +912,168 @@ async def _handle_check_account(event, name: str):
         )
     except Exception as e:
         await event.respond(f"❌ Check thất bại {acc['name']}: {e}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# FORUM INBOX (Sales War Room) — v1 text-only
+# ════════════════════════════════════════════════════════════════════════════
+
+async def _load_forum_config() -> "fx.ForumConfig":
+    """Read forum inbox config from settings KV. Disabled unless fully configured."""
+    enabled = (await db.get_setting("forum_inbox_enabled", "0")) == "1"
+    group_raw = (await db.get_setting("forum_inbox_group_id", "") or "").strip()
+    general_raw = (await db.get_setting("forum_inbox_general_topic_id", "1") or "1").strip()
+    group_id = int(group_raw) if group_raw.lstrip("-").isdigit() else 0
+    general_id = int(general_raw) if general_raw.lstrip("-").isdigit() else 1
+    if not group_id:
+        enabled = False
+    return fx.ForumConfig(enabled=enabled, group_id=group_id,
+                          general_topic_id=general_id or 1,
+                          admin_ids=fx.parse_int_set(await db.get_setting("command_bot_admin_ids", "")))
+
+
+class _TelethonForumBot:
+    """Adapter: the only place that talks Telegram forum APIs."""
+
+    def __init__(self, client: TelegramClient):
+        self._client = client
+
+    async def create_forum_topic(self, group_id: int, title: str) -> int:
+        from telethon.tl.functions.channels import CreateForumTopicRequest
+        import random as _random
+        entity = await self._client.get_entity(group_id)
+        result = await self._client(CreateForumTopicRequest(
+            channel=entity, title=title, random_id=_random.randint(1, 2**62)))
+        for upd in getattr(result, "updates", []) or []:
+            msg = getattr(upd, "message", None)
+            if msg is not None and getattr(msg, "id", None):
+                return int(msg.id)
+        raise RuntimeError("CreateForumTopicRequest returned no topic id")
+
+    async def send_topic_message(self, group_id: int, topic_id: int, text: str, buttons=None):
+        return await self._client.send_message(group_id, text, reply_to=topic_id, buttons=buttons)
+
+
+def _forum_bot() -> "_TelethonForumBot | None":
+    return _TelethonForumBot(_bot) if (_bot and _bot.is_connected()) else None
+
+
+def _extract_topic_id(message) -> int | None:
+    """Topic (thread) id of a forum message; None when not a forum message."""
+    reply_to = getattr(message, "reply_to", None)
+    if reply_to is None:
+        return 1  # message posted directly in General
+    top = getattr(reply_to, "reply_to_top_id", None)
+    return int(top) if top else int(getattr(reply_to, "reply_to_msg_id", 0) or 0) or None
+
+
+async def relay_inbound_to_forum(account_id: int, user_id: int, username: str | None,
+                                 name: str | None, text: str, has_media: bool = False) -> str:
+    """Called by dm_reply_tracker on inbound lead messages. Never raises."""
+    try:
+        bot = _forum_bot()
+        if not bot:
+            return "bot_offline"
+        cfg = await _load_forum_config()
+        return await fx.relay_inbound(db, bot, cfg, account_id=account_id, user_id=user_id,
+                                      username=username, name=name, text=text, has_media=has_media)
+    except Exception as e:
+        logger.warning("[ForumInbox] inbound relay failed (acc=%s user=%s): %s", account_id, user_id, e)
+        return "error"
+
+
+async def relay_outgoing_to_forum(account_id: int, user_id: int, text: str) -> str:
+    """Called by dm_reply_tracker for outgoing messages, to keep the topic transcript complete."""
+    try:
+        bot = _forum_bot()
+        if not bot:
+            return "bot_offline"
+        cfg = await _load_forum_config()
+        return await fx.relay_outgoing(db, bot, cfg, account_id=account_id, user_id=user_id, text=text)
+    except Exception as e:
+        logger.warning("[ForumInbox] outgoing relay failed (acc=%s user=%s): %s", account_id, user_id, e)
+        return "error"
+
+
+async def send_forum_general_alert(text: str) -> bool:
+    """HANDOVER / KOL alerts into the General topic. Fallbacks must not depend on this."""
+    try:
+        bot = _forum_bot()
+        if not bot:
+            return False
+        cfg = await _load_forum_config()
+        return await fx.relay_general_alert(bot, cfg, text)
+    except Exception as e:
+        logger.debug("[ForumInbox] general alert skipped: %s", e)
+        return False
+
+
+async def _handle_forum_admin_message(event) -> None:
+    """Admin typed in a lead topic → show a preview bound to admin/group/topic/draft."""
+    cfg = await _load_forum_config()
+    if not cfg.enabled or event.chat_id != cfg.group_id:
+        return
+    sender_id = event.sender_id
+    is_bot = bool(getattr(await event.get_sender(), "bot", False)) if sender_id else False
+    is_anonymous = sender_id is None
+    if not fx.is_relayable_admin_message(sender_id, is_bot, is_anonymous):
+        return
+    topic_id = _extract_topic_id(event.message)
+    if not topic_id:
+        return
+    # Media with a caption would otherwise be relayed as a silent text-only reply,
+    # dropping the attachment the admin thinks was sent. V1 is text-only — refuse loudly.
+    if getattr(event.message, "media", None) is not None:
+        if (event.raw_text or "").strip():
+            await event.respond(
+                "⚠️ Forum Inbox v1 chỉ hỗ trợ tin nhắn văn bản. Ảnh/video/file kèm caption sẽ "
+                "KHÔNG được gửi cho lead — hãy gửi caption dưới dạng tin nhắn text riêng.",
+                reply_to=topic_id,
+            )
+        return
+    preview = await fx.prepare_reply(db, cfg, sender_id, cfg.group_id, topic_id, event.raw_text or "")
+    if not preview:
+        return
+    await _bot.send_message(
+        cfg.group_id, fx.render_reply_preview(preview), reply_to=topic_id,
+        buttons=[[Button.inline("✅ Gửi ngay", data=f"fr_ok:{preview.token}"),
+                  Button.inline("❌ Hủy", data=f"fr_no:{preview.token}")]])
+
+
+async def _handle_forum_cancel(event, token: str) -> None:
+    cfg = await _load_forum_config()
+    message = await event.get_message()
+    topic_id = _extract_topic_id(message)
+    if not cfg.enabled or event.chat_id != cfg.group_id or event.sender_id not in (cfg.admin_ids or set()):
+        await event.answer("⛔ Không hợp lệ.", alert=True)
+        return
+    result = fx.cancel_reply(token, event.sender_id, event.chat_id, topic_id)
+    await event.answer("Đã hủy draft." if result == "cancelled" else "⛔ Draft không hợp lệ.", alert=True)
+    if result == "cancelled":
+        await event.edit("❌ Đã hủy draft.")
+
+
+async def _handle_forum_confirm(event, token: str) -> None:
+    cfg = await _load_forum_config()
+    message = await event.get_message()
+    topic_id = _extract_topic_id(message)
+    if not cfg.enabled or event.chat_id != cfg.group_id or not topic_id:
+        await event.answer("⛔ Không hợp lệ.", alert=True)
+        return
+
+    async def _send(account_id: int, user_id: int, text: str):
+        return await tg.send_text_message(account_id, user_id, text, parse_mode=None)
+
+    result = await fx.confirm_reply(db, token, event.sender_id, cfg.group_id, topic_id, _send, cfg=cfg)
+    messages = {
+        "sent": "✅ Đã gửi từ nick phụ.",
+        "missing_or_used": "⚠️ Draft đã được gửi hoặc đã hết hiệu lực.",
+        "expired": "⏳ Draft quá hạn, soạn lại.",
+        "binding_mismatch": "⛔ Sai admin/group/topic.",
+    }
+    await event.answer(messages.get(result, "❌ Lỗi."), alert=True)
+    if result == "sent":
+        await event.edit(f"✅ Đã gửi.\n\n{getattr(message, 'text', '') or ''}")
 
 
 # ════════════════════════════════════════════════════════════════════════════

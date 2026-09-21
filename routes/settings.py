@@ -498,6 +498,40 @@ class CommandBotConfig(BaseModel):
     admin_ids: str = ""   # comma-separated Telegram user IDs
 
 
+class ForumInboxConfig(BaseModel):
+    enabled: bool = False
+    group_id: int = 0
+    general_topic_id: int = 1
+
+
+@router.get("/forum-inbox/config")
+async def get_forum_inbox_config():
+    raw_group = (await db.get_setting("forum_inbox_group_id", "0") or "0").strip()
+    raw_topic = (await db.get_setting("forum_inbox_general_topic_id", "1") or "1").strip()
+    return {
+        "enabled": await db.get_setting("forum_inbox_enabled", "0") == "1",
+        "group_id": int(raw_group) if raw_group.lstrip("-").isdigit() else 0,
+        "general_topic_id": int(raw_topic) if raw_topic.lstrip("-").isdigit() else 1,
+    }
+
+
+@router.post("/forum-inbox/config")
+async def save_forum_inbox_config(payload: ForumInboxConfig):
+    if payload.enabled:
+        if payload.group_id >= 0:
+            raise HTTPException(status_code=400, detail="group_id phải là ID supergroup âm, ví dụ -1004352266125")
+        if payload.general_topic_id <= 0:
+            raise HTTPException(status_code=400, detail="general_topic_id phải là số dương (General = 1)")
+        admin_ids = await db.get_setting("command_bot_admin_ids", "")
+        token = await db.get_setting("command_bot_token", "")
+        if not admin_ids or not token:
+            raise HTTPException(status_code=400, detail="Cấu hình Command Bot token và Admin IDs trước")
+    await db.set_setting("forum_inbox_enabled", "1" if payload.enabled else "0")
+    await db.set_setting("forum_inbox_group_id", str(payload.group_id))
+    await db.set_setting("forum_inbox_general_topic_id", str(payload.general_topic_id))
+    return {"message": "Saved", **payload.model_dump()}
+
+
 @router.get("/command-bot/config")
 async def get_command_bot_config():
     return {

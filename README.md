@@ -58,6 +58,23 @@ tg-scheduler/
 └── data/                # SQLite database (gitignored)
 ```
 
+### Forum Inbox (Sales War Room) v1
+
+Tin nhắn từ lead có outreach thành công trong campaign/watcher → một topic riêng cho mỗi cặp nick phụ–lead.
+Admin đọc tin, soạn phản hồi → bot hiển thị preview + confirm → gửi từ đúng nick phụ.
+
+**Setup:**
+1. Tạo Telegram group, bật **Topics** trong phần cài đặt group.
+2. Thêm Command Bot là admin của group này.
+3. Trong Settings → **Forum Inbox**: nhập Group ID dạng âm (link `t.me/c/4352266125/1` → ID = `-1004352266125`), General Topic ID thường = `1`.
+4. Cấu hình và chạy **Command Bot** (token + admin IDs); Forum Inbox không relay khi bot offline.
+5. Bật toggle → Lưu.
+
+**Tính năng v1:** Chỉ relay text. Media từ lead có thông báo chưa hỗ trợ; admin gửi media kèm caption bị từ chối.
+**Alert handover / KOL cũng được gửi vào topic General** của group.
+
+
+
 ## ⚠️ Lưu ý
 
 - **Không share** thư mục `sessions/` — chứa session đã đăng nhập

@@ -266,6 +266,8 @@ async def _notify_main_account_handover(
                 campaign_name=campaign if campaign != "Chưa chọn" else None,
                 ai_message=alert_text,
             )
+            # Mirror to Forum General topic (best-effort, never blocks alert)
+            await command_bot.send_forum_general_alert(alert_text)
         except Exception as e:
             logger.debug("[Handover] Command bot alert skipped: %s", e)
 
@@ -453,6 +455,42 @@ def sanitize_telegram_html(text: str) -> str:
             s += f"</{tag_l}>"
 
     return s.strip()
+
+
+async def _send_ai_message(account_id: int, user_id: int, text: str,
+                           new_status: str = "active", drip_stage: int | None = None) -> bool:
+    from telegram_forum_inbox import get_send_lock
+    async with get_send_lock(account_id, user_id):
+        chat = await db.get_followup_chat(account_id, user_id)
+        if account_id == MAIN_ACCOUNT_ID or not chat or chat.get("status") != "active":
+            return False
+        takeover = chat.get("human_takeover_at")
+        if takeover:
+            try:
+                elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(takeover).replace(tzinfo=timezone.utc)).total_seconds()
+                if elapsed < 86400:
+                    return False
+            except (ValueError, TypeError):
+                return False  # Malformed takeover data must fail closed.
+        if await db.is_user_blacklisted(user_id=user_id, username=chat.get("username") or ""):
+            return False
+        if drip_stage is not None and chat.get("last_drip_stage", 0) >= drip_stage:
+            return False
+        _pending_ai_sends.add((account_id, user_id))
+        try:
+            if await tg.send_text_message(account_id, user_id, text) is False:
+                return False
+            await db.append_followup_chat_message(account_id, user_id, "assistant", text, inc_reply_count=True)
+            if new_status != "active":
+                await db.update_followup_chat_status(account_id, user_id, new_status)
+            if drip_stage is not None:
+                async with db.get_db() as conn:
+                    await conn.execute("UPDATE ai_followup_chats SET last_drip_stage = ? WHERE account_id = ? AND user_id = ?",
+                                       (drip_stage, account_id, user_id))
+                    await conn.commit()
+            return True
+        finally:
+            _spawn_background(_remove_ai_send_after_delay(account_id, user_id))
 
 
 async def generate_and_send_ai_reply_for_chat(
@@ -792,11 +830,21 @@ async def generate_and_send_ai_reply_for_chat(
         elif delay > 0:
             await asyncio.sleep(delay)
 
-        await tg.send_text_message(account_id, user_id, ai_reply)
-        _spawn_background(_remove_ai_send_after_delay(account_id, user_id))
-        await db.append_followup_chat_message(account_id, user_id, "assistant", ai_reply, inc_reply_count=True)
-        if new_status != "active":
-            await db.update_followup_chat_status(account_id, user_id, new_status)
+        # Re-check human takeover AFTER the typing delay: an admin (dashboard or
+        # Forum Inbox confirm) may have taken over during the 8-22s sleep above.
+        fresh_chat = await db.get_followup_chat(account_id, user_id)
+        takeover_str = (fresh_chat or {}).get("human_takeover_at")
+        if fresh_chat and fresh_chat.get("status") == "needs_human" and takeover_str:
+            try:
+                dt_tk = datetime.fromisoformat(takeover_str).replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - dt_tk).total_seconds() < 86400:
+                    logger.info("[AIFollowUp] 🛑 Admin took over during typing delay — dropping AI reply for user %d", user_id)
+                    return False
+            except Exception:
+                pass
+
+        if not await _send_ai_message(account_id, user_id, ai_reply, new_status):
+            return False
         logger.info("[AIFollowUp] ✅ AI reply sent to user @%s (%d) (Tier: %s, Score: %d)", sender_username or '?', user_id, lead_tier, intent_score)
         return True
     except Exception as ex_send:
@@ -839,6 +887,18 @@ def _make_handler(account_id: int):
 
                 # If AI is currently sending, this outgoing msg IS the AI message — skip
                 if (account_id, dest_id) in _pending_ai_sends:
+                    return
+
+                # Forum inbox outgoing transcript. Runs FIRST: when this outgoing
+                # message originated from a forum confirm, the loop guard returns
+                # 'loop_suppressed' and takeover/append was already handled there.
+                forum_result = None
+                try:
+                    import command_bot
+                    forum_result = await command_bot.relay_outgoing_to_forum(account_id, dest_id, msg_content)
+                except Exception:
+                    pass
+                if forum_result == "loop_suppressed":
                     return
 
                 # Human admin is manually sending → ALWAYS lock out AI
@@ -947,6 +1007,15 @@ def _make_handler(account_id: int):
             "message_text": message_text,
             "platform": "telegram",
         })
+
+        # Forum inbox relay is best-effort and never blocks AI/fallback paths.
+        try:
+            import command_bot
+            await command_bot.relay_inbound_to_forum(
+                account_id, sender_id, sender_username, sender_name, message_text,
+                has_media=(has_photo or has_video or has_document))
+        except Exception:
+            pass
 
         # Blacklist check
         if await db.is_user_blacklisted(user_id=sender_id, username=sender_username):
@@ -1294,15 +1363,8 @@ async def process_drip_followups() -> dict:
                     if contains_ai_disclosure(msg):
                         logger.warning("[DripEngine] 🚫 Blocked AI-disclosure drip for user %d", user_id)
                         continue
-                    await tg.send_text_message(account_id, user_id, msg)
-                    await db.append_followup_chat_message(account_id, user_id, "assistant", msg, inc_reply_count=True)
-                    async with db.get_db() as db_conn2:
-                        await db_conn2.execute(
-                            "UPDATE ai_followup_chats SET last_drip_stage = ?, updated_at = datetime('now') WHERE account_id = ? AND user_id = ?",
-                            (stage, account_id, user_id)
-                        )
-                        await db_conn2.commit()
-                    sent_count += 1
+                    if await _send_ai_message(account_id, user_id, msg, drip_stage=stage):
+                        sent_count += 1
             except Exception as e:
                 logger.error("[DripEngine] Failed drip for user %d: %s", user_id, e)
                 errors.append(str(e))

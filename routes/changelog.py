@@ -8,11 +8,45 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.4.0",
+        "date": "21/09/2026",
+        "title": "🗂️ Telegram Forum Inbox (Sales War Room) v1",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Đưa toàn bộ hội thoại lead vào 1 Telegram Group dạng Forum/Topics. Mỗi lead trả lời sau outreach mở 1 topic riêng. Admin trả lời trực tiếp trong topic bằng bot; nick phụ gửi tin thật ra lead. Topic General nhận Handover/KOL alerts.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Topic riêng cho từng Lead có phản hồi",
+                "desc": "Chỉ tạo topic khi có bằng chứng outreach thành công từ Campaign/Watcher. Tên topic gắn rõ account_id, username, lead user_id. Tránh bùng nổ topic rác.",
+                "tag": "Forum Inbox"
+            },
+            {
+                "type": "feature",
+                "title": "Admin Reply Bridge từ Topic ra Nick phụ",
+                "desc": "Admin soạn tin trong topic → bot hiển thị bản nháp + nút bấm xác nhận gửi. Bấm gửi → nick phụ gửi ra lead, tự động khóa AI (human takeover) để tránh AI nói đè, ghi lịch sử đầy đủ.",
+                "tag": "Forum Inbox"
+            },
+            {
+                "type": "security",
+                "title": "Bảo vệ hai chiều & Chống lặp tin",
+                "desc": "Xác nhận gửi được gắn chặt với đúng admin, group và topic; tự động bỏ qua tin nhắn từ bot hoặc người dùng ẩn danh; cơ chế chống vòng lặp transcript giữa Telethon bot và userbot.",
+                "tag": "Security"
+            },
+            {
+                "type": "feature",
+                "title": "Alert Handover & KOL vào topic General",
+                "desc": "Mọi cảnh báo HANDOVER_REQUIRED và KOL Campaign Pending được tự động đẩy về topic General của group (mặc định topic ID 1), giúp quản lý tập trung trên điện thoại.",
+                "tag": "Alerts"
+            }
+        ]
+    },
+    {
         "version": "v3.3.3",
         "date": "21/09/2026",
         "title": "⚡ Mở khóa nguồn Members + tải trang Members nhanh hơn",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Modal sửa Campaign cho phép đổi nguồn Members ở mọi trạng thái có thể chỉnh sửa. Trang Members không còn tự gọi Telegram get_dialogs khi mở trang, giúp Campaign/Scrape Jobs hiển thị nhanh hơn.",
         "changes": [
             {

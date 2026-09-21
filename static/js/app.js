@@ -2991,13 +2991,14 @@ App.toggleApiKeyVisibility = function() {
   }
 };
 
-// Patch loadSettings to also load API key UI + Daily Summary + Command Bot
+// Patch loadSettings to also load API key UI + Daily Summary + Command Bot + Forum Inbox
 const _origLoadSettings = App.loadSettings;
 App.loadSettings = async function() {
   if (_origLoadSettings) await _origLoadSettings.call(this);
   App.loadApiKeyUi();
   App.loadDailySummary();
   App.loadCommandBotConfig();
+  App.loadForumInboxConfig();
 };
 
 // ══════════════════════════════════════════════════════════
@@ -3132,6 +3133,80 @@ App.checkCommandBotStatus = async function(showMsg = true) {
     if (showMsg && msg) msg.textContent = data.running ? '✅ Bot đang chạy.' : '⚠️ Bot chưa chạy.';
   } catch (e) {
     if (showMsg && msg) msg.textContent = '❌ Không kiểm tra được trạng thái bot.';
+  }
+};
+
+// ══════════════════════════════════════════════════════════
+//  FORUM INBOX (SALES WAR ROOM) SETTINGS
+// ══════════════════════════════════════════════════════════
+
+App.toggleForumInboxEnabled = function(enabled) {
+  const badge = document.getElementById('forum-inbox-badge');
+  if (badge && !enabled) {
+    badge.className = 'badge badge-gray';
+    badge.textContent = 'Đang tắt';
+  }
+};
+
+App.setForumInboxBadge = function(enabled) {
+  const badge = document.getElementById('forum-inbox-badge');
+  if (!badge) return;
+  badge.className = 'badge ' + (enabled ? 'badge-success' : 'badge-gray');
+  badge.textContent = enabled ? 'Đang bật' : 'Đang tắt';
+};
+
+App.loadForumInboxConfig = async function() {
+  try {
+    const res = await fetch('/api/settings/forum-inbox/config', { headers: API.getHeaders() });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const cfg = await res.json();
+    const enabled = document.getElementById('forum-inbox-enabled');
+    const group = document.getElementById('forum-inbox-group-id');
+    const topic = document.getElementById('forum-inbox-general-topic-id');
+    if (enabled) enabled.checked = !!cfg.enabled;
+    if (group) group.value = cfg.group_id ? String(cfg.group_id) : '';
+    if (topic) topic.value = cfg.general_topic_id ? String(cfg.general_topic_id) : '1';
+    App.setForumInboxBadge(!!cfg.enabled);
+  } catch (e) {
+    console.warn('loadForumInboxConfig failed', e);
+  }
+};
+
+App.saveForumInboxConfig = async function() {
+  const msg = document.getElementById('forum-inbox-status-msg');
+  const groupVal = (document.getElementById('forum-inbox-group-id')?.value || '').trim();
+  const topicVal = (document.getElementById('forum-inbox-general-topic-id')?.value || '1').trim();
+  const enabled = !!document.getElementById('forum-inbox-enabled')?.checked;
+
+  const groupId = parseInt(groupVal, 10);
+  const generalId = parseInt(topicVal, 10) || 1;
+
+  if (enabled && (!groupId || groupId >= 0)) {
+    if (msg) msg.textContent = '❌ Group ID phải là số âm, ví dụ -1004352266125.';
+    return;
+  }
+
+  const payload = {
+    enabled: enabled,
+    group_id: isNaN(groupId) ? 0 : groupId,
+    general_topic_id: isNaN(generalId) ? 1 : generalId
+  };
+
+  if (msg) msg.textContent = 'Đang lưu...';
+  try {
+    const res = await fetch('/api/settings/forum-inbox/config', {
+      method: 'POST',
+      headers: { ...API.getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    App.setForumInboxBadge(payload.enabled);
+    if (msg) msg.textContent = payload.enabled
+      ? '✅ Đã lưu và bật Forum Inbox.'
+      : '✅ Đã lưu (trạng thái: Đang tắt).';
+  } catch (e) {
+    if (msg) msg.textContent = '❌ Lỗi: ' + e.message;
   }
 };
 
