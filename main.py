@@ -37,19 +37,32 @@ class CacheControlledStaticFiles(StaticFiles):
         return response
 
 import database as db
-import telegram_client as tg
-import scheduler as sch
-import message_queue as mq
-import keyword_watcher as kw
-from routes import auth, chats, schedules, messages, logs, watchers, settings, blacklist, reactions, inbox, members, analytics, proxy, invite
+
+TG_RUNTIME_MODE = os.getenv("TG_RUNTIME_MODE", "combined").strip().lower()
+if TG_RUNTIME_MODE not in ("combined", "web"):
+    raise RuntimeError("TG_RUNTIME_MODE must be 'combined' or 'web'")
+
+# Web mode deliberately imports only DB/read-only routers. Telegram-backed routes are
+# rejected below until Phase 2 adds IPC commands; never report a mutation as accepted.
+from routes import logs, settings, blacklist, analytics
 from routes import discord as discord_routes
-from routes import warmup as warmup_routes
-from routes import ai_followup
 from routes import ai_agents as ai_agents_routes
 from routes import changelog as changelog_routes
-import reaction_watcher as rw
-import dm_reply_tracker as drt
-import kol_channel_watcher as kcw
+from routes import ipc as ipc_routes
+
+if TG_RUNTIME_MODE == "combined":
+    import telegram_client as tg
+    import scheduler as sch
+    import message_queue as mq
+    import keyword_watcher as kw
+    import reaction_watcher as rw
+    import dm_reply_tracker as drt
+    import kol_channel_watcher as kcw
+    from routes import auth, chats, schedules, messages, watchers, reactions, inbox, members, proxy, invite
+    from routes import warmup as warmup_routes
+    from routes import ai_followup
+else:
+    tg = sch = mq = kw = rw = drt = kcw = None
 
 # Logging setup
 logging.basicConfig(
@@ -76,102 +89,23 @@ async def verify_api_key(key: str = Security(api_key_header)):
 
 
 _startup_task = None
+_runtime_lock_acquired = False
 
 
-async def connect_accounts_background():
-    """Connect all Telegram clients in the background to avoid blocking server startup."""
-    try:
-        logger.info("Connecting Telegram clients in the background (concurrently)...")
-        accounts = await db.get_all_accounts()
-
-        async def connect_single(acc):
-            try:
-                proxy_url = acc.get("proxy_url")  # Load per-account proxy from DB
-                await tg.create_client(acc["id"], int(acc["api_id"]), acc["api_hash"], acc["session_name"], proxy_url=proxy_url)
-                authorized = await asyncio.wait_for(tg.start_client(acc["id"]), timeout=30)
-                if authorized:
-                    await db.update_account_login_status(acc["id"], True)
-                    return True
-                else:
-                    await db.update_account_login_status(acc["id"], False)
-                    return False
-            except asyncio.TimeoutError:
-                logger.warning(f"Account {acc['id']} ({acc['name']}): connect timed out after 30s")
-                await db.update_account_login_status(acc["id"], False)
-            except Exception as e:
-                logger.warning(f"Account {acc['id']} ({acc['name']}): connect failed: {e}")
-                await db.update_account_login_status(acc["id"], False)
-            return False
-
-        results = await asyncio.gather(*(connect_single(acc) for acc in accounts), return_exceptions=True)
-        logged_count = sum(1 for r in results if r is True)
-
-        logger.info(f"Loaded {len(accounts)} accounts, {logged_count} successfully logged in")
-
-        # Start keyword watchers
-        await kw.start_all_watchers()
-
-        # Start reaction watchers
-        await rw.start_all()
-
-        # Start DM reply tracker (inbox)
-        await drt.start_reply_tracker()
-
-        # Start KOL channel auto-forward watcher (optional)
-        await kcw.start_kol_channel_watcher()
-
-        # Connect Discord bots
-        try:
-            from platforms.discord_adapter import DiscordAdapter
-            import discord_watcher as dw
-            import discord_reaction_watcher as drw
-            import discord_reply_tracker as drt_discord
-
-            adapter = DiscordAdapter()
-            discord_routes._adapter = adapter
-
-            dw.set_adapter(adapter)
-            drw.set_adapter(adapter)
-            drt_discord.set_adapter(adapter)
-
-            discord_bots = await db.get_all_discord_bots()
-            for bot in discord_bots:
-                try:
-                    success = await adapter.connect_bot(bot["id"], bot["bot_token"])
-                    if success:
-                        info = await adapter.get_account_info(bot["id"])
-                        await db.update_discord_bot_status(
-                            bot["id"], True,
-                            user_id=str(info.get("user_id", "")),
-                            username=info.get("username", ""),
-                            guild_count=info.get("guild_count", 0),
-                        )
-                        logger.info(f"Discord bot {bot['id']} ({bot['name']}): connected")
-                    else:
-                        logger.warning(f"Discord bot {bot['id']} ({bot['name']}): connect failed")
-                except Exception as e:
-                    logger.warning(f"Discord bot {bot['id']} ({bot['name']}): {e}")
-            logger.info(f"Discord: {len(discord_bots)} bots loaded")
-
-            # Start Discord engines
-            await dw.start_all_watchers()
-            await drw.start_all()
-            await drt_discord.start_reply_tracker()
-            logger.info("Discord engines started (watcher + reaction + reply)")
-        except ImportError:
-            logger.info("Discord adapter not available (discord.py not installed)")
-        except Exception as e:
-            logger.warning(f"Discord startup error: {e}")
-
-        logger.info("All background engines started successfully.")
-    except Exception as e:
-        logger.error(f"Error in background account startup: {e}", exc_info=True)
+def _log_startup_task_result(task: "asyncio.Task") -> None:
+    """Surface background engine-startup failures instead of losing them."""
+    if task.cancelled():
+        logger.warning("Background engine startup task was cancelled")
+        return
+    exc = task.exception()
+    if exc:
+        logger.error("Background engine startup task FAILED: %s", exc, exc_info=exc)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
-    global _startup_task
+    global _startup_task, _runtime_lock_acquired
     # ── Startup ──
     logger.info("=" * 50)
     logger.info("TG Scheduler starting up...")
@@ -186,127 +120,48 @@ async def lifespan(app: FastAPI):
         logger.error("=" * 50)
         raise SystemExit(1)
 
-    # Init database
-    await db.init_db()
-    logger.info("Database initialized")
+    import engine_lifecycle as lc
 
-    # Start scheduler
-    sch.start_scheduler()
+    if TG_RUNTIME_MODE == "combined":
+        # Singleton lock: block combined+worker or two combined from sharing DATA_DIR
+        lc.acquire_data_lock()
+        _runtime_lock_acquired = True
 
-    # Register auto-resume job for paused_auto campaigns
-    sch.start_auto_resume_job()
-
-    # Start Telegram Command Bot (admin remote control)
     try:
-        import command_bot
-        await command_bot.start_command_bot()
-    except Exception as e:
-        logger.warning(f"Command bot startup error: {e}")
-    await sch.load_all_jobs()
+        await db.init_db()
+        # IPC queue schema must exist before the first enqueue/claim in BOTH modes:
+        # web enqueues, worker consumes, combined serves /api/ipc status reads.
+        import runtime_commands as rc
+        async with db.get_db() as conn:
+            await rc.init_schema(conn)
+        logger.info("Database initialized")
+        if TG_RUNTIME_MODE == "combined":
+            # Background connect task, same as before: HTTP must not wait on Telethon.
+            _startup_task = await lc.start_engines()
+            # Failures inside the background task must be visible in the log, not silent.
+            _startup_task.add_done_callback(_log_startup_task_result)
+        else:
+            logger.info("Running in TG_RUNTIME_MODE=web; skipping all Telethon/background engines")
 
-    # Reload scheduled DM campaigns
-    scheduled_campaigns = await db.get_scheduled_campaigns()
-    for sc in scheduled_campaigns:
-        if sc["scheduled_at"] and sc["target_timezone"]:
-            sch.add_campaign_schedule_job(sc["id"], sc["scheduled_at"], sc["target_timezone"])
-    if scheduled_campaigns:
-        logger.info(f"Reloaded {len(scheduled_campaigns)} scheduled DM campaigns")
-
-    # Auto-resume active running DM campaigns after app restart
-    try:
-        all_campaigns = await db.get_all_dm_campaigns()
-        running_cnt = 0
-        for rc in all_campaigns:
-            if rc.get("status") == "running":
-                from routes.members import _run_campaign, _active_campaigns
-                curr_task = _active_campaigns.get(rc["id"])
-                is_running = curr_task is True or (isinstance(curr_task, asyncio.Task) and not curr_task.done())
-                if not is_running:
-                    logger.info(f"Auto-resuming running DM campaign #{rc['id']} ({rc['name']})...")
-                    _active_campaigns[rc["id"]] = asyncio.create_task(_run_campaign(rc["id"]))
-                    running_cnt += 1
-        if running_cnt:
-            logger.info(f"Auto-resumed {running_cnt} active running DM campaigns")
-    except Exception as e:
-        logger.warning(f"Error auto-resuming DM campaigns: {e}")
-
-    # Daily summary notification
-    from daily_summary import send_daily_summary
-    from apscheduler.triggers.cron import CronTrigger
-    summary_time = await db.get_setting("daily_summary_time", "21:00")
-    hour, minute = map(int, summary_time.split(":"))
-    sch.get_scheduler().add_job(
-        send_daily_summary,
-        trigger=CronTrigger(hour=hour, minute=minute, timezone=sch.TZ),
-        id="daily_summary",
-        name="Daily Summary",
-        replace_existing=True,
-    )
-    logger.info(f"Daily summary scheduled at {summary_time}")
-
-    # DB backup: 1 bản lúc khởi động + cron hằng ngày 03:00 (giữ 7 bản)
-    import alerts
-    alerts.run_backup()
-    sch.get_scheduler().add_job(
-        alerts.run_backup,
-        trigger=CronTrigger(hour=3, minute=0, timezone=sch.TZ),
-        id="db_backup",
-        name="DB Backup",
-        replace_existing=True,
-    )
-    logger.info("DB backup scheduled daily at 03:00")
-
-    # Lead SLA check: every 30 min — ping if Tier A/B leads wait >2h
-    from apscheduler.triggers.interval import IntervalTrigger
-    sch.get_scheduler().add_job(
-        alerts.check_lead_sla,
-        trigger=IntervalTrigger(minutes=30),
-        id="lead_sla_check",
-        name="Lead SLA Check",
-        replace_existing=True,
-    )
-    logger.info("Lead SLA check scheduled every 30 min")
-
-    # Start message queue worker
-    mq.start_worker()
-
-    # Start background task to connect accounts and load watchers
-    _startup_task = asyncio.create_task(connect_accounts_background())
-
-    logger.info("=" * 50)
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8888"))
-    logger.info(f"Dashboard: http://{host}:{port}")
-    logger.info("=" * 50)
-
-    yield
-
-    # ── Shutdown ──
-    logger.info("Shutting down...")
-    if _startup_task and not _startup_task.done():
-        _startup_task.cancel()
-    mq.stop_worker()
-    sch.stop_scheduler()
-    await rw.stop_all()
-    await drt.stop_reply_tracker()
-    await tg.disconnect_all()
-    await db.close_db()
-    # Disconnect Discord bots
-    try:
-        import discord_watcher as dw
-        import discord_reaction_watcher as drw
-        import discord_reply_tracker as drt_discord
-        await dw.stop_all_watchers()
-        await drw.stop_all()
-        await drt_discord.stop_reply_tracker()
-    except Exception:
-        pass
-    try:
-        if discord_routes._adapter:
-            await discord_routes._adapter.disconnect_all()
-    except Exception:
-        pass
-    logger.info("Goodbye!")
+        logger.info("=" * 50)
+        host = os.getenv("HOST", "0.0.0.0")
+        port = int(os.getenv("PORT", "8888"))
+        logger.info(f"Dashboard: http://{host}:{port}")
+        logger.info("=" * 50)
+        yield
+    finally:
+        logger.info("Shutting down...")
+        try:
+            if TG_RUNTIME_MODE == "combined":
+                await lc.stop_engines(_startup_task)
+        finally:
+            try:
+                await db.close_db()
+            finally:
+                if _runtime_lock_acquired:
+                    lc.release_data_lock()
+                    _runtime_lock_acquired = False
+        logger.info("Goodbye!")
 
 
 # Media types already compressed — gzipping them wastes CPU and can grow the payload
@@ -361,6 +216,21 @@ app = FastAPI(title="TG Scheduler", lifespan=lifespan)
 
 app.add_middleware(SafeGZipMiddleware, minimum_size=1000)
 
+if TG_RUNTIME_MODE == "web":
+    @app.middleware("http")
+    async def split_read_only_boundary(request, call_next):
+        # ponytail: Phase 1 is read-only; widen this allowlist only after route/IPC audit.
+        from fastapi.responses import JSONResponse
+        path = request.url.path
+        if path.startswith("/api/ipc"):
+            return await call_next(request)
+        allowed = ("/api/logs", "/api/analytics", "/api/changelog", "/api/health/telegram-worker")
+        if path.startswith("/api/") and (
+            request.method != "GET" or not any(path == p or path.startswith(p + "/") for p in allowed)
+        ):
+            return JSONResponse(status_code=503, content={"detail": "Requires TG_RUNTIME_MODE=combined until Phase 2 IPC; web mode is read-only"})
+        return await call_next(request)
+
 # ── BONUS: CORS ───────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
@@ -372,30 +242,56 @@ app.add_middleware(
 
 # Include API routes (with API key auth dependency injected)
 _auth_dep = [Depends(verify_api_key)]
-app.include_router(auth.router, dependencies=_auth_dep)
-app.include_router(chats.router, dependencies=_auth_dep)
-app.include_router(schedules.router, dependencies=_auth_dep)
-app.include_router(messages.router, dependencies=_auth_dep)
 app.include_router(logs.router, dependencies=_auth_dep)
-app.include_router(watchers.router, dependencies=_auth_dep)
 app.include_router(settings.router, dependencies=_auth_dep)
 app.include_router(blacklist.router, dependencies=_auth_dep)
-app.include_router(reactions.router, dependencies=_auth_dep)
-app.include_router(inbox.router, dependencies=_auth_dep)
 app.include_router(discord_routes.router, dependencies=_auth_dep)
-app.include_router(members.router, dependencies=_auth_dep)
 app.include_router(analytics.router, dependencies=_auth_dep)
-app.include_router(proxy.router, dependencies=_auth_dep)
-app.include_router(invite.router, dependencies=_auth_dep)
-
-app.include_router(warmup_routes.router, dependencies=_auth_dep)
-app.include_router(ai_followup.router, dependencies=_auth_dep)
 app.include_router(ai_agents_routes.router, dependencies=_auth_dep)
 app.include_router(changelog_routes.router, dependencies=_auth_dep)
+app.include_router(ipc_routes.router, dependencies=_auth_dep)
+
+if TG_RUNTIME_MODE == "combined":
+    app.include_router(auth.router, dependencies=_auth_dep)
+    app.include_router(chats.router, dependencies=_auth_dep)
+    app.include_router(schedules.router, dependencies=_auth_dep)
+    app.include_router(messages.router, dependencies=_auth_dep)
+    app.include_router(watchers.router, dependencies=_auth_dep)
+    app.include_router(reactions.router, dependencies=_auth_dep)
+    app.include_router(inbox.router, dependencies=_auth_dep)
+    app.include_router(members.router, dependencies=_auth_dep)
+    app.include_router(proxy.router, dependencies=_auth_dep)
+    app.include_router(invite.router, dependencies=_auth_dep)
+    app.include_router(warmup_routes.router, dependencies=_auth_dep)
+    app.include_router(ai_followup.router, dependencies=_auth_dep)
+else:
+    def _split_runtime_pending(route_name: str):
+        async def endpoint():
+            raise HTTPException(status_code=503, detail=f"{route_name} requires TG_RUNTIME_MODE=combined until split IPC ships in Phase 2")
+        return endpoint
+
+    for methods, path, name in (
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/watchers{rest:path}", "Watcher routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/reactions{rest:path}", "Reaction routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/auth{rest:path}", "Telegram auth routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/chats{rest:path}", "Telegram chat routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/messages{rest:path}", "Telegram message routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/schedules{rest:path}", "Schedule mutation routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/members{rest:path}", "Member/campaign routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/ai-followup{rest:path}", "AI follow-up routes"),
+    ):
+        app.add_api_route(path, _split_runtime_pending(name), methods=methods, dependencies=_auth_dep)
 
 # Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", CacheControlledStaticFiles(directory=static_dir), name="static")
+
+
+@app.get("/api/health/telegram-worker", dependencies=_auth_dep)
+async def telegram_worker_health():
+    """Authenticated worker status with stale-heartbeat classification."""
+    import engine_lifecycle as lc
+    return {"runtime_mode": TG_RUNTIME_MODE, "worker": await lc.read_worker_health()}
 
 
 @app.get("/")

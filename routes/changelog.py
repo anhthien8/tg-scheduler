@@ -8,11 +8,45 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.5.0",
+        "date": "23/09/2026",
+        "title": "⚡ Split Runtime & IPC Command Queue Architecture (Pha 1 & Pha 2)",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Tách biệt tiến trình Web Dashboard và Telegram Background Worker. Tích hợp SQLite Command Queue (IPC) với cơ chế bảo vệ idempotency, lease timeout, crash recovery. Sửa triệt để lỗi spam warning Reaction Watcher.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Kiến trúc Split Runtime & Telegram Worker độc lập",
+                "desc": "Hỗ trợ TG_RUNTIME_MODE=combined (mặc định) và web/worker. Web mode chỉ phục vụ API và UI nhẹ, không giữ Telethon clients; Worker mode quản lý toàn bộ background engines.",
+                "tag": "Architecture"
+            },
+            {
+                "type": "feature",
+                "title": "Durable SQLite IPC Command Queue",
+                "desc": "Nối hàng đợi lệnh bất đồng bộ cho Chats Refresh, Campaign Start/Stop, và Watchers Reload. Bảo vệ trùng lặp bằng Idempotency Key, tự động phân loại kết quả và xử lý lệnh mất liên lạc.",
+                "tag": "IPC Queue"
+            },
+            {
+                "type": "fix",
+                "title": "Khắc phục triệt để spam log MessageIdInvalidError ở Reaction Watcher",
+                "desc": "Bảo vệ chặt chẽ channel_id và chat_id để không gửi reaction nhầm vào tin nhắn từ group/kênh khác; xử lý unresolvable entity và giải phóng reservation an toàn trong mọi trường hợp.",
+                "tag": "Fixes"
+            },
+            {
+                "type": "improvement",
+                "title": "Giao diện thích ứng Runtime (Runtime-Aware UI)",
+                "desc": "Frontend tự động phát hiện runtime mode, xếp hàng lệnh bất đồng bộ và hiển thị tiến trình xác thực từ worker theo thời gian thực.",
+                "tag": "UI/UX"
+            }
+        ]
+    },
+    {
         "version": "v3.4.0",
         "date": "21/09/2026",
         "title": "🗂️ Telegram Forum Inbox (Sales War Room) v1",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Đưa toàn bộ hội thoại lead vào 1 Telegram Group dạng Forum/Topics. Mỗi lead trả lời sau outreach mở 1 topic riêng. Admin trả lời trực tiếp trong topic bằng bot; nick phụ gửi tin thật ra lead. Topic General nhận Handover/KOL alerts.",
         "changes": [
             {

@@ -42,6 +42,135 @@ const API = {
   patch(path, body) { return this.request('PATCH', path, body); },
   del(path) { return this.request('DELETE', path); },
 
+  // ── Split-runtime (web/worker) awareness ───────────────────────────────────
+  // The server runs as TG_RUNTIME_MODE=combined (default, everything in one
+  // process) or =web (HTTP only; Telegram work is executed by a separate worker
+  // process through the /api/ipc command queue).
+  //
+  // Rules enforced here:
+  //  - combined mode behaviour is UNCHANGED: legacy direct routes are used.
+  //  - web mode routes ONLY the migrated slice (chats refresh, campaign
+  //    start/stop, watcher list/reload, DB-only reads) through /api/ipc.
+  //  - enqueue returns {command_id, status:'queued'} — that is NOT "sent".
+  //    Callers must poll with pollCommand() for the real outcome.
+  //  - 'unknown' (worker lease expired) is terminal and never auto-resent: the
+  //    side effect may or may not have happened, so only a human decides.
+  _runtimeModePromise: null,
+
+  /** Resolve 'web' | 'combined' once per page load; unreachable → 'combined'. */
+  getRuntimeMode() {
+    if (this._runtimeModePromise) return this._runtimeModePromise;
+    this._runtimeModePromise = this.get('/api/health/telegram-worker')
+      .then(res => (res && res.runtime_mode === 'web' ? 'web' : 'combined'))
+      .catch(() => 'combined');   // degrade to legacy behaviour, never break the UI
+    return this._runtimeModePromise;
+  },
+
+  clearRuntimeModeCache() { this._runtimeModePromise = null; },
+
+  _requireId(value, label) {
+    const num = typeof value === 'number' ? value : Number(value);
+    if (!Number.isInteger(num) || num <= 0) {
+      throw new Error(`${label} không hợp lệ (phải là số nguyên dương)`);
+    }
+    return num;
+  },
+
+  /** Enqueue one allow-listed command. Resolves to {command_id, status:'queued'}. */
+  enqueueCommand(command, payload) {
+    return this.post(`/api/ipc/commands/${command}`, payload);
+  },
+
+  getCommand(commandId) { return this.get(`/api/ipc/commands/${commandId}`); },
+
+  /**
+   * Poll a queued command until it reaches a terminal state.
+   * Terminal: succeeded | failed | unknown. On timeout the last known state is
+   * returned with timed_out:true — callers must not assume success.
+   */
+  async pollCommand(commandId, { intervalMs = 1000, timeoutMs = 30000 } = {}) {
+    const terminal = ['succeeded', 'failed', 'unknown'];
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const item = await this.getCommand(commandId);
+      if (terminal.includes(item.status)) return item;
+      if (Date.now() >= deadline) return { ...item, timed_out: true };
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+  },
+
+  // ── Runtime-aware wrappers for the migrated slice ──────────────────────────
+
+  /** Campaign start. combined → direct route; web → queued command. */
+  async startCampaignRuntime(id) {
+    const campaignId = this._requireId(id, 'ID campaign');
+    if (await this.getRuntimeMode() === 'web') {
+      return this.enqueueCommand('campaign.start', { campaign_id: campaignId });
+    }
+    return MembersAPI.startCampaign(campaignId);
+  },
+
+  /** Campaign stop. combined → direct route; web → queued command. */
+  async stopCampaignRuntime(id) {
+    const campaignId = this._requireId(id, 'ID campaign');
+    if (await this.getRuntimeMode() === 'web') {
+      return this.enqueueCommand('campaign.stop', { campaign_id: campaignId });
+    }
+    return MembersAPI.stopCampaign(campaignId);
+  },
+
+  /** Campaign list. Both modes are DB reads; web uses the IPC snapshot. */
+  async listCampaignsRuntime(updatedSince = null) {
+    if (await this.getRuntimeMode() === 'web') {
+      const res = await this.get('/api/ipc/campaigns');
+      return res.campaigns || [];
+    }
+    const res = await MembersAPI.getCampaigns(updatedSince);
+    return Array.isArray(res) ? res : (res.campaigns || []);
+  },
+
+  /** Telegram watcher list (telegram platform only). */
+  async listWatchersRuntime() {
+    if (await this.getRuntimeMode() === 'web') {
+      const res = await this.get('/api/ipc/watchers');
+      return res.watchers || [];
+    }
+    const res = await this.getWatchers();
+    return Array.isArray(res) ? res : (res.watchers || []);
+  },
+
+  /** Ask the worker to reload one watcher's handlers. web → queued command. */
+  async reloadWatcherRuntime(id) {
+    const watcherId = this._requireId(id, 'ID watcher');
+    if (await this.getRuntimeMode() === 'web') {
+      return this.enqueueCommand('watchers.reload', { watcher_id: watcherId });
+    }
+    // combined: create/update already reload in-process; nothing to enqueue.
+    return { status: 'noop', reason: 'combined mode reloads watchers in-process' };
+  },
+
+  // Watcher CRUD is NOT migrated to the command queue yet. Fail loudly in web
+  // mode instead of POSTing to a route that returns 503, or worse, pretending
+  // the write succeeded.
+  async createWatcherRuntime(data) {
+    if (await this.getRuntimeMode() === 'web') {
+      throw new Error('Watcher CRUD chưa được migrate sang IPC — chỉ hỗ trợ list/reload ở chế độ web. Dùng TG_RUNTIME_MODE=combined để tạo/sửa/xóa watcher.');
+    }
+    return this.createWatcher(data);
+  },
+  async updateWatcherRuntime(id, data) {
+    if (await this.getRuntimeMode() === 'web') {
+      throw new Error('Watcher CRUD chưa được migrate sang IPC — chỉ hỗ trợ list/reload ở chế độ web. Dùng TG_RUNTIME_MODE=combined để tạo/sửa/xóa watcher.');
+    }
+    return this.updateWatcher(this._requireId(id, 'ID watcher'), data);
+  },
+  async deleteWatcherRuntime(id) {
+    if (await this.getRuntimeMode() === 'web') {
+      throw new Error('Watcher CRUD chưa được migrate sang IPC — chỉ hỗ trợ list/reload ở chế độ web. Dùng TG_RUNTIME_MODE=combined để tạo/sửa/xóa watcher.');
+    }
+    return this.deleteWatcher(this._requireId(id, 'ID watcher'));
+  },
+
   // Auth & Accounts
   _accountsPromise: null,
   clearAccountsCache() {
@@ -62,7 +191,8 @@ const API = {
         sessionStorage.removeItem('tgs_accounts_cache');
       }
     }
-    const p = this.get('/api/auth/accounts')
+    const p = this.getRuntimeMode()
+      .then(mode => this.get(mode === 'web' ? '/api/ipc/accounts' : '/api/auth/accounts'))
       .then(data => {
         if (this._accountsPromise === p) {
           sessionStorage.setItem('tgs_accounts_cache', JSON.stringify(data));
@@ -114,7 +244,15 @@ const API = {
   },
 
   // Chats
-  getChats(accountId) { return this.get(`/api/chats?account_id=${accountId}`); },
+  // combined: direct read. web: Telethon lives in the worker, so this enqueues
+  // chats.refresh and returns {command_id, status:'queued'} — poll for the list.
+  async getChats(accountId) {
+    const accId = this._requireId(accountId, 'ID tài khoản');
+    if (await this.getRuntimeMode() === 'web') {
+      return this.enqueueCommand('chats.refresh', { account_id: accId });
+    }
+    return this.get(`/api/chats?account_id=${accId}`);
+  },
 
   // Schedules
   getSchedules(params = {}) {

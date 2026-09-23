@@ -642,8 +642,15 @@ const Members = {
   // ── Campaign Actions ──
   async startCampaign(id) {
     try {
-      const r = await MembersAPI.startCampaign(id);
-      App.toast(r.message || 'Campaign đã chạy!', 'success');
+      const r = await API.startCampaignRuntime(id);
+      if (r.status === 'queued') {
+        App.toast('Lệnh đã được xếp hàng — worker sẽ chạy campaign', 'info');
+        const result = await API.pollCommand(r.command_id);
+        if (result.status !== 'succeeded') throw new Error(result.error_text || `Worker trả về ${result.status}`);
+        App.toast('Campaign đã chạy', 'success');
+      } else {
+        App.toast(r.message || 'Campaign đã chạy!', 'success');
+      }
       this._lastCampaignsUpdate = null;
       this.loadCampaigns();
       // Auto-refresh while running
@@ -655,8 +662,15 @@ const Members = {
 
   async stopCampaign(id) {
     try {
-      await MembersAPI.stopCampaign(id);
-      App.toast('Campaign đã dừng', 'success');
+      const r = await API.stopCampaignRuntime(id);
+      if (r.status === 'queued') {
+        App.toast('Lệnh dừng đã được xếp hàng', 'info');
+        const result = await API.pollCommand(r.command_id);
+        if (result.status !== 'succeeded') throw new Error(result.error_text || `Chưa xác nhận lệnh dừng: ${result.status}. Không tự gửi lại lệnh.`);
+        App.toast('Campaign đã dừng', 'success');
+      } else {
+        App.toast('Campaign đã dừng', 'success');
+      }
       this._lastCampaignsUpdate = null;
       this.loadCampaigns();
     } catch (e) {

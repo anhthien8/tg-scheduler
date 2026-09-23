@@ -31,6 +31,7 @@ _background_tasks: set[asyncio.Task] = set()
 # Dedup: set of (target_id, account_id, msg_id) to prevent double-react in same session
 _reacted: set[tuple[int, int, int]] = set()
 
+_dispatching: set[tuple[int, int]] = set()
 
 def _clean_channel_id(raw_id: int) -> int:
     """Strip -100 prefix from supergroup/channel IDs."""
@@ -203,6 +204,10 @@ async def join_channel(target: dict) -> dict:
 
 async def _do_react(target: dict, client: Any, acc_id: int, msg_id: int, channel_entity: Any) -> None:
     """Send a single reaction + optionally increment view from one account."""
+    if channel_entity is None:
+        logger.debug(f"[Reactions] Target {target['id']} | acc={acc_id} entity is None, skip")
+        return
+
     target_id    = target["id"]
     reactions    = target.get("reactions") or ["👍"]
     raw_emoji    = random.choice(reactions)
@@ -216,38 +221,38 @@ async def _do_react(target: dict, client: Any, acc_id: int, msg_id: int, channel
         return
     _reacted.add(key)
 
-    # DB dedup check (survives restarts)
-    if await db.was_msg_reacted(target_id, acc_id, msg_id):
-        _reacted.discard(key)
-        return
-
-    # --- Step 1: Increment view (if enabled) ---
-    if view_enabled and random.random() <= view_ratio:
-        try:
-            await client(GetMessagesViewsRequest(
-                peer=channel_entity,
-                id=[msg_id],
-                increment=True,
-            ))
-            logger.info(f"[Reactions] Target {target_id} | acc={acc_id} → 👁 view on msg {msg_id}")
-        except Exception as e:
-            logger.debug(f"[Reactions] Target {target_id} | acc={acc_id} view failed: {e}")
-
-    # --- Step 2: Send reaction emoji ---
     try:
-        await client(SendReactionRequest(
-            peer=channel_entity,
-            msg_id=msg_id,
-            reaction=[ReactionEmoji(emoticon=emoji)],
-        ))
-        chan_id = _clean_channel_id(getattr(channel_entity, "id", 0))
-        await db.add_reaction_log(target_id, acc_id, chan_id, msg_id, emoji, "success")
-        logger.info(f"[Reactions] Target {target_id} | acc={acc_id} → {emoji} on msg {msg_id}")
-    except Exception as e:
-        err = str(e)
-        chan_id = _clean_channel_id(getattr(channel_entity, "id", 0))
-        await db.add_reaction_log(target_id, acc_id, chan_id, msg_id, emoji, "failed", err)
-        logger.warning(f"[Reactions] Target {target_id} | acc={acc_id} react failed: {err}")
+        # DB dedup check (survives restarts)
+        if await db.was_msg_reacted(target_id, acc_id, msg_id):
+            return
+
+        # --- Step 1: Increment view (if enabled) ---
+        if view_enabled and random.random() <= view_ratio:
+            try:
+                await client(GetMessagesViewsRequest(
+                    peer=channel_entity,
+                    id=[msg_id],
+                    increment=True,
+                ))
+                logger.info(f"[Reactions] Target {target_id} | acc={acc_id} → 👁 view on msg {msg_id}")
+            except Exception as e:
+                logger.debug(f"[Reactions] Target {target_id} | acc={acc_id} view failed: {e}")
+
+        # --- Step 2: Send reaction emoji ---
+        try:
+            await client(SendReactionRequest(
+                peer=channel_entity,
+                msg_id=msg_id,
+                reaction=[ReactionEmoji(emoticon=emoji)],
+            ))
+            chan_id = _clean_channel_id(getattr(channel_entity, "id", 0))
+            await db.add_reaction_log(target_id, acc_id, chan_id, msg_id, emoji, "success")
+            logger.info(f"[Reactions] Target {target_id} | acc={acc_id} → {emoji} on msg {msg_id}")
+        except Exception as e:
+            err = str(e)
+            chan_id = _clean_channel_id(getattr(channel_entity, "id", 0))
+            await db.add_reaction_log(target_id, acc_id, chan_id, msg_id, emoji, "failed", err)
+            logger.warning(f"[Reactions] Target {target_id} | acc={acc_id} react failed: {err}")
     finally:
         _reacted.discard(key)
 
@@ -289,6 +294,9 @@ async def _react_all_accounts(target: dict, msg_id: int, channel_link: str) -> N
         try:
             # Use _get_entity_only: tries channel_id first (fast), falls back to link
             channel_entity = await _get_entity_only(client, channel_link, channel_id)
+            if channel_entity is None:
+                logger.warning(f"[Reactions] Target {target['id']} | acc={acc_id} entity not found, skip")
+                continue
             await _do_react(target, client, acc_id, msg_id, channel_entity)
         except Exception as e:
             logger.warning(f"[Reactions] Target {target['id']} | acc={acc_id} entity error: {e}")
@@ -301,9 +309,12 @@ def _make_reaction_handler(target: dict):
     channel_id   = target.get("channel_id")
 
     async def handler(event):
-        # Only handle posts from this specific channel
+        # Fail closed: without a known channel, message IDs from other chats
+        # must never be sent to the target channel.
+        if not channel_id or event.chat_id is None:
+            return
         evt_cid = _clean_channel_id(event.chat_id)
-        if channel_id and evt_cid != int(channel_id):
+        if evt_cid != int(channel_id):
             return
 
         # Re-fetch target to respect is_active toggle at runtime
@@ -312,11 +323,20 @@ def _make_reaction_handler(target: dict):
             return
 
         msg_id = event.id
+        dispatch_key = (target_id, msg_id)
+        if dispatch_key in _dispatching:
+            return
+        _dispatching.add(dispatch_key)
         logger.info(f"[Reactions] Target {target_id} | new post msg_id={msg_id}")
 
         task = asyncio.create_task(_react_all_accounts(t, msg_id, channel_link))
         _background_tasks.add(task)
-        task.add_done_callback(_background_tasks.discard)
+
+        def _on_done(done_task: asyncio.Task) -> None:
+            _background_tasks.discard(done_task)
+            _dispatching.discard(dispatch_key)
+
+        task.add_done_callback(_on_done)
 
     return handler
 
