@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.5.1",
+        "date": "25/09/2026",
+        "title": "🛡️ Chặn triệt để AI tự chat giữa nick chính và nick phụ",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Khắc phục triệt để lỗi nick chính và nick phụ tự nhắn tin qua lại bằng cơ chế nhận diện định danh Telegram bền vững lưu vào database, fail-closed và chặn từ cả 3 lớp (event handler, generate_reply, send_message).",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Nhận diện tài khoản nội bộ bền vững bằng telegram_user_id trong DB",
+                "desc": "Trước đây kiểm tra nick nội bộ chỉ dựa trên _me_cache trong RAM; khi nick phụ bị tạm dừng/chưa kết nối, cache bị trống khiến AI nhầm là khách ngoài và tự trả lời. Giờ lưu telegram_user_id vào bảng accounts, đồng bộ từ session/get_me, truy vấn kết hợp cache 60s và cơ chế fail-closed (nếu lỗi kiểm tra thì chặn mặc định).",
+                "tag": "AI Follow-Up"
+            },
+            {
+                "type": "fix",
+                "title": "Chặn 3 lớp: Không bao giờ gửi AI cho bất kỳ nick nội bộ nào",
+                "desc": "Áp dụng hard guard ở cả hàm xử lý sự kiện tin nhắn đến, hàm sinh phản hồi AI và hàm gửi tin nhắn cuối cùng để ngăn hoàn toàn vòng lặp chat qua lại giữa các nick.",
+                "tag": "Safety"
+            }
+        ]
+    },
+    {
         "version": "v3.5.0",
         "date": "23/09/2026",
         "title": "⚡ Split Runtime & IPC Command Queue Architecture (Pha 1 & Pha 2)",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "STABLE",
         "summary": "Tách biệt tiến trình Web Dashboard và Telegram Background Worker. Tích hợp SQLite Command Queue (IPC) với cơ chế bảo vệ idempotency, lease timeout, crash recovery. Sửa triệt để lỗi spam warning Reaction Watcher.",
         "changes": [
             {

@@ -461,6 +461,8 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
                            new_status: str = "active", drip_stage: int | None = None) -> bool:
     from telegram_forum_inbox import get_send_lock
     async with get_send_lock(account_id, user_id):
+        if account_id == MAIN_ACCOUNT_ID or await is_internal_account_user(user_id):
+            return False
         chat = await db.get_followup_chat(account_id, user_id)
         if account_id == MAIN_ACCOUNT_ID or not chat or chat.get("status") != "active":
             return False
@@ -503,6 +505,18 @@ async def generate_and_send_ai_reply_for_chat(
     event: Any | None = None,
 ) -> bool:
     """Generate and send AI response for a chat session. Returns True if reply was sent."""
+    # 0. HARD GUARD: never let AI chat with another managed internal account.
+    if await is_internal_account_user(user_id):
+        logger.info(
+            "[AIFollowUp] 🛑 User %d is an internal managed account — AI auto-reply blocked.",
+            user_id,
+        )
+        try:
+            await db.update_followup_chat_status(account_id, user_id, "bot_ignored")
+        except Exception:
+            pass
+        return False
+
     # 0a. HARD GUARD: main account is human-only. AI must NEVER auto-reply on nick chính —
     # a sloppy AI reply there destroys the main account's credibility with KOLs.
     if account_id == MAIN_ACCOUNT_ID:
@@ -857,13 +871,54 @@ async def generate_and_send_ai_reply_for_chat(
             _pending_ai_sends.discard((account_id, user_id))
 
 
+# Cache of known internal Telegram user_ids populated from DB + runtime me_cache
+_internal_user_ids_cache: set[int] = set()
+_internal_user_ids_loaded_at: float = 0.0
+
+
+async def _get_all_internal_user_ids() -> set[int]:
+    """Return all Telegram user_ids for internal accounts, combining runtime
+    _me_cache and durable database telegram_user_id (with 60s TTL)."""
+    global _internal_user_ids_cache, _internal_user_ids_loaded_at
+    now = time.time()
+    runtime_ids = {
+        int(me["user_id"])
+        for me in tg._me_cache.values()
+        if me and me.get("user_id")
+    }
+    if now - _internal_user_ids_loaded_at > 60.0 or not _internal_user_ids_cache:
+        try:
+            db_ids = await db.get_all_internal_telegram_user_ids()
+            _internal_user_ids_cache = db_ids | runtime_ids
+            _internal_user_ids_loaded_at = now
+        except Exception as e:
+            logger.error("[AIFollowUp] Không xác minh được tài khoản nội bộ; chặn AI: %s", e)
+            raise
+    else:
+        _internal_user_ids_cache |= runtime_ids
+    return _internal_user_ids_cache
+
+
 def _is_internal_account_user(user_id: int) -> bool:
-    """True when user_id belongs to any Telegram account managed by this app."""
+    """Synchronous fast-path: checks runtime me_cache AND known internal user_ids cache."""
+    uid = int(user_id)
+    if uid in _internal_user_ids_cache:
+        return True
     return any(
-        int(me.get("user_id", 0)) == int(user_id)
+        int(me.get("user_id", 0)) == uid
         for me in tg._me_cache.values()
         if me and me.get("user_id")
     )
+
+
+async def is_internal_account_user(user_id: int) -> bool:
+    """Async complete check against DB + me_cache. Fails CLOSED: if internal identity
+    cannot be verified, treat the user as internal so AI never replies blindly."""
+    try:
+        all_ids = await _get_all_internal_user_ids()
+    except Exception:
+        return True
+    return int(user_id) in all_ids
 
 
 def _make_handler(account_id: int):
@@ -927,8 +982,8 @@ def _make_handler(account_id: int):
         sender_id = event.sender_id
 
         # Skip AI completely when two internal accounts (nick phụ / nick chính) message each other
-        if _is_internal_account_user(sender_id):
-            logger.debug("[AIFollowUp] Sender %d is internal managed account — skip AI", sender_id)
+        if await is_internal_account_user(sender_id):
+            logger.info("[AIFollowUp] 🛑 Sender %d is an internal managed account — skip AI completely", sender_id)
             return
 
         dedup_key = (account_id, sender_id, msg_id)

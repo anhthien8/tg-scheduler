@@ -435,9 +435,10 @@ async def start_client(account_id: int) -> bool:
                     "phone": me.phone or ""
                 }
                 logger.info(f"Account {account_id}: connected as @{me.username} (id={me.id})")
-                # Sync tên thật từ Telegram vào DB nếu đã đổi (tránh tên cũ gây nhầm lẫn)
+                # Sync ID và tên thật từ Telegram vào DB để nhận diện nick nội bộ bền vững
                 try:
                     import database as _db
+                    await _db.update_account_telegram_user_id(account_id, me.id)
                     real_name = " ".join(x for x in [me.first_name, me.last_name or ""] if x).strip()
                     if real_name:
                         acc = await _db.get_account(account_id)
@@ -445,7 +446,7 @@ async def start_client(account_id: int) -> bool:
                             await _db.update_account_name(account_id, real_name)
                             logger.info(f"Account {account_id}: name synced '{acc.get('name')}' → '{real_name}'")
                 except Exception as e:
-                    logger.debug(f"Account {account_id}: name sync skipped: {e}")
+                    logger.debug(f"Account {account_id}: identity sync skipped: {e}")
             except Exception as e:
                 logger.warning(f"Account {account_id}: Failed to get self details: {e}")
                 logger.info(f"Account {account_id}: connected (authorized)")
@@ -643,6 +644,11 @@ async def get_me(account_id: int, timeout: float = 3.0) -> dict | None:
                 "username": me.username or "",
                 "phone": me.phone or ""
             }
+            try:
+                import database as _db
+                await _db.update_account_telegram_user_id(account_id, me.id)
+            except Exception:
+                pass
             return _me_cache[account_id]
     except Exception as e:
         logger.debug(f"Account {account_id} get_me failed or timed out: {e}")

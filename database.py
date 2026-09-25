@@ -176,6 +176,7 @@ async def init_db():
                 paused_at TEXT,
                 pause_reason TEXT,
                 ai_agent_id INTEGER DEFAULT NULL,
+                telegram_user_id INTEGER DEFAULT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
@@ -438,6 +439,16 @@ async def init_db():
             await db.execute("ALTER TABLE accounts ADD COLUMN ai_agent_id INTEGER DEFAULT NULL")
         except Exception:
             pass
+
+        # Durable Telegram identity for internal-account loop prevention.
+        try:
+            await db.execute("ALTER TABLE accounts ADD COLUMN telegram_user_id INTEGER DEFAULT NULL")
+        except Exception:
+            pass
+        await db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_telegram_user_id "
+            "ON accounts(telegram_user_id) WHERE telegram_user_id IS NOT NULL"
+        )
 
         # Member lang_code & Campaign auto_translate_native columns
         try:
@@ -1139,6 +1150,29 @@ async def update_account_name(account_id: int, name: str):
             (name, account_id)
         )
         await conn.commit()
+
+
+async def update_account_telegram_user_id(account_id: int, telegram_user_id: int):
+    """Persist the Telegram user_id for an account — durable identity used to detect
+    internal accounts (nick chính / nick phụ) messaging each other, independent of
+    the in-memory _me_cache (which is empty for paused/disconnected accounts)."""
+    async with get_db() as conn:
+        await conn.execute(
+            "UPDATE accounts SET telegram_user_id = ? WHERE id = ?",
+            (telegram_user_id, account_id)
+        )
+        await conn.commit()
+
+
+async def get_all_internal_telegram_user_ids() -> set[int]:
+    """All known Telegram user_ids belonging to any managed account (including
+    paused/disconnected ones, via the durable telegram_user_id column)."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT telegram_user_id FROM accounts WHERE telegram_user_id IS NOT NULL"
+        )
+        rows = await cursor.fetchall()
+        return {row[0] for row in rows}
 
 
 async def update_account_login_status(account_id: int, is_logged_in: bool):
