@@ -45,6 +45,53 @@ async def test_callback_uses_get_message(monkeypatch):
     event.edit.assert_awaited_once()
 
 @pytest.mark.asyncio
+async def test_send_flow_text_handles_select_target_new_from_group(monkeypatch):
+    """_handle_send_flow_text must advance select_target_new→type_message
+    even when the event comes from a group/forum topic (not just private chat)."""
+    import command_bot as cb
+    accounts = [{"id": 1, "name": "TestAcc", "is_premium": False}]
+    monkeypatch.setattr(cb, '_get_managed_accounts', AsyncMock(return_value=accounts))
+    cb._STATES[9] = {"step": "select_target_new", "account_id": 1, "ts": __import__('time').time()}
+    respond_calls = []
+    event = SimpleNamespace(
+        sender_id=9,
+        raw_text="@targetkol",
+        is_group=True,
+        is_private=False,
+        respond=AsyncMock(side_effect=lambda *a, **kw: respond_calls.append(kw))
+    )
+    await cb._handle_send_flow_text(event)
+    assert cb._STATES[9]["step"] == "type_message"
+    assert cb._STATES[9]["target"] == "@targetkol"
+    assert len(respond_calls) == 1
+    assert respond_calls[0]["buttons"] is cb._CANCEL_BUTTONS
+    cb._STATES.pop(9, None)
+
+
+@pytest.mark.asyncio
+async def test_send_flow_text_handles_type_message_from_group(monkeypatch):
+    """_handle_send_flow_text must collect message and advance to confirm step
+    when admin types in a group/forum topic while in type_message state."""
+    import command_bot as cb
+    _show_confirm_calls = []
+    async def fake_show_confirm(event, state): _show_confirm_calls.append(state)
+    monkeypatch.setattr(cb, '_show_confirm', fake_show_confirm)
+    cb._STATES[9] = {"step": "type_message", "account_id": 1, "target": "@kol", "ts": __import__('time').time()}
+    event = SimpleNamespace(
+        sender_id=9,
+        raw_text="Xin chào KOL",
+        is_group=True,
+        is_private=False,
+        respond=AsyncMock()
+    )
+    await cb._handle_send_flow_text(event)
+    assert cb._STATES[9]["step"] == "confirm"
+    assert cb._STATES[9]["message"] == "Xin chào KOL"
+    assert len(_show_confirm_calls) == 1
+    cb._STATES.pop(9, None)
+
+
+@pytest.mark.asyncio
 async def test_captioned_media_is_rejected(monkeypatch):
     monkeypatch.setattr(cb, '_load_forum_config', AsyncMock(return_value=fx.ForumConfig(True, -1001, 1, {9})))
     monkeypatch.setattr(fx, 'prepare_reply', AsyncMock())

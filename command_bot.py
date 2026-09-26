@@ -248,6 +248,11 @@ def _register_handlers(client: TelegramClient):
     # ── Forum topic admin messages ──────────────────────────────────────────
     @client.on(events.NewMessage(func=lambda e: (e.is_group or getattr(e, "is_channel", False)) and not e.raw_text.startswith("/")))
     async def on_group_message(event):
+        # Command Bot flows can start inside a Forum topic. Consume the active
+        # state first; otherwise this text would be misrouted as a forum reply.
+        if _is_admin(event.sender_id) and _get_state(event.sender_id):
+            await _handle_send_flow_text(event)
+            return
         await _handle_forum_admin_message(event)
 
     # ── Plain text in send flow ─────────────────────────────────────────────
@@ -255,36 +260,7 @@ def _register_handlers(client: TelegramClient):
     async def on_plain_text(event):
         if not _check_admin(event):
             return
-        st = _get_state(event.sender_id)
-        if not st:
-            return
-        step = st.get("step")
-        if step == "type_message":
-            msg = event.raw_text.strip()
-            if not msg:
-                await event.respond("⚠️ Tin nhắn không được rỗng.")
-                return
-            st["message"] = msg
-            st["step"] = "confirm"
-            _set_state(event.sender_id, st)
-            await _show_confirm(event, st)
-        elif step == "select_target_new":
-            target = event.raw_text.strip()
-            if not target.startswith("@"):
-                target = "@" + target
-            st["target"] = target
-            st["step"] = "type_message"
-            _set_state(event.sender_id, st)
-            acc = next((a for a in await _get_managed_accounts()
-                        if a["id"] == st["account_id"]), None)
-            acc_name = acc["name"] if acc else f"Acc #{st['account_id']}"
-            await event.respond(
-                f"📝 Nhập nội dung tin nhắn:\n\n"
-                f"📤 Từ: **{acc_name}** → 🎯 **{target}**\n\n"
-                f"Gõ tin nhắn cần gửi (gửi 1 tin nhắn duy nhất):",
-                parse_mode="md",
-                buttons=_CANCEL_BUTTONS
-            )
+        await _handle_send_flow_text(event)
 
     # ── Callback queries (inline buttons) ───────────────────────────────────
     @client.on(events.CallbackQuery)
@@ -355,7 +331,8 @@ def _register_handlers(client: TelegramClient):
                         f"📝 Nhập username KOL cần gửi tin:\n\n"
                         f"📤 Từ: **{acc_name}**\n"
                         f"🎯 Gửi đến: (gõ @username hoặc user_id)",
-                        parse_mode="md"
+                        parse_mode="md",
+                        buttons=_CANCEL_BUTTONS
                     )
                 return
 
@@ -443,6 +420,51 @@ def _register_handlers(client: TelegramClient):
 # ════════════════════════════════════════════════════════════════════════════
 # FLOW IMPLEMENTATIONS
 # ════════════════════════════════════════════════════════════════════════════
+
+async def _reply_or_edit(event, text: str, buttons=None, parse_mode: str = "md"):
+    """Edit in place for button callbacks; send a new message for text events.
+
+    A NewMessage event carries the *admin's* message — bots cannot edit messages
+    they do not own, so calling event.edit() there fails silently and the flow stalls.
+    """
+    if hasattr(event, "data"):  # CallbackQuery — bot owns the message it attached buttons to
+        await event.edit(text, parse_mode=parse_mode, buttons=buttons)
+    else:
+        await event.respond(text, parse_mode=parse_mode, buttons=buttons)
+
+
+async def _handle_send_flow_text(event):
+    """Handle plain-text inputs for the send flow across both private chats and forum topics."""
+    st = _get_state(event.sender_id)
+    if not st:
+        return
+    step = st.get("step")
+    if step == "type_message":
+        msg = event.raw_text.strip()
+        if not msg:
+            await event.respond("⚠️ Tin nhắn không được rỗng.")
+            return
+        st["message"] = msg
+        st["step"] = "confirm"
+        _set_state(event.sender_id, st)
+        await _show_confirm(event, st)
+    elif step == "select_target_new":
+        target = event.raw_text.strip()
+        if not target.startswith("@"):
+            target = "@" + target
+        st["target"] = target
+        st["step"] = "type_message"
+        _set_state(event.sender_id, st)
+        acc = next((a for a in await _get_managed_accounts()
+                    if a["id"] == st["account_id"]), None)
+        acc_name = acc["name"] if acc else f"Acc #{st['account_id']}"
+        await event.respond(
+            f"📝 Nhập nội dung tin nhắn:\n\n"
+            f"📤 Từ: **{acc_name}** → 🎯 **{target}**\n\n"
+            f"Gõ tin nhắn cần gửi (gửi 1 tin nhắn duy nhất):",
+            parse_mode="md",
+            buttons=_CANCEL_BUTTONS
+        )
 
 async def _start_send_flow(event, target: str | None):
     """Step 1: Pick account."""
@@ -538,12 +560,7 @@ async def _show_target_picker(event, state: dict):
     else:
         text += "\n_Chưa có lịch sử chat. Nhập username mới._\n"
 
-    if hasattr(event, "edit"):
-        await event.edit(text, parse_mode="md",
-                         buttons=buttons)
-    else:
-        await event.respond(text, parse_mode="md",
-                            buttons=buttons)
+    await _reply_or_edit(event, text, buttons=buttons, parse_mode="md")
 
 
 async def _show_confirm(event, state: dict):
@@ -569,12 +586,7 @@ async def _show_confirm(event, state: dict):
         [Button.inline("❌ Hủy", data="send:cancel")],
     ]
 
-    if hasattr(event, "edit"):
-        await event.edit(text, parse_mode="md",
-                         buttons=buttons)
-    else:
-        await event.respond(text, parse_mode="md",
-                            buttons=buttons)
+    await _reply_or_edit(event, text, buttons=buttons, parse_mode="md")
 
 
 async def _execute_send(event, state: dict):
