@@ -31,7 +31,26 @@ class ConnectionPool:
 
     async def _create_connection(self):
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        conn = await aiosqlite.connect(self.db_path)
+        # aiosqlite.connect() spawns a worker thread that finishes opening the
+        # file even if this await is cancelled. Without a guard the resulting
+        # Connection is orphaned: its thread stays alive and Windows keeps the
+        # .db file locked. Shield the connect, and on cancellation wait for it
+        # to finish so the connection can be closed properly.
+        connect_task = asyncio.ensure_future(aiosqlite.connect(self.db_path))
+        try:
+            conn = await asyncio.shield(connect_task)
+        except asyncio.CancelledError:
+            conn = None
+            try:
+                conn = await asyncio.shield(connect_task)
+            except Exception:
+                pass
+            if conn is not None:
+                try:
+                    await asyncio.shield(conn.close())
+                except Exception:
+                    pass
+            raise
         initialized = False
         try:
             await conn.execute("PRAGMA journal_mode=WAL")

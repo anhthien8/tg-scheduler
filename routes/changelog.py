@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.5.3",
+        "date": "26/09/2026",
+        "title": "🧹 Đóng connection SQLite an toàn khi tác vụ bị hủy",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Ngăn rò rỉ aiosqlite worker thread và khóa file database khi tác vụ bị hủy đúng lúc pool đang mở connection mới.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Không còn connection mồ côi khi cancellation giữa lúc connect",
+                "desc": "Pool bảo vệ tiến trình mở connection khỏi cancellation, chờ kết nối hoàn tất rồi đóng đúng lifecycle trước khi phát lại CancelledError. Semaphore permit vẫn được trả và file database không còn bị khóa trên Windows.",
+                "tag": "Database"
+            },
+            {
+                "type": "improvement",
+                "title": "Thêm regression test cancellation xác định",
+                "desc": "Test kiểm chứng connection thật đã mở được đóng, permit được trả và database có thể xóa ngay sau cancellation.",
+                "tag": "QC"
+            }
+        ]
+    },
+    {
         "version": "v3.5.2",
         "date": "26/09/2026",
         "title": "🧭 Thêm nút Hủy trong luồng gửi tin Command Bot",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Bổ sung nút Hủy tại mọi bước nhập nội dung tin nhắn để admin thoát luồng gửi ngay, không phải chờ state hết hạn.",
         "changes": [
             {
