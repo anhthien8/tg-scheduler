@@ -29,6 +29,9 @@ _admin_ids: set[int] = set()
 _STATES: dict[int, dict] = {}       # user_id → state machine
 _STATE_TTL = 300                     # 5 minutes
 
+# Nút Hủy dùng chung cho bước nhập nội dung tin nhắn (handler: data == "send:cancel").
+_CANCEL_BUTTONS = [[Button.inline("❌ Hủy", data="send:cancel")]]
+
 # ── Templates for quick send ────────────────────────────────────────────────
 TEMPLATES = {
     "uid_received": "Team đã nhận UID và thông tin của bạn. Mình sẽ kiểm tra và phản hồi sớm nhất có thể 👍",
@@ -279,7 +282,8 @@ def _register_handlers(client: TelegramClient):
                 f"📝 Nhập nội dung tin nhắn:\n\n"
                 f"📤 Từ: **{acc_name}** → 🎯 **{target}**\n\n"
                 f"Gõ tin nhắn cần gửi (gửi 1 tin nhắn duy nhất):",
-                parse_mode="md"
+                parse_mode="md",
+                buttons=_CANCEL_BUTTONS
             )
 
     # ── Callback queries (inline buttons) ───────────────────────────────────
@@ -372,7 +376,8 @@ def _register_handlers(client: TelegramClient):
                         f"📝 Nhập nội dung tin nhắn:\n\n"
                         f"📤 Từ: **{acc_name}** → 🎯 **{target}**\n\n"
                         f"Gõ tin nhắn cần gửi:",
-                        parse_mode="md"
+                        parse_mode="md",
+                        buttons=_CANCEL_BUTTONS
                     )
                 return
 
@@ -388,7 +393,7 @@ def _register_handlers(client: TelegramClient):
                 elif tpl_key == "custom":
                     st["step"] = "type_message"
                     _set_state(uid, st)
-                    await event.edit("📝 Gõ nội dung tin nhắn tùy chỉnh:")
+                    await event.edit("📝 Gõ nội dung tin nhắn tùy chỉnh:", buttons=_CANCEL_BUTTONS)
                 return
 
             # ── Send flow: confirm / cancel / edit ──
@@ -403,7 +408,7 @@ def _register_handlers(client: TelegramClient):
                 if st:
                     st["step"] = "type_message"
                     _set_state(uid, st)
-                    await event.edit("📝 Gõ lại nội dung tin nhắn:")
+                    await event.edit("📝 Gõ lại nội dung tin nhắn:", buttons=_CANCEL_BUTTONS)
                 return
 
             if data == "send:cancel":
@@ -493,14 +498,16 @@ async def _show_target_picker(event, state: dict):
                 f"📝 Nhập nội dung tin nhắn:\n\n"
                 f"📤 Từ: **{acc_name}** → 🎯 **{state['target']}**\n\n"
                 f"Gõ tin nhắn cần gửi:",
-                parse_mode="md"
+                parse_mode="md",
+                buttons=_CANCEL_BUTTONS
             )
         else:
             await event.respond(
                 f"📝 Nhập nội dung tin nhắn:\n\n"
                 f"📤 Từ: **{acc_name}** → 🎯 **{state['target']}**\n\n"
                 f"Gõ tin nhắn cần gửi:",
-                parse_mode="md"
+                parse_mode="md",
+                buttons=_CANCEL_BUTTONS
             )
         return
 

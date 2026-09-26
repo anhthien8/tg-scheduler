@@ -8,11 +8,27 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.5.2",
+        "date": "26/09/2026",
+        "title": "🧭 Thêm nút Hủy trong luồng gửi tin Command Bot",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Bổ sung nút Hủy tại mọi bước nhập nội dung tin nhắn để admin thoát luồng gửi ngay, không phải chờ state hết hạn.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Nút Hủy luôn hiển thị khi bot chờ nhập nội dung",
+                "desc": "Áp dụng cho gửi tới username mới, target có sẵn, template tùy chỉnh và sửa lại nội dung. Nút dùng handler send:cancel hiện có để xóa state an toàn.",
+                "tag": "Command Bot"
+            }
+        ]
+    },
+    {
         "version": "v3.5.1",
         "date": "25/09/2026",
         "title": "🛡️ Chặn triệt để AI tự chat giữa nick chính và nick phụ",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Khắc phục triệt để lỗi nick chính và nick phụ tự nhắn tin qua lại bằng cơ chế nhận diện định danh Telegram bền vững lưu vào database, fail-closed và chặn từ cả 3 lớp (event handler, generate_reply, send_message).",
         "changes": [
             {
