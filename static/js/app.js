@@ -634,7 +634,7 @@ document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'
 const viewEl=document.getElementById(`view-${page}`);
 if(viewEl)viewEl.classList.remove('hidden');
 
-if(page==='dashboard')this.loadDashboard();else if(page==='schedules')this.loadSchedules();else if(page==='accounts')this.loadAccounts();else if(page==='logs')this.loadLogs();else if(page==='watchers')this.loadWatchers();else if(page==='watcher-logs')this.loadWatcherLogs();else if(page==='channels')this.loadChannels();else if(page==='settings')this.loadSettings();else if(page==='blacklist')this.loadBlacklist();else if(page==='reactions')Reactions.init();else if(page==='members')Members.init()},
+if(page==='dashboard')this.loadDashboard();else if(page==='schedules')this.loadSchedules();else if(page==='accounts')this.loadAccounts();else if(page==='logs')this.loadLogs();else if(page==='watchers')this.loadWatchers();else if(page==='watcher-logs')this.loadWatcherLogs();else if(page==='settings')this.loadSettings();else if(page==='blacklist')this.loadBlacklist();else if(page==='reactions')Reactions.init();else if(page==='members')Members.init()},
 
 
 async loadDashboard(){try{
@@ -2439,7 +2439,8 @@ App._chFiltered = [];
 App._chSelected = new Set();
 
 App._chAccountId = null;
-
+App._dialogsCache = new Map();
+App._dialogsRequests = new Map();
 
 
 App._populateChAccountSelect = async function() {
@@ -2447,6 +2448,9 @@ App._populateChAccountSelect = async function() {
   const sel = document.getElementById('ch-account-select');
 
   if (!sel) return;
+
+  // Nhớ account đang chọn trước khi rebuild <select> (innerHTML rebuild xoá sel.value)
+  const prevSelected = sel.value || (App._chAccountId != null ? String(App._chAccountId) : '');
 
   if (!App._accounts || App._accounts.length === 0) {
 
@@ -2470,7 +2474,9 @@ App._populateChAccountSelect = async function() {
 
   }).join('');
 
-  if (accounts.length > 0 && !sel.value) sel.value = accounts[0].id;
+  // Giữ account đã chọn nếu vẫn còn trong danh sách, không thì fallback account đầu tiên
+  if (accounts.some(a => String(a.id) === prevSelected)) sel.value = prevSelected;
+  else if (accounts.length > 0) sel.value = accounts[0].id;
 
   App.loadChannels();
 
@@ -2478,7 +2484,39 @@ App._populateChAccountSelect = async function() {
 
 
 
-App.loadChannels = async function() {
+// ponytail: cache TTL 60s, stale-while-revalidate. Upgrade to indexedDB if data > 5MB.
+App._DIALOGS_TTL = 60000;
+// Epoch tăng mỗi lần mutation (leave/delete) → response bay trước đó bị bỏ, không hồi sinh item
+App._dialogsEpoch = new Map();
+
+App._getDialogsEpoch = function(accountId) {
+  return App._dialogsEpoch.get(accountId) || 0;
+};
+
+App._fetchDialogs = async function(accountId, force) {
+  // Dedupe in-flight: nếu đang fetch cho cùng account → trả cùng promise.
+  // force=true (refresh explicit / sau mutation) bỏ qua dedupe vì request đang bay
+  // có thể mang dữ liệu trước mutation → sẽ hồi sinh item đã xoá.
+  const existing = App._dialogsRequests.get(accountId);
+  if (existing && !force) return existing;
+
+  const p = (async () => {
+    const res = await fetch(`/api/chats?account_id=${accountId}`);
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try { const body = await res.json(); detail = body.detail || body.error || detail; } catch(_){}
+      throw new Error(detail);
+    }
+    const data = await res.json();
+    if (!data || !Array.isArray(data.chats)) throw new Error('Schema không hợp lệ: thiếu chats[]');
+    return data.chats;
+  })();
+
+  App._dialogsRequests.set(accountId, p);
+  try { return await p; } finally { App._dialogsRequests.delete(accountId); }
+};
+
+App.loadChannels = async function(force) {
 
   const sel = document.getElementById('ch-account-select');
 
@@ -2493,6 +2531,27 @@ App.loadChannels = async function() {
   App._chSelected.clear();
 
   App._updateActionBar();
+
+  // Cache hit: hiển thị stale ngay, refresh nền nếu hết TTL
+  const cached = App._dialogsCache.get(accountId);
+  const now = Date.now();
+  if (cached && !force) {
+    App._chChannels = cached.data;
+    App._filterChannels();
+    if (now - cached.ts < App._DIALOGS_TTL) return; // fresh → done
+    // stale → refresh nền, KHÔNG show loading spinner
+    const epochAtStart = App._getDialogsEpoch(accountId);
+    App._fetchDialogs(accountId).then(chats => {
+      // Guard: account có thể đã đổi trong lúc chờ
+      if (App._chAccountId !== accountId) return;
+      // Guard: mutation (leave/delete) xảy ra trong lúc chờ → bỏ response cũ, không hồi sinh item
+      if (App._getDialogsEpoch(accountId) !== epochAtStart) return;
+      App._dialogsCache.set(accountId, {data: chats, ts: Date.now()});
+      App._chChannels = chats;
+      App._filterChannels();
+    }).catch(() => {}); // silent background refresh failure
+    return;
+  }
 
 
 
@@ -2514,20 +2573,41 @@ App.loadChannels = async function() {
 
   try {
 
-    const res = await fetch(`/api/chats?account_id=${accountId}`);
+    const epochAtStart = App._getDialogsEpoch(accountId);
+    const chats = await App._fetchDialogs(accountId, force);
+    // Guard: account đã đổi trong lúc await → bỏ kết quả
+    if (App._chAccountId !== accountId) return;
+    // Guard: mutation xảy ra trong lúc await → bỏ response cũ, không hồi sinh item
+    if (App._getDialogsEpoch(accountId) !== epochAtStart) return;
+    App._dialogsCache.set(accountId, {data: chats, ts: Date.now()});
 
-    const data = await res.json();
-
-    App._chChannels = data.chats || [];
+    App._chChannels = chats;
 
     App._filterChannels();
 
   } catch(e) {
 
+    if (App._chAccountId !== accountId) return;
     (document.getElementById('ch-loading') || me_dummy).textContent = 'L\u1ED7i: ' + e.message;
 
   }
 
+};
+
+// Refresh explicit: bỏ qua cache kể cả còn fresh.
+// index.html line ~335 cần đổi onclick="App.loadChannels()" → "App.refreshChannels()" (parent sở hữu file đó)
+App.refreshChannels = function() {
+  const sel = document.getElementById('ch-account-select');
+  const accountId = sel ? parseInt(sel.value) : null;
+  if (accountId) App._dialogsCache.delete(accountId);
+  return App.loadChannels(true);
+};
+
+// Invalidate cache của 1 account (gọi sau leave/delete thành công)
+// Tăng epoch → mọi in-flight response bay trước đó sẽ bị bỏ, không hồi sinh item
+App._invalidateDialogsCache = function(accountId) {
+  App._dialogsCache.delete(accountId);
+  App._dialogsEpoch.set(accountId, (App._dialogsEpoch.get(accountId) || 0) + 1);
 };
 
 
@@ -2797,6 +2877,7 @@ App.leaveOne = async function(chatId, chatTitle, chatType = '') {
       if (row) row.remove();
 
       App._chChannels = App._chChannels.filter(c => c.chat_id !== chatId);
+      App._invalidateDialogsCache(App._chAccountId);
 
       App._chSelected.delete(chatId);
 
@@ -2877,6 +2958,7 @@ App.leaveSelected = async function() {
         if (row) row.remove();
 
         App._chChannels = App._chChannels.filter(c => c.chat_id !== chatId);
+        App._invalidateDialogsCache(App._chAccountId);
 
         successCount++;
 
@@ -3579,12 +3661,9 @@ Object.assign(App, {
   _inboxHasMore: false,
 
   // ── Badge polling ──────────────────────────────────────────────
-  _inboxBadgeTimer: null,
-
   startInboxBadgePolling(){
-    if(this._inboxBadgeTimer) return;
+    if(Polling.isActive('inbox:badge')) return;
     const poll = async () => {
-      if(document.hidden) return; // Skip polling when tab is inactive
       try{
         const r = await fetch('/api/inbox/unread-count');
         const d = await r.json();
@@ -3598,8 +3677,8 @@ Object.assign(App, {
         }
       } catch{}
     };
-    poll();
-    this._inboxBadgeTimer = setInterval(poll, 10000);
+    Polling.start('inbox:badge', poll, 10000);
+    Polling.run('inbox:badge');
   },
 
   async _populateInboxAccountFilter() {
@@ -3731,8 +3810,7 @@ Object.assign(App, {
       if(nameCell) nameCell.style.fontWeight = '400';
     }
     // Refresh badge
-    this.startInboxBadgePolling && clearInterval(this._inboxBadgeTimer);
-    this._inboxBadgeTimer = null;
+    if (Polling.isActive('inbox:badge')) Polling.run('inbox:badge');
     this.startInboxBadgePolling();
   },
 

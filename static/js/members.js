@@ -11,8 +11,6 @@ const Members = {
   _groupsCache: {},
   _lastCampaignsUpdate: null,
   _lastInviteCampaignsUpdate: null,
-  _campaignPollInterval: null,
-  _inviteCampaignPollInterval: null,
   _deepCrawlPollInterval: 3000,
   _deepCrawlPrevState: null,
   _editingInviteCampaignId: null,
@@ -21,14 +19,8 @@ const Members = {
   async init() {
     this._lastCampaignsUpdate = null;
     this._lastInviteCampaignsUpdate = null;
-    if (this._campaignPollInterval) {
-      clearInterval(this._campaignPollInterval);
-      this._campaignPollInterval = null;
-    }
-    if (this._inviteCampaignPollInterval) {
-      clearInterval(this._inviteCampaignPollInterval);
-      this._inviteCampaignPollInterval = null;
-    }
+    Polling.stop('members:campaigns');
+    Polling.stop('members:inviteCampaigns');
     await Promise.all([
       this.loadScrapeJobs(),
       this.loadCampaigns(),
@@ -289,10 +281,9 @@ const Members = {
   },
 
   // ── Poll Batch Progress ──
-  _batchPollTimer: null,
   async _pollBatchProgress(batchJobId) {
+    let finished = false;
     const poll = async () => {
-      if (document.hidden) return; // Skip polling when tab is inactive
       try {
         const r = await MembersAPI.getBatchProgress(batchJobId);
 
@@ -328,8 +319,8 @@ const Members = {
 
         // Stop polling when done
         if (r.status === 'done') {
-          clearInterval(this._batchPollTimer);
-          this._batchPollTimer = null;
+          finished = true;
+          Polling.stop('members:batchProgress');
           const btn = document.getElementById('ms-btn-batch-scrape');
           btn.disabled = false;
           btn.textContent = '🚀 Bắt đầu cào hàng loạt';
@@ -344,7 +335,7 @@ const Members = {
 
     // Poll immediately then every 5 seconds
     await poll();
-    this._batchPollTimer = setInterval(poll, 5000);
+    if (!finished) Polling.start('members:batchProgress', poll, 5000);
   },
 
   // ── Load Scrape Jobs ──
@@ -724,21 +715,17 @@ const Members = {
   },
 
   _pollCampaign(id) {
-    if (this._campaignPollInterval) return;
+    if (Polling.isActive('members:campaigns')) return;
 
-    this._campaignPollInterval = setInterval(async () => {
-      if (document.hidden) return; // Skip polling when tab is inactive
+    Polling.start('members:campaigns', async () => {
       try {
         await this.loadCampaigns();
-        
         const hasRunning = this._campaigns.some(c => c.status === 'running');
         if (!hasRunning) {
-          clearInterval(this._campaignPollInterval);
-          this._campaignPollInterval = null;
+          Polling.stop('members:campaigns');
         }
       } catch (e) {
-        clearInterval(this._campaignPollInterval);
-        this._campaignPollInterval = null;
+        Polling.stop('members:campaigns');
       }
     }, 10000);
   },
@@ -2758,21 +2745,17 @@ const Members = {
   },
 
   _pollInviteCampaign() {
-    if (this._inviteCampaignPollInterval) return;
+    if (Polling.isActive('members:inviteCampaigns')) return;
 
-    this._inviteCampaignPollInterval = setInterval(async () => {
-      if (document.hidden) return; // Skip polling when tab is inactive
+    Polling.start('members:inviteCampaigns', async () => {
       try {
         await this.loadInviteCampaigns();
-        
         const hasRunning = this._inviteCampaigns.some(c => c.status === 'running');
         if (!hasRunning) {
-          clearInterval(this._inviteCampaignPollInterval);
-          this._inviteCampaignPollInterval = null;
+          Polling.stop('members:inviteCampaigns');
         }
       } catch (e) {
-        clearInterval(this._inviteCampaignPollInterval);
-        this._inviteCampaignPollInterval = null;
+        Polling.stop('members:inviteCampaigns');
       }
     }, 10000);
   },

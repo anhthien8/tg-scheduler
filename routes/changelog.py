@@ -8,11 +8,51 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.5.4",
+        "date": "26/09/2026",
+        "title": "⚡ Tối ưu hiệu năng: Channels cache + Polling scheduler tập trung",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Trang Channels không còn lag 1–2 giây khi cold-load. Polling timer phân tán thay bằng scheduler chung, pause khi tab ẩn, chống overlap per-job.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Channels: stale-while-revalidate cache 60 giây",
+                "desc": "Kết quả get_dialogs được cache per-account. Lần thứ 2 trở đi hiển thị tức thì (~5ms thay vì 1–2s). Khi cache hết TTL, dữ liệu cũ hiện ngay + refresh nền không chặn UI.",
+                "tag": "Performance"
+            },
+            {
+                "type": "improvement",
+                "title": "Channels: dedupe in-flight + epoch guard",
+                "desc": "Nhiều request cùng account gộp thành 1 fetch. Epoch guard ngăn response cũ (bay trước lệnh leave/delete) hồi sinh item đã xoá.",
+                "tag": "Performance"
+            },
+            {
+                "type": "fix",
+                "title": "Fix double load khi navigate() sang Channels",
+                "desc": "navigate() không còn gọi loadChannels() trùng với _populateChAccountSelect(). Account đã chọn được giữ nguyên sau khi rebuild danh sách.",
+                "tag": "Bug Fix"
+            },
+            {
+                "type": "improvement",
+                "title": "Polling scheduler tập trung (polling.js)",
+                "desc": "Thay 4 setInterval rải rác (batch scrape 5s, campaign 10s, invite campaign 10s, inbox badge 10s) bằng 1 shared scheduler. Tự pause khi document.hidden, chống overlap per-job, stop/restart an toàn.",
+                "tag": "Performance"
+            },
+            {
+                "type": "fix",
+                "title": "Fix bug: badge inbox bị dừng vĩnh viễn sau lần mark-read đầu tiên",
+                "desc": "Code cũ clearInterval sau mỗi lần read mà không restart — badge ngừng cập nhật. Nay dùng Polling.run() để trigger refresh ngay, không ngắt scheduler.",
+                "tag": "Bug Fix"
+            }
+        ]
+    },
+    {
         "version": "v3.5.3",
         "date": "26/09/2026",
         "title": "🧹 Đóng connection SQLite an toàn khi tác vụ bị hủy",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Ngăn rò rỉ aiosqlite worker thread và khóa file database khi tác vụ bị hủy đúng lúc pool đang mở connection mới.",
         "changes": [
             {
