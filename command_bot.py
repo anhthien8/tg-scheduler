@@ -12,14 +12,13 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from telethon import TelegramClient, events, Button
-from telethon.tl.types import BotCommand, BotCommandScopeDefault
+from telethon import Button, TelegramClient, events
 from telethon.tl.functions.bots import SetBotCommandsRequest
+from telethon.tl.types import BotCommand, BotCommandScopeDefault
 
 import database as db
 import telegram_client as tg
 import telegram_forum_inbox as fx
-
 
 logger = logging.getLogger("tg-scheduler.command_bot")
 
@@ -565,7 +564,6 @@ async def _show_target_picker(event, state: dict):
 
 async def _show_confirm(event, state: dict):
     """Step 4: Preview and confirm."""
-    uid = event.sender_id
     acc = next((a for a in await _get_managed_accounts()
                 if a["id"] == state["account_id"]), None)
     acc_name = acc["name"] if acc else f"Acc #{state['account_id']}"
@@ -608,7 +606,7 @@ async def _execute_send(event, state: dict):
 
     try:
         entity = await client.get_entity(target)
-        sent_msg = await client.send_message(entity, message)
+        await client.send_message(entity, message)
         _clear_state(uid)
 
         acc = next((a for a in await _get_managed_accounts()
@@ -843,7 +841,7 @@ async def _handle_resume(event, cid: int):
     try:
         # Chống gửi trùng: lock serialize check-and-start; 2 lệnh /resume đồng thời
         # không thể cùng vượt qua check rồi tạo 2 task
-        from routes.members import _run_campaign, _active_campaigns, _active_campaign_lock
+        from routes.members import _active_campaign_lock, _active_campaigns, _run_campaign
         async with _active_campaign_lock:
             existing = _active_campaigns.get(cid)
             if existing is True or (isinstance(existing, asyncio.Task) and not existing.done()):
@@ -958,8 +956,9 @@ class _TelethonForumBot:
         self._client = client
 
     async def create_forum_topic(self, group_id: int, title: str) -> int:
-        from telethon.tl.functions.channels import CreateForumTopicRequest
         import random as _random
+
+        from telethon.tl.functions.channels import CreateForumTopicRequest
         entity = await self._client.get_entity(group_id)
         result = await self._client(CreateForumTopicRequest(
             channel=entity, title=title, random_id=_random.randint(1, 2**62)))
@@ -1124,7 +1123,7 @@ async def send_handover_alert(account_name: str, sender_username: str,
 
             buttons = [
                 [Button.inline("📤 Gửi tin", data=f"sel_tgt:recent:@{sender_username}")],
-                [Button.inline("👤 Xem KOL", data=f"nav:home")],
+                [Button.inline("👤 Xem KOL", data="nav:home")],
             ]
 
             await _bot.send_message(
@@ -1184,7 +1183,7 @@ async def start_command_bot():
         prev_token_id = None
         try:
             if os.path.exists(token_marker):
-                with open(token_marker, "r", encoding="utf-8") as f:
+                with open(token_marker, encoding="utf-8") as f:
                     prev_token_id = f.read().strip()
         except Exception:
             pass

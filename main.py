@@ -1,13 +1,11 @@
 """
 Main entry point - starts FastAPI + multi-account Telethon + APScheduler.
 """
-import os
-import sys
-import secrets
 import asyncio
-import subprocess
-import signal
 import logging
+import os
+import secrets
+import sys
 
 # Ensure stdout and stderr are not None when running via pythonw.exe or Windows background tasks
 if sys.stdout is None:
@@ -16,19 +14,21 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8", errors="ignore")
 
 from contextlib import asynccontextmanager
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, Security, HTTPException, Depends
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi.security.api_key import APIKeyHeader
+import uvicorn
+from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from starlette.middleware.gzip import GZipResponder, IdentityResponder
+from fastapi.responses import FileResponse
+from fastapi.security.api_key import APIKeyHeader
+from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
-import uvicorn
+from starlette.middleware.gzip import GZipResponder, IdentityResponder
+
 
 class CacheControlledStaticFiles(StaticFiles):
     def file_response(self, *args, **kwargs):
@@ -44,23 +44,22 @@ if TG_RUNTIME_MODE not in ("combined", "web"):
 
 # Web mode deliberately imports only DB/read-only routers. Telegram-backed routes are
 # rejected below until Phase 2 adds IPC commands; never report a mutation as accepted.
-from routes import logs, settings, blacklist, analytics
-from routes import discord as discord_routes
 from routes import ai_agents as ai_agents_routes
+from routes import analytics, blacklist, logs, settings
 from routes import changelog as changelog_routes
+from routes import discord as discord_routes
 from routes import ipc as ipc_routes
 
 if TG_RUNTIME_MODE == "combined":
-    import telegram_client as tg
-    import scheduler as sch
-    import message_queue as mq
-    import keyword_watcher as kw
-    import reaction_watcher as rw
     import dm_reply_tracker as drt
+    import keyword_watcher as kw
     import kol_channel_watcher as kcw
-    from routes import auth, chats, schedules, messages, watchers, reactions, inbox, members, proxy, invite
+    import message_queue as mq
+    import reaction_watcher as rw
+    import scheduler as sch
+    import telegram_client as tg
+    from routes import ai_followup, auth, chats, inbox, invite, members, messages, proxy, reactions, schedules, watchers
     from routes import warmup as warmup_routes
-    from routes import ai_followup
 else:
     tg = sch = mq = kw = rw = drt = kcw = None
 

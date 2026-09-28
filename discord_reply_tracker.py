@@ -18,7 +18,6 @@ to prevent double-insertion within a session.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 

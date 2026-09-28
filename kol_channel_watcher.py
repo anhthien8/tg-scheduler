@@ -23,7 +23,7 @@ import re
 
 import database as db
 import telegram_client as tg
-from dm_reply_tracker import personalize_weex_links, contains_weex_link
+from dm_reply_tracker import contains_weex_link, personalize_weex_links
 
 logger = logging.getLogger("tg-scheduler.kol_channel")
 

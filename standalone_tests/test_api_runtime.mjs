@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const SOURCE = fs.readFileSync(new URL('./static/js/api.js', import.meta.url), 'utf8');
+const SOURCE = fs.readFileSync(new URL('../static/js/api.js', import.meta.url), 'utf8');
 
 function makeSandbox({ routes }) {
   const calls = [];

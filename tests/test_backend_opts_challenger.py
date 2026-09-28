@@ -1,9 +1,11 @@
-import pytest
 import time
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
-from main import app
+
 import database as db
+from main import app
 
 pytestmark = pytest.mark.asyncio
 

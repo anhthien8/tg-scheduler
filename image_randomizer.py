@@ -3,10 +3,9 @@ Image Randomization Utility
 Slightly modifies images before each send to change their hash/fingerprint,
 preventing Telegram from detecting mass-sent identical media.
 """
-import io
+import logging
 import os
 import random
-import logging
 import tempfile
 
 logger = logging.getLogger("tg-scheduler.image_randomizer")

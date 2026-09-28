@@ -3,10 +3,11 @@ Discord Bot Management API Routes
 ──────────────────────────────────
 Bot CRUD, connect/disconnect, guild listing, watcher management.
 """
+import logging
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
-import logging
 
 import database as db
 
@@ -105,10 +106,11 @@ async def connect_discord_bot(bot_id: int):
 
         # Register handlers on this newly connected bot
         try:
+            import json
+
+            import discord_reaction_watcher as drw
             import discord_reply_tracker as drt_discord
             import discord_watcher as dw
-            import discord_reaction_watcher as drw
-            import json
 
             # Set adapters in case they weren't set
             dw.set_adapter(adapter)
@@ -191,7 +193,6 @@ async def list_discord_watchers():
 @router.post("/watchers")
 async def create_discord_watcher(payload: DiscordWatcherPayload):
     """Create a Discord keyword watcher."""
-    import json
     watcher_data = {
         "name": payload.name,
         "sender_account_ids": payload.sender_bot_ids,

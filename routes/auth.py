@@ -1,15 +1,17 @@
 """
 Authentication & Account management routes.
 """
-import os
 import logging
+import os
 from typing import Optional
-from pydantic import BaseModel
+
 from fastapi import APIRouter, HTTPException
-from models import SendCodeRequest, VerifyCodeRequest, AccountCreate
-import telegram_client as tg
+from pydantic import BaseModel
+
 import database as db
 import scheduler as sch
+import telegram_client as tg
+from models import AccountCreate, SendCodeRequest, VerifyCodeRequest
 
 logger = logging.getLogger("tg-scheduler")
 router = APIRouter(prefix="/api/auth", tags=["auth"])

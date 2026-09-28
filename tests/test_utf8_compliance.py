@@ -1,7 +1,9 @@
 import os
 import re
 import sqlite3
+
 import pytest
+
 
 def test_static_html_encoding():
     """Verify that static/index.html is valid UTF-8 and check for HTML entities or raw Vietnamese chars."""
@@ -10,7 +12,7 @@ def test_static_html_encoding():
     
     # 1. Verify we can read it as UTF-8
     try:
-        with open(html_path, "r", encoding="utf-8") as f:
+        with open(html_path, encoding="utf-8") as f:
             content = f.read()
     except UnicodeDecodeError as e:
         pytest.fail(f"index.html is not valid UTF-8: {e}")
@@ -43,7 +45,7 @@ def test_python_files_open_calls():
             if file.endswith(".py"):
                 path = os.path.join(root, file)
                 try:
-                    with open(path, "r", encoding="utf-8") as f:
+                    with open(path, encoding="utf-8") as f:
                         lines = f.readlines()
                 except Exception as e:
                     print(f"[WARN] Failed to read {path}: {e}")

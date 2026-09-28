@@ -2,15 +2,13 @@
 Warmup / Group Seeding API routes.
 """
 import asyncio
-import json
 import logging
-
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
-from pydantic import BaseModel
 from typing import Optional
 
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from pydantic import BaseModel
+
 import database as db
-import telegram_client as tg
 import warmup_engine
 
 logger = logging.getLogger("tg-scheduler.warmup")

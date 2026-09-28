@@ -1,7 +1,9 @@
-import pytest
 import asyncio
 import random
 import time
+
+import pytest
+
 import database as db
 
 # Mark all test functions in this module as async

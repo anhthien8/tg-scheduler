@@ -11,16 +11,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-import time as _time
 from typing import Any
-
-import database as db
-import telegram_client as tg
 
 from telethon import events
 from telethon.tl.functions.channels import JoinChannelRequest
-from telethon.tl.functions.messages import ImportChatInviteRequest, SendReactionRequest, GetMessagesViewsRequest
+from telethon.tl.functions.messages import GetMessagesViewsRequest, ImportChatInviteRequest, SendReactionRequest
 from telethon.tl.types import ReactionEmoji
+
+import database as db
+import telegram_client as tg
 
 logger = logging.getLogger("tg-scheduler.reactions")
 

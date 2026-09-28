@@ -1,16 +1,20 @@
 """Offline regression checks: python -m unittest test_reaction_watcher_safety -v."""
 import asyncio
 import importlib.util
-from pathlib import Path
 import sys
-from types import SimpleNamespace, ModuleType
 import unittest
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
+# This test lives in standalone_tests/ but loads reaction_watcher.py from the
+# repo root (its source under test).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def load_watcher():
     spec = importlib.util.spec_from_file_location(
-        "isolated_reaction_watcher", Path(__file__).with_name("reaction_watcher.py")
+        "isolated_reaction_watcher", _REPO_ROOT / "reaction_watcher.py"
     )
     module = importlib.util.module_from_spec(spec)
     # Never import production DB/client/config or open sessions.

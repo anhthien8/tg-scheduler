@@ -1,9 +1,11 @@
 import json
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from fastapi import HTTPException
-import database as db
+
 import ai_remix as ai_rmx
+import database as db
 
 pytestmark = pytest.mark.asyncio
 

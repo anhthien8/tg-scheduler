@@ -1,12 +1,13 @@
+import asyncio
+import inspect
 import os
+import random
 import sys
 import tempfile
 import types
-import pytest
 from datetime import datetime
-import random
-import asyncio
-import inspect
+
+import pytest
 
 _original_sleep = asyncio.sleep
 async def _mock_sleep(seconds, *args, **kwargs):
@@ -227,6 +228,7 @@ def is_bot_account(sender, username: str = None) -> bool:
 tg_mock.is_bot_account = is_bot_account
 
 import telegram_client as real_tg
+
 tg_mock.score_community_trading = real_tg.score_community_trading
 
 async def disconnect_all():
@@ -311,9 +313,10 @@ drt_discord_mock.stop_reply_tracker = lambda: None
 sys.modules["discord_reply_tracker"] = drt_discord_mock
 
 # 4. Import FastAPI app and database
+from fastapi.testclient import TestClient
+
 import database as db
 from main import app
-from fastapi.testclient import TestClient
 
 # Fix database path variable resolution
 db.DB_DIR = temp_dir.name
@@ -338,8 +341,9 @@ def setup_teardown_session():
 @pytest.fixture(autouse=True)
 def clean_database():
     # Empty tables or re-create schema to ensure a completely clean slate between tests
-    import aiosqlite
     import asyncio
+
+    import aiosqlite
     async def _do_clean():
         await db.close_db()
         if os.path.exists(db.DB_PATH):

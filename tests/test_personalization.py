@@ -1,8 +1,9 @@
 """
 Tests for personalization.py — variable substitution in DM messages.
 """
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from personalization import apply_personalization

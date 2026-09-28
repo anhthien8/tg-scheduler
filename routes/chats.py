@@ -1,11 +1,12 @@
 """
 Chat listing routes - per account.
 """
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-import asyncio
+
 import telegram_client as tg
-import database as db
 
 router = APIRouter(prefix="/api/chats", tags=["chats"])
 

@@ -12,8 +12,8 @@ Usage::
     await tg.send_dm(account_id=1, user_id=123, text="hello")
 """
 from platforms.base import BasePlatformClient
-from platforms.telegram_adapter import TelegramAdapter
 from platforms.discord_adapter import DiscordAdapter
+from platforms.telegram_adapter import TelegramAdapter
 
 # ── Registry ────────────────────────────────────────────────────
 # Maps lowercase platform name → adapter class.

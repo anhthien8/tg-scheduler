@@ -2,8 +2,9 @@
 Smart Template Rotation — selects the best-performing template variant
 based on historical response rates, with fallback to round-robin.
 """
-import random
 import logging
+import random
+
 import database as db
 
 logger = logging.getLogger("tg-scheduler.template-rotation")
@@ -12,8 +13,8 @@ logger = logging.getLogger("tg-scheduler.template-rotation")
 MIN_SENDS_FOR_STATS = 5
 
 
-async def select_variant(messages_list: list, template_id: int = None,
-                          campaign_id: int = None, watcher_id: int = None) -> tuple[list, int]:
+async def select_variant(messages_list: list, template_id: int | None = None,
+                          campaign_id: int | None = None, watcher_id: int | None = None) -> tuple[list, int]:
     """
     Select the best template variant from a list of message sets.
 
@@ -65,7 +66,7 @@ async def select_variant(messages_list: list, template_id: int = None,
 
 
 async def record_send(template_id: int, variant_index: int,
-                       campaign_id: int = None, watcher_id: int = None):
+                       campaign_id: int | None = None, watcher_id: int | None = None):
     """Record a successful send for a template variant."""
     await db.update_template_performance(
         template_id, variant_index,
@@ -75,7 +76,7 @@ async def record_send(template_id: int, variant_index: int,
 
 
 async def record_reply(template_id: int, variant_index: int,
-                        campaign_id: int = None, watcher_id: int = None):
+                        campaign_id: int | None = None, watcher_id: int | None = None):
     """Record a reply for a template variant."""
     await db.update_template_performance(
         template_id, variant_index,

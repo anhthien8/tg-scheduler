@@ -6,10 +6,12 @@ All agents use the system-wide global AI provider and API keys.
 import json
 import logging
 from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-import database as db
+
 import ai_remix as ai_rmx
+import database as db
 
 logger = logging.getLogger("tg-scheduler.ai_agents")
 router = APIRouter(prefix="/api/ai-agents", tags=["AI Agents"])

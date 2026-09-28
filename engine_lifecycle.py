@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import sys
-import time
 from datetime import datetime, timezone
 
 import database as db
@@ -138,8 +137,8 @@ async def start_engines() -> asyncio.Task:
 
     Returns the background connect task so the caller can track/cancel it.
     """
-    import scheduler as sch
     import message_queue as mq
+    import scheduler as sch
 
     sch.start_scheduler()
     sch.start_auto_resume_job()
@@ -167,7 +166,7 @@ async def start_engines() -> asyncio.Task:
         running_cnt = 0
         for rc in all_campaigns:
             if rc.get("status") == "running":
-                from routes.members import _run_campaign, _active_campaigns
+                from routes.members import _active_campaigns, _run_campaign
                 curr_task = _active_campaigns.get(rc["id"])
                 is_running = curr_task is True or (isinstance(curr_task, asyncio.Task) and not curr_task.done())
                 if not is_running:
@@ -180,8 +179,9 @@ async def start_engines() -> asyncio.Task:
         logger.warning("Error auto-resuming DM campaigns: %s", e)
 
     # Daily summary
-    from daily_summary import send_daily_summary
     from apscheduler.triggers.cron import CronTrigger
+
+    from daily_summary import send_daily_summary
     summary_time = await db.get_setting("daily_summary_time", "21:00")
     hour, minute = map(int, summary_time.split(":"))
     sch.get_scheduler().add_job(
@@ -216,6 +216,16 @@ async def start_engines() -> asyncio.Task:
     )
     logger.info("Lead SLA check scheduled every 30 min")
 
+    # Speed-to-reply SLA: ping when a hot lead has waited too long for OUR reply.
+    sch.get_scheduler().add_job(
+        alerts.check_reply_sla,
+        trigger=IntervalTrigger(minutes=10),
+        id="reply_sla_check",
+        name="Speed-to-Reply SLA Check",
+        replace_existing=True,
+    )
+    logger.info("Speed-to-reply SLA check scheduled every 10 min")
+
     # Message queue worker
     mq.start_worker()
 
@@ -226,11 +236,11 @@ async def start_engines() -> asyncio.Task:
 
 async def _connect_accounts_and_watchers() -> None:
     """Connect Telegram accounts + start all watchers + Discord bots."""
-    import telegram_client as tg
-    import keyword_watcher as kw
-    import reaction_watcher as rw
     import dm_reply_tracker as drt
+    import keyword_watcher as kw
     import kol_channel_watcher as kcw
+    import reaction_watcher as rw
+    import telegram_client as tg
 
     accounts = await db.get_all_accounts()
 
@@ -263,10 +273,10 @@ async def _connect_accounts_and_watchers() -> None:
 
     # Discord bots (optional dependency)
     try:
-        from platforms.discord_adapter import DiscordAdapter
-        import discord_watcher as dw
         import discord_reaction_watcher as drw
         import discord_reply_tracker as drt_discord
+        import discord_watcher as dw
+        from platforms.discord_adapter import DiscordAdapter
         from routes import discord as discord_routes
 
         adapter = DiscordAdapter()
@@ -310,10 +320,10 @@ async def _connect_accounts_and_watchers() -> None:
 
 async def stop_engines(connect_task: asyncio.Task | None) -> None:
     """Inverse of start_engines. Await task cancellations; preserve error state."""
-    import message_queue as mq
-    import scheduler as sch
-    import reaction_watcher as rw
     import dm_reply_tracker as drt
+    import message_queue as mq
+    import reaction_watcher as rw
+    import scheduler as sch
     import telegram_client as tg
 
     # Cancel and AWAIT the connect task
@@ -332,9 +342,9 @@ async def stop_engines(connect_task: asyncio.Task | None) -> None:
 
     # Discord shutdown
     try:
-        import discord_watcher as dw
         import discord_reaction_watcher as drw
         import discord_reply_tracker as drt_discord
+        import discord_watcher as dw
         await dw.stop_all_watchers()
         await drw.stop_all()
         await drt_discord.stop_reply_tracker()

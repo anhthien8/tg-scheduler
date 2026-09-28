@@ -1,8 +1,10 @@
-import pytest
-import os
 import asyncio
-import database as db
+import os
+
+import pytest
 from fastapi.testclient import TestClient
+
+import database as db
 from main import app
 
 # Ensure pytest treats these test functions as async

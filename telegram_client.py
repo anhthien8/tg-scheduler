@@ -2,20 +2,24 @@
 Telegram Client Manager - Multi-account support.
 Each account gets its own Telethon client instance.
 """
-import os
-import re
-import random
-import logging
 import asyncio
-from collections import deque
+import logging
+import os
+import random
+
+from dotenv import load_dotenv
 from telethon import TelegramClient, errors
 from telethon.tl.types import (
-    InputMediaPoll, Poll, PollAnswer,
-    Channel, Chat, User,
+    Channel,
+    Chat,
+    InputMediaPoll,
+    PeerChannel,
+    PeerChat,
+    Poll,
+    PollAnswer,
     TextWithEntities,
-    PeerChannel, PeerChat
+    User,
 )
-from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger("tg-scheduler")
@@ -759,7 +763,7 @@ async def check_accounts_in_groups(account_ids: list[int], group_ids: list[int])
                     "account_name": acc_name,
                     "missing_groups": missing
                 })
-        except Exception as e:
+        except Exception:
             pass  # skip if can't check (account offline etc)
 
     return {"warnings": warnings, "all_ok": len(warnings) == 0}
@@ -772,7 +776,7 @@ async def leave_channel(account_id: int, chat_id: int) -> dict:
     try:
         from telethon.tl.functions.channels import LeaveChannelRequest
         from telethon.tl.functions.messages import DeleteHistoryRequest
-        from telethon.tl.types import Channel, Chat, User
+        from telethon.tl.types import Channel, User
 
         entity = await client.get_entity(chat_id)
 
@@ -952,8 +956,9 @@ async def get_similar_channels_and_contacts(account_id: int, channel_link: str) 
     if not client:
         raise Exception("Account not found")
         
-    from telethon.tl.functions.channels import GetChannelRecommendationsRequest, GetFullChannelRequest
     import re
+
+    from telethon.tl.functions.channels import GetChannelRecommendationsRequest, GetFullChannelRequest
     
     # 1. Resolve target channel
     try:
@@ -1036,6 +1041,7 @@ async def deep_crawl_similar_channels(
     """
     import re
     from collections import deque
+
     from telethon.tl.functions.channels import GetChannelRecommendationsRequest, GetFullChannelRequest
 
     if not account_ids:
@@ -1181,7 +1187,9 @@ async def deep_crawl_similar_channels(
 
         # Resolve channel entity — with multi-account fallback on FloodWait
         entity = None
-        async def _try_resolve_with(c):
+        # Bind the loop variable explicitly: this closure is defined inside the
+        # BFS `while queue` loop and captures channel_ref (avoids late-binding).
+        async def _try_resolve_with(c, channel_ref=channel_ref):
             """Try to resolve channel_ref using client c."""
             if isinstance(channel_ref, str):
                 return await c.get_entity(channel_ref)
@@ -1480,7 +1488,7 @@ async def invite_to_channel(account_id: int, channel, users) -> dict:
                 logger.warning(f"Cannot resolve user {u}: {e}")
         if not user_entities:
             return {"success": False, "error": "No valid users to invite"}
-        result = await client(InviteToChannelRequest(
+        await client(InviteToChannelRequest(
             channel=channel_entity,
             users=user_entities
         ))
@@ -1536,7 +1544,7 @@ async def get_channel_info(account_id: int, channel) -> dict:
 
 async def disconnect_all():
     """Disconnect all clients."""
-    for aid, client in _clients.items():
+    for _aid, client in _clients.items():
         if client.is_connected():
             try:
                 await client.disconnect()

@@ -3,7 +3,7 @@ Platform Abstraction Layer — Base Class
 Defines the interface contract for all platform adapters.
 """
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Callable
 
 
 class BasePlatformClient(ABC):

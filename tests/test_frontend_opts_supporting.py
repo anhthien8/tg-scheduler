@@ -1,6 +1,8 @@
-import pytest
-import database as db
 from datetime import datetime
+
+import pytest
+
+import database as db
 
 pytestmark = pytest.mark.asyncio
 

@@ -1,9 +1,12 @@
 """Offline callback regression; no real Telegram client or database."""
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
 import pytest
+
 import command_bot as cb
 import telegram_forum_inbox as fx
+
 
 @pytest.mark.asyncio
 async def test_cancel_callback_cannot_cancel_another_admin_draft(monkeypatch):

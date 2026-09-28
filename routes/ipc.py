@@ -1,7 +1,9 @@
 """DB-only split-runtime API for the first migrated operations."""
 import secrets
+
 from fastapi import APIRouter, Header, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
+
 import database as db
 import runtime_commands as commands
 

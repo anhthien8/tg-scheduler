@@ -4,8 +4,8 @@ Uses multiple accounts to simulate organic group activity.
 """
 import asyncio
 import json
-import random
 import logging
+import random
 from datetime import datetime
 
 import database as db

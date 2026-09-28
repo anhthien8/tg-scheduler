@@ -3,7 +3,7 @@ routes/reactions.py  — API endpoints for the auto-react feature
 """
 
 from __future__ import annotations
-import json
+
 import logging
 
 from fastapi import APIRouter, HTTPException

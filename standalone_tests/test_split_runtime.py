@@ -9,9 +9,8 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
-
 
 _FORBIDDEN_MODULES = (
     'telegram_client', 'keyword_watcher', 'scheduler',
@@ -408,7 +407,7 @@ class SplitRuntimeTests(unittest.TestCase):
                      '    print("ACQUIRED")\n'
                      'except RuntimeError:\n'
                      '    print("BLOCKED")\n'],
-                    cwd=os.path.dirname(os.path.abspath(__file__)),
+                    cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     env={**os.environ, 'DATA_DIR': data},
                     capture_output=True, text=True, timeout=60,
                 )

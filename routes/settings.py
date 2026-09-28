@@ -1,14 +1,14 @@
 """
 Settings API Routes - store/retrieve key-value settings like AI API keys.
 """
+import logging
+from typing import Optional
+
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
-import json
 
 import database as db
-import httpx
-import logging
 
 logger = logging.getLogger("tg-scheduler.settings")
 
@@ -68,8 +68,9 @@ async def test_remix(payload: TestRemixPayload):
 @router.post("/daily-summary")
 async def save_daily_summary(payload: DailySummaryPayload):
     """Save daily summary settings and reschedule the job."""
-    import scheduler as sch
     from apscheduler.triggers.cron import CronTrigger
+
+    import scheduler as sch
 
     # Validate time format
     try:

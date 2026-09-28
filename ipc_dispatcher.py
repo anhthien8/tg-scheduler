@@ -7,13 +7,13 @@ import database as db
 
 
 async def _chats_refresh(payload):
-    import telegram_client as tg
     from routes.chats import get_chats
     return await get_chats(account_id=payload["account_id"])
 
 
 async def _campaign_start(payload):
     from fastapi import BackgroundTasks
+
     from routes.members import start_campaign
     return await start_campaign(payload["campaign_id"], BackgroundTasks())
 

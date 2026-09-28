@@ -1,11 +1,13 @@
-import pytest
 import asyncio
-import time
 import random
+import time
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
+
 import database as db
-from routes.analytics import analytics_cache, AsyncTTLCache
+from routes.analytics import AsyncTTLCache, analytics_cache
 
 pytestmark = pytest.mark.asyncio
 

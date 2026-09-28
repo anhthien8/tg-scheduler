@@ -1,8 +1,9 @@
 """
 Unit tests for message_merger.py — consolidating multiple message bubbles into 1 cohesive message.
 """
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from message_merger import clean_paragraph_spacing, merge_messages

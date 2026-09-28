@@ -2,14 +2,15 @@
 Message Queue - rate limiting, retry, multi-account aware.
 """
 import asyncio
-import random
 import json
 import logging
+import random
+
 from telethon import errors as tg_errors
 
+import alerts
 import database as db
 import telegram_client as tg
-import alerts
 
 logger = logging.getLogger("tg-scheduler")
 
@@ -229,7 +230,7 @@ async def queue_worker():
                                           chat_id, chat_title, "failed", friendly_error)
                 await asyncio.sleep(2.5)
 
-            except tg_errors.PeerFloodError as e:
+            except tg_errors.PeerFloodError:
                 logger.warning(f"⚠️ PeerFloodError for account {account_id} -> {chat_title}. Failing immediately.")
                 await alerts.flood_guard(account_id)  # auto-pause + cảnh báo Telegram
                 friendly_error = translate_error("PeerFlood")

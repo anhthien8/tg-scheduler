@@ -15,13 +15,12 @@ import asyncio
 import json
 import logging
 import random
-import re
 import time as _time
 from typing import Any
 
-import database as db
 import ai_remix as ai_rmx
-from engines.keyword_engine import normalize_text, match_keyword_advanced
+import database as db
+from engines.keyword_engine import match_keyword_advanced, normalize_text
 
 logger = logging.getLogger("tg-scheduler.discord.watcher")
 
@@ -300,7 +299,6 @@ def _make_handler(watcher: dict):
 
             user_id = author.id
             username = author.name
-            display_name = getattr(author, "display_name", username) or username
 
             # Exclusion list check
             uname_lower = username.lower() if username else ""
@@ -575,6 +573,7 @@ async def _preload_dm_history() -> None:
     """Load recent successful DMs from DB into _user_dm_sent to persist across restarts."""
     try:
         from datetime import datetime, timezone
+
         from database import get_db
 
         cutoff_secs = USER_DM_COOLDOWN_SECS

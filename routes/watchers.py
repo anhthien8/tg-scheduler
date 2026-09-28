@@ -1,11 +1,12 @@
 """
 Watchers API Routes
 """
+import logging
+import os
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
-import os
-import logging
 
 import database as db
 import keyword_watcher as kw

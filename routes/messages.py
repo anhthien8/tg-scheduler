@@ -3,8 +3,8 @@ Message management and file upload routes.
 """
 import os
 import uuid
-import shutil
-from fastapi import APIRouter, UploadFile, File, HTTPException
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 router = APIRouter(prefix="/api", tags=["messages"])

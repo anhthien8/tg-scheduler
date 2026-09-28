@@ -1,8 +1,10 @@
 """
 Send log routes - history and stats.
 """
-from fastapi import APIRouter
 from typing import Optional
+
+from fastapi import APIRouter
+
 import database as db
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])

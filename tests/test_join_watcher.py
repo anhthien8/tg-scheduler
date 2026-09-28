@@ -6,8 +6,9 @@ Tests for the Join Watcher feature (watch_type='join'):
 Telethon is mocked (conftest) — no real Telegram calls.
 """
 import asyncio
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 import database as db
 import keyword_watcher as kw

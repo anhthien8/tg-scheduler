@@ -5,6 +5,7 @@ real telegram_forum_inbox module, fake Telegram bot only. Verifies:
 - concurrent inbound never creates two topics for the same user (race guard)
 """
 import asyncio
+
 import pytest
 
 import database as db
@@ -29,8 +30,9 @@ async def test_concurrent_history_append_preserves_every_message():
 
 @pytest.mark.asyncio
 async def test_confirm_blocks_queued_ai_and_drip(monkeypatch):
-    import dm_reply_tracker as tracker
     from unittest.mock import AsyncMock
+
+    import dm_reply_tracker as tracker
     await db.upsert_telegram_topic({"group_id": -1005, "topic_id": 902, "account_id": 777, "user_id": 888})
     p = await inbox.prepare_reply(db, inbox.ForumConfig(True, -1005, 1, {9}), 9, -1005, 902, "human")
     entered, release = asyncio.Event(), asyncio.Event()

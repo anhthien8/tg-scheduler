@@ -1,9 +1,11 @@
 """
 Blacklist routes - global DM blacklist management.
 """
+from typing import Optional
+
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional
+
 import database as db
 
 router = APIRouter(prefix="/api/blacklist", tags=["blacklist"])

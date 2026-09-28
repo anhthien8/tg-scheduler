@@ -3,11 +3,12 @@ Scheduler - APScheduler with hourly, daily, weekly, monthly, once.
 """
 import logging
 import os
+from datetime import datetime
+
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
-from datetime import datetime
 
 import database as db
 import message_queue as mq
@@ -129,7 +130,7 @@ async def _auto_start_campaign(campaign_id: int):
             return
 
         # Import and start the campaign
-        from routes.members import _run_campaign, _active_campaigns
+        from routes.members import _active_campaigns, _run_campaign
         await db.update_dm_campaign_status(campaign_id, "running")
         _active_campaigns[campaign_id] = True
         logger.info(f"🚀 Campaign {campaign_id} auto-started by scheduler")
@@ -209,8 +210,9 @@ async def _auto_resume_campaigns():
         return
 
     import json
+
     import telegram_client as tg
-    from routes.members import _run_campaign, _active_campaigns
+    from routes.members import _active_campaigns, _run_campaign
 
     for cmp in campaigns:
         cid = cmp["id"]
