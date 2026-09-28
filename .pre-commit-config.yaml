@@ -1,0 +1,25 @@
+# Pre-commit hooks — fast local gate before pushes.
+# Install:  .venv/Scripts/python.exe -m pre_commit install
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(static/|media/|data/|.*\.md$)
+      - id: end-of-file-fixer
+        exclude: ^(static/|media/|data/)
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+      - id: detect-private-key
+      # Project rule (AGENTS.md #2): never corrupt UTF-8 / Vietnamese chars.
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+        exclude: \.(bat|cmd|vbs)$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format

@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install ruff
+        run: pip install ruff
+      - name: ruff check
+        run: ruff check .
+
+  test:
+    name: Tests (Python + JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run main test suite (tests/)
+        # Fully offline: tests/conftest.py mocks Telegram/Discord.
+        env:
+          DASHBOARD_SECRET_KEY: ci_test_key
+        run: pytest -v --tb=short tests
+      - name: Run isolated lifecycle tests (one process per file)
+        # These purge/reload global modules and mutate env, so each file needs
+        # a fresh interpreter. Keep them out of the main run.
+        env:
+          DASHBOARD_SECRET_KEY: ci_test_key
+        run: |
+          for f in standalone_tests/test_internal_identity.py \
+                   standalone_tests/test_ipc_vertical.py \
+                   standalone_tests/test_pool_cancel_leak.py \
+                   standalone_tests/test_reaction_watcher_safety.py \
+                   standalone_tests/test_runtime_commands.py \
+                   standalone_tests/test_split_runtime.py; do
+            echo "### $f ###"
+            pytest -v --tb=short "$f"
+          done
+      - name: Run JS tests
+        run: |
+          node --test tests/test_polling.js
+          node --test tests/test_polling_integration.js
+          node --test tests/test_channels_cache.js
+          node --test standalone_tests/test_api_runtime.mjs

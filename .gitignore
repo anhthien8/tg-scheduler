@@ -18,9 +18,19 @@ data/
 .agents/
 agents/
 scratch/
+.claude/
 
 # Runtime / temp
 start_server.bat
+
+# Test / tooling artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
 
 # Logs
 *.log

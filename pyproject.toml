@@ -1,0 +1,87 @@
+[project]
+name = "tg-scheduler"
+version = "0.1.0"
+description = "Telegram/Discord userbot outreach scheduler"
+requires-python = ">=3.11"
+
+# ── Pytest ──────────────────────────────────────────────────────────────────
+# One runner for the whole suite. Root-level unittest files and every test_*.py
+# are collected, so nothing is silently skipped (previously run_tests.py only
+# ran tests/, ignoring 6 root files and all JS tests).
+[tool.pytest.ini_options]
+# Default target is tests/ only. standalone_tests/ holds lifecycle/split-runtime
+# tests that purge+reload global modules and mutate os.environ: each file MUST
+# run in its own pytest process (see run_tests.py / CI), never mixed with tests/.
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*", "*Tests", "*Integration", "*Challenger", "*Detailed"]
+python_functions = ["test_*"]
+norecursedirs = [
+    ".git", ".venv", "venv", "__pycache__", "node_modules",
+    "data", "sessions", "media", ".agents", "agents", "scratch",
+    "standalone_tests",
+]
+asyncio_mode = "auto"
+addopts = "-q --strict-markers"
+markers = [
+    "slow: long-running tests (E2E, DB stress); deselect with -m 'not slow'",
+    "integration: uses real database.py against a temp dir",
+    "adversarial: audit-artifact regression tests",
+]
+filterwarnings = [
+    "ignore::pytest.PytestUnhandledThreadExceptionWarning",
+]
+
+# ── Ruff (lint + import sort) ───────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = [
+    ".venv", "venv", "__pycache__", "data", "sessions", "media",
+    ".agents", "agents", "scratch", "static",
+]
+
+[tool.ruff.lint]
+# Conservative, enforceable-from-day-one set: real bugs + import hygiene.
+# UP/B beyond this are deliberately NOT enabled yet — modernizing 13k untyped
+# LOC (Optional[X] -> X|None etc.) is churn that belongs in its own reviewed PR,
+# not in a QC-bootstrap change. Add rule families incrementally later.
+select = [
+    "E9",   # syntax/runtime errors (e.g. undefined names)
+    "F",    # pyflakes: unused imports/vars, redefinitions, undefined locals
+    "I",    # import sorting
+    "B007", # unused loop control variable
+    "B023", # function-uses-loop-variable (late binding)
+    "B905", # zip without explicit strict=
+]
+ignore = [
+    "E501",  # line length handled by formatter policy, not lint noise
+    "B008",  # FastAPI Depends()/Security() in defaults is idiomatic
+    "F401",  # unused imports tolerated where re-exported for compatibility
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests often bind values purely to trigger side effects (fixtures, setup calls);
+# unused-variable / redefinition noise there is not a bug signal.
+"tests/**" = ["F401", "F811", "F841", "B007", "B011"]
+"test_*.py" = ["F401", "F811", "F841", "B007", "B011"]
+"standalone_tests/**" = ["F401", "F811", "F841", "B007", "B011"]
+
+# ── Mypy (advisory) ─────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+# Advisory only for now: the codebase is largely untyped. Check a small,
+# self-contained set so drift is caught early without a red wall of errors.
+files = [
+    "personalization.py",
+    "message_merger.py",
+    "template_rotation.py",
+    "backtest/",
+]
+# Don't follow into the untyped monolith (database.py etc.) yet — its type debt
+# is real but belongs in its own migration, not in the QC bootstrap.
+follow_imports = "skip"
+ignore_missing_imports = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
