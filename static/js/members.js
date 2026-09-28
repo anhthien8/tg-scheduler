@@ -768,6 +768,10 @@ const Members = {
       if (autoResumeEl) {
         autoResumeEl.checked = c.auto_resume !== undefined ? !!c.auto_resume : true;
       }
+      const minLeadScoreEl = document.getElementById('cmp-min-lead-score');
+      if (minLeadScoreEl) {
+        minLeadScoreEl.value = (c.min_lead_score !== undefined && c.min_lead_score !== null) ? c.min_lead_score : 0;
+      }
 
       // Scrape job selector — allow changing source (linh động chạy tiếp với nguồn mới)
       const jobSel = document.getElementById('cmp-scrape-job');
@@ -888,6 +892,7 @@ const Members = {
     const autoNative = document.getElementById('cmp-auto-translate-native')?.checked ? 1 : 0;
     const autoResume = document.getElementById('cmp-auto-resume')?.checked ?? true;
     const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
+    const minLeadScore = parseInt(document.getElementById('cmp-min-lead-score')?.value) || 0;
 
     if (!jobId) { App.toast('Vui lòng chọn nguồn members', 'error'); return; }
 
@@ -928,6 +933,7 @@ const Members = {
         auto_translate_native: autoNative,
         exclude_previous_dms: excludePrev,
         auto_resume: autoResume,
+        min_lead_score: minLeadScore,
       });
       App.toast('✅ Đã cập nhật Campaign (nguồn, tài khoản & tin nhắn)!', 'success');
       this._editingCampaignId = null;
@@ -993,6 +999,8 @@ const Members = {
     }
     const excludePrevEl = document.getElementById('cmp-exclude-previous');
     if (excludePrevEl) excludePrevEl.checked = true;
+    const minLeadScoreEl = document.getElementById('cmp-min-lead-score');
+    if (minLeadScoreEl) minLeadScoreEl.value = 0;
     (document.getElementById('cmp-messages-list') || me_dummy).innerHTML = '';
 
     const schedToggle = document.getElementById('cmp-schedule-toggle');
@@ -1322,6 +1330,7 @@ const Members = {
     const autoNative = document.getElementById('cmp-auto-translate-native')?.checked ? 1 : 0;
     const autoResume = document.getElementById('cmp-auto-resume')?.checked ?? true;
     const excludePrev = document.getElementById('cmp-exclude-previous')?.checked ?? true;
+    const minLeadScore = parseInt(document.getElementById('cmp-min-lead-score')?.value) || 0;
 
     // --- NEW SCHEDULE FIELDS ---
     const scheduleEnabled = document.getElementById('cmp-schedule-toggle')?.checked || false;
@@ -1371,6 +1380,7 @@ const Members = {
         auto_translate_native: autoNative,
         exclude_previous_dms: excludePrev,
         auto_resume: autoResume,
+        min_lead_score: minLeadScore,
         // --- NEW FIELDS ---
         schedule_enabled: scheduleEnabled,
         scheduled_at: scheduleEnabled ? scheduledAt : undefined,

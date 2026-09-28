@@ -16,9 +16,9 @@ to prevent double-insertion within a session.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
-import json
 import re
 import time
 from datetime import datetime, timezone
@@ -29,9 +29,9 @@ from telethon import events
 from telethon.tl.functions.messages import SendReactionRequest
 from telethon.tl.types import ReactionEmoji
 
+import ai_remix as ai_rmx
 import database as db
 import telegram_client as tg
-import ai_remix as ai_rmx
 
 logger = logging.getLogger("tg-scheduler.inbox")
 
@@ -322,7 +322,6 @@ async def _async_distill_human_rule(account_id: int, user_id: int, message_text:
         user_questions = [m["content"] for m in history if m.get("role") == "user"]
         if not user_questions:
             return
-        last_user_q = user_questions[-1]
 
         agent_config = None
         target_cmp_id = chat.get("campaign_id")
@@ -1273,11 +1272,75 @@ def unregister_account(account_id: int) -> None:
     _unregister_account(account_id)
 
 
+# Default follow-up cadence in HOURS of silence before each drip stage fires.
+# Day 1 (24h) → Day 3 (72h) → Day 7 (168h). Overridable via the
+# `ai_followup_drip_cadence` setting (JSON array of hours, e.g. [24, 72, 168]).
+DEFAULT_DRIP_CADENCE_HOURS = [24, 72, 168]
+
+
+async def _load_drip_cadence() -> list[int]:
+    """Read the configured drip cadence (hours). Falls back to the default.
+
+    Validates: JSON list of positive ints, strictly increasing, length >= 1.
+    Any malformed value falls back to DEFAULT_DRIP_CADENCE_HOURS so a bad
+    setting can never silently disable follow-ups.
+    """
+    raw = await db.get_setting("ai_followup_drip_cadence", "")
+    if raw:
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            hours = [int(h) for h in parsed]
+            if hours and all(h > 0 for h in hours) and all(
+                hours[i] < hours[i + 1] for i in range(len(hours) - 1)
+            ):
+                return hours
+            logger.warning("[DripEngine] Invalid drip cadence %r, using default", raw)
+        except (ValueError, TypeError, json.JSONDecodeError):
+            logger.warning("[DripEngine] Unparseable drip cadence %r, using default", raw)
+    return list(DEFAULT_DRIP_CADENCE_HOURS)
+
+
+def _silence_hours(updated_at: str | None) -> float:
+    """Hours since the chat's last update. Returns a large number if unknown,
+    so an undatable chat simply becomes eligible for the final stage."""
+    if not updated_at:
+        return 10**6
+    try:
+        ts = datetime.fromisoformat(str(updated_at))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - ts).total_seconds() / 3600)
+    except (ValueError, TypeError):
+        return 10**6
+
+
+def _drip_instruction_for_stage(stage: int, total_stages: int) -> str:
+    """Prompt instruction for a given drip stage (1-indexed)."""
+    if stage == 1:
+        return (
+            "The user has not replied in about 1 day. Send a friendly, non-pushy follow-up "
+            "(1-2 short sentences) mentioning our latest crypto trading competition with "
+            "$50,000 prize pool and VIP Maker fee discounts."
+        )
+    if stage < total_stages:
+        return (
+            "The user has been silent for several days. Send a brief, value-adding follow-up "
+            "(1-2 short sentences) with a different angle than before — do not repeat the "
+            "previous message. Offer a concrete benefit (fee discount, VIP tier, or event)."
+        )
+    return (
+        "The user has been silent for a long time. Send a courteous, brief FINAL check-in asking "
+        "if they need any customized rate proposal or have any questions, and make clear this is "
+        "the last message so we don't keep bothering them."
+    )
+
+
 async def process_drip_followups() -> dict:
     """
     1. Scan human takeover chats (>24h since update) where user is waiting for a reply -> Auto-resume & Send AI Reply!
     2. Scan stuck active chats (>2m since user message with 0 replies generated) -> Send AI Reply!
-    3. Scan inactive followup chats (>48h / >5d) -> Process Drip Follow-ups!
+    3. Scan inactive followup chats -> Process configurable multi-step Drip Follow-ups
+       (default day 1/3/7 via ai_followup_drip_cadence).
     """
     import aiosqlite
     sent_count = 0
@@ -1353,25 +1416,38 @@ async def process_drip_followups() -> dict:
     except Exception as e_stuck:
         logger.error("[AIFollowUp] Error recovering stuck chats: %s", e_stuck)
 
-    # ── 3. Process Drip Follow-ups ──
+    # ── 3. Process Drip Follow-ups (configurable multi-step cadence) ──
     try:
+        cadence = await _load_drip_cadence()
+        total_stages = len(cadence)
+        # Only fetch chats silent for at least the first cadence threshold.
+        first_hours = cadence[0]
         async with db.get_db() as db_conn:
             db_conn.row_factory = aiosqlite.Row
             cursor = await db_conn.execute("""
                 SELECT * FROM ai_followup_chats
                 WHERE status = 'active'
                   AND (lead_tier IN ('Tier A', 'Tier B') OR intent_score >= 50)
-                  AND last_drip_stage < 2
-                  AND datetime(updated_at) <= datetime('now', '-48 hours')
+                  AND last_drip_stage < ?
+                  AND datetime(updated_at) <= datetime('now', ?)
                 ORDER BY updated_at ASC
                 LIMIT 20
-            """)
+            """, (total_stages, f"-{first_hours} hours"))
             drip_chats = [dict(r) for r in await cursor.fetchall()]
 
         for chat in drip_chats:
             account_id = chat["account_id"]
             user_id = chat["user_id"]
-            stage = chat.get("last_drip_stage", 0) + 1
+            silence_hours = _silence_hours(chat.get("updated_at"))
+
+            # Determine the highest cadence stage whose threshold has been crossed,
+            # then advance one past last_drip_stage so we never skip or repeat.
+            due_stage = sum(1 for h in cadence if silence_hours >= h)
+            stage = max(chat.get("last_drip_stage", 0) + 1, 1)
+            if stage > due_stage:
+                continue  # not yet due for the next stage
+            if stage > total_stages:
+                continue  # cadence exhausted
 
             if await db.is_user_blacklisted(user_id=user_id, username=chat.get("username", "")):
                 continue
@@ -1384,19 +1460,10 @@ async def process_drip_followups() -> dict:
             agent_id = account_obj.get("ai_agent_id") if account_obj else None
             agent_config = await db.get_ai_agent(agent_id) if agent_id else None
 
-            if stage == 1:
-                drip_instruction = (
-                    "The user has not replied in 2 days. Send a friendly, non-pushy follow-up (1-2 short sentences) "
-                    "mentioning our latest crypto trading competition with $50,000 prize pool and VIP Maker fee discounts."
-                )
-            else:
-                drip_instruction = (
-                    "The user has been silent for 5 days. Send a courteous, brief final check-in asking if they need "
-                    "any customized rate proposal or have any questions before we close this conversation."
-                )
+            drip_instruction = _drip_instruction_for_stage(stage, total_stages)
 
             sys_p = agent_config.get("system_prompt", "") if agent_config else ""
-            combined = sys_p + f"\n\n[DRIP FOLLOWUP STAGE {stage} INSTRUCTION]: " + drip_instruction
+            combined = sys_p + f"\n\n[DRIP FOLLOWUP STAGE {stage}/{total_stages} INSTRUCTION]: " + drip_instruction
 
             try:
                 history = json.loads(chat.get("history_json", "[]"))

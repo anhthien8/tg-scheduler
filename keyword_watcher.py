@@ -1,5 +1,6 @@
 import json
 import re
+
 """
 Keyword Watcher Engine
 Listens for new messages in configured groups, matches keywords,
@@ -8,16 +9,18 @@ and auto-DMs the sender via multi-account with fallback.
 import asyncio
 import logging
 import random
-from telethon import events, errors as tg_errors
 
-import database as db
-import telegram_client as tg
-import alerts
+from telethon import errors as tg_errors
+from telethon import events
+
 import ai_remix as ai_rmx
+import alerts
+import database as db
 import image_randomizer as img_rand
-from personalization import apply_personalization
+import telegram_client as tg
+import template_rotation as tmpl_rot
 from message_merger import merge_messages
-from telegram_client import _get_entity_safe
+from personalization import apply_personalization
 
 logger = logging.getLogger("tg-scheduler.watcher")
 
@@ -179,6 +182,7 @@ async def _get_self_user_ids() -> set:
 
 # Global DM rate-limit: only 1 DM at a time, random 2-20 min delay between sends
 import asyncio as _asyncio
+
 _dm_global_lock = None   # initialized lazily (asyncio loop must be running)
 _dm_last_send_time: float = 0.0
 DM_DELAY_MIN_SECS = 2 * 60    # 2 minutes
@@ -210,7 +214,6 @@ async def _restore_peerflood_from_db() -> None:
 def _is_peerflood_blocked(acc_id: int) -> bool:
     until = _peerflood_cooldown.get(acc_id)
     if until and _time.time() < until:
-        remaining = int(until - _time.time()) // 60
         return True
     return False
 
@@ -274,9 +277,9 @@ async def _get_group_admin_ids(client, group_id: int) -> set:
     try:
         from telethon.tl.functions.channels import GetParticipantsRequest
         from telethon.tl.types import (
-            ChannelParticipantsAdmins,
             ChannelParticipantAdmin,
             ChannelParticipantCreator,
+            ChannelParticipantsAdmins,
         )
         # Resolve input peer for the group
         input_chat = await client.get_input_entity(group_id)
@@ -391,8 +394,22 @@ async def _do_send_dm_with_fallback(
     input_peer=None,
 ):
     """Internal: actual DM sending logic (called from _send_dm_with_fallback after lock/delay)."""
-    import random as _random
-    import time as _time_module
+    # ── Smart Template Rotation: pick the best-performing message variant ──
+    # Messages sharing a variant_index form one variant. Watchers without
+    # variants collapse to a single variant, so behaviour is unchanged.
+    # Rotation is best-effort: any failure falls back to the raw message list.
+    variant_idx = 0
+    variants = db.group_watcher_message_variants(messages) if messages else []
+    if len(variants) > 1:
+        try:
+            messages, variant_idx = await tmpl_rot.select_variant(
+                variants, watcher_id=watcher_id
+            )
+        except Exception as _sel_err:
+            logger.debug("[Watcher %s] Variant selection failed, using variant 0: %s",
+                         watcher_id, _sel_err)
+            messages, variant_idx = variants[0], 0
+
     # Load AI remix settings from DB (cached inside _send_dm_with_fallback scope)
     ai_provider = await db.get_setting("ai_provider", None)
     ai_custom_prompt = await db.get_setting("ai_custom_prompt", None)
@@ -536,18 +553,30 @@ async def _do_send_dm_with_fallback(
                 msg_to_send = dict(msg)
 
                 # ── Personalization: replace {name}, {first_name}, etc. ──
+                _peer_first = getattr(peer, "first_name", None) or ""
+                _peer_last = getattr(peer, "last_name", None) or ""
                 if msg_to_send.get("content"):
-                    # Try to get first/last name from the resolved peer
-                    _peer_first = getattr(peer, "first_name", None) or ""
-                    _peer_last = getattr(peer, "last_name", None) or ""
                     msg_to_send["content"] = apply_personalization(
                         msg_to_send["content"],
                         {
                             "first_name": _peer_first,
                             "last_name": _peer_last,
                             "username": username,
+                            "group_title": group_title,
                         },
                     )
+
+                # Deeper personalization context for AI remix: recipient name +
+                # the source community (group title) so the AI can localize and
+                # reference the shared context instead of writing generic copy.
+                _member_info = {
+                    "first_name": _peer_first,
+                    "last_name": _peer_last,
+                    "username": username,
+                    "lang_code": getattr(peer, "lang_code", None),
+                    "community_hint": group_title or "",
+                }
+                _auto_native = bool(await db.get_setting("ai_auto_translate_native", "1") == "1")
 
                 if ai_enabled and msg_to_send.get("msg_type") == "text" and msg_to_send.get("content"):
                     logger.info(f"[Watcher {watcher_id}] Requesting {ai_provider} AI remix...")
@@ -557,6 +586,8 @@ async def _do_send_dm_with_fallback(
                         api_keys=ai_keys,
                         sender_name=username if username and not username.isdigit() else None,
                         custom_instruction=ai_custom_prompt,
+                        auto_translate_native=_auto_native,
+                        member_info=_member_info,
                         **ai_remix_kwargs
                     )
                 elif ai_enabled and msg_to_send.get("content"):
@@ -568,6 +599,8 @@ async def _do_send_dm_with_fallback(
                         api_keys=ai_keys,
                         sender_name=username if username and not username.isdigit() else None,
                         custom_instruction=ai_custom_prompt,
+                        auto_translate_native=_auto_native,
+                        member_info=_member_info,
                         **ai_remix_kwargs
                     )
 
@@ -589,8 +622,16 @@ async def _do_send_dm_with_fallback(
             )
             await db.add_watcher_dm_log(
                 watcher_id, acc_id, user_id, username,
-                group_id, group_title, matched_keyword, "success"
+                group_id, group_title, matched_keyword, "success",
+                template_variant_index=variant_idx,
             )
+            # Record the send against the chosen variant so rotation learns
+            # which variant performs best (only when variants are in use).
+            if len(variants) > 1:
+                try:
+                    await tmpl_rot.record_send(watcher_id, variant_idx, watcher_id=watcher_id)
+                except Exception as _rec_err:
+                    logger.debug("[Watcher %s] record_send failed: %s", watcher_id, _rec_err)
             # Note: _mark_dmed(user_id) is called in process_msg after this returns
             return True, acc_id, None
 
@@ -808,7 +849,8 @@ async def _send_group_reply(
     Reply to the user's original group message with a short text (e.g. "Check my DM 😊").
     Uses ONLY the same account that sent the DM — no fallback.
     """
-    import random as _rnd, asyncio as _aio
+    import asyncio as _aio
+    import random as _rnd
 
     if not used_dm_acc_id:
         return
@@ -947,7 +989,8 @@ def _make_handler(watcher: dict):
             # Resolve the correct input peer for sending DMs.
             # Min users (seen only in a group, never DM'd before) need InputUserFromMessage
             # which gives Telegram the group context to resolve their full access_hash.
-            from telethon.tl.types import InputUserFromMessage, InputPeerUser as _IPU
+            from telethon.tl.types import InputPeerUser as _IPU
+            from telethon.tl.types import InputUserFromMessage
             input_peer = None
 
             if getattr(sender, "min", False):
@@ -1345,7 +1388,6 @@ async def start_all_watchers():
 async def _preload_dm_history():
     """Load recent successful DMs from DB into _user_dm_sent to persist across restarts."""
     try:
-        import os
         from database import get_db
         cutoff_secs = USER_DM_COOLDOWN_SECS
         async with get_db() as conn:

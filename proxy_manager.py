@@ -244,3 +244,59 @@ async def auto_assign_proxies(proxy_urls: list[str], accounts: list[dict]) -> di
         f"{len(proxy_urls)} proxies available, {unassigned} accounts sharing proxies"
     )
     return {"assignments": assignments, "unassigned_accounts": unassigned}
+
+
+async def rotate_proxy_for_account(account_id: int, current_proxy: str | None = None) -> dict:
+    """Swap an account onto a different proxy from the pool (ban-triggered rotation).
+
+    Used when an account is hit by PeerFlood/ban: a fresh IP often clears a
+    temporary limit tied to the previous IP. Picks the least-recently-used proxy
+    from the `proxy_pool` setting that differs from the account's current one.
+
+    Returns {"rotated": bool, "old_proxy": str|None, "new_proxy": str|None, "reason": str}.
+    Never raises — returns rotated=False with a reason on any failure.
+    """
+    import json
+
+    try:
+        import database as db
+        raw = await db.get_setting("proxy_pool", "[]")
+        pool = json.loads(raw) if raw else []
+        if not isinstance(pool, list):
+            pool = []
+        pool = [p for p in pool if isinstance(p, str) and p.strip()]
+        if not pool:
+            return {"rotated": False, "old_proxy": current_proxy, "new_proxy": None,
+                    "reason": "proxy pool trống"}
+        if len(pool) == 1 and pool[0] == current_proxy:
+            return {"rotated": False, "old_proxy": current_proxy, "new_proxy": None,
+                    "reason": "chỉ có 1 proxy, không thể xoay"}
+
+        # Prefer the proxy least recently used by other accounts to spread load.
+        accounts = await db.get_all_accounts()
+        usage: dict[str, int] = {p: 0 for p in pool}
+        for acc in accounts:
+            p = acc.get("proxy_url")
+            if p in usage:
+                usage[p] += 1
+
+        candidates = [p for p in pool if p != current_proxy]
+        candidates.sort(key=lambda p: usage.get(p, 0))
+        new_proxy = candidates[0]
+
+        await db.update_account_proxy(account_id, new_proxy)
+
+        # Reconnect the live client onto the new proxy if it supports it.
+        try:
+            import telegram_client as tg
+            await tg.reconnect_with_proxy(account_id, new_proxy)
+        except Exception as e:
+            logger.warning(f"[Proxy] Rotated DB proxy for acc {account_id} but reconnect failed: {e}")
+            return {"rotated": True, "old_proxy": current_proxy, "new_proxy": new_proxy,
+                    "reason": "đã đổi proxy (reconnect lỗi, áp dụng ở lần kết nối sau)"}
+
+        logger.warning(f"[Proxy] 🔄 Rotated proxy for account {account_id}: {current_proxy} -> {new_proxy}")
+        return {"rotated": True, "old_proxy": current_proxy, "new_proxy": new_proxy, "reason": "ok"}
+    except Exception as e:
+        logger.error(f"[Proxy] rotate_proxy_for_account failed: {e}")
+        return {"rotated": False, "old_proxy": current_proxy, "new_proxy": None, "reason": str(e)}

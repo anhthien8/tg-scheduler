@@ -71,10 +71,26 @@ async def flood_guard(account_id: int) -> bool:
             "PeerFlood — tự động tạm dừng để bảo vệ tài khoản"
         )
         logger.warning(f"[FloodGuard] Account {account_id} AUTO-PAUSED: PeerFlood")
+
+        # Ban-triggered proxy rotation: a fresh IP often clears a temporary
+        # limit tied to the previous IP. Opt-out via proxy_rotate_on_ban=0.
+        rotation_note = ""
+        try:
+            if await db.get_setting("proxy_rotate_on_ban", "1") == "1":
+                import proxy_manager as pm
+                cur_proxy = acc.get("proxy_url") if acc else None
+                res = await pm.rotate_proxy_for_account(account_id, cur_proxy)
+                if res.get("rotated"):
+                    rotation_note = "\n🔄 Đã tự đổi proxy sang IP mới để gỡ giới hạn."
+                elif res.get("reason"):
+                    rotation_note = f"\n(Chưa đổi proxy: {res['reason']})"
+        except Exception as e:
+            logger.warning(f"[FloodGuard] Proxy rotation skipped for {account_id}: {e}")
+
         await send_alert(
             f"peerflood_{account_id}",
             f"⛔ Tài khoản {name} (ID {account_id}) bị PeerFlood — "
-            f"ĐÃ TỰ TẮT để tránh bị ban. Kiểm tra kỹ trước khi bật lại."
+            f"ĐÃ TỰ TẮT để tránh bị ban. Kiểm tra kỹ trước khi bật lại.{rotation_note}"
         )
         return True
     except Exception as e:
@@ -123,6 +139,77 @@ async def check_lead_sla():
         )
     except Exception as e:
         logger.error(f"[SLA] Lỗi: {e}")
+
+
+async def check_reply_sla():
+    """Speed-to-reply alert: hot leads waiting on US for too long.
+
+    Finds Tier A/B leads whose last message is from the USER (we owe a reply)
+    and have been waiting longer than `reply_sla_minutes` (default 30). Fires a
+    dedup'd alert so operators jump in before the lead goes cold. Disable via
+    setting `reply_sla_enabled=0`.
+    """
+    try:
+        if await db.get_setting("alerts_enabled", "1") != "1":
+            return
+        if await db.get_setting("reply_sla_enabled", "1") != "1":
+            return
+        try:
+            threshold_min = int(await db.get_setting("reply_sla_minutes", "30"))
+        except (ValueError, TypeError):
+            threshold_min = 30
+        if threshold_min <= 0:
+            return
+
+        import aiosqlite
+        async with db.get_db() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute("""
+                SELECT account_id, user_id, username, name, lead_tier, intent_score,
+                       updated_at, history_json
+                FROM ai_followup_chats
+                WHERE status = 'active'
+                  AND (lead_tier IN ('Tier A', 'Tier B') OR intent_score >= 50)
+            """)
+            rows = [dict(r) for r in await cursor.fetchall()]
+
+        import json as _json
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        waiting = []
+        for r in rows:
+            # Only when the LAST message is from the user (we owe a reply).
+            try:
+                hist = _json.loads(r.get("history_json") or "[]")
+            except Exception:
+                hist = []
+            if not hist or hist[-1].get("role") != "user":
+                continue
+            try:
+                ts = datetime.fromisoformat(r["updated_at"])
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            waited_min = (now - ts).total_seconds() / 60
+            if waited_min > threshold_min:
+                waiting.append((waited_min, r))
+
+        if not waiting:
+            return
+        waiting.sort(key=lambda x: -x[0])
+        lines = []
+        for waited_min, r in waiting[:5]:
+            tag = f"@{r['username']}" if r.get("username") else f"#{r['user_id']}"
+            name = r.get("name") or tag
+            lines.append(f"• {name} ({tag}) — chờ {int(waited_min)} phút, {r['lead_tier']} {r.get('intent_score') or 0}%")
+        await send_alert(
+            "reply_sla",
+            f"🔥 {len(waiting)} lead nóng đang chờ phản hồi >{threshold_min} phút:\n"
+            + "\n".join(lines) + "\n\nTrả lời NGAY kẻo nguội lead!"
+        )
+    except Exception as e:
+        logger.error(f"[ReplySLA] Lỗi: {e}")
 
 
 def run_backup() -> str | None:

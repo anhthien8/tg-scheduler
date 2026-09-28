@@ -4,25 +4,26 @@ Member Scraping & Bulk DM Campaign routes.
 import asyncio
 import json
 import logging
-import uuid
-import time
 import random
 import re
+import time
+import uuid
 from datetime import datetime, timedelta
-
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
-from pydantic import BaseModel
 from typing import Optional
 
-import database as db
-import telegram_client as tg
-import alerts
-import ai_remix as ai_rmx
-import template_rotation as tmpl_rot
-import image_randomizer as img_rand
-from personalization import apply_personalization
-from message_merger import merge_messages
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from pydantic import BaseModel
 from telethon import errors as tg_errors
+
+import ai_remix as ai_rmx
+import alerts
+import database as db
+import image_randomizer as img_rand
+import lead_scoring
+import telegram_client as tg
+import template_rotation as tmpl_rot
+from message_merger import merge_messages
+from personalization import apply_personalization
 
 logger = logging.getLogger("tg-scheduler.members")
 router = APIRouter(prefix="/api/members", tags=["members"])
@@ -69,6 +70,7 @@ class CampaignCreate(BaseModel):
     ai_agent_id: int | None = None
     auto_translate_native: int = 1
     auto_resume: bool = True
+    min_lead_score: int = 0  # 0 = no ICP filter; >0 = skip leads scoring below this
 
 
 class CampaignUpdateMessages(BaseModel):
@@ -84,6 +86,7 @@ class CampaignUpdateMessages(BaseModel):
     ai_agent_id: Optional[int] = None
     auto_translate_native: Optional[int] = None
     auto_resume: Optional[bool] = None
+    min_lead_score: Optional[int] = None
 
 
 class AutoResumeUpdate(BaseModel):
@@ -163,8 +166,11 @@ def _parse_channel_identifier(raw: str) -> str:
 def _get_last_seen(sender, message=None):
     """Extract last_seen from a user status."""
     from telethon.tl.types import (
-        UserStatusOnline, UserStatusOffline, UserStatusRecently,
-        UserStatusLastWeek, UserStatusLastMonth,
+        UserStatusLastMonth,
+        UserStatusLastWeek,
+        UserStatusOffline,
+        UserStatusOnline,
+        UserStatusRecently,
     )
     status = getattr(sender, "status", None)
     if isinstance(status, UserStatusOnline):
@@ -265,8 +271,11 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
         from telethon.tl.functions.channels import GetParticipantsRequest
         from telethon.tl.types import (
             ChannelParticipantsSearch,
-            UserStatusOnline, UserStatusOffline, UserStatusRecently,
-            UserStatusLastWeek, UserStatusLastMonth,
+            UserStatusLastMonth,
+            UserStatusLastWeek,
+            UserStatusOffline,
+            UserStatusOnline,
+            UserStatusRecently,
         )
 
         input_chat = await client.get_input_entity(group_id)
@@ -709,9 +718,8 @@ async def _do_batch_scrape(batch_job_id: str, account_id: int, channels: list[st
 
             from telethon.tl.functions.channels import GetParticipantsRequest
             from telethon.tl.types import (
-                ChannelParticipantsSearch, ChannelParticipantsAdmins,
-                UserStatusOnline, UserStatusOffline, UserStatusRecently,
-                UserStatusLastWeek, UserStatusLastMonth,
+                ChannelParticipantsAdmins,
+                ChannelParticipantsSearch,
             )
 
             # Get admin IDs to exclude
@@ -875,6 +883,7 @@ async def import_contacts(req: ImportContactsRequest):
     Automatically deduplicates against all previously DM'd users across campaigns and watchers."""
     try:
         import zlib
+
         from database import get_db
 
         # ── Step 1: Collect already-DM'd usernames (cross-campaign dedup) ──
@@ -1226,10 +1235,10 @@ async def _translate_single_text(text: str, target_lang: str = "en") -> str:
     if cache_key in _translation_cache:
         return _translation_cache[cache_key]
 
-    import urllib.request
-    import urllib.parse
-    import json
     import asyncio
+    import json
+    import urllib.parse
+    import urllib.request
 
     def _do_http():
         try:
@@ -1273,7 +1282,7 @@ async def translate_descriptions(req: TranslateDescriptionsRequest):
     tasks = [_translate_single_text(t, req.target_lang) for t in unique]
     translated_list = await asyncio.gather(*tasks, return_exceptions=True)
     translations = {}
-    for orig, trans in zip(unique, translated_list):
+    for orig, trans in zip(unique, translated_list, strict=False):
         if isinstance(trans, Exception):
             translations[orig] = orig  # fallback to original on error
         else:
@@ -1371,6 +1380,7 @@ async def create_campaign(req: CampaignCreate):
         "scheduled_at": req.scheduled_at,
         "target_timezone": req.target_timezone,
         "auto_resume": req.auto_resume,
+        "min_lead_score": req.min_lead_score,
     })
 
     # Register APScheduler job if scheduled
@@ -1425,6 +1435,9 @@ async def clone_campaign(campaign_id: int, req: Optional[CampaignCloneRequest] =
         "use_ai_remix": bool(source_cmp.get("use_ai_remix", False)),
         "exclude_previous_dms": bool(source_cmp.get("exclude_previous_dms", 1)),
         "total_targets": adjusted_total,
+        "ai_agent_id": source_cmp.get("ai_agent_id"),
+        "auto_resume": bool(source_cmp.get("auto_resume", 1)),
+        "min_lead_score": source_cmp.get("min_lead_score", 0) or 0,
     })
 
     # Save exclude_campaign_ids to new campaign
@@ -1577,6 +1590,7 @@ async def update_campaign_messages(campaign_id: int, req: CampaignUpdateMessages
         scrape_job_id=req.scrape_job_id,
         sender_account_ids=req.sender_account_ids,
         total_targets=total_targets,
+        min_lead_score=req.min_lead_score,
     )
     return {"status": "updated", "message": "Đã cập nhật Campaign"}
 
@@ -1784,6 +1798,10 @@ async def _run_campaign(campaign_id: int):
         sent = campaign.get("sent_count", 0)
         failed = campaign.get("failed_count", 0)
         skipped = campaign.get("skipped_count", 0)
+        # Lead scoring / ICP: 0 disables the filter. >0 skips low-quality leads.
+        min_lead_score = int(campaign.get("min_lead_score", 0) or 0)
+        if min_lead_score > 0:
+            logger.info(f"[Campaign {campaign_id}] 🎯 ICP filter active: min_lead_score={min_lead_score}")
         daily_sent = 0  # Track daily sends per session
         account_idx = 0  # Round-robin account index
         consecutive_errors = 0  # Track consecutive errors for backoff
@@ -1959,6 +1977,17 @@ async def _run_campaign(campaign_id: int):
                 await db.add_dm_campaign_log(campaign_id, None, user_id, username, "skipped", "Trong blacklist")
                 continue
 
+            # ── Lead scoring / ICP gate (opt-in; min_lead_score > 0) ──
+            if min_lead_score > 0:
+                qualified, _lead = lead_scoring.passes_icp(member, min_lead_score)
+                if not qualified:
+                    skipped += 1
+                    await db.add_dm_campaign_log(
+                        campaign_id, None, user_id, username, "skipped",
+                        f"Lead score {_lead.score} < ngưỡng ICP {min_lead_score}",
+                    )
+                    continue
+
             # Pick sender account (round-robin, excluding flooded/offline ones)
             # Inner loop: try different accounts for this member until one works
             acc_id = None
@@ -2016,7 +2045,7 @@ async def _run_campaign(campaign_id: int):
                         peer = await client.get_entity(username)
                     else:
                         peer = await client.get_entity(user_id)
-                except Exception as pe:
+                except Exception:
                     try:
                         from telethon.tl.types import PeerUser
                         peer = await client.get_entity(PeerUser(user_id))
@@ -2055,13 +2084,13 @@ async def _run_campaign(campaign_id: int):
                             "first_name": member.get("first_name"),
                             "last_name": member.get("last_name"),
                             "username": username,
+                            "group_title": member.get("group_title"),
                         })
 
                     # AI remix if enabled
                     if use_ai and content:
                         if ai_provider and ai_keys:
                             try:
-                                original_len = len(content)
                                 auto_native = bool(campaign.get("auto_translate_native", 1))
                                 campaign_hint = str(campaign.get("name", ""))
                                 # Word-boundary match — tránh false positive kiểu "Trust" chứa "rus"
@@ -2282,7 +2311,8 @@ async def _run_campaign(campaign_id: int):
                     failed += 1
                     consecutive_errors += 1
                     # Try to extract wait time from error string
-                    import re
+                    # (module-level `import re` is used; a local import here would
+                    # shadow it and cause UnboundLocalError at the earlier use above.)
                     wait_match = re.search(r'(\d+)', err_str)
                     wait_secs = int(wait_match.group(1)) if wait_match else 60
                     wait_secs = min(max(wait_secs, 30), 600)  # Clamp 30s-600s

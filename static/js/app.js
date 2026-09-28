@@ -224,6 +224,11 @@ if(page==='ai-followup'){
               <label class="form-label" for="aifu-handover-kw" style="font-weight:600">🛑 Từ khóa bàn giao người thật (phân cách dấu phẩy)</label>
               <input type="text" id="aifu-handover-kw" class="form-input" placeholder="gặp admin, tư vấn viên, số điện thoại, lừa đảo...">
             </div>
+            <div style="grid-column:1/-1">
+              <label class="form-label" for="aifu-drip-cadence" style="font-weight:600">⏰ Nhịp follow-up tự động (giờ cách nhau, phân cách dấu phẩy)</label>
+              <input type="text" id="aifu-drip-cadence" class="form-input" placeholder="24, 72, 168">
+              <small style="color:#9ca3af;font-size:0.72rem;">Số giờ im lặng trước mỗi lần nhắc. Mặc định 24, 72, 168 = Ngày 1 / 3 / 7. Tăng dần, tối đa tùy ý.</small>
+            </div>
           </div>
           <div style="text-align:right;margin-top:16px">
             <button class="btn btn-primary" onclick="AIFollowUp.saveSettings()">💾 Lưu cấu hình</button>
@@ -503,7 +508,29 @@ if(page==='changelog'){
   if(!document.getElementById('view-changelog')){
     const CHANGELOG = [
       {
-        version: '2.8.0', date: '2026-08-01', tag: 'latest',
+        version: '2.10.0', date: '2026-09-29', tag: 'latest',
+        changes: [
+          { type: 'new', text: 'Lọc Lead Chất Lượng (ICP Score) — chấm điểm lead TRƯỚC khi gửi (username, tên, Premium, hoạt động gần đây) và bỏ qua lead dưới ngưỡng; đặt ở ô "🎯 Lọc Lead Chất Lượng" trong campaign (0 = tắt)' },
+          { type: 'new', text: 'Nhịp follow-up tùy chỉnh — từ 2 bước cố định thành cadence cấu hình được (mặc định Ngày 1/3/7) trong AI Follow-Up Settings' },
+          { type: 'new', text: 'Tự động xoay Proxy khi bị ban — PeerFlood sẽ tự đổi IP mới từ pool để gỡ giới hạn (tắt bằng setting proxy_rotate_on_ban=0)' },
+          { type: 'new', text: 'Cảnh báo Speed-to-Reply — ping khi lead nóng chờ phản hồi quá lâu (mặc định >30 phút, cấu hình reply_sla_minutes)' },
+          { type: 'improve', text: 'Cá nhân hóa sâu hơn — AI remix ở watcher nay dùng tên + chủ đề nhóm nguồn + ngôn ngữ lead; thêm biến {group}/{community} trong template' },
+          { type: 'improve', text: 'Watcher dùng template rotation + auto-translate-native giống campaign' },
+        ]
+      },
+      {
+        version: '2.9.0', date: '2026-09-28',
+        changes: [
+          { type: 'new', text: 'Backtester dữ liệu thật — replay lịch sử outreach, funnel reply/convert/onboard, đo tốc độ phản hồi (median/p90), so sánh variant với khoảng tin cậy Wilson 95% + kiểm định ý nghĩa (thay cho open-rate giả)' },
+          { type: 'new', text: 'Smart Template Rotation cho Keyword Watcher — mỗi tin nhắn DM có ô "Variant"; các tin cùng số tạo thành 1 biến thể để tự động xoay vòng A/B dựa trên hiệu suất' },
+          { type: 'improve', text: 'Ghi nhận variant_index vào watcher_dm_logs để quy kết reply chính xác theo biến thể' },
+          { type: 'fix', text: 'Sửa lỗi ngầm trong campaign: import `re` cục bộ che module-level gây UnboundLocalError khi phát hiện FloodWait' },
+          { type: 'fix', text: 'Sửa định nghĩa hàm trùng lặp find_campaign_log_for_user / find_watcher_log_for_user (hàm sau ghi đè hàm trước)' },
+          { type: 'improve', text: 'Hạ tầng QC/QA: gom toàn bộ test về một runner (pytest + node), thêm ruff/mypy/pytest-cov, CI GitHub Actions, gỡ test trùng lặp' },
+        ]
+      },
+      {
+        version: '2.8.0', date: '2026-08-01',
         changes: [
           { type: 'fix', text: 'Sửa lỗi campaign dừng sớm — chỉ gửi 66/1600+ members do accounts exhausted ghi đè status thành "completed"' },
           { type: 'fix', text: 'PeerFlood accounts giờ sẽ tự phục hồi sau cooldown 2-5 phút thay vì bị loại vĩnh viễn' },
@@ -1331,7 +1358,11 @@ addWatcherMessage(type,data=null){
 
   const div=document.createElement('div');div.className='msg-item';div.dataset.type=type;
 
-  let inner=`<div class="msg-item-header"><span class="msg-item-type">${type.toUpperCase()}</span><button class="msg-remove" onclick="this.closest('.msg-item').remove()">✕</button></div>`;
+  // Optional variant index: messages sharing a variant number form one template
+  // variant that Smart Template Rotation will A/B test. Blank = 0 (single variant).
+  const _variant=data?.variant_index||0;
+
+  let inner=`<div class="msg-item-header"><span class="msg-item-type">${type.toUpperCase()}</span><label class="msg-variant-label" title="Biến thể (variant): các tin cùng số sẽ tạo thành 1 biến thể để xoay vòng A/B">Variant <input type="number" min="0" step="1" class="msg-variant" value="${_variant}" style="width:52px"></label><button class="msg-remove" onclick="this.closest('.msg-item').remove()">✕</button></div>`;
 
   if(type==='text')inner+=`<textarea class="form-textarea msg-content" placeholder="Nội dung DM">${data?.content||''}</textarea>`;
 
@@ -1369,6 +1400,8 @@ async saveWatcher(){
   if(!accIds.length)return this.toast('Chọn ít nhất 1 tài khoản','error');
 
   const messages=[];document.querySelectorAll('#w-messages-list .msg-item').forEach((item,i)=>{const mt=item.dataset.type;const msg={msg_order:i,msg_type:mt};
+
+    const _v=parseInt(item.querySelector('.msg-variant')?.value);msg.variant_index=Number.isFinite(_v)&&_v>0?_v:0;
 
     if(mt==='text'){msg.content=item.querySelector('.msg-content').value;if(!msg.content.trim())return}
 

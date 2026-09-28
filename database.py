@@ -2,14 +2,15 @@
 Database layer - SQLite with aiosqlite
 Multi-account + hourly schedule + max sends support
 """
-import aiosqlite
-import os
-import json
-from datetime import datetime
 import asyncio
-from contextlib import asynccontextmanager
 import contextvars
+import json
 import logging
+import os
+from contextlib import asynccontextmanager
+from datetime import datetime
+
+import aiosqlite
 
 logger = logging.getLogger("tg-scheduler.database")
 
@@ -319,9 +320,16 @@ async def init_db():
                 msg_type TEXT NOT NULL CHECK(msg_type IN ('text','photo','video','document')),
                 content TEXT,
                 media_path TEXT,
+                variant_index INTEGER DEFAULT 0,
                 FOREIGN KEY (watcher_id) REFERENCES keyword_watchers(id) ON DELETE CASCADE
             )
         """)
+        # Migration for DBs created before variant_index existed.
+        try:
+            await db.execute("ALTER TABLE watcher_messages ADD COLUMN variant_index INTEGER DEFAULT 0")
+            await db.commit()
+        except Exception:
+            pass  # Column already exists
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS watcher_dm_logs (
@@ -614,6 +622,18 @@ async def init_db():
                 pass  # column already exists
         await db.commit()
 
+        # ── Lead scoring / ICP pre-send filter migration ───────────────────────
+        # min_lead_score: 0 disables filtering (default). >0 skips members whose
+        # lead-quality score is below the threshold. See lead_scoring.py.
+        for _col, _coldef in [
+            ("min_lead_score", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE dm_campaigns ADD COLUMN {_col} {_coldef}")
+            except Exception:
+                pass  # column already exists
+        await db.commit()
+
         # ── Member Scraping ───────────────────────────────────────────────
         await db.execute("""
             CREATE TABLE IF NOT EXISTS scraped_members (
@@ -685,6 +705,7 @@ async def init_db():
                 exclude_campaign_ids TEXT DEFAULT '[]',
                 ai_agent_id     INTEGER DEFAULT NULL,
                 auto_resume     INTEGER DEFAULT 1,
+                min_lead_score  INTEGER DEFAULT 0,
                 status          TEXT DEFAULT 'draft',
                 total_targets   INTEGER DEFAULT 0,
                 sent_count      INTEGER DEFAULT 0,
@@ -1603,10 +1624,10 @@ async def create_watcher(data: dict) -> int:
         for msg in data.get("messages", []):
             await db.execute(
                 """INSERT INTO watcher_messages
-                   (watcher_id, msg_order, msg_type, content, media_path)
-                   VALUES (?, ?, ?, ?, ?)""",
+                   (watcher_id, msg_order, msg_type, content, media_path, variant_index)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
                 (watcher_id, msg.get("msg_order", 0), msg["msg_type"],
-                 msg.get("content"), msg.get("media_path"))
+                 msg.get("content"), msg.get("media_path"), msg.get("variant_index", 0))
             )
         await db.commit()
         return watcher_id
@@ -1624,6 +1645,7 @@ async def _load_watcher_row(db, row: dict) -> dict:
     c = await db.execute(
         "SELECT * FROM watcher_messages WHERE watcher_id=? ORDER BY msg_order", (w["id"],))
     w["messages"] = [dict(r) for r in await c.fetchall()]
+    w["message_variants"] = group_watcher_message_variants(w["messages"])
     return w
 
 
@@ -1635,6 +1657,27 @@ def _parse_watcher_json_fields(w: dict) -> dict:
         except Exception:
             w[f] = []
     return w
+
+
+def group_watcher_message_variants(messages: list[dict]) -> list[list[dict]]:
+    """Split a flat watcher-message list into template variants.
+
+    Messages sharing a `variant_index` (default 0) form one variant; variants
+    are returned in ascending index order, each preserving msg_order. Watchers
+    with no variant_index set collapse to a single variant, so behaviour is
+    unchanged for existing configs. This is the shape template_rotation
+    .select_variant() expects.
+    """
+    if not messages:
+        return []
+    by_variant: dict[int, list[dict]] = {}
+    for m in messages:
+        idx = m.get("variant_index") or 0
+        by_variant.setdefault(idx, []).append(m)
+    variants = []
+    for idx in sorted(by_variant):
+        variants.append(sorted(by_variant[idx], key=lambda m: m.get("msg_order", 0)))
+    return variants
 
 
 async def _load_watcher_rows_bulk(db, rows: list) -> list:
@@ -1660,6 +1703,7 @@ async def _load_watcher_rows_bulk(db, rows: list) -> list:
         
     for w in watchers:
         w["messages"] = msgs_by_watcher.get(w["id"], [])
+        w["message_variants"] = group_watcher_message_variants(w["messages"])
     return watchers
 
 
@@ -1732,10 +1776,10 @@ async def update_watcher(watcher_id: int, data: dict) -> bool:
         for msg in data.get("messages", []):
             await db.execute(
                 """INSERT INTO watcher_messages
-                   (watcher_id, msg_order, msg_type, content, media_path)
-                   VALUES (?, ?, ?, ?, ?)""",
+                   (watcher_id, msg_order, msg_type, content, media_path, variant_index)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
                 (watcher_id, msg.get("msg_order", 0), msg["msg_type"],
-                 msg.get("content"), msg.get("media_path"))
+                 msg.get("content"), msg.get("media_path"), msg.get("variant_index", 0))
             )
         await db.commit()
         return True
@@ -2957,8 +3001,8 @@ async def create_dm_campaign(data: dict) -> int:
             (name, scrape_job_id, sender_account_ids, messages,
              delay_min, delay_max, daily_limit_premium, daily_limit_normal,
              use_ai_remix, exclude_previous_dms, total_targets, status,
-             scheduled_at, target_timezone, ai_agent_id, auto_resume)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             scheduled_at, target_timezone, ai_agent_id, auto_resume, min_lead_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["name"], data["scrape_job_id"],
             json.dumps(data.get("sender_account_ids", [])),
@@ -2974,6 +3018,7 @@ async def create_dm_campaign(data: dict) -> int:
             data.get("target_timezone"),
             data.get("ai_agent_id"),
             1 if data.get("auto_resume", True) else 0,
+            data.get("min_lead_score", 0) or 0,
         ))
         await db.commit()
         return cursor.lastrowid
@@ -3084,7 +3129,8 @@ async def update_dm_campaign_messages(campaign_id: int, messages: list,
                                        auto_resume: bool = None,
                                        scrape_job_id: str = None,
                                        sender_account_ids: list[int] = None,
-                                       total_targets: int = None):
+                                       total_targets: int = None,
+                                       min_lead_score: int = None):
     """Update an inactive campaign's source, senders, messages, and settings."""
     async with get_db() as db:
         updates = ["messages = ?", "updated_at = datetime('now')"]
@@ -3122,6 +3168,9 @@ async def update_dm_campaign_messages(campaign_id: int, messages: list,
         if auto_resume is not None:
             updates.append("auto_resume = ?")
             params.append(1 if auto_resume else 0)
+        if min_lead_score is not None:
+            updates.append("min_lead_score = ?")
+            params.append(max(0, int(min_lead_score)))
         params.append(campaign_id)
         await db.execute(
             f"UPDATE dm_campaigns SET {', '.join(updates)} WHERE id = ?",
@@ -4154,24 +4203,9 @@ async def reset_warmup_daily_counts():
         await db.commit()
 
 
-async def find_campaign_log_for_user(user_id: int) -> dict | None:
-    async with get_db() as db:
-        db.row_factory = aiosqlite.Row
-        row = await (await db.execute(
-            "SELECT * FROM dm_campaign_logs WHERE target_user_id = ? AND status = 'success' ORDER BY sent_at DESC LIMIT 1",
-            (user_id,)
-        )).fetchone()
-        return dict(row) if row else None
-
-
-async def find_watcher_log_for_user(user_id: int) -> dict | None:
-    async with get_db() as db:
-        db.row_factory = aiosqlite.Row
-        row = await (await db.execute(
-            "SELECT * FROM watcher_dm_logs WHERE target_user_id = ? AND status = 'success' ORDER BY sent_at DESC LIMIT 1",
-            (user_id,)
-        )).fetchone()
-        return dict(row) if row else None
+# NOTE: find_campaign_log_for_user / find_watcher_log_for_user are defined once
+# above (near find_running_campaign_log_for_user). A duplicate pair used to live
+# here and silently shadowed them (F811) — removed to keep one source of truth.
 
 
 # ── AI Follow-Up Sales Agent DB Helpers ─────────────────────────────────────

@@ -1435,6 +1435,18 @@
               </div>
             </div>
           </div>
+
+          <!-- Lead Scoring / ICP Filter Box -->
+          <div style="padding:12px;background:rgba(0,0,0,0.25);border:1px solid rgba(52,211,153,0.25);border-radius:8px;">
+            <div style="font-size:0.84rem;font-weight:700;color:#34d399;display:flex;align-items:center;gap:6px;">
+              <span>🎯</span> <span>Lọc Lead Chất Lượng (ICP Score)</span>
+            </div>
+            <div style="font-size:0.75rem;color:#9ca3af;margin-top:3px;line-height:1.4;margin-bottom:8px;">
+              Bỏ qua lead chất lượng thấp trước khi gửi (dựa trên username, tên, Premium, hoạt động gần đây). <b>0 = tắt lọc</b> (mặc định). Khuyến nghị 40–60 để tiết kiệm quota & giảm nguy cơ ban.
+            </div>
+            <input type="number" id="cmp-min-lead-score" class="form-input" min="0" max="100" step="5" value="0"
+                   style="font-size:0.83rem;padding:6px 10px;height:36px;background:rgba(0,0,0,0.25);width:120px;">
+          </div>
         </div>
       </div>
 

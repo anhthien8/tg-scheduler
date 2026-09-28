@@ -4,15 +4,16 @@ routes/ai_followup.py
 API Endpoints for AI Follow-Up Sales Agent settings and live lead chat management.
 """
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
-from typing import Optional
 import asyncio
 import json
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 import database as db
 import telegram_client as tg
-from dm_reply_tracker import personalize_weex_links, contains_weex_link
+from dm_reply_tracker import contains_weex_link, personalize_weex_links
 
 router = APIRouter(prefix="/api/ai-followup", tags=["ai-followup"])
 
@@ -23,6 +24,8 @@ class AIFollowUpSettings(BaseModel):
     knowledge_base: str = "Tên sản phẩm: Telegram Outreach Automation\nGiá: 50$/tháng\nTính năng: Gửi tin nhắn hàng loạt, lọc trùng, tương tác AI tự động chốt đơn.\nLink đăng ký onboard: https://example.com/onboard"
     max_replies_per_user: int = 5
     handover_keywords: list[str] = ["gặp admin", "tư vấn viên", "gọi điện", "số điện thoại", "lừa đảo"]
+    # Drip cadence: hours of silence before each follow-up. Default day 1/3/7.
+    drip_cadence_hours: list[int] = [24, 72, 168]
 
 
 class UpdateChatStatusRequest(BaseModel):
@@ -147,6 +150,7 @@ async def get_settings():
     kb = await db.get_setting("ai_followup_knowledge_base", None)
     max_replies_str = await db.get_setting("ai_followup_max_replies", "5")
     handover_raw = await db.get_setting("ai_followup_handover_keywords", '["gặp admin", "tư vấn viên", "số điện thoại"]')
+    cadence_raw = await db.get_setting("ai_followup_drip_cadence", "")
 
     default_prompt = (
         "Bạn là chuyên gia tư vấn bán hàng & onboard thân thiện. Giọng văn tự nhiên, ngắn gọn như người thật đang nhắn tin.\n"
@@ -165,12 +169,20 @@ async def get_settings():
     except Exception:
         handover_kw = ["gặp admin", "tư vấn viên", "số điện thoại"]
 
+    try:
+        cadence = [int(h) for h in json.loads(cadence_raw)] if cadence_raw else [24, 72, 168]
+        if not cadence or any(h <= 0 for h in cadence):
+            cadence = [24, 72, 168]
+    except Exception:
+        cadence = [24, 72, 168]
+
     return {
         "enabled": enabled_str.lower() in ("true", "1"),
         "system_prompt": default_prompt if sys_prompt is None else sys_prompt,
         "knowledge_base": default_kb if kb is None else kb,
         "max_replies_per_user": int(max_replies_str) if max_replies_str.isdigit() else 5,
-        "handover_keywords": handover_kw
+        "handover_keywords": handover_kw,
+        "drip_cadence_hours": cadence,
     }
 
 
@@ -182,6 +194,12 @@ async def save_settings(req: AIFollowUpSettings):
     await db.set_setting("ai_followup_knowledge_base", req.knowledge_base)
     await db.set_setting("ai_followup_max_replies", str(req.max_replies_per_user))
     await db.set_setting("ai_followup_handover_keywords", json.dumps(req.handover_keywords))
+    # Validate + persist the drip cadence (hours, increasing, positive).
+    cadence = [int(h) for h in (req.drip_cadence_hours or [])]
+    if (not cadence or any(h <= 0 for h in cadence)
+            or any(cadence[i] >= cadence[i + 1] for i in range(len(cadence) - 1))):
+        cadence = [24, 72, 168]
+    await db.set_setting("ai_followup_drip_cadence", json.dumps(cadence))
     return {"status": "ok", "message": "Đã lưu cài đặt AI Follow-Up Agent"}
 
 
