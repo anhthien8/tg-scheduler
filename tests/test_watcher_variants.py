@@ -75,3 +75,12 @@ async def test_single_variant_watcher_has_one_variant():
     })
     w = await db.get_watcher(wid)
     assert len(w["message_variants"]) == 1
+
+
+# ── regression: get_watcher_log_stats must not have a malformed SQL ──────────
+
+async def test_get_watcher_log_stats_runs_without_syntax_error():
+    """Regression for a stray ')' in the today-count SQL (500 on /api/watchers/stats)."""
+    stats = await db.get_watcher_log_stats()
+    assert set(stats) == {"success", "failed", "skipped", "today", "active_watchers"}
+    assert all(isinstance(v, int) for v in stats.values())

@@ -1931,7 +1931,7 @@ async def get_watcher_log_stats() -> dict:
         c = await db.execute("SELECT COUNT(*) FROM watcher_dm_logs WHERE status='skipped'")
         skipped = (await c.fetchone())[0]
         c = await db.execute(
-            "SELECT COUNT(*) FROM watcher_dm_logs WHERE status='success' AND date(sent_at)=date('now', '+7 hours'))")
+            "SELECT COUNT(*) FROM watcher_dm_logs WHERE status='success' AND date(sent_at)=date('now', '+7 hours')")
         today = (await c.fetchone())[0]
         c = await db.execute("SELECT COUNT(*) FROM keyword_watchers WHERE is_active=1")
         active = (await c.fetchone())[0]
