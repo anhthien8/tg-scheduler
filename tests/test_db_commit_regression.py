@@ -60,6 +60,16 @@ async def test_nested_get_db_in_same_task_reuses_connection():
             assert inner is outer
 
 
+async def test_ai_followup_has_last_user_message_at_column():
+    """Regression: the ALTER for last_user_message_at used a non-constant
+    default (datetime('now')) which SQLite rejects, so the column was silently
+    never added and the drip engine crashed with 'no such column'."""
+    async with db.get_db() as conn:
+        cur = await conn.execute("PRAGMA table_info(ai_followup_chats)")
+        cols = [r[1] for r in await cur.fetchall()]
+    assert "last_user_message_at" in cols
+
+
 def test_database_has_no_write_without_commit():
     """Static scan: every async def in database.py that runs an INSERT/UPDATE/
     DELETE literal must also call commit() (or be wrapped in a known pattern)."""

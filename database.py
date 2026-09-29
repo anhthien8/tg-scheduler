@@ -821,12 +821,15 @@ async def init_db():
             pass
 
         # Migrations for Crypto BD Lead Metrics & Drip stage in ai_followup_chats
+        # NOTE: SQLite forbids ALTER TABLE ADD COLUMN with a non-constant default
+        # (e.g. datetime('now')) — such a migration fails silently. So
+        # last_user_message_at uses a NULL default and is backfilled below.
         for col_name, col_def in [
             ("intent_score", "INTEGER DEFAULT 0"),
             ("lead_tier", "TEXT DEFAULT 'Tier C'"),
             ("summary", "TEXT DEFAULT ''"),
             ("last_drip_stage", "INTEGER DEFAULT 0"),
-            ("last_user_message_at", "TEXT DEFAULT (datetime('now'))"),
+            ("last_user_message_at", "TEXT"),
             ("human_takeover_at", "TEXT"),
             ("verification_status", "TEXT DEFAULT 'none'")
         ]:
@@ -834,6 +837,19 @@ async def init_db():
                 await db.execute(f"ALTER TABLE ai_followup_chats ADD COLUMN {col_name} {col_def}")
             except Exception:
                 pass
+
+        # Backfill last_user_message_at for rows created before the column
+        # existed, so the drip cadence has a sane anchor (fall back to
+        # updated_at, else created_at).
+        try:
+            await db.execute("""
+                UPDATE ai_followup_chats
+                SET last_user_message_at = COALESCE(updated_at, created_at, datetime('now'))
+                WHERE last_user_message_at IS NULL
+            """)
+            await db.commit()
+        except Exception:
+            pass
 
         # Auto-mark any chat as 'bot_ignored' if username contains 'bot'
         try:
