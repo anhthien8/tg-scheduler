@@ -1817,6 +1817,13 @@ async def _run_campaign(campaign_id: int):
         blacklisted_ids = {b["user_id"] for b in bl if b.get("user_id")}
         blacklisted_usernames = await db.get_blacklisted_usernames_set()
 
+        # Pre-load our OWN account user_ids — never DM ourselves.
+        _internal_user_ids: set[int] = set()
+        try:
+            _internal_user_ids = {int(x) for x in await db.get_all_internal_telegram_user_ids() if x}
+        except Exception:
+            pass
+
         # Pre-load bot_ignored user IDs (users who never replied / are bots)
         _bot_ignored_ids: set[int] = set()
         try:
@@ -1944,6 +1951,13 @@ async def _run_campaign(campaign_id: int):
                 skipped += 1
                 await db.add_dm_campaign_log(campaign_id, None, user_id, username, "skipped",
                                             "Tài khoản là Telegram Bot (lọc tự động)")
+                continue
+
+            # ── Never DM one of our own managed accounts ──
+            if user_id in _internal_user_ids:
+                skipped += 1
+                await db.add_dm_campaign_log(campaign_id, None, user_id, username, "skipped",
+                                            "Là tài khoản nội bộ của hệ thống")
                 continue
 
             # ── Bot filter: Layer 2 (skip users already marked bot_ignored) ──

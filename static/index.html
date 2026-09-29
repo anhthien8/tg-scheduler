@@ -725,12 +725,24 @@
             </div>
 
             <div id="forum-inbox-fields">
+              <div style="margin-bottom:12px;padding:12px;background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.25);border-radius:8px">
+                <label class="form-label" style="font-size:13px">🔗 Dán link nhóm — tự lấy ID</label>
+                <div style="display:flex;gap:8px">
+                  <input type="text" class="form-input" id="forum-inbox-link"
+                         placeholder="VD: https://t.me/c/4352266125/1 hoặc https://t.me/+InviteHash"
+                         style="font-family:monospace;font-size:13px;flex:1">
+                  <button class="btn btn-primary btn-sm" onclick="App.resolveForumInboxLink()" style="white-space:nowrap">Tự lấy ID</button>
+                </div>
+                <p class="form-hint" id="forum-inbox-link-msg" style="min-height:16px">
+                  Hỗ trợ <code>t.me/c/&lt;id&gt;/&lt;topic&gt;</code> (offline), <code>t.me/&lt;username&gt;</code> và link mời <code>t.me/+...</code> (cần account đang kết nối).
+                </p>
+              </div>
               <div style="margin-bottom:12px">
                 <label class="form-label" style="font-size:13px">Group ID (số âm, ví dụ nhóm Weex KOL Support)</label>
                 <input type="text" class="form-input" id="forum-inbox-group-id"
-                       placeholder="VD: -1004352266125 (xem trong link t.me/c/4352266125/1 → thêm tiền tố -100)"
+                       placeholder="VD: -1004352266125"
                        style="font-family:monospace;font-size:13px">
-                <p class="form-hint">Lấy từ link group dạng <code>t.me/c/&lt;số&gt;/&lt;topic&gt;</code>: Group ID = <code>-100</code> + số đó.</p>
+                <p class="form-hint">Tự điền khi bạn dán link ở trên, hoặc nhập tay.</p>
               </div>
               <div style="margin-bottom:14px">
                 <label class="form-label" style="font-size:13px">General Topic ID</label>

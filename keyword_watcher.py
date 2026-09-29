@@ -160,21 +160,37 @@ _SELF_IDS_TTL_SECS = 60 * 60  # refresh hourly
 
 
 async def _get_self_user_ids() -> set:
-    """Return (and lazily cache) the Telegram user_ids of all our own accounts."""
+    """Return (and lazily cache) the Telegram user_ids of all our own accounts.
+
+    Combines the durable DB telegram_user_id (available even when a client is
+    offline/not yet connected) with the live _me_cache, so the internal-account
+    guard is reliable from the first message after startup.
+    """
     global _self_user_ids_loaded_at
     now = _time.time()
     if _self_user_ids and now - _self_user_ids_loaded_at < _SELF_IDS_TTL_SECS:
         return _self_user_ids
     try:
-        accounts = await db.get_all_accounts()
-        for acc in accounts:
-            try:
-                acc_id = acc["id"]
-                me = await tg.get_me(acc_id)
-                if me and me.get("user_id"):
-                    _self_user_ids.add(int(me["user_id"]))
-            except Exception:
-                pass
+        # Durable source: telegram_user_id in accounts table.
+        try:
+            db_ids = await db.get_all_internal_telegram_user_ids()
+            _self_user_ids.update(int(x) for x in db_ids if x)
+        except Exception as _db_err:
+            logger.debug(f"[Watcher] internal ids from DB failed: {_db_err}")
+        # Live source: runtime me_cache (covers accounts not yet persisted).
+        for me in getattr(tg, "_me_cache", {}).values():
+            if me and me.get("user_id"):
+                _self_user_ids.add(int(me["user_id"]))
+        # Last resort: resolve from connected clients.
+        if not _self_user_ids:
+            accounts = await db.get_all_accounts()
+            for acc in accounts:
+                try:
+                    me = await tg.get_me(acc["id"])
+                    if me and me.get("user_id"):
+                        _self_user_ids.add(int(me["user_id"]))
+                except Exception:
+                    pass
         _self_user_ids_loaded_at = now
     except Exception as e:
         logger.debug(f"[JoinWatcher] Could not load self user ids: {e}")
@@ -929,6 +945,18 @@ def _make_handler(watcher: dict):
             if tg.is_bot_account(sender, username):
                 logger.info(f"[Watcher {watcher_id}] Skipped - sender @{username} (id={user_id}) is a Telegram Bot")
                 return
+
+            # HARD GUARD: never DM one of our OWN managed accounts. Otherwise when
+            # one of our accounts posts a keyword-matching message in a watched
+            # group, the watcher DMs it back (internal chatter / ban signal).
+            try:
+                if user_id in await _get_self_user_ids():
+                    logger.info(
+                        f"[Watcher {watcher_id}] Skipped - sender {user_id} is one of our own accounts"
+                    )
+                    return
+            except Exception as _self_err:
+                logger.warning(f"[Watcher {watcher_id}] Self-id check failed: {_self_err}")
 
             # Exclusion list check (by username or numeric id)
             uname_lower = (getattr(sender, "username", None) or "").lower()

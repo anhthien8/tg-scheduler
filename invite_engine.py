@@ -63,6 +63,13 @@ async def run_invite_campaign(campaign_id: int):
         # Get already-processed user IDs
         sent_user_ids = await db.get_invite_campaign_sent_user_ids(campaign_id)
 
+        # Our own account user_ids — never invite/DM ourselves.
+        _internal_user_ids: set[int] = set()
+        try:
+            _internal_user_ids = {int(x) for x in await db.get_all_internal_telegram_user_ids() if x}
+        except Exception:
+            pass
+
         # Update total targets
         total = len(members)
         await db.update_invite_campaign_status(campaign_id, "running")
@@ -108,6 +115,14 @@ async def run_invite_campaign(campaign_id: int):
                 skipped += 1
                 await db.add_invite_campaign_log(
                     campaign_id, 0, user_id, username, "skipped", "Bot account"
+                )
+                continue
+
+            # Never invite/DM one of our own managed accounts.
+            if user_id in _internal_user_ids:
+                skipped += 1
+                await db.add_invite_campaign_log(
+                    campaign_id, 0, user_id, username, "skipped", "Internal account"
                 )
                 continue
 

@@ -111,7 +111,8 @@ class IPCIntegration(unittest.IsolatedAsyncioTestCase):
     def test_dispatcher_table_is_explicit(self):
         import ipc_dispatcher
         self.assertEqual(set(ipc_dispatcher.HANDLERS),
-                         {'chats.refresh', 'campaign.start', 'campaign.stop', 'watchers.reload'})
+                         {'chats.refresh', 'campaign.start', 'campaign.stop',
+                          'watchers.reload', 'forum.resolve_link'})
         with self.assertRaises(ValueError):
             loop = asyncio.new_event_loop()
             try:

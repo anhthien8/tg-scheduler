@@ -325,6 +325,64 @@ async def _get_entity_safe(client: TelegramClient, chat_id: int):
         ) from final_err
 
 
+def _marked_id_from_entity(entity) -> int | None:
+    """Return the -100... supergroup id for a Telethon Channel/Chat entity."""
+    try:
+        from telethon.utils import get_peer_id
+        pid = get_peer_id(entity)
+        # get_peer_id returns the marked id (already -100... for channels).
+        return int(pid)
+    except Exception:
+        cid = getattr(entity, "id", None)
+        if cid is None:
+            return None
+        # Channel/supergroup -> -100<id>; basic group -> -<id>.
+        if getattr(entity, "broadcast", False) or getattr(entity, "megagroup", False):
+            return int(f"-100{cid}")
+        return int(cid)
+
+
+async def resolve_invite_or_username(link_or_hash: str, username: str | None = None,
+                                     account_id: int | None = None) -> dict:
+    """Resolve a private-invite hash or public @username to a supergroup id.
+
+    Uses the first available connected account (or `account_id` if given).
+    Returns {"group_id": int, "title": str} or raises on failure.
+    """
+    from telethon import functions
+    from telethon.tl.types import Channel, Chat
+
+    client = None
+    if account_id is not None:
+        client = get_client(account_id)
+        if client is None or not client.is_connected():
+            client = None
+    if client is None:
+        for _aid, c in list(_clients.items()):
+            if c is not None and c.is_connected():
+                client = c
+                break
+    if client is None:
+        raise Exception("Không có tài khoản Telegram nào đang kết nối để resolve link")
+
+    if username:
+        entity = await client.get_entity(username)
+    else:
+        # Inspect the invite to learn the chat id without joining.
+        result = await client(functions.messages.CheckChatInviteRequest(link_or_hash))
+        entity = getattr(result, "chat", None)
+        if entity is None:
+            raise Exception("Link mời không hợp lệ hoặc đã hết hạn")
+
+    if not isinstance(entity, (Channel, Chat)):
+        raise Exception("Link không trỏ tới nhóm/kênh")
+
+    gid = _marked_id_from_entity(entity)
+    if gid is None:
+        raise Exception("Không lấy được ID từ entity")
+    return {"group_id": int(gid), "title": getattr(entity, "title", "") or ""}
+
+
 def _parse_proxy(proxy_url: str | None):
     """
     Parse proxy URL string to Telethon proxy tuple.

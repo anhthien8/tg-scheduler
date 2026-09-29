@@ -540,6 +540,62 @@ async def save_forum_inbox_config(payload: ForumInboxConfig):
     return {"message": "Saved", **payload.model_dump()}
 
 
+class ResolveForumLinkPayload(BaseModel):
+    link: str
+
+
+@router.post("/forum-inbox/resolve-link")
+async def resolve_forum_inbox_link(payload: ResolveForumLinkPayload):
+    """Turn a pasted group link into Forum Inbox IDs.
+
+    Offline path handles t.me/c/<id>/<topic> and bare numeric ids immediately.
+    Invite (@username / t.me/+hash) links are resolved via a connected account.
+    """
+    import forum_link
+
+    try:
+        parsed = forum_link.parse_forum_link(payload.link)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not parsed.needs_network:
+        if parsed.group_id is None or parsed.group_id >= 0:
+            raise HTTPException(status_code=400,
+                                detail="Không lấy được Group ID âm từ link này")
+        return {
+            "group_id": parsed.group_id,
+            "general_topic_id": parsed.general_topic_id or 1,
+            "source": parsed.source,
+            "message": "Đã lấy ID từ link (offline)",
+        }
+
+    # Needs Telethon — only available in combined mode.
+    try:
+        import telegram_client as tg
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Cần chạy ở TG_RUNTIME_MODE=combined để resolve link mời/username. "
+                   "Link dạng t.me/c/<id>/<topic> thì dán trực tiếp, không cần mạng.",
+        )
+
+    try:
+        resolved = await tg.resolve_invite_or_username(
+            parsed.invite_hash or "",
+            username=parsed.username,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Không resolve được link: {e}")
+
+    return {
+        "group_id": resolved["group_id"],
+        "general_topic_id": parsed.general_topic_id or 1,
+        "title": resolved.get("title", ""),
+        "source": parsed.source,
+        "message": f"Đã resolve: {resolved.get('title') or resolved['group_id']}",
+    }
+
+
 @router.get("/command-bot/config")
 async def get_command_bot_config():
     return {

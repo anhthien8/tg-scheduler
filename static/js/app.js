@@ -508,8 +508,9 @@ if(page==='changelog'){
   if(!document.getElementById('view-changelog')){
     const CHANGELOG = [
       {
-        version: '2.10.0', date: '2026-09-29', tag: 'latest',
+        version: '2.11.0', date: '2026-09-29', tag: 'latest',
         changes: [
+          { type: 'new', text: 'Forum Inbox: dán link nhóm là tự lấy ID — hỗ trợ t.me/c/<id>/<topic> (offline), t.me/<username> và link mời t.me/+... (resolve qua account đang kết nối)' },
           { type: 'new', text: 'Lọc Lead Chất Lượng (ICP Score) — chấm điểm lead TRƯỚC khi gửi (username, tên, Premium, hoạt động gần đây) và bỏ qua lead dưới ngưỡng; đặt ở ô "🎯 Lọc Lead Chất Lượng" trong campaign (0 = tắt)' },
           { type: 'new', text: 'Nhịp follow-up tùy chỉnh — từ 2 bước cố định thành cadence cấu hình được (mặc định Ngày 1/3/7) trong AI Follow-Up Settings' },
           { type: 'new', text: 'Tự động xoay Proxy khi bị ban — PeerFlood sẽ tự đổi IP mới từ pool để gỡ giới hạn (tắt bằng setting proxy_rotate_on_ban=0)' },
@@ -3286,6 +3287,31 @@ App.loadForumInboxConfig = async function() {
     App.setForumInboxBadge(!!cfg.enabled);
   } catch (e) {
     console.warn('loadForumInboxConfig failed', e);
+  }
+};
+
+App.resolveForumInboxLink = async function() {
+  const linkEl = document.getElementById('forum-inbox-link');
+  const msg = document.getElementById('forum-inbox-link-msg');
+  const link = (linkEl?.value || '').trim();
+  if (!link) { if (msg) msg.textContent = '❌ Dán link nhóm vào trước đã.'; return; }
+  if (msg) msg.textContent = '⏳ Đang lấy ID...';
+  try {
+    const res = await fetch('/api/settings/forum-inbox/resolve-link', {
+      method: 'POST',
+      headers: { ...API.getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ link })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    const group = document.getElementById('forum-inbox-group-id');
+    const topic = document.getElementById('forum-inbox-general-topic-id');
+    if (group) group.value = String(data.group_id);
+    if (topic) topic.value = String(data.general_topic_id || 1);
+    if (msg) msg.textContent = '✅ ' + (data.message || 'Đã lấy ID') +
+      (data.title ? ` — ${data.title}` : '') + ' (nhớ bấm Lưu cấu hình).';
+  } catch (e) {
+    if (msg) msg.textContent = '❌ ' + e.message;
   }
 };
 

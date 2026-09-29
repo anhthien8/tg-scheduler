@@ -35,11 +35,22 @@ async def _watchers_reload(payload):
     return {"watcher_id": watcher_id, "reloaded": True}
 
 
+async def _forum_resolve_link(payload):
+    """Resolve a t.me invite/username link to a supergroup id (needs Telethon)."""
+    import telegram_client as tg
+    return await tg.resolve_invite_or_username(
+        payload.get("invite_hash") or "",
+        username=payload.get("username"),
+        account_id=payload.get("account_id"),
+    )
+
+
 HANDLERS = {
     "chats.refresh": _chats_refresh,
     "campaign.start": _campaign_start,
     "campaign.stop": _campaign_stop,
     "watchers.reload": _watchers_reload,
+    "forum.resolve_link": _forum_resolve_link,
 }
 
 
