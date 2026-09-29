@@ -514,10 +514,15 @@ class ForumInboxConfig(BaseModel):
 
 @router.get("/forum-inbox/config")
 async def get_forum_inbox_config():
-    raw_group = (await db.get_setting("forum_inbox_group_id", "0") or "0").strip()
-    raw_topic = (await db.get_setting("forum_inbox_general_topic_id", "1") or "1").strip()
+    s = await db.get_settings_bulk({
+        "forum_inbox_group_id": "0",
+        "forum_inbox_general_topic_id": "1",
+        "forum_inbox_enabled": "0",
+    })
+    raw_group = (s["forum_inbox_group_id"] or "0").strip()
+    raw_topic = (s["forum_inbox_general_topic_id"] or "1").strip()
     return {
-        "enabled": await db.get_setting("forum_inbox_enabled", "0") == "1",
+        "enabled": s["forum_inbox_enabled"] == "1",
         "group_id": int(raw_group) if raw_group.lstrip("-").isdigit() else 0,
         "general_topic_id": int(raw_topic) if raw_topic.lstrip("-").isdigit() else 1,
     }
@@ -530,13 +535,17 @@ async def save_forum_inbox_config(payload: ForumInboxConfig):
             raise HTTPException(status_code=400, detail="group_id phải là ID supergroup âm, ví dụ -1004352266125")
         if payload.general_topic_id <= 0:
             raise HTTPException(status_code=400, detail="general_topic_id phải là số dương (General = 1)")
-        admin_ids = await db.get_setting("command_bot_admin_ids", "")
-        token = await db.get_setting("command_bot_token", "")
-        if not admin_ids or not token:
+        cfg = await db.get_settings_bulk({
+            "command_bot_admin_ids": "",
+            "command_bot_token": "",
+        })
+        if not cfg["command_bot_admin_ids"] or not cfg["command_bot_token"]:
             raise HTTPException(status_code=400, detail="Cấu hình Command Bot token và Admin IDs trước")
-    await db.set_setting("forum_inbox_enabled", "1" if payload.enabled else "0")
-    await db.set_setting("forum_inbox_group_id", str(payload.group_id))
-    await db.set_setting("forum_inbox_general_topic_id", str(payload.general_topic_id))
+    await db.set_settings_bulk({
+        "forum_inbox_enabled": "1" if payload.enabled else "0",
+        "forum_inbox_group_id": str(payload.group_id),
+        "forum_inbox_general_topic_id": str(payload.general_topic_id),
+    })
     return {"message": "Saved", **payload.model_dump()}
 
 
@@ -598,10 +607,15 @@ async def resolve_forum_inbox_link(payload: ResolveForumLinkPayload):
 
 @router.get("/command-bot/config")
 async def get_command_bot_config():
+    s = await db.get_settings_bulk({
+        "command_bot_enabled": "0",
+        "command_bot_token": "",
+        "command_bot_admin_ids": "",
+    })
     return {
-        "enabled": await db.get_setting("command_bot_enabled", "0") == "1",
-        "token": await db.get_setting("command_bot_token", ""),
-        "admin_ids": await db.get_setting("command_bot_admin_ids", ""),
+        "enabled": s["command_bot_enabled"] == "1",
+        "token": s["command_bot_token"],
+        "admin_ids": s["command_bot_admin_ids"],
     }
 
 

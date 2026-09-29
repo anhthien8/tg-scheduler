@@ -108,10 +108,15 @@ class KOLChannelSettings(BaseModel):
 
 @router.get("/kol-channel-settings")
 async def get_kol_channel_settings():
+    s = await db.get_settings_bulk({
+        "kol_channel_enabled": "false",
+        "kol_channel_source": "",
+        "kol_channel_account_id": "",
+    })
     return {
-        "enabled": (await db.get_setting("kol_channel_enabled", "false") or "").lower() in ("true", "1"),
-        "source": await db.get_setting("kol_channel_source", ""),
-        "account_id": await db.get_setting("kol_channel_account_id", ""),
+        "enabled": (s["kol_channel_enabled"] or "").lower() in ("true", "1"),
+        "source": s["kol_channel_source"],
+        "account_id": s["kol_channel_account_id"],
     }
 
 
@@ -145,12 +150,20 @@ async def get_kol_broadcast_log(limit: int = 30, offset: int = 0):
 @router.get("/settings")
 async def get_settings():
     """Get AI Follow-Up Agent configuration settings."""
-    enabled_str = await db.get_setting("ai_followup_enabled", "true")
-    sys_prompt = await db.get_setting("ai_followup_system_prompt", None)
-    kb = await db.get_setting("ai_followup_knowledge_base", None)
-    max_replies_str = await db.get_setting("ai_followup_max_replies", "5")
-    handover_raw = await db.get_setting("ai_followup_handover_keywords", '["gặp admin", "tư vấn viên", "số điện thoại"]')
-    cadence_raw = await db.get_setting("ai_followup_drip_cadence", "")
+    s = await db.get_settings_bulk({
+        "ai_followup_enabled": "true",
+        "ai_followup_system_prompt": None,
+        "ai_followup_knowledge_base": None,
+        "ai_followup_max_replies": "5",
+        "ai_followup_handover_keywords": '["gặp admin", "tư vấn viên", "số điện thoại"]',
+        "ai_followup_drip_cadence": "",
+    })
+    enabled_str = s["ai_followup_enabled"]
+    sys_prompt = s["ai_followup_system_prompt"]
+    kb = s["ai_followup_knowledge_base"]
+    max_replies_str = s["ai_followup_max_replies"]
+    handover_raw = s["ai_followup_handover_keywords"]
+    cadence_raw = s["ai_followup_drip_cadence"]
 
     default_prompt = (
         "Bạn là chuyên gia tư vấn bán hàng & onboard thân thiện. Giọng văn tự nhiên, ngắn gọn như người thật đang nhắn tin.\n"

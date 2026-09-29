@@ -8,11 +8,45 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.5.5",
+        "date": "30/09/2026",
+        "title": "⚡ Giảm truy vấn Settings & N+1: bulk read/write toàn hệ thống",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Các endpoint đọc nhiều setting không còn mở connection riêng cho từng key. Thêm helper bulk read/write và bulk count, gộp N truy vấn tuần tự thành 1 — giảm độ trễ và tải connection pool trên các trang Settings, AI Agent, Follow-Up, Proxy và Batch Scrape.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Helper bulk read/write cho Settings",
+                "desc": "Thêm db.get_settings_bulk(keys) và db.set_settings_bulk(values): 1 lần acquire connection + 1 câu query/commit thay vì N lần. Endpoint đọc 6–8 setting tuần tự trước đây giờ chỉ còn 1 round-trip.",
+                "tag": "Performance"
+            },
+            {
+                "type": "improvement",
+                "title": "AI Agent: cấu hình provider load 1 lần",
+                "desc": "_get_system_ai_config() và luồng test/reply gộp tối đa 10 lần get_setting (provider + 6 provider dự phòng + base_url/model) thành 2 lần bulk read. Áp dụng tương tự cho luồng AI remix trong Members.",
+                "tag": "AI"
+            },
+            {
+                "type": "improvement",
+                "title": "Hết N+1 khi tạo batch channel & xóa proxy",
+                "desc": "Tạo N channel trong batch scrape dùng 1 executemany thay vì N lần INSERT. Nút xóa toàn bộ proxy cập nhật mọi account trong 1 commit thay vì UPDATE từng account.",
+                "tag": "Database"
+            },
+            {
+                "type": "improvement",
+                "title": "Settings/Follow-Up/Forum Inbox gộp truy vấn",
+                "desc": "Trang Cấu hình AI, AI Follow-Up và Forum Inbox đọc/ghi nhiều setting trong 1 query. Số lần acquire connection giảm mạnh khi mở các trang này.",
+                "tag": "Performance"
+            }
+        ]
+    },
+    {
         "version": "v3.5.4",
         "date": "26/09/2026",
         "title": "⚡ Tối ưu hiệu năng: Channels cache + Polling scheduler tập trung",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Trang Channels không còn lag 1–2 giây khi cold-load. Polling timer phân tán thay bằng scheduler chung, pause khi tab ẩn, chống overlap per-job.",
         "changes": [
             {

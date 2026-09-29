@@ -1257,6 +1257,21 @@ async def update_account_proxy(account_id: int, proxy_url: str | None):
         await db.commit()
 
 
+async def update_accounts_proxy_bulk(assignments: dict):
+    """Bulk-update proxy_url for many accounts in ONE commit.
+
+    `assignments` maps account_id -> proxy_url (may be None to clear).
+    """
+    if not assignments:
+        return
+    async with get_db() as db:
+        await db.executemany(
+            "UPDATE accounts SET proxy_url=? WHERE id=?",
+            [(proxy_url, account_id) for account_id, proxy_url in assignments.items()],
+        )
+        await db.commit()
+
+
 async def delete_account(account_id: int):
     async with get_db() as db:
         await db.execute("PRAGMA foreign_keys=ON")
@@ -1972,6 +1987,41 @@ async def get_setting(key: str, default=None):
         cursor = await db.execute("SELECT value FROM settings WHERE key=?", (key,))
         row = await cursor.fetchone()
         return row[0] if row else default
+
+
+async def get_settings_bulk(keys: dict):
+    """Fetch many settings in ONE pool acquire + ONE query.
+
+    `keys` maps setting key -> default value. Returns {key: value} with
+    defaults filled in for any key not present in the DB. Use this instead of
+    N sequential get_setting() calls, which cost a pool acquire/release and a
+    query round-trip each.
+    """
+    if not keys:
+        return {}
+    result = dict(keys)
+    placeholders = ",".join("?" * len(keys))
+    async with get_db() as db:
+        cursor = await db.execute(
+            f"SELECT key, value FROM settings WHERE key IN ({placeholders})",
+            tuple(keys.keys()),
+        )
+        for row in await cursor.fetchall():
+            result[row[0]] = row[1]
+    return result
+
+
+async def set_settings_bulk(values: dict):
+    """Persist many settings in ONE connection + ONE commit."""
+    if not values:
+        return
+    async with get_db() as db:
+        await db.executemany(
+            """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+            [(k, v) for k, v in values.items()],
+        )
+        await db.commit()
 
 
 async def set_setting(key: str, value: str):
@@ -2984,6 +3034,19 @@ async def create_batch_channel(batch_job_id: str, channel_username: str):
             INSERT INTO batch_scrape_channels (batch_job_id, channel_username)
             VALUES (?, ?)
         """, (batch_job_id, channel_username))
+        await db.commit()
+
+
+async def create_batch_channels_bulk(batch_job_id: str, channel_usernames):
+    """Add many channels to a batch scrape job in ONE insert + ONE commit."""
+    rows = [(batch_job_id, ch) for ch in channel_usernames]
+    if not rows:
+        return
+    async with get_db() as db:
+        await db.executemany(
+            "INSERT INTO batch_scrape_channels (batch_job_id, channel_username) VALUES (?, ?)",
+            rows,
+        )
         await db.commit()
 
 
@@ -4586,6 +4649,25 @@ async def count_campaigns_by_agent(agent_id: int) -> int:
         )
         row = await cursor.fetchone()
         return row[0] if row else 0
+
+
+async def count_campaigns_by_agent_bulk(agent_ids) -> dict:
+    """Campaign counts for many agents in ONE query. Returns {agent_id: count}
+    with 0 filled in for agents that have no campaigns."""
+    ids = list(agent_ids)
+    if not ids:
+        return {}
+    counts = {aid: 0 for aid in ids}
+    placeholders = ",".join("?" * len(ids))
+    async with get_db() as db:
+        cursor = await db.execute(
+            f"SELECT ai_agent_id, COUNT(*) FROM dm_campaigns "
+            f"WHERE ai_agent_id IN ({placeholders}) GROUP BY ai_agent_id",
+            tuple(ids),
+        )
+        for agent_id, count in await cursor.fetchall():
+            counts[agent_id] = count
+    return counts
 
 
 # ── KOL Profiles & Learned Knowledge CRUD ─────────────────────────────────────

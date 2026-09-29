@@ -615,8 +615,7 @@ async def batch_scrape_members(req: BatchScrapeRequest, background_tasks: Backgr
     batch_job_id = f"batch_{uuid.uuid4().hex[:8]}"
 
     # Create batch channel records
-    for ch in channels:
-        await db.create_batch_channel(batch_job_id, ch)
+    await db.create_batch_channels_bulk(batch_job_id, channels)
 
     background_tasks.add_task(
         _do_batch_scrape, batch_job_id, req.account_id, channels,
@@ -1682,26 +1681,33 @@ async def _run_campaign(campaign_id: int):
         ai_remix_kwargs = {}
         ai_custom_prompt = None
         if use_ai:
-            # 1. Global settings for provider and keys
-            ai_provider = await db.get_setting("ai_provider", None)
-            ai_custom_prompt = await db.get_setting("ai_custom_prompt", None)
+            # 1. Global settings for provider and keys.
+            # Bulk-read every provider key in one query instead of up to 6
+            # sequential get_setting() round-trips.
+            all_providers = ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]
+            cfg = await db.get_settings_bulk({
+                "ai_provider": None,
+                "ai_custom_prompt": None,
+                **{f"ai_keys_{p}": "[]" for p in all_providers},
+            })
+            ai_provider = cfg["ai_provider"]
+            ai_custom_prompt = cfg["ai_custom_prompt"]
 
-            async def _load_provider_keys(prov):
+            def _provider_keys(prov):
                 if not prov:
                     return []
                 try:
-                    raw = await db.get_setting(f"ai_keys_{prov}", "[]")
+                    raw = cfg.get(f"ai_keys_{prov}", "[]")
                     return json.loads(raw) if raw else []
                 except Exception:
                     return []
 
             if ai_provider:
-                ai_keys = await _load_provider_keys(ai_provider)
+                ai_keys = _provider_keys(ai_provider)
 
             if not ai_keys:
-                all_providers = ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]
                 for alt_prov in all_providers:
-                    alt_keys = await _load_provider_keys(alt_prov)
+                    alt_keys = _provider_keys(alt_prov)
                     if alt_keys:
                         logger.warning(
                             f"[Campaign {campaign_id}] ⚠️ Provider '{ai_provider}' không có API key. "
@@ -1711,16 +1717,14 @@ async def _run_campaign(campaign_id: int):
                         ai_keys = alt_keys
                         break
 
-            if ai_provider == "openai_compatible":
-                b_url = await db.get_setting("ai_oai_compat_base_url", "")
-                mod = await db.get_setting("ai_oai_compat_model", "")
-                if b_url and b_url.strip():
-                    ai_remix_kwargs["base_url"] = b_url.strip()
-                if mod and mod.strip():
-                    ai_remix_kwargs["model"] = mod.strip()
-            elif ai_provider == "chatgpt_oauth":
-                b_url = await db.get_setting("ai_chatgpt_oauth_base_url", "")
-                mod = await db.get_setting("ai_chatgpt_oauth_model", "")
+            if ai_provider in ("openai_compatible", "chatgpt_oauth"):
+                prefix = "oai_compat" if ai_provider == "openai_compatible" else "chatgpt_oauth"
+                env = await db.get_settings_bulk({
+                    f"ai_{prefix}_base_url": "",
+                    f"ai_{prefix}_model": "",
+                })
+                b_url = env[f"ai_{prefix}_base_url"]
+                mod = env[f"ai_{prefix}_model"]
                 if b_url and b_url.strip():
                     ai_remix_kwargs["base_url"] = b_url.strip()
                 if mod and mod.strip():

@@ -66,10 +66,13 @@ async def _get_system_ai_config():
             ai_keys = []
 
     if not ai_keys:
-        for alt_prov in ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]:
+        # One bulk read for every fallback provider instead of up to 6 sequential
+        # get_setting() calls (one pool acquire + query each).
+        alt_provs = ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]
+        alt_map = await db.get_settings_bulk({f"ai_keys_{p}": "[]" for p in alt_provs})
+        for alt_prov in alt_provs:
             try:
-                raw = await db.get_setting(f"ai_keys_{alt_prov}", "[]")
-                alt_keys = json.loads(raw) if raw else []
+                alt_keys = json.loads(alt_map[f"ai_keys_{alt_prov}"] or "[]")
                 if alt_keys:
                     ai_provider = alt_prov
                     ai_keys = alt_keys
@@ -78,16 +81,14 @@ async def _get_system_ai_config():
                 pass
 
     kwargs = {}
-    if ai_provider == "openai_compatible":
-        b_url = await db.get_setting("ai_oai_compat_base_url", "")
-        mod = await db.get_setting("ai_oai_compat_model", "")
-        if b_url and b_url.strip():
-            kwargs["base_url"] = b_url.strip()
-        if mod and mod.strip():
-            kwargs["model"] = mod.strip()
-    elif ai_provider == "chatgpt_oauth":
-        b_url = await db.get_setting("ai_chatgpt_oauth_base_url", "")
-        mod = await db.get_setting("ai_chatgpt_oauth_model", "")
+    if ai_provider in ("openai_compatible", "chatgpt_oauth"):
+        env = await db.get_settings_bulk({
+            f"ai_{'oai_compat' if ai_provider == 'openai_compatible' else 'chatgpt_oauth'}_base_url": "",
+            f"ai_{'oai_compat' if ai_provider == 'openai_compatible' else 'chatgpt_oauth'}_model": "",
+        })
+        prefix = "oai_compat" if ai_provider == "openai_compatible" else "chatgpt_oauth"
+        b_url = env[f"ai_{prefix}_base_url"]
+        mod = env[f"ai_{prefix}_model"]
         if b_url and b_url.strip():
             kwargs["base_url"] = b_url.strip()
         if mod and mod.strip():
@@ -146,8 +147,9 @@ async def list_agents():
         await db.create_ai_agent(default_agent)
         agents = await db.get_all_ai_agents(active_only=True)
 
+    counts = await db.count_campaigns_by_agent_bulk([a["id"] for a in agents])
     for agent in agents:
-        agent["campaign_count"] = await db.count_campaigns_by_agent(agent["id"])
+        agent["campaign_count"] = counts.get(agent["id"], 0)
     return {"agents": agents}
 
 
@@ -259,26 +261,27 @@ async def test_agent(agent_id: int, req: AgentTestRequest):
         raise HTTPException(400, f"AI Agent '{agent['name']}' chưa có API Key và hệ thống chưa cấu hình API Key!")
 
     # Merge base_url and model for openai_compatible
-    if provider == "openai_compatible":
+    if provider in ("openai_compatible", "chatgpt_oauth"):
+        prefix = "oai_compat" if provider == "openai_compatible" else "chatgpt_oauth"
         b_url = agent.get("base_url", "")
         mod = agent.get("model", "")
-        if not b_url or not b_url.strip():
-            b_url = await db.get_setting("ai_oai_compat_base_url", "")
-        if not mod or not mod.strip():
-            mod = await db.get_setting("ai_oai_compat_model", "")
-        if b_url and b_url.strip():
-            kwargs["base_url"] = b_url.strip()
-        if mod and mod.strip():
-            kwargs["model"] = mod.strip()
-    elif provider == "chatgpt_oauth":
-        b_url = agent.get("base_url", "")
-        mod = agent.get("model", "")
-        if not b_url or not b_url.strip():
-            b_url = await db.get_setting("ai_chatgpt_oauth_base_url", "")
-        if not mod or not mod.strip():
-            mod = await db.get_setting("ai_chatgpt_oauth_model", "")
-        kwargs["base_url"] = b_url.strip() if b_url and b_url.strip() else "https://api.openai.com/v1"
-        kwargs["model"] = mod.strip() if mod and mod.strip() else "gpt-4o"
+        need_b = not b_url or not b_url.strip()
+        need_m = not mod or not mod.strip()
+        if need_b or need_m:
+            fallback = await db.get_settings_bulk({
+                f"ai_{prefix}_base_url": "",
+                f"ai_{prefix}_model": "",
+            })
+            if need_b:
+                b_url = fallback[f"ai_{prefix}_base_url"]
+            if need_m:
+                mod = fallback[f"ai_{prefix}_model"]
+        if provider == "openai_compatible":
+            kwargs["base_url"] = b_url.strip() if b_url and b_url.strip() else kwargs.get("base_url", "")
+            kwargs["model"] = mod.strip() if mod and mod.strip() else kwargs.get("model", "")
+        else:
+            kwargs["base_url"] = b_url.strip() if b_url and b_url.strip() else kwargs.get("base_url") or "https://api.openai.com/v1"
+            kwargs["model"] = mod.strip() if mod and mod.strip() else kwargs.get("model") or "gpt-4o"
 
     sys_prompt = agent.get("system_prompt", "")
     kb = agent.get("knowledge_base", "")

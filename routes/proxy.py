@@ -222,9 +222,8 @@ async def clear_pool():
     """Clear the proxy pool and remove all account proxies."""
     await db.set_setting("proxy_pool", "[]")
     accounts = await db.get_accounts()
-    for acc in accounts:
-        if acc.get("proxy_url"):
-            await db.update_account_proxy(acc["id"], None)
+    to_clear = {acc["id"]: None for acc in accounts if acc.get("proxy_url")}
+    await db.update_accounts_proxy_bulk(to_clear)
     return {"success": True, "message": "Đã xóa tất cả proxy"}
 
 
