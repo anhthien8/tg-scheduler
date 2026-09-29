@@ -203,8 +203,16 @@ async def check_reply_sla():
             tag = f"@{r['username']}" if r.get("username") else f"#{r['user_id']}"
             name = r.get("name") or tag
             lines.append(f"• {name} ({tag}) — chờ {int(waited_min)} phút, {r['lead_tier']} {r.get('intent_score') or 0}%")
+
+        # Per-lead dedup: the default 1h send_alert cooldown is LONGER than the
+        # 30-min SLA, so a single shared kind would suppress alerts for OTHER
+        # leads. Key the cooldown on the specific set of waiting leads, so the
+        # same set won't re-alert within an hour but a new lead still will.
+        lead_keys = sorted(f"{r['account_id']}:{r['user_id']}" for _, r in waiting[:5])
+        kind = "reply_sla:" + ",".join(lead_keys)
+
         await send_alert(
-            "reply_sla",
+            kind,
             f"🔥 {len(waiting)} lead nóng đang chờ phản hồi >{threshold_min} phút:\n"
             + "\n".join(lines) + "\n\nTrả lời NGAY kẻo nguội lead!"
         )

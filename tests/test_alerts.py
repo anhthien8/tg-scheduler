@@ -216,6 +216,37 @@ async def test_reply_sla_disabled_by_setting(fake_db, monkeypatch):
     sa.assert_not_awaited()
 
 
+async def test_reply_sla_new_lead_not_suppressed_by_prior_alert(fake_db, monkeypatch):
+    """Regression: a shared 'reply_sla' kind + 1h cooldown used to suppress the
+    alert for a DIFFERENT hot lead that crosses the 30-min threshold later."""
+    monkeypatch.setattr(alerts, "db", fake_db)
+
+    async def _setting(key, default=""):
+        if key == "reply_sla_minutes":
+            return "30"
+        return "1"
+    fake_db.get_setting = AsyncMock(side_effect=_setting)
+
+    # Lead A waiting.
+    fake_db.get_db = lambda: _FakeConn([_row(minutes_ago=90)])
+    sent_kinds = []
+
+    async def capture(kind, text):
+        sent_kinds.append(kind)
+    monkeypatch.setattr(alerts, "send_alert", capture)
+
+    await alerts.check_reply_sla()
+    assert len(sent_kinds) == 1
+
+    # Lead B (different user_id) waiting — must produce a NEW distinct alert.
+    row_b = _row(minutes_ago=90)
+    row_b["user_id"] = 200
+    fake_db.get_db = lambda: _FakeConn([row_b])
+    await alerts.check_reply_sla()
+    assert len(sent_kinds) == 2
+    assert sent_kinds[0] != sent_kinds[1]
+
+
 async def test_flood_guard_rotates_proxy_when_enabled(fake_db, monkeypatch):
     monkeypatch.setattr(alerts, "db", fake_db)
     fake_db.get_all_accounts = AsyncMock(return_value=[{"id": 5, "name": "n", "is_paused": False, "proxy_url": "p1"}])

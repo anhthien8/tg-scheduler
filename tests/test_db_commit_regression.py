@@ -33,6 +33,33 @@ async def test_no_open_transaction_after_verification_update():
         assert conn.in_transaction is False
 
 
+async def test_child_task_does_not_share_parent_connection():
+    """Regression: asyncio.create_task copies the context, so a child task used
+    to inherit the parent's pooled connection. Each task must get its OWN."""
+    import asyncio
+
+    seen = {}
+
+    async with db.get_db() as parent_conn:
+        async def child():
+            async with db.get_db() as child_conn:
+                seen["child"] = id(child_conn)
+                # A child must be able to run a write without the parent's
+                # connection being reused concurrently.
+                await child_conn.execute("SELECT 1")
+        await asyncio.create_task(child())
+        seen["parent"] = id(parent_conn)
+
+    assert seen["child"] != seen["parent"], "child task reused parent's connection"
+
+
+async def test_nested_get_db_in_same_task_reuses_connection():
+    """The reuse path must still work within a single task (prevents deadlock)."""
+    async with db.get_db() as outer:
+        async with db.get_db() as inner:
+            assert inner is outer
+
+
 def test_database_has_no_write_without_commit():
     """Static scan: every async def in database.py that runs an INSERT/UPDATE/
     DELETE literal must also call commit() (or be wrapped in a known pattern)."""

@@ -134,6 +134,10 @@ class ConnectionPool:
 
 _pool = None
 _current_db_conn: "contextvars.ContextVar[aiosqlite.Connection | None]" = contextvars.ContextVar("_current_db_conn", default=None)
+# The task that owns the connection in _current_db_conn. asyncio.create_task
+# COPIES the context, so a child task would otherwise inherit and reuse the
+# parent's connection (which the parent releases while the child still holds it).
+_current_db_owner: "contextvars.ContextVar[object | None]" = contextvars.ContextVar("_current_db_owner", default=None)
 
 @asynccontextmanager
 async def get_db():
@@ -141,14 +145,20 @@ async def get_db():
     if _pool is None:
         _pool = ConnectionPool(DB_PATH)
 
-    # Reuse connection if already acquired in this async task (prevents nested deadlock)
+    # Reuse the connection only if THIS task acquired it (prevents nested
+    # deadlock) — never a connection inherited from a parent task via a copied
+    # context, which would mean two tasks sharing one aiosqlite connection.
+    current_task = asyncio.current_task()
     existing = _current_db_conn.get(None)
-    if existing is not None and getattr(existing, "_connection", None) is not None:
+    if (existing is not None
+            and getattr(existing, "_connection", None) is not None
+            and _current_db_owner.get(None) is current_task):
         yield existing
         return
 
     conn = await _pool.acquire()
     token = _current_db_conn.set(conn)
+    owner_token = _current_db_owner.set(current_task)
     try:
         yield conn
     except BaseException:
@@ -159,6 +169,7 @@ async def get_db():
             pass
         raise
     finally:
+        _current_db_owner.reset(owner_token)
         _current_db_conn.reset(token)
         await _pool.release(conn)
 
