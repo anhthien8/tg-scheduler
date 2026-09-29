@@ -78,3 +78,22 @@ def test_passes_icp_accepts_above_threshold():
 def test_lead_score_is_qualified_truthy():
     assert score_lead({"username": "u"}, now=NOW).is_qualified
     assert not score_lead({}, now=NOW).is_qualified
+
+
+def test_is_qualified_returns_bool_not_int():
+    assert score_lead({"username": "u"}, now=NOW).is_qualified is True
+    assert score_lead({}, now=NOW).is_qualified is False
+
+
+def test_tz_aware_last_seen_still_awards_activity_points():
+    """Telethon emits tz-aware ISO (e.g. '+00:00'); must not lose the points."""
+    aware_ts = "2026-09-27T12:00:00+00:00"  # 1 day before NOW (2026-09-28 12:00)
+    lead = score_lead({"username": "u", "last_seen": aware_ts}, now=NOW)
+    assert any("active_recently" in r for r in lead.reasons)
+
+
+def test_tz_aware_now_does_not_crash():
+    from datetime import timezone
+    aware_now = NOW.replace(tzinfo=timezone.utc)
+    lead = score_lead({"username": "u", "last_seen": "2026-09-25T12:00:00+00:00"}, now=aware_now)
+    assert lead.score > 0

@@ -134,7 +134,7 @@ const Analytics = {
       const bar = `<div style="height:3px;border-radius:1.5px;background:var(--bg3);margin-top:4px"><div style="height:100%;width:${score}%;border-radius:1.5px;background:${color}"></div></div>`;
       return `<div class="card" style="padding:10px;margin-bottom:0">
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">
-          <strong style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">${a.account_name || 'Account #' + a.account_id}</strong>
+          <strong style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">${esc(a.account_name || 'Account #' + a.account_id)}</strong>
           <span class="badge ${score >= 80 ? 'badge-green' : score >= 50 ? 'badge-blue' : 'badge-red'}" style="padding:2px 6px;font-size:10px">${score}/100</span>
         </div>
         ${bar}
@@ -161,8 +161,8 @@ const Analytics = {
         const rate = (c.success_rate || 0).toFixed(1);
         const badge = c.status === 'running' ? 'badge-green' : c.status === 'completed' ? 'badge-blue' : 'badge-gray';
         return `<tr>
-          <td><strong>${c.name || ''}</strong></td>
-          <td><span class="badge ${badge}">${c.status}</span></td>
+          <td><strong>${esc(c.name || '')}</strong></td>
+          <td><span class="badge ${badge}">${esc(c.status || '')}</span></td>
           <td>${c.sent_count || 0}</td>
           <td>${c.failed_count || 0}</td>
           <td>${c.reply_count || 0}</td>
@@ -208,15 +208,15 @@ const Templates = {
       const icon = cats[t.category] || '\uD83D\uDCC4';
       return `<div class="card" style="padding:16px;cursor:pointer" onclick="Templates.use(${t.id})">
         <div style="display:flex;justify-content:space-between;align-items:start">
-          <div><span style="font-size:20px">${icon}</span> <strong>${t.name}</strong></div>
+          <div><span style="font-size:20px">${icon}</span> <strong>${esc(t.name)}</strong></div>
           <div class="btn-group" style="display:flex;gap:4px;align-items:center">
             ${t.is_default ? '<span class="badge badge-purple">Default</span>' : ''}
             <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();Templates.openEdit(${t.id})" title="S\u1EEDa">✏️</button>
             ${!t.is_default ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();Templates.remove(${t.id})" title="Xo\u00E1">\uD83D\uDDD1</button>` : ''}
           </div>
         </div>
-        <div style="color:var(--text2);font-size:12px;margin-top:6px">${t.category} \u00B7 ${msgs.length} message${msgs.length > 1 ? 's' : ''}</div>
-        <div style="margin-top:8px;font-size:12px;color:var(--text3);max-height:60px;overflow:hidden">${msgs[0]?.content?.slice(0, 120) || '(empty)'}</div>
+        <div style="color:var(--text2);font-size:12px;margin-top:6px">${esc(t.category)} \u00B7 ${msgs.length} message${msgs.length > 1 ? 's' : ''}</div>
+        <div style="margin-top:8px;font-size:12px;color:var(--text3);max-height:60px;overflow:hidden">${esc(msgs[0]?.content?.slice(0, 120) || '(empty)')}</div>
       </div>`;
     }).join('')}</div>`;
   },
@@ -372,8 +372,8 @@ const AutoReply = {
           </div>
         </div>
         <div style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--text2);flex-wrap:wrap">
-          <span>Trigger: <strong>${r.trigger_type}</strong></span>
-          ${keywords.length ? `<span>Keywords: ${keywords.slice(0, 3).join(', ')}${keywords.length > 3 ? '...' : ''}</span>` : ''}
+          <span>Trigger: <strong>${esc(r.trigger_type)}</strong></span>
+          ${keywords.length ? `<span>Keywords: ${esc(keywords.slice(0, 3).join(', '))}${keywords.length > 3 ? '...' : ''}</span>` : ''}
           <span>${msgs.length} reply msg${msgs.length > 1 ? 's' : ''}</span>
           <span>Max ${r.max_replies_per_user}/user</span>
         </div>

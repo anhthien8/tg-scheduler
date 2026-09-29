@@ -492,12 +492,19 @@ async def reconnect_with_proxy(account_id: int, proxy_url: str | None) -> bool:
     """
     Disconnect existing client and reconnect with a new proxy.
     Used when proxy is assigned/changed/removed for an account.
-    Returns True if reconnected successfully.
+
+    Returns True ONLY if the account is now connected via the REQUESTED proxy.
+    If the new proxy fails, we best-effort roll back to the previous proxy and
+    return False — so a caller that wants to persist the new proxy must treat
+    False as "do not commit" (the account is on the old proxy again).
     """
     import database as db_mod
 
     old_client = _clients.get(account_id)
+    old_proxy = None
     if old_client:
+        # Remember the old proxy so we can roll back on failure.
+        old_proxy = getattr(old_client, "_tg_proxy_url", None)
         try:
             await old_client.disconnect()
             logger.info(f"Account {account_id}: disconnected for proxy change")
@@ -511,26 +518,82 @@ async def reconnect_with_proxy(account_id: int, proxy_url: str | None) -> bool:
         logger.error(f"Account {account_id}: not found in DB for reconnect")
         return False
 
-    try:
-        # Create new client with proxy
+    async def _build_and_start(purl):
         await create_client(
             account_id,
             int(acc["api_id"]),
             acc["api_hash"],
             acc["session_name"],
-            proxy_url=proxy_url,
+            proxy_url=purl,
         )
-        # Start and authorize
-        ok = await start_client(account_id)
+        client = _clients.get(account_id)
+        if client is not None:
+            # Tag so a future reconnect can roll back to this proxy.
+            try:
+                client._tg_proxy_url = purl
+            except Exception:
+                pass
+        return await start_client(account_id)
+
+    try:
+        ok = await _build_and_start(proxy_url)
         if ok:
             proxy_display = proxy_url.split("@")[-1] if proxy_url and "@" in proxy_url else (proxy_url or "direct")
             logger.info(f"Account {account_id}: ✓ reconnected via {proxy_display}")
-        else:
-            logger.warning(f"Account {account_id}: reconnected but not authorized")
-        return ok
+            return True
+
+        logger.warning(f"Account {account_id}: reconnected but not authorized")
     except Exception as e:
         logger.error(f"Account {account_id}: reconnect with proxy failed: {e}")
+
+    # New proxy did not work — restore the old connection. Return False either
+    # way (the caller must NOT persist the new proxy), but attempt rollback so
+    # the account isn't left offline.
+    restored = await _rollback_proxy(account_id, old_proxy, acc)
+    if not restored:
+        logger.error(f"Account {account_id}: account is OFFLINE (rollback failed)")
+    return False
+
+
+async def _rollback_proxy(account_id: int, old_proxy: str | None, acc: dict | None = None) -> bool:
+    """Best-effort restore of the previous client when a proxy swap fails.
+
+    Returns True if the account ends up connected again (on the old proxy).
+    """
+    try:
+        if acc is None:
+            acc = await _find_account(account_id)
+        if acc is None:
+            logger.error(f"Account {account_id}: cannot roll back — account not found")
+            return False
+        await create_client(
+            account_id,
+            int(acc["api_id"]),
+            acc["api_hash"],
+            acc["session_name"],
+            proxy_url=old_proxy,
+        )
+        client = _clients.get(account_id)
+        if client is not None:
+            try:
+                client._tg_proxy_url = old_proxy
+            except Exception:
+                pass
+        restored = await start_client(account_id)
+        if restored:
+            logger.warning(f"Account {account_id}: rolled back to previous proxy after failed swap")
+        else:
+            logger.error(f"Account {account_id}: rollback also failed — account offline")
+        return restored
+    except Exception as e:
+        logger.error(f"Account {account_id}: proxy rollback failed: {e}")
         return False
+
+
+async def _find_account(account_id: int) -> dict | None:
+    import database as db_mod
+    accounts = await db_mod.get_accounts()
+    return next((a for a in accounts if a["id"] == account_id), None)
 
 
 async def send_code(account_id: int, phone: str) -> str:

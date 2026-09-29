@@ -72,15 +72,58 @@ async def test_picks_least_used_proxy(monkeypatch):
     assert res["new_proxy"] == "p3"
 
 
-async def test_reconnect_failure_still_rotates_db(monkeypatch):
+async def test_reconnect_failure_does_not_rotate(monkeypatch):
+    """If the new proxy can't connect, we must NOT commit it (account would be
+    left offline). DB proxy stays unchanged and rotated is False."""
     db = FakeDB(pool=["p1", "p2"], accounts=[{"id": 1, "proxy_url": "p1"}])
     monkeypatch.setattr("database.get_setting", db.get_setting)
     monkeypatch.setattr("database.get_all_accounts", db.get_all_accounts)
     monkeypatch.setattr("database.update_account_proxy", db.update_account_proxy)
-    with patch("telegram_client.reconnect_with_proxy", AsyncMock(side_effect=RuntimeError("boom")), create=True):
+    with patch("telegram_client.reconnect_with_proxy", AsyncMock(return_value=False), create=True):
         res = await pm.rotate_proxy_for_account(1, current_proxy="p1")
-    assert res["rotated"] is True
-    assert "reconnect" in res["reason"]
+    assert res["rotated"] is False
+    assert "thất bại" in res["reason"]
+    assert db.updated is None  # DB proxy untouched
+
+
+async def test_reconnect_returns_false_even_after_successful_rollback(monkeypatch):
+    """Regression: reconnect_with_proxy must NOT return True when it fell back to
+    the old proxy — otherwise rotate_proxy_for_account persists the dead proxy.
+
+    conftest mocks `telegram_client`, so load the REAL module from disk to test
+    its actual reconnect contract.
+    """
+    import importlib.util
+    import sys
+    import types
+    from pathlib import Path
+    from unittest.mock import patch
+
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("real_tg_reconnect", root / "telegram_client.py")
+    real = importlib.util.module_from_spec(spec)
+    with patch.dict(sys.modules, {
+        "database": types.ModuleType("database"),
+    }):
+        spec.loader.exec_module(real)
+
+    calls = {"n": 0}
+
+    async def fake_create_client(account_id, api_id, api_hash, session_name, proxy_url=None):
+        calls["n"] += 1
+
+    async def fake_start_client(account_id):
+        return calls["n"] > 1  # new proxy fails, rollback succeeds
+
+    monkeypatch.setattr(real, "create_client", fake_create_client)
+    monkeypatch.setattr(real, "start_client", fake_start_client)
+    real._clients = {}
+
+    fake_db = types.ModuleType("database")
+    fake_db.get_accounts = AsyncMock(return_value=[{"id": 1, "api_id": 1, "api_hash": "h", "session_name": "s"}])
+    with patch.dict(sys.modules, {"database": fake_db}):
+        result = await real.reconnect_with_proxy(1, "socks5://dead:1080")
+    assert result is False  # rolled back, but must report failure for the swap
 
 
 async def test_handles_malformed_pool(monkeypatch):

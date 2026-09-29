@@ -116,7 +116,14 @@ class FetchModelsPayload(BaseModel):
 @router.post("/fetch-models")
 async def fetch_models(payload: FetchModelsPayload):
     """Proxy to fetch available models from an OpenAI-compatible API."""
-    base_url = payload.base_url.rstrip("/")
+    # SSRF guard: block private/loopback/link-local targets.
+    try:
+        from routes._url_guard import UrlNotAllowed, validate_outbound_url
+        base_url = validate_outbound_url(payload.base_url).rstrip("/")
+    except UrlNotAllowed as e:
+        return {"success": False, "error": f"URL bị chặn: {e}"}
+    except Exception:
+        base_url = payload.base_url.rstrip("/")
     # Ensure we hit /models endpoint
     if base_url.endswith("/v1"):
         models_url = base_url + "/models"
@@ -573,9 +580,31 @@ async def command_bot_logs(limit: int = 30):
     return {"actions": await db.get_command_actions(limit)}
 
 
+# Infrastructure credentials that this generic getter must NEVER return in
+# plaintext — no UI needs their value back (they are write-only from the UI).
+# NOTE: `ai_keys_*` are intentionally NOT blocked — the AI-keys settings UI
+# edits them and needs to read them back for a single local operator.
+_BLOCKED_SETTING_KEYS = frozenset({
+    "webshare_api_key",
+    "command_bot_token",
+    "dashboard_secret_key",
+})
+
+
+def _is_secret_setting(key: str) -> bool:
+    k = (key or "").lower()
+    if k in _BLOCKED_SETTING_KEYS:
+        return True
+    # Any *_password / *_secret is write-only.
+    return k.endswith("_password") or k.endswith("_secret")
+
+
 @router.get("/{key}")
 async def get_setting(key: str):
     value = await db.get_setting(key, None)
+    # Never exfiltrate infrastructure credentials through this generic getter.
+    if _is_secret_setting(key):
+        return {"key": key, "value": None, "configured": bool(value)}
     return {"key": key, "value": value}
 
 

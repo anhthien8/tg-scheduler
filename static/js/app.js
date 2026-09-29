@@ -29,7 +29,7 @@ showLogin(){(document.getElementById('login-page')?.classList || {add:()=>{},rem
 
 showDashboard(user){(document.getElementById('login-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('dashboard-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
 
-if(user){const n=[user.first_name,user.last_name].filter(Boolean).join(' ');(document.getElementById('user-info') || me_dummy).innerHTML = `<strong>${n}</strong><span>@${user.username||user.phone||''}</span>`}
+if(user){const n=[user.first_name,user.last_name].filter(Boolean).join(' ');const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');(document.getElementById('user-info') || me_dummy).innerHTML = `<strong>${esc(n)}</strong><span>@${esc(user.username||user.phone||'')}</span>`}
 
 this.navigate('dashboard');document.querySelectorAll('.day-btn').forEach(b=>b.addEventListener('click',()=>b.classList.toggle('active')))},
 
@@ -1362,11 +1362,13 @@ addWatcherMessage(type,data=null){
   // variant that Smart Template Rotation will A/B test. Blank = 0 (single variant).
   const _variant=data?.variant_index||0;
 
+  const _esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
   let inner=`<div class="msg-item-header"><span class="msg-item-type">${type.toUpperCase()}</span><label class="msg-variant-label" title="Biến thể (variant): các tin cùng số sẽ tạo thành 1 biến thể để xoay vòng A/B">Variant <input type="number" min="0" step="1" class="msg-variant" value="${_variant}" style="width:52px"></label><button class="msg-remove" onclick="this.closest('.msg-item').remove()">✕</button></div>`;
 
-  if(type==='text')inner+=`<textarea class="form-textarea msg-content" placeholder="Nội dung DM">${data?.content||''}</textarea>`;
+  if(type==='text')inner+=`<textarea class="form-textarea msg-content" placeholder="Nội dung DM">${_esc(data?.content)}</textarea>`;
 
-  else if(['photo','video','document'].includes(type))inner+=`<div class="form-group" style="margin-bottom:8px"><input type="file" class="form-input msg-file" onchange="App.handleFileUpload(this)"><input type="hidden" class="msg-media-path" value="${data?.media_path||''}">${data?.media_path?`<small style="color:var(--green)">✓ ${data.media_path.split('/').pop()}</small>`:''}</div><textarea class="form-textarea msg-content" placeholder="Caption" rows="2">${data?.content||''}</textarea>`;
+  else if(['photo','video','document'].includes(type))inner+=`<div class="form-group" style="margin-bottom:8px"><input type="file" class="form-input msg-file" onchange="App.handleFileUpload(this)"><input type="hidden" class="msg-media-path" value="${_esc(data?.media_path)}">${data?.media_path?`<small style="color:var(--green)">✓ ${_esc(String(data.media_path).split('/').pop())}</small>`:''}</div><textarea class="form-textarea msg-content" placeholder="Caption" rows="2">${_esc(data?.content)}</textarea>`;
 
   div.innerHTML=inner;list.appendChild(div)},
 
@@ -1440,7 +1442,7 @@ _showMembershipWarning(warnings, ruleName) {
       <strong style="color:#fb923c;font-size:1rem;">Cảnh báo: Tài khoản chưa join nhóm</strong>
     </div>
     <p style="color:var(--text-secondary);font-size:.88rem;margin-bottom:.8rem;">
-      Rule <strong style="color:var(--text)">"${ruleName}"</strong> có tài khoản chưa tham gia nhóm đang theo dõi. 
+      Rule <strong style="color:var(--text)">"${this._esc(ruleName)}"</strong> có tài khoản chưa tham gia nhóm đang theo dõi.
       Các tài khoản này sẽ không thể DM user từ nhóm đó.
     </p>`;
   warnings.forEach(w => {

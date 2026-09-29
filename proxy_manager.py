@@ -284,16 +284,20 @@ async def rotate_proxy_for_account(account_id: int, current_proxy: str | None = 
         candidates.sort(key=lambda p: usage.get(p, 0))
         new_proxy = candidates[0]
 
-        await db.update_account_proxy(account_id, new_proxy)
+        # Reconnect the live client FIRST. Only commit the DB proxy if the new
+        # connection actually works — otherwise we'd persist a dead proxy and
+        # (worse) the account could be left with no live client at all.
+        # reconnect_with_proxy internally rolls back to the old proxy on failure.
+        import telegram_client as tg
+        connected = await tg.reconnect_with_proxy(account_id, new_proxy)
+        if not connected:
+            logger.warning(f"[Proxy] Reconnect via {new_proxy} failed for acc {account_id}; "
+                           f"not rotating (account restored on {current_proxy})")
+            return {"rotated": False, "old_proxy": current_proxy, "new_proxy": None,
+                    "reason": "reconnect qua proxy mới thất bại, giữ nguyên proxy cũ"}
 
-        # Reconnect the live client onto the new proxy if it supports it.
-        try:
-            import telegram_client as tg
-            await tg.reconnect_with_proxy(account_id, new_proxy)
-        except Exception as e:
-            logger.warning(f"[Proxy] Rotated DB proxy for acc {account_id} but reconnect failed: {e}")
-            return {"rotated": True, "old_proxy": current_proxy, "new_proxy": new_proxy,
-                    "reason": "đã đổi proxy (reconnect lỗi, áp dụng ở lần kết nối sau)"}
+        # New connection is live — now persist the new proxy.
+        await db.update_account_proxy(account_id, new_proxy)
 
         logger.warning(f"[Proxy] 🔄 Rotated proxy for account {account_id}: {current_proxy} -> {new_proxy}")
         return {"rotated": True, "old_proxy": current_proxy, "new_proxy": new_proxy, "reason": "ok"}

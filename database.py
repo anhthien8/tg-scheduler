@@ -3623,7 +3623,14 @@ async def update_template_performance(
     campaign_id: int = None, watcher_id: int = None,
     sent_delta: int = 0, reply_delta: int = 0,
 ):
-    """Increment sent/reply counters and recalculate response_rate."""
+    """Increment sent/reply counters and recalculate response_rate.
+
+    NULL campaign_id/watcher_id are normalised to 0 because SQLite treats NULLs
+    as distinct in UNIQUE indexes — with NULL the ON CONFLICT never fires and
+    every send inserted a new row instead of upserting.
+    """
+    campaign_id = 0 if campaign_id is None else campaign_id
+    watcher_id = 0 if watcher_id is None else watcher_id
     async with get_db() as db:
         # Upsert row
         await db.execute("""
@@ -4301,11 +4308,22 @@ async def append_followup_chat_message(
 
         reply_count = chat.get("reply_count", 0) + (1 if inc_reply_count else 0)
 
-        await db.execute("""
-            UPDATE ai_followup_chats
-            SET history_json = ?, reply_count = ?, updated_at = datetime('now')
-            WHERE account_id = ? AND user_id = ?
-        """, (json.dumps(history), reply_count, account_id, user_id))
+        # last_user_message_at anchors the drip cadence to the USER's real
+        # silence (it must NOT be bumped by our own outgoing messages, or the
+        # day 1/3/7 cadence resets on every follow-up we send).
+        if role == "user":
+            await db.execute("""
+                UPDATE ai_followup_chats
+                SET history_json = ?, reply_count = ?, updated_at = datetime('now'),
+                    last_user_message_at = datetime('now')
+                WHERE account_id = ? AND user_id = ?
+            """, (json.dumps(history), reply_count, account_id, user_id))
+        else:
+            await db.execute("""
+                UPDATE ai_followup_chats
+                SET history_json = ?, reply_count = ?, updated_at = datetime('now')
+                WHERE account_id = ? AND user_id = ?
+            """, (json.dumps(history), reply_count, account_id, user_id))
         await db.commit()
 
         chat["history"] = history
@@ -4362,6 +4380,11 @@ async def update_followup_verification(account_id: int, user_id: int, status: st
             "UPDATE ai_followup_chats SET verification_status = ?, updated_at = datetime('now') WHERE account_id = ? AND user_id = ?",
             (status, account_id, user_id)
         )
+        # MUST commit: an uncommitted write leaves the pooled connection with an
+        # open transaction, which then breaks runtime_commands.claim()'s
+        # BEGIN IMMEDIATE on the next reuse ("cannot start a transaction within
+        # a transaction") and loses the write on crash.
+        await db.commit()
         return cursor.rowcount > 0
 
 

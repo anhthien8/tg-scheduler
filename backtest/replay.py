@@ -115,8 +115,10 @@ def build_funnels(db_path: str, campaign_id: int | None = None,
     funnels: dict[int, Funnel] = {}
     counted_reply_keys: set[tuple[int, int]] = set()
 
-    # Sort attempts oldest-first so "latest send before reply" attribution works.
-    attempts.sort(key=lambda r: r["sent_at"] or "")
+    # Sort NEWEST-first: the most recent send before the reply must claim it
+    # (matching the attribution model documented at the top of this module).
+    # Processing oldest-first credited the reply to the earliest attempt.
+    attempts.sort(key=lambda r: r["sent_at"] or "", reverse=True)
 
     for row in attempts:
         variant = row["template_variant_index"] if row["template_variant_index"] is not None else 0
@@ -158,12 +160,12 @@ def _first_reply_after(reply_times: list[str], sent_at: datetime | None):
     if sent_at is None:
         parsed = _parse_ts(reply_times[0])
         return (0, parsed) if parsed else None
-    for ts in reply_times:
+    for i, ts in enumerate(reply_times):
         parsed = _parse_ts(ts)
         if parsed is None:
             continue
         if parsed >= sent_at:
-            return (0, parsed)
+            return (i, parsed)
     return None
 
 

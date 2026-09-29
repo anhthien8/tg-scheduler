@@ -219,8 +219,10 @@ async def queue_worker():
                                           chat_id, chat_title, "failed", "Gửi tin nhắn thất bại (Không rõ lý do)")
 
             except tg_errors.FloodWaitError as e:
-                wait_time = e.seconds + 1
-                logger.warning(f"⏳ FloodWait: got {wait_time}s wait for account {account_id}. Re-queueing.")
+                # MUST actually wait e.seconds — sleeping a fixed 2.5s and
+                # re-queueing escalates FloodWait into PeerFlood/ban.
+                wait_time = min(e.seconds + random.randint(5, 15), 900)
+                logger.warning(f"⏳ FloodWait: sleeping {wait_time}s for account {account_id} before retry.")
                 if retry_count < MAX_RETRIES:
                     item["retry_count"] = retry_count + 1
                     await q.put(item)
@@ -228,7 +230,7 @@ async def queue_worker():
                     friendly_error = translate_error(f"FloodWait after {MAX_RETRIES} retries")
                     await db.add_send_log(schedule_id, account_id, msg.get("id"),
                                           chat_id, chat_title, "failed", friendly_error)
-                await asyncio.sleep(2.5)
+                await asyncio.sleep(wait_time)
 
             except tg_errors.PeerFloodError:
                 logger.warning(f"⚠️ PeerFloodError for account {account_id} -> {chat_title}. Failing immediately.")

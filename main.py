@@ -143,9 +143,17 @@ async def lifespan(app: FastAPI):
             logger.info("Running in TG_RUNTIME_MODE=web; skipping all Telethon/background engines")
 
         logger.info("=" * 50)
-        host = os.getenv("HOST", "0.0.0.0")
+        host = os.getenv("HOST", "127.0.0.1")
         port = int(os.getenv("PORT", "8888"))
         logger.info(f"Dashboard: http://{host}:{port}")
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            logger.warning("=" * 50)
+            logger.warning("SECURITY: HOST=%s exposes the dashboard on the network.", host)
+            logger.warning("The X-API-Key is the ONLY gate. Bind 127.0.0.1 unless you")
+            logger.warning("intend remote access (use a VPN/reverse-proxy with TLS + auth).")
+            logger.warning("=" * 50)
+        if os.getenv("DISABLE_AUTH", "0") == "1":
+            logger.warning("SECURITY: DISABLE_AUTH=1 — the entire API is UNAUTHENTICATED.")
         logger.info("=" * 50)
         yield
     finally:
@@ -299,6 +307,6 @@ async def root():
 
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "0.0.0.0")
+    host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8888"))
     uvicorn.run("main:app", host=host, port=port, reload=False)

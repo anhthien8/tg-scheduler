@@ -129,3 +129,26 @@ def test_overall_funnel_sums_variants(db_path):
     assert overall.converted == 1
     assert overall.onboarded == 1
     assert sorted(overall.latencies) == [300.0, 1800.0]
+
+
+def test_reply_credited_to_latest_send_not_oldest(tmp_path):
+    """Regression: an attempt is credited to the MOST RECENT send before the
+    reply, not the oldest (the old oldest-first sort misattributed replies)."""
+    path = str(tmp_path / "bt4.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(SCHEMA)
+    # variant 0 sent at 10:00, variant 1 sent at 11:00, reply at 12:00.
+    conn.execute("INSERT INTO dm_campaign_logs (campaign_id,account_id,target_user_id,"
+                 "template_variant_index,status,sent_at) VALUES (1,1,100,0,'success','2026-01-01 10:00:00')")
+    conn.execute("INSERT INTO dm_campaign_logs (campaign_id,account_id,target_user_id,"
+                 "template_variant_index,status,sent_at) VALUES (1,1,100,1,'success','2026-01-01 11:00:00')")
+    conn.execute("INSERT INTO dm_replies (account_id,sender_user_id,received_at) "
+                 "VALUES (1,100,'2026-01-01 12:00:00')")
+    conn.commit()
+    conn.close()
+
+    funnels = build_funnels(path, campaign_id=1)
+    # The reply (12:00) belongs to variant 1 (sent 11:00), latency 3600s.
+    assert funnels[1].replied == 1
+    assert funnels[0].replied == 0
+    assert funnels[1].latencies == [3600.0]

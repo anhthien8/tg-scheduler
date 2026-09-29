@@ -1424,13 +1424,16 @@ async def process_drip_followups() -> dict:
         first_hours = cadence[0]
         async with db.get_db() as db_conn:
             db_conn.row_factory = aiosqlite.Row
+            # Anchor silence on COALESCE(last_user_message_at, updated_at):
+            # last_user_message_at is only bumped by inbound user messages, so
+            # our own follow-ups no longer reset the cadence clock.
             cursor = await db_conn.execute("""
                 SELECT * FROM ai_followup_chats
                 WHERE status = 'active'
                   AND (lead_tier IN ('Tier A', 'Tier B') OR intent_score >= 50)
                   AND last_drip_stage < ?
-                  AND datetime(updated_at) <= datetime('now', ?)
-                ORDER BY updated_at ASC
+                  AND datetime(COALESCE(last_user_message_at, updated_at)) <= datetime('now', ?)
+                ORDER BY COALESCE(last_user_message_at, updated_at) ASC
                 LIMIT 20
             """, (total_stages, f"-{first_hours} hours"))
             drip_chats = [dict(r) for r in await cursor.fetchall()]
@@ -1438,7 +1441,7 @@ async def process_drip_followups() -> dict:
         for chat in drip_chats:
             account_id = chat["account_id"]
             user_id = chat["user_id"]
-            silence_hours = _silence_hours(chat.get("updated_at"))
+            silence_hours = _silence_hours(chat.get("last_user_message_at") or chat.get("updated_at"))
 
             # Determine the highest cadence stage whose threshold has been crossed,
             # then advance one past last_drip_stage so we never skip or repeat.

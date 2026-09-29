@@ -8,7 +8,7 @@ import random
 import re
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
@@ -208,6 +208,10 @@ def _passes_active_filter(last_seen, filter_active_days):
         return filter_active_days >= 30
     try:
         seen_dt = datetime.fromisoformat(last_seen)
+        # Telethon's status.was_online.isoformat() is tz-AWARE while utcnow() is
+        # naive; comparing them raises TypeError and silently dropped the row.
+        if seen_dt.tzinfo is not None:
+            seen_dt = seen_dt.astimezone(timezone.utc).replace(tzinfo=None)
         cutoff = datetime.utcnow() - timedelta(days=filter_active_days)
         return seen_dt >= cutoff
     except Exception:

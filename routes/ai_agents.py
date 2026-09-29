@@ -153,8 +153,17 @@ async def list_agents():
 
 @router.get("/test-router")
 async def test_router_models(base_url: str = "http://127.0.0.1:20128/v1", model: str = ""):
-    """Diagnostic endpoint to test 9Router proxy and list available models."""
+    """Diagnostic endpoint to test 9Router proxy and list available models.
+
+    This endpoint intentionally targets a LOCAL router, so loopback is allowed;
+    but link-local/metadata addresses are blocked to prevent cloud-metadata SSRF.
+    """
     import httpx
+    try:
+        from routes._url_guard import UrlNotAllowed, validate_outbound_url
+        validate_outbound_url(base_url, allow_private=True)
+    except UrlNotAllowed as e:
+        return {"success": False, "error": f"URL bị chặn: {e}"}
     url = f"{base_url.rstrip('/')}/models"
     try:
         async with httpx.AsyncClient(timeout=10) as client:

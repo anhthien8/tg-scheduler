@@ -402,8 +402,12 @@ async def _do_send_dm_with_fallback(
     variants = db.group_watcher_message_variants(messages) if messages else []
     if len(variants) > 1:
         try:
+            # Pass template_id=watcher_id so select_variant consults the learned
+            # performance for this watcher. record_send/record_reply already key
+            # their stats by watcher_id (as template_id); without this the
+            # selection always fell through to random and never learned.
             messages, variant_idx = await tmpl_rot.select_variant(
-                variants, watcher_id=watcher_id
+                variants, template_id=watcher_id, watcher_id=watcher_id
             )
         except Exception as _sel_err:
             logger.debug("[Watcher %s] Variant selection failed, using variant 0: %s",

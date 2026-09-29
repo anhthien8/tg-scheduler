@@ -82,3 +82,32 @@ def test_middle_stage_differs_from_previous():
 def test_due_stage_counts_crossed_thresholds(silence, expected_due):
     cadence = [24, 72, 168]
     assert sum(1 for h in cadence if silence >= h) == expected_due
+
+
+# ── last_user_message_at anchoring ──────────────────────────────────────────
+
+async def test_assistant_message_does_not_bump_last_user_message_at():
+    """Regression: our own follow-up must NOT reset the user's silence clock."""
+    import database as db
+    await db.get_or_create_followup_chat(account_id=1, user_id=9001, username="u", name="U")
+    # user writes -> last_user_message_at set
+    await db.append_followup_chat_message(1, 9001, "user", "hello")
+    after_user = (await db.get_followup_chat(1, 9001))["last_user_message_at"]
+    assert after_user
+
+    # we send a drip (assistant role) -> last_user_message_at must be UNCHANGED
+    await db.append_followup_chat_message(1, 9001, "assistant", "follow up")
+    after_assistant = (await db.get_followup_chat(1, 9001))["last_user_message_at"]
+    assert after_assistant == after_user
+
+
+async def test_second_user_message_advances_last_user_message_at():
+    import database as db
+    await db.get_or_create_followup_chat(account_id=2, user_id=9002, username="u", name="U")
+    await db.append_followup_chat_message(2, 9002, "user", "one")
+    first = (await db.get_followup_chat(2, 9002))["last_user_message_at"]
+    import asyncio
+    await asyncio.sleep(1.1)  # datetime('now') has 1s resolution
+    await db.append_followup_chat_message(2, 9002, "user", "two")
+    second = (await db.get_followup_chat(2, 9002))["last_user_message_at"]
+    assert second >= first

@@ -19,7 +19,7 @@ The module is pure (no DB, no I/O) so it is fully unit-testable.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Signal weights (sum to 100 max).
 W_USERNAME = 25
@@ -39,18 +39,30 @@ class LeadScore:
     reasons: list[str] = field(default_factory=list)
 
     @property
-    def is_qualified(self):
-        return self.score
+    def is_qualified(self) -> bool:
+        return self.score > 0
+
+
+def _as_utc_naive(dt: datetime) -> datetime:
+    """Normalise a datetime to naive UTC so naive/aware subtraction never raises.
+
+    Telethon's `status.was_online.isoformat()` yields tz-AWARE strings while
+    `datetime.utcnow()` is naive; subtracting the two raises TypeError, which
+    silently dropped all activity points for offline users.
+    """
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def score_lead(member: dict, now: datetime | None = None) -> LeadScore:
     """Score a scraped-member dict. Returns LeadScore(score, reasons).
 
     Recognised keys: username, first_name, last_name, is_premium, last_seen.
-    `last_seen` may be an ISO timestamp, or one of the coarse buckets
-    'recently' / 'last_week' / 'last_month' used by the scraper.
+    `last_seen` may be an ISO timestamp (naive or tz-aware), or one of the
+    coarse buckets 'recently' / 'last_week' / 'last_month' used by the scraper.
     """
-    now = now or datetime.utcnow()
+    now = _as_utc_naive(now or datetime.now(timezone.utc))
     score = 0
     reasons: list[str] = []
 
@@ -95,9 +107,9 @@ def _activity_points(last_seen, now: datetime) -> tuple[int, str]:
         return W_ACTIVE_WEEK, "active_last_week"
     if last_seen == "last_month":
         return 0, ""  # too stale to be worth points
-    # ISO timestamp
+    # ISO timestamp (may be tz-aware from Telethon or naive from scrape)
     try:
-        seen = datetime.fromisoformat(str(last_seen))
+        seen = _as_utc_naive(datetime.fromisoformat(str(last_seen)))
     except (ValueError, TypeError):
         return 0, ""
     delta = now - seen
