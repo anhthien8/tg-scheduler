@@ -5,9 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TG Scheduler</title>
   <meta name="description" content="Telegram Userbot Multi-Account Message Scheduler">
-  <link rel="stylesheet" href="/static/css/style.css?v=408">
+  <link rel="stylesheet" href="/static/css/style.css?v=424">
+  <!-- Boot splash: paints instantly (CSS-only, no JS) so the user never sees a
+       blank white screen while the app bundle parses/executes. Hidden as soon
+       as app.js runs (body.app-ready). -->
+  <style>
+    #boot-splash{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+      flex-direction:column;gap:14px;background:#0e1116;color:#8b93a7;
+      font-family:system-ui,Segoe UI,Roboto,sans-serif;z-index:9999}
+    #boot-splash .boot-spinner{width:34px;height:34px;border-radius:50%;
+      border:3px solid rgba(139,147,167,.25);border-top-color:#5b8def;
+      animation:boot-spin .8s linear infinite}
+    #boot-splash .boot-text{font-size:14px;letter-spacing:.3px}
+    @keyframes boot-spin{to{transform:rotate(360deg)}}
+    body.app-ready #boot-splash{display:none}
+  </style>
 </head>
 <body>
+
+  <div id="boot-splash" aria-hidden="true">
+    <div class="boot-spinner"></div>
+    <div class="boot-text">Đang tải…</div>
+  </div>
 
   <!-- Toast container -->
   <div class="toast-container" id="toasts"></div>
@@ -1871,15 +1890,15 @@
     </div>
   </div>
 
-  <script src="/static/js/polling.js?v=423"></script>
-  <script src="/static/js/api.js?v=402"></script>
-  <script src="/static/js/discord.js?v=400"></script>
-  <script src="/static/js/members.js?v=423"></script>
-  <script src="/static/js/analytics.js?v=400"></script>
-  <script src="/static/js/ai_agents.js?v=400"></script>
-  <script src="/static/js/ai_followup.js?v=414"></script>
-  <script src="/static/js/changelog.js?v=423"></script>
-  <script src="/static/js/app.js?v=423"></script>
+  <script defer src="/static/js/polling.js?v=424"></script>
+  <script defer src="/static/js/api.js?v=424"></script>
+  <script defer src="/static/js/discord.js?v=424"></script>
+  <script defer src="/static/js/members.js?v=424"></script>
+  <script defer src="/static/js/analytics.js?v=424"></script>
+  <script defer src="/static/js/ai_agents.js?v=424"></script>
+  <script defer src="/static/js/ai_followup.js?v=424"></script>
+  <script defer src="/static/js/changelog.js?v=424"></script>
+  <script defer src="/static/js/app.js?v=424"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

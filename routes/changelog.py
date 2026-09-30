@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.5.6",
+        "date": "30/09/2026",
+        "title": "⚡ Hết màn hình trắng 3 giây khi mở Dashboard",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Nạp 9 file JS (512KB) đồng bộ chặn first-paint, cộng với việc app chỉ hiện UI sau khi chờ auth → trên máy chậm/đang tải, người dùng nhìn màn hình trắng 3 giây. Đã defer toàn bộ script và hiện splash tải ngay lập tức.",
+        "changes": [
+            {
+                "type": "performance",
+                "title": "Defer toàn bộ 9 file script",
+                "desc": "Trước đây 9 thẻ <script> nạp đồng bộ (không defer), buộc trình duyệt tải + parse ~512KB JS xong mới vẽ được gì. Đo bằng Playwright với CPU throttle 6x: first-paint mất 5.6–9.5 giây. Thêm defer → trình duyệt vẽ HTML trước, JS chạy sau.",
+                "tag": "Performance"
+            },
+            {
+                "type": "performance",
+                "title": "Splash tải tức thì, hết màn hình trắng",
+                "desc": "Thêm màn hình chờ CSS-only (#boot-splash, không cần JS) hiện ngay khi HTML vẽ xong. App.init() giờ bỏ splash và hiện shell ngay, không chờ authStatus()/getAccounts() như trước. First-paint từ ~6–9s xuống 230–400ms.",
+                "tag": "UX"
+            },
+            {
+                "type": "improvement",
+                "title": "Cache-busting v424 đồng bộ",
+                "desc": "Đổi ?v= của toàn bộ script và style.css sang 424 để trình duyệt nạp bản mới, tránh dùng JS/CSS cũ trong cache sau khi cập nhật.",
+                "tag": "Cache"
+            }
+        ]
+    },
+    {
         "version": "v3.5.5",
         "date": "30/09/2026",
         "title": "⚡ Giảm truy vấn Settings & N+1: bulk read/write toàn hệ thống",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Các endpoint đọc nhiều setting không còn mở connection riêng cho từng key. Thêm helper bulk read/write và bulk count, gộp N truy vấn tuần tự thành 1 — giảm độ trễ và tải connection pool trên các trang Settings, AI Agent, Follow-Up, Proxy và Batch Scrape.",
         "changes": [
             {

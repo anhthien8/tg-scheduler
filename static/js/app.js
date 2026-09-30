@@ -14,7 +14,12 @@ function customConfirm(msg){return new Promise(r=>{const o=document.getElementBy
 
 const App={currentPage:'dashboard',chats:[],schedules:[],accounts:[],phoneCodeHash:'',loginAccountId:null,loginPhone:'',logOffset:0,logLimit:30,
 
-async init(){try{const s=await API.authStatus();if(s.authenticated){this.showDashboard(s.user);return}}catch{}
+async init(){
+// Reveal the app shell immediately and drop the boot splash. Without this the
+// page stays blank until authStatus()+getAccounts() resolve — and on slower
+// machines the 500KB+ script bundle already delayed first paint by seconds.
+document.body.classList.add('app-ready');this.showLogin();
+try{const s=await API.authStatus();if(s.authenticated){this.showDashboard(s.user);return}}catch{}
 
 try{const a=await API.getAccounts();App._accounts=a.accounts||[];if(a.accounts&&a.accounts.length>0){this.showDashboard(null);return}}catch{}
 
