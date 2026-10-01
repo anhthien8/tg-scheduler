@@ -993,11 +993,33 @@ async def relay_inbound_to_forum(account_id: int, user_id: int, username: str | 
         if not bot:
             return "bot_offline"
         cfg = await _load_forum_config()
-        return await fx.relay_inbound(db, bot, cfg, account_id=account_id, user_id=user_id,
-                                      username=username, name=name, text=text, has_media=has_media)
+        if not cfg.enabled:
+            return "disabled"
+        result = await fx.relay_inbound(db, bot, cfg, account_id=account_id, user_id=user_id,
+                                        username=username, name=name, text=text, has_media=has_media)
+        # Surface why a conversation did NOT reach the group. Silence here is what
+        # made "no topics ever appear" invisible for days.
+        if result != "relayed":
+            logger.info("[ForumInbox] inbound skipped (acc=%s user=%s): %s", account_id, user_id, result)
+        return result
     except Exception as e:
         logger.warning("[ForumInbox] inbound relay failed (acc=%s user=%s): %s", account_id, user_id, e)
         return "error"
+
+
+async def backfill_forum_topics(days: int = 7, limit: int = 500) -> dict:
+    """Open topics for already-replied conversations (bounded by `days`)."""
+    try:
+        bot = _forum_bot()
+        if not bot:
+            return {"created": 0, "skipped": 0, "failed": 0, "reason": "bot_offline"}
+        cfg = await _load_forum_config()
+        report = await fx.backfill_topics(db, bot, cfg, days=days, limit=limit)
+        logger.info("[ForumInbox] backfill report: %s", report)
+        return report
+    except Exception as e:
+        logger.warning("[ForumInbox] backfill failed: %s", e)
+        return {"created": 0, "skipped": 0, "failed": 0, "reason": "error"}
 
 
 async def relay_outgoing_to_forum(account_id: int, user_id: int, text: str) -> str:

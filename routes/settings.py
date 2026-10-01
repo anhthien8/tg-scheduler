@@ -115,11 +115,12 @@ class FetchModelsPayload(BaseModel):
 
 @router.post("/fetch-models")
 async def fetch_models(payload: FetchModelsPayload):
-    """Proxy to fetch available models from an OpenAI-compatible API."""
-    # SSRF guard: block private/loopback/link-local targets.
+    """Proxy to fetch models, including from a router on this host."""
     try:
         from routes._url_guard import UrlNotAllowed, validate_outbound_url
-        base_url = validate_outbound_url(payload.base_url).rstrip("/")
+        base_url = validate_outbound_url(
+            payload.base_url, allow_loopback=True
+        ).rstrip("/")
     except UrlNotAllowed as e:
         return {"success": False, "error": f"URL bị chặn: {e}"}
     except Exception:
@@ -648,6 +649,37 @@ async def command_bot_status():
 @router.get("/command-bot/logs")
 async def command_bot_logs(limit: int = 30):
     return {"actions": await db.get_command_actions(limit)}
+
+
+class ForumBackfillPayload(BaseModel):
+    days: int = 7
+    limit: int = 500
+
+
+@router.post("/forum-inbox/backfill")
+async def backfill_forum_inbox(payload: ForumBackfillPayload = ForumBackfillPayload()):
+    """Open topics for already-replied conversations missing one (bounded by `days`).
+
+    Existing history is NOT replayed — only a header is posted per new topic.
+    """
+    try:
+        import command_bot
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Forum Inbox cần TG_RUNTIME_MODE=combined (Command Bot phải đang chạy).",
+        )
+    days = max(1, min(int(payload.days), 90))
+    limit = max(1, min(int(payload.limit), 1000))
+    report = await command_bot.backfill_forum_topics(days=days, limit=limit)
+    return {"message": f"Backfill xong: tạo {report.get('created', 0)} topic", **report}
+
+
+@router.get("/forum-inbox/topics")
+async def list_forum_inbox_topics(limit: int = 200):
+    """Topic mappings currently tracked (for diagnostics in the UI)."""
+    topics = await db.get_telegram_topics(limit=limit)
+    return {"topics": topics, "count": len(topics)}
 
 
 # Infrastructure credentials that this generic getter must NEVER return in

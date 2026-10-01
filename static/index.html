@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TG Scheduler</title>
   <meta name="description" content="Telegram Userbot Multi-Account Message Scheduler">
-  <link rel="stylesheet" href="/static/css/style.css?v=424">
+  <link rel="stylesheet" href="/static/css/style.css?v=428">
   <!-- Boot splash: paints instantly (CSS-only, no JS) so the user never sees a
        blank white screen while the app bundle parses/executes. Hidden as soon
        as app.js runs (body.app-ready). -->
@@ -773,6 +773,24 @@
                 <button class="btn btn-primary btn-sm" onclick="App.saveForumInboxConfig()">💾 Lưu cấu hình</button>
                 <span id="forum-inbox-status-msg" style="font-size:12px;color:var(--text2)"></span>
               </div>
+              <div style="margin-top:16px;padding:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.25);border-radius:8px">
+                <label class="form-label" style="font-size:13px">🔄 Tạo topic cho hội thoại đã có phản hồi</label>
+                <p class="form-hint" style="margin:4px 0 8px">
+                  Các cuộc hội thoại lead <strong>đã trả lời</strong> trước khi Forum Inbox bật sẽ không tự có topic.
+                  Bấm đây để tạo topic cho những cuộc trong <strong>N ngày</strong> gần nhất (không phát lại lịch sử cũ).
+                </p>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <input type="number" class="form-input" id="forum-inbox-backfill-days" value="7" min="1" max="90"
+                         style="width:90px;font-family:monospace;font-size:13px">
+                  <span style="font-size:12px;color:var(--text2)">ngày gần nhất</span>
+                  <button class="btn btn-secondary btn-sm" onclick="App.backfillForumInboxTopics()">🔄 Tạo topic</button>
+                  <span id="forum-inbox-backfill-msg" style="font-size:12px;color:var(--text2)"></span>
+                </div>
+                <p style="font-size:12px;color:var(--text2);margin-top:8px">
+                  Đã có <span id="forum-inbox-topic-count">—</span> topic đang theo dõi.
+                  <button class="btn btn-ghost btn-sm" onclick="App.loadForumInboxTopicCount()" style="margin-left:6px">↻</button>
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -971,6 +989,7 @@
               </tbody>
             </table>
           </div>
+          <div id="rt-logs-pager" class="pager"></div>
         </div>
       </div>
       <!-- ══ AI Agents Management View ══ -->
@@ -1321,6 +1340,10 @@
         <button class="modal-close" onclick="Members.closeDetailModal()">&times;</button>
       </div>
       <div class="modal-body">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+          <input type="text" id="members-detail-search" class="input" placeholder="🔍 Tìm theo tên, @username hoặc User ID..." style="flex:1" oninput="Members.onDetailSearch(this.value)">
+          <span id="members-detail-count" style="font-size:12px;color:var(--text2);white-space:nowrap"></span>
+        </div>
         <div class="table-wrap" style="max-height:60vh;overflow-y:auto">
           <table>
             <thead>
@@ -1336,6 +1359,7 @@
             <tbody id="members-detail-tbody"></tbody>
           </table>
         </div>
+        <div id="members-detail-pager" class="pager"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="Members.closeDetailModal()">Đóng</button>
@@ -1512,6 +1536,7 @@
             <tbody id="campaign-logs-tbody"></tbody>
           </table>
         </div>
+        <div id="campaign-logs-pager" class="pager"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="Members.closeCampaignLogs()">Đóng</button>
@@ -1890,15 +1915,15 @@
     </div>
   </div>
 
-  <script defer src="/static/js/polling.js?v=424"></script>
-  <script defer src="/static/js/api.js?v=424"></script>
-  <script defer src="/static/js/discord.js?v=424"></script>
-  <script defer src="/static/js/members.js?v=424"></script>
-  <script defer src="/static/js/analytics.js?v=424"></script>
-  <script defer src="/static/js/ai_agents.js?v=424"></script>
-  <script defer src="/static/js/ai_followup.js?v=424"></script>
-  <script defer src="/static/js/changelog.js?v=424"></script>
-  <script defer src="/static/js/app.js?v=424"></script>
+  <script defer src="/static/js/polling.js?v=428"></script>
+  <script defer src="/static/js/api.js?v=428"></script>
+  <script defer src="/static/js/discord.js?v=428"></script>
+  <script defer src="/static/js/members.js?v=428"></script>
+  <script defer src="/static/js/analytics.js?v=428"></script>
+  <script defer src="/static/js/ai_agents.js?v=428"></script>
+  <script defer src="/static/js/ai_followup.js?v=428"></script>
+  <script defer src="/static/js/changelog.js?v=428"></script>
+  <script defer src="/static/js/app.js?v=428"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

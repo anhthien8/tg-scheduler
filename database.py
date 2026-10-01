@@ -4383,6 +4383,9 @@ async def append_followup_chat_message(
         )
         row = await cursor.fetchone()
         if not row:
+            # Must not leave the BEGIN IMMEDIATE transaction open — an uncommitted
+            # write transaction would hold the SQLite write lock indefinitely.
+            await db.rollback()
             return None
 
         chat = dict(row)
@@ -4814,14 +4817,22 @@ async def delete_learned_knowledge(rule_id: int) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════
 
 async def get_telegram_outreach_proof(account_id: int, user_id: int) -> dict | None:
-    """Check campaign and watcher success logs for this (account_id, user_id)."""
+    """Prove the lead was actually reachable by this nick before opening a topic.
+
+    Order matters: most authoritative evidence first. Campaign logs record the
+    *target* id, which for scrape jobs is the group/channel id and NOT the human
+    user id — so a campaign "success" row alone is NOT proof. Requiring it made
+    the topic gate almost never match, silently dropping real conversations.
+    """
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
+        # Only trust campaign/watcher rows whose target is a real user id (> 0).
         c_cur = await db.execute(
             """SELECT 'campaign' AS source, c.name, l.sent_at
                FROM dm_campaign_logs l
                LEFT JOIN dm_campaigns c ON c.id = l.campaign_id
                WHERE l.account_id = ? AND l.target_user_id = ? AND l.status = 'success'
+                 AND l.target_user_id > 0
                ORDER BY l.sent_at DESC LIMIT 1""",
             (account_id, user_id),
         )
@@ -4833,11 +4844,61 @@ async def get_telegram_outreach_proof(account_id: int, user_id: int) -> dict | N
             """SELECT 'watcher' AS source, group_title AS name, sent_at
                FROM watcher_dm_logs
                WHERE account_id = ? AND target_user_id = ? AND status = 'success'
+                 AND target_user_id > 0
                ORDER BY sent_at DESC LIMIT 1""",
             (account_id, user_id),
         )
         row2 = await w_cur.fetchone()
-        return dict(row2) if row2 else None
+        if row2:
+            return dict(row2)
+
+        # The lead is in the AI follow-up pipeline → we definitely contacted them.
+        f_cur = await db.execute(
+            """SELECT 'followup' AS source, name, updated_at AS sent_at
+               FROM ai_followup_chats
+               WHERE account_id = ? AND user_id = ?
+               ORDER BY updated_at DESC LIMIT 1""",
+            (account_id, user_id),
+        )
+        row3 = await f_cur.fetchone()
+        if row3:
+            return dict(row3)
+
+        # Any inbound reply recorded for this (nick, lead) pair.
+        r_cur = await db.execute(
+            """SELECT 'reply' AS source, sender_name AS name, received_at AS sent_at
+               FROM dm_replies
+               WHERE account_id = ? AND sender_user_id = ?
+               ORDER BY received_at DESC LIMIT 1""",
+            (account_id, user_id),
+        )
+        row4 = await r_cur.fetchone()
+        return dict(row4) if row4 else None
+
+
+async def get_forum_backfill_candidates(days: int = 7, limit: int = 500) -> list:
+    """Replied conversations from the last `days` that still have no topic.
+
+    Bounded by `days` on purpose: enabling Forum Inbox must not spam hundreds of
+    topics for stale history.
+    """
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT c.account_id, c.user_id, c.username, c.name,
+                      c.last_user_message_at, c.updated_at
+               FROM ai_followup_chats c
+               WHERE c.reply_count > 0
+                 AND COALESCE(c.last_user_message_at, c.updated_at) >= datetime('now', ?)
+                 AND NOT EXISTS (
+                     SELECT 1 FROM telegram_topics t
+                     WHERE t.account_id = c.account_id AND t.user_id = c.user_id
+                 )
+               ORDER BY COALESCE(c.last_user_message_at, c.updated_at) DESC
+               LIMIT ?""",
+            (f"-{int(days)} days", int(limit)),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
 
 
 async def find_telegram_topic_for_user(group_id: int, account_id: int, user_id: int) -> dict | None:
@@ -4849,6 +4910,20 @@ async def find_telegram_topic_for_user(group_id: int, account_id: int, user_id: 
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
+
+
+async def get_telegram_topics(group_id: int | None = None, limit: int = 200) -> list:
+    """List topic mappings, newest activity first — used by the UI diagnostics view."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        if group_id is None:
+            cursor = await db.execute(
+                "SELECT * FROM telegram_topics ORDER BY updated_at DESC LIMIT ?", (int(limit),))
+        else:
+            cursor = await db.execute(
+                "SELECT * FROM telegram_topics WHERE group_id = ? ORDER BY updated_at DESC LIMIT ?",
+                (group_id, int(limit)))
+        return [dict(r) for r in await cursor.fetchall()]
 
 
 async def get_telegram_topic_by_thread(group_id: int, topic_id: int) -> dict | None:

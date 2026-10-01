@@ -134,6 +134,48 @@ async def relay_inbound(db, bot, cfg: ForumConfig, *, account_id: int, user_id: 
     return "relayed"
 
 
+async def backfill_topics(db, bot, cfg: ForumConfig, *, days: int = 7, limit: int = 500) -> dict:
+    """Open topics for already-replied conversations missing one, bounded by `days`.
+
+    Only creates the topic and posts a header; existing history is NOT replayed
+    (that would spam the group). Returns a small report so the caller can toast it.
+    """
+    if not cfg.enabled:
+        return {"created": 0, "skipped": 0, "failed": 0, "reason": "disabled"}
+    candidates = await db.get_forum_backfill_candidates(days=days, limit=limit)
+    created = skipped = failed = 0
+    for cand in candidates:
+        account_id = int(cand["account_id"])
+        user_id = int(cand["user_id"])
+        username = cand.get("username")
+        name = cand.get("name")
+        try:
+            async with _topic_lock(cfg.group_id, account_id, user_id):
+                existing = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
+                if existing:
+                    skipped += 1
+                    continue
+                topic_id = await bot.create_forum_topic(
+                    cfg.group_id, _topic_title(account_id, user_id, username, name))
+                await db.upsert_telegram_topic({
+                    "group_id": cfg.group_id, "topic_id": int(topic_id),
+                    "account_id": account_id, "user_id": user_id,
+                    "username": username, "name": name,
+                    "campaign_name": None, "status": "active",
+                    "last_lead_message": None,
+                })
+                header = (f"🗂️ Topic tạo bởi backfill ({days} ngày gần nhất)\n"
+                          f"Lead: {_lead_label(username, name, user_id)}\n"
+                          f"Nick phụ #{account_id} · user_id {user_id}\n\n"
+                          f"Chỉ hội thoại MỚI kể từ lúc bật mới được relay vào đây.")
+                await bot.send_topic_message(cfg.group_id, int(topic_id), header)
+                created += 1
+        except Exception:
+            failed += 1
+    return {"created": created, "skipped": skipped, "failed": failed,
+            "candidates": len(candidates), "days": days}
+
+
 async def relay_outgoing(db, bot, cfg: ForumConfig, *, account_id: int, user_id: int, text: str) -> str:
     if not cfg.enabled:
         return "disabled"

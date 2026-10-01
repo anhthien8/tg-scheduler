@@ -3290,6 +3290,7 @@ App.loadForumInboxConfig = async function() {
     if (group) group.value = cfg.group_id ? String(cfg.group_id) : '';
     if (topic) topic.value = cfg.general_topic_id ? String(cfg.general_topic_id) : '1';
     App.setForumInboxBadge(!!cfg.enabled);
+    App.loadForumInboxTopicCount();
   } catch (e) {
     console.warn('loadForumInboxConfig failed', e);
   }
@@ -3358,11 +3359,56 @@ App.saveForumInboxConfig = async function() {
   }
 };
 
+// ── Forum Inbox backfill: open topics for conversations that already replied ──
+App.loadForumInboxTopicCount = async function() {
+  const el = document.getElementById('forum-inbox-topic-count');
+  if (!el) return;
+  try {
+    const res = await fetch('/api/settings/forum-inbox/topics?limit=1', { headers: API.getHeaders() });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    el.textContent = String(data.count ?? 0);
+  } catch (e) {
+    el.textContent = '—';
+  }
+};
+
+App.backfillForumInboxTopics = async function() {
+  const msg = document.getElementById('forum-inbox-backfill-msg');
+  const daysEl = document.getElementById('forum-inbox-backfill-days');
+  const days = Math.max(1, Math.min(parseInt(daysEl?.value || '7', 10) || 7, 90));
+  if (msg) msg.textContent = `⏳ Đang tạo topic cho hội thoại ${days} ngày gần nhất...`;
+  try {
+    const res = await fetch('/api/settings/forum-inbox/backfill', {
+      method: 'POST',
+      headers: { ...API.getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days: days, limit: 500 })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    if (data.reason === 'bot_offline') {
+      if (msg) msg.textContent = '❌ Command Bot chưa chạy — bật bot ở mục trên rồi thử lại.';
+      return;
+    }
+    if (data.reason === 'disabled') {
+      if (msg) msg.textContent = '❌ Forum Inbox đang tắt — bật và Lưu cấu hình trước.';
+      return;
+    }
+    if (msg) {
+      msg.textContent = `✅ Tạo ${data.created || 0} topic (bỏ qua ${data.skipped || 0}, lỗi ${data.failed || 0}) `
+        + `trong ${data.candidates || 0} hội thoại ${days} ngày gần nhất.`;
+    }
+    App.loadForumInboxTopicCount();
+    if (typeof App.toast === 'function') App.toast(`Đã tạo ${data.created || 0} topic`, 'success');
+  } catch (e) {
+    if (msg) msg.textContent = '❌ Lỗi: ' + e.message;
+  }
+};
+
 App.toggleCmdBotTokenVisibility = function() {
   const input = document.getElementById('cmd-bot-token');
   if (input) input.type = input.type === 'password' ? 'text' : 'password';
 };
-
 App.openCommandBotLogs = async function() {
   try {
     const res = await fetch('/api/settings/command-bot/logs?limit=20', { headers: API.getHeaders() });
@@ -3670,23 +3716,44 @@ const Reactions = (() => {
     alert('Kết quả join:\n' + Object.entries(res.join_results||{}).map(([a,s])=>`acc ${a}: ${fmtJoin(s)}`).join('\n'));
   }
 
+  let _rtLogs = [];       // toàn bộ log đã tải (fetch 200), phân trang client
+  let _rtLogsPage = 1;
+  const _RT_LOGS_PER_PAGE = 50;
+
   async function loadLogs() {
     const tbody = document.getElementById('rt-logs-body');
     if (!tbody) return;
     try {
-      const { logs } = await ReactionsAPI.getLogs(null, 50);
-      if (!logs || !logs.length) { tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--text2)">Chưa có lịch sử</td></tr>'; return; }
-      tbody.innerHTML = logs.map(l=>`
-        <tr>
-          <td style="font-size:.8rem;white-space:nowrap">${_esc(l.sent_at)}</td>
-          <td>${l.channel_id||'—'}</td>
-          <td>${l.msg_id||'—'}</td>
-          <td>acc#${l.account_id}</td>
-          <td style="font-size:1.2rem">${l.reaction||'—'}</td>
-          <td><span class="status-badge ${l.status}">${l.status}</span></td>
-          <td style="font-size:.75rem;color:var(--text2)">${_esc(l.error_msg||'—')}</td>
-        </tr>`).join('');
+      // Fetch 200 dòng 1 lần rồi phân trang client — tránh dựng hàng trăm DOM node.
+      const { logs } = await ReactionsAPI.getLogs(null, 200);
+      _rtLogs = logs || [];
+      _rtLogsPage = 1;
+      _renderRtLogs();
     } catch(e) { tbody.innerHTML=`<tr><td colspan="7">Lỗi: ${e.message}</td></tr>`; }
+  }
+
+  function _renderRtLogs() {
+    const tbody = document.getElementById('rt-logs-body');
+    const pager = document.getElementById('rt-logs-pager');
+    if (!tbody) return;
+    if (!_rtLogs.length) {
+      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--text2)">Chưa có lịch sử</td></tr>';
+      if (pager) pager.innerHTML = '';
+      return;
+    }
+    const st = paginate(_rtLogs, _rtLogsPage, _RT_LOGS_PER_PAGE);
+    _rtLogsPage = st.page;
+    tbody.innerHTML = st.slice.map(l=>`
+      <tr>
+        <td style="font-size:.8rem;white-space:nowrap">${_esc(l.sent_at)}</td>
+        <td>${l.channel_id||'—'}</td>
+        <td>${l.msg_id||'—'}</td>
+        <td>acc#${l.account_id}</td>
+        <td style="font-size:1.2rem">${l.reaction||'—'}</td>
+        <td><span class="status-badge ${l.status}">${l.status}</span></td>
+        <td style="font-size:.75rem;color:var(--text2)">${_esc(l.error_msg||'—')}</td>
+      </tr>`).join('');
+    renderPager(pager, st, (p) => { _rtLogsPage = p; _renderRtLogs(); });
   }
 
   function _esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }

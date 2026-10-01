@@ -8,11 +8,51 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.5.7",
+        "date": "01/10/2026",
+        "title": "🗂️ Forum Inbox: hết cảnh không có topic nào cho lead đã trả lời",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Forum Inbox bật nhưng group Telegram không bao giờ có topic nào. Nguyên nhân: cổng tạo topic đòi phải có log campaign/watcher 'success' khớp ID người dùng — nhưng log campaign lưu ID GROUP (số âm), không phải ID lead, nên gần như mọi hội thoại thật bị chặn trong im lặng. Đã nới cổng theo hướng tương tác thật và thêm nút tạo topic cho hội thoại cũ.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Cổng tạo topic không còn chặn nhầm hội thoại thật",
+                "desc": "get_telegram_outreach_proof() chỉ chấp nhận log campaign/watcher success khi target là ID người dùng thật (>0). Trước đây log campaign lưu ID group (số âm) nên không bao giờ khớp ID lead. Đo trên dữ liệu thật: 365 hội thoại AI follow-up chỉ 29 lọt qua cổng cũ (7.9%); cổng mới đạt 365 (100%). Với 610 lead đã trả lời: 72 → 610.",
+                "tag": "Bug Fix"
+            },
+            {
+                "type": "improvement",
+                "title": "Bổ sung nguồn bằng chứng tương tác thật",
+                "desc": "Ngoài campaign/watcher, cổng tạo topic nay chấp nhận thêm ai_followup_chats (lead đang trong pipeline AI) và dm_replies (lead đã từng nhắn vào nick phụ). Lead nào đã trả lời thì chắc chắn được mở topic.",
+                "tag": "Forum Inbox"
+            },
+            {
+                "type": "recommendation",
+                "title": "Nút 'Tạo topic cho hội thoại đã có phản hồi'",
+                "desc": "Các cuộc hội thoại lead đã trả lời TRƯỚC khi bật Forum Inbox sẽ không tự có topic. Thêm nút backfill trong Settings → Forum Inbox, giới hạn N ngày gần nhất (mặc định 7). Không phát lại lịch sử cũ vào group — mỗi topic mới chỉ có 1 dòng tiêu đề, tránh spam. Kèm hiển thị số topic đang theo dõi.",
+                "tag": "UX"
+            },
+            {
+                "type": "fix",
+                "title": "Log lý do hội thoại không được relay",
+                "desc": "Trước đây khi relay bị chặn (thiếu proof, bot offline, disabled) hệ thống im lặng hoàn toàn — không log, không báo lỗi, nên rất khó phát hiện. Nay mỗi lần bỏ qua đều ghi log kèm account/user và lý do cụ thể.",
+                "tag": "Observability"
+            },
+            {
+                "type": "fix",
+                "title": "Rò rỉ transaction khi append tin nhắn vào chat không tồn tại",
+                "desc": "append_followup_chat_message() mở BEGIN IMMEDIATE rồi return sớm nếu không tìm thấy chat — transaction bị bỏ ngỏ, giữ khóa ghi SQLite vô thời hạn và chặn các ghi khác. Nay rollback trước khi return.",
+                "tag": "Database"
+            }
+        ]
+    },
+    {
         "version": "v3.5.6",
         "date": "30/09/2026",
         "title": "⚡ Hết màn hình trắng 3 giây khi mở Dashboard",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Nạp 9 file JS (512KB) đồng bộ chặn first-paint, cộng với việc app chỉ hiện UI sau khi chờ auth → trên máy chậm/đang tải, người dùng nhìn màn hình trắng 3 giây. Đã defer toàn bộ script và hiện splash tải ngay lập tức.",
         "changes": [
             {
