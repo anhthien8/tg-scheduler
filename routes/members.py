@@ -1183,8 +1183,15 @@ async def get_deep_crawl_status():
 
 
 @router.get("/deep-crawl/results")
-async def get_deep_crawl_results():
-    """Get the full results of the last deep crawl with up-to-date trading scores."""
+async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50):
+    """Get the full results of the last deep crawl with up-to-date trading scores.
+
+    The set can hold thousands of leads and ~1 MB of description text, so the
+    browser asks for a page at a time (`slim=1`): it gets the tab counts plus
+    only the leads on the current page, with long descriptions trimmed. The
+    default (slim=0) keeps returning everything for callers that truly need it,
+    but the list view should never pay for 4 MB it will not display.
+    """
     global _deep_crawl_state
     if not _deep_crawl_state.get("results"):
         await _load_deep_crawl_snapshot()
@@ -1201,11 +1208,60 @@ async def get_deep_crawl_results():
                 participants_count=lead.get("participants_count", 0)
             )
             lead.update(score_info)
+
+    if not slim:
+        return {
+            "status": _deep_crawl_state.get("status"),
+            "leads": leads,
+            "total": len(leads),
+        }
+
+    # ── Slim mode: counts for the filter tabs + one page of leads ──
+    # Counts must cover ALL leads (the tabs are global), but the payload only
+    # carries the requested page — that is the whole point of this branch.
+    counts = {"all": len(leads), "has_contacts": 0, "trading_vip": 0,
+              "trading_all": 0, "potential_bd": 0, "news": 0, "no_contacts": 0}
+    for lead in leads:
+        has_c = bool(lead.get("contacts"))
+        if not has_c:
+            counts["no_contacts"] += 1
+            continue
+        counts["has_contacts"] += 1
+        s = lead.get("trading_score") or 0
+        if s >= 80:
+            counts["trading_vip"] += 1
+        elif s >= 60:
+            counts["trading_all"] += 1
+        elif s >= 45:
+            counts["potential_bd"] += 1
+        if lead.get("category") == "news_general":
+            counts["news"] += 1
+
+    limit = max(1, min(int(limit), 200))
+    page = max(0, int(page))
+    start = page * limit
+    page_leads = leads[start:start + limit]
+
+    # Trim the heavy description for the list; the client fetches the full text
+    # when a row is expanded. Empty string keeps the row rendering simple.
+    trimmed = []
+    for lead in page_leads:
+        l = dict(lead)
+        desc = (l.get("description") or "")
+        if len(desc) > 400:
+            l["description"] = desc[:400]
+            l["description_truncated"] = True
+        trimmed.append(l)
+
     return {
         "status": _deep_crawl_state.get("status"),
-        "leads": leads,
+        "leads": trimmed,
         "total": len(leads),
+        "page": page,
+        "limit": limit,
+        "counts": counts,
     }
+
 
 
 _translation_cache: dict[str, str] = {}

@@ -14,6 +14,14 @@ const Members = {
   _deepCrawlPollInterval: 3000,
   _deepCrawlPrevState: null,
   _editingInviteCampaignId: null,
+  _membersDetailCache: {},   // jobId -> members[] (tránh fetch lại khi đổi trang)
+  _membersDetailPage: 1,     // trang hiện tại của modal members
+  _membersDetailCurrent: null, // members[] đang hiển thị (đã lọc) cho job hiện tại
+  _membersDetailSearch: '',
+  _campaignLogsCache: {},    // campaignId -> logs[]
+  _campaignLogsPage: 1,
+  _membersDetailPerPage: 50,
+  _campaignLogsPerPage: 50,
 
   // ── Init: load data when navigating to members page ──
   async init() {
@@ -366,9 +374,17 @@ const Members = {
     }
     if (empty) empty.classList.add('hidden');
 
-    tbody.innerHTML = jobs.map((j, i) => {
+    // Diff render theo scrape_job_id: polling gọi hàm này liên tục, chỉ ghi lại
+    // dòng khi dữ liệu thật sự đổi — tránh dựng lại toàn bộ DOM mỗi lần.
+    const idsInState = new Set(jobs.map(j => String(j.scrape_job_id)));
+    Array.from(tbody.children).forEach(row => {
+      const id = row.getAttribute('data-id');
+      if (id && !idsInState.has(id)) row.remove();
+    });
+
+    jobs.forEach((j, i) => {
       const date = j.scraped_at ? new Date(j.scraped_at + 'Z').toLocaleString('vi-VN') : '—';
-      return `<tr>
+      const rowHtml = `
         <td>${i + 1}</td>
         <td>${esc(j.group_title || j.group_id)}</td>
         <td><span class="badge badge-blue">${j.member_count}</span></td>
@@ -379,40 +395,118 @@ const Members = {
             <button class="btn btn-ghost btn-sm" onclick="window.open(AnalyticsAPI.exportMembers('${esc(j.scrape_job_id)}'),'_blank')" title="Export CSV">📥</button>
             <button class="btn btn-danger btn-sm" onclick="Members.deleteScrapeJob('${esc(j.scrape_job_id)}')">🗑</button>
           </div>
-        </td>
-      </tr>`;
-    }).join('');
+        </td>`;
+
+      const key = String(j.scrape_job_id);
+      let existingRow = tbody.querySelector(`tr[data-id="${key}"]`);
+      if (existingRow) {
+        const changed =
+          parseInt(existingRow.getAttribute('data-index')) !== (i + 1) ||
+          existingRow.getAttribute('data-count') !== String(j.member_count) ||
+          existingRow.getAttribute('data-scraped-at') !== String(j.scraped_at || '') ||
+          existingRow.getAttribute('data-title') !== String(j.group_title || '');
+        if (changed) {
+          existingRow.innerHTML = rowHtml;
+          existingRow.setAttribute('data-index', i + 1);
+          existingRow.setAttribute('data-count', j.member_count);
+          existingRow.setAttribute('data-scraped-at', j.scraped_at || '');
+          existingRow.setAttribute('data-title', j.group_title || '');
+        }
+      } else {
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-id', key);
+        tr.setAttribute('data-index', i + 1);
+        tr.setAttribute('data-count', j.member_count);
+        tr.setAttribute('data-scraped-at', j.scraped_at || '');
+        tr.setAttribute('data-title', j.group_title || '');
+        tr.innerHTML = rowHtml;
+        if (i >= tbody.children.length) tbody.appendChild(tr);
+        else tbody.insertBefore(tr, tbody.children[i]);
+      }
+    });
+    // Dọn dòng thừa nếu state co lại nhanh hơn DOM (an toàn khi xóa/xếp lại)
+    while (tbody.children.length > jobs.length) tbody.lastElementChild.remove();
   },
 
-  // ── View Members Detail ──
+  // ── View Members Detail (phân trang client, 50 dòng/trang) ──
   async viewMembers(jobId, title) {
     (document.getElementById('members-detail-title') || me_dummy).textContent = `Members: ${title || jobId}`;
     const tbody = document.getElementById('members-detail-tbody');
+    const pager = document.getElementById('members-detail-pager');
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center">⏳ Đang tải...</td></tr>';
+    if (pager) pager.innerHTML = '';
     (document.getElementById('members-detail-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
 
-    try {
-      const d = await MembersAPI.getScrapeMembers(jobId, 500);
-      const members = d.members || [];
-      if (!members.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2)">Không có members</td></tr>';
+    this._membersDetailPage = 1;
+    this._membersDetailSearch = '';
+    const searchEl = document.getElementById('members-detail-search');
+    if (searchEl) searchEl.value = '';
+    // Dùng cache nếu đã tải job này trước đó — không fetch lại khi mở lại
+    let members = this._membersDetailCache[jobId];
+    if (!members) {
+      try {
+        const d = await MembersAPI.getScrapeMembers(jobId, 500);
+        members = d.members || [];
+        this._membersDetailCache[jobId] = members;
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--danger)">${esc(e.message)}</td></tr>`;
         return;
       }
-      tbody.innerHTML = members.map((m, i) => {
-        const name = [m.first_name, m.last_name].filter(Boolean).join(' ') || '—';
-        const ls = m.last_seen || '—';
-        return `<tr>
-          <td>${i + 1}</td>
-          <td style="font-size:12px">${m.user_id}</td>
-          <td>${m.username ? '@' + esc(m.username) : '<span style="color:var(--text2)">—</span>'}</td>
-          <td>${esc(name)}</td>
-          <td>${m.is_premium ? '<span class="badge badge-green">⭐</span>' : '—'}</td>
-          <td style="font-size:12px;color:var(--text2)">${esc(ls)}</td>
-        </tr>`;
-      }).join('');
-    } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--danger)">${esc(e.message)}</td></tr>`;
     }
+    this._membersDetailCurrent = members;   // giữ full list để lọc
+    this._renderMembersDetail();
+  },
+
+  // Lọc theo tên / @username / user_id, không phân biệt hoa thường.
+  _filterMembersDetail() {
+    const all = this._membersDetailCurrent || [];
+    const q = (this._membersDetailSearch || '').trim().toLowerCase().replace(/^@/, '');
+    if (!q) return all;
+    return all.filter(m => {
+      const name = [m.first_name, m.last_name].filter(Boolean).join(' ').toLowerCase();
+      const uname = (m.username || '').toLowerCase();
+      const uid = String(m.user_id || '');
+      return name.includes(q) || uname.includes(q) || uid.includes(q);
+    });
+  },
+
+  onDetailSearch(value) {
+    this._membersDetailSearch = value || '';
+    this._membersDetailPage = 1;
+    this._renderMembersDetail();
+  },
+
+  // Render 1 trang members (đã lọc) + pager. Bấm trang/ô search chỉ re-render, không fetch lại.
+  _renderMembersDetail() {
+    const tbody = document.getElementById('members-detail-tbody');
+    const pager = document.getElementById('members-detail-pager');
+    const countEl = document.getElementById('members-detail-count');
+    if (!tbody) return;
+    const all = this._membersDetailCurrent || [];
+    const members = this._filterMembersDetail();
+    if (countEl) countEl.textContent = members.length === all.length ? `${all.length} members` : `${members.length}/${all.length} members`;
+    if (!members.length) {
+      const msg = all.length ? 'Không tìm thấy member nào khớp' : 'Không có members';
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text2)">${msg}</td></tr>`;
+      if (pager) pager.innerHTML = '';
+      return;
+    }
+    const st = paginate(members, this._membersDetailPage, this._membersDetailPerPage);
+    this._membersDetailPage = st.page;
+    const offset = st.start;
+    tbody.innerHTML = st.slice.map((m, i) => {
+      const name = [m.first_name, m.last_name].filter(Boolean).join(' ') || '—';
+      const ls = m.last_seen || '—';
+      return `<tr>
+        <td>${offset + i + 1}</td>
+        <td style="font-size:12px">${m.user_id}</td>
+        <td>${m.username ? '@' + esc(m.username) : '<span style="color:var(--text2)">—</span>'}</td>
+        <td>${esc(name)}</td>
+        <td>${m.is_premium ? '<span class="badge badge-green">⭐</span>' : '—'}</td>
+        <td style="font-size:12px;color:var(--text2)">${esc(ls)}</td>
+      </tr>`;
+    }).join('');
+    renderPager(pager, st, (p) => { this._membersDetailPage = p; this._renderMembersDetail(); });
   },
 
   closeDetailModal() {
@@ -424,6 +518,7 @@ const Members = {
     if (!confirm('Xóa dữ liệu cào này?')) return;
     try {
       await MembersAPI.deleteScrapeJob(jobId);
+      delete this._membersDetailCache[jobId];   // tránh cache stale sau khi xóa
       App.toast('Đã xóa', 'success');
       this.loadScrapeJobs();
     } catch (e) {
@@ -944,38 +1039,57 @@ const Members = {
     }
   },
 
-  // ── Campaign Logs ──
+  // ── Campaign Logs (phân trang client) ──
   async viewCampaignLogs(id, name) {
     (document.getElementById('campaign-logs-title') || me_dummy).textContent = `Logs: ${name}`;
     const tbody = document.getElementById('campaign-logs-tbody');
+    const pager = document.getElementById('campaign-logs-pager');
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">⏳ Đang tải...</td></tr>';
+    if (pager) pager.innerHTML = '';
     (document.getElementById('campaign-logs-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
 
-    try {
-      const d = await MembersAPI.getCampaignLogs(id);
-      const logs = d.logs || [];
-      if (!logs.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2)">Chưa có logs</td></tr>';
+    this._campaignLogsPage = 1;
+    let logs = this._campaignLogsCache[id];
+    if (!logs) {
+      try {
+        const d = await MembersAPI.getCampaignLogs(id);
+        logs = d.logs || [];
+        this._campaignLogsCache[id] = logs;
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" style="color:var(--danger)">${esc(e.message)}</td></tr>`;
         return;
       }
-      tbody.innerHTML = logs.map(l => {
-        const statusBadge = l.status === 'success'
-          ? '<span class="badge badge-green">✅</span>'
-          : l.status === 'skipped'
-            ? '<span class="badge" style="background:#f59e0b">⏭</span>'
-            : '<span class="badge badge-red">❌</span>';
-        const time = l.sent_at ? new Date(l.sent_at + 'Z').toLocaleString('vi-VN') : '—';
-        return `<tr>
-          <td>${l.target_username ? '@' + esc(l.target_username) : l.target_user_id}</td>
-          <td>${l.account_name ? esc(l.account_name) : (l.account_id || '—')}</td>
-          <td>${statusBadge}</td>
-          <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(l.error_message || '')}</td>
-          <td style="font-size:12px;color:var(--text2)">${time}</td>
-        </tr>`;
-      }).join('');
-    } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="5" style="color:var(--danger)">${esc(e.message)}</td></tr>`;
     }
+    this._renderCampaignLogs(logs);
+  },
+
+  _renderCampaignLogs(logs) {
+    const tbody = document.getElementById('campaign-logs-tbody');
+    const pager = document.getElementById('campaign-logs-pager');
+    if (!tbody) return;
+    if (!logs.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2)">Chưa có logs</td></tr>';
+      if (pager) pager.innerHTML = '';
+      return;
+    }
+    const st = paginate(logs, this._campaignLogsPage, this._campaignLogsPerPage);
+    this._campaignLogsPage = st.page;
+    tbody.innerHTML = st.slice.map(l => {
+      const statusBadge = l.status === 'success'
+        ? '<span class="badge badge-green">✅</span>'
+        : l.status === 'skipped'
+          ? '<span class="badge" style="background:#f59e0b">⏭</span>'
+          : '<span class="badge badge-red">❌</span>';
+      const time = l.sent_at ? new Date(l.sent_at + 'Z').toLocaleString('vi-VN') : '—';
+      return `<tr>
+        <td>${l.target_username ? '@' + esc(l.target_username) : l.target_user_id}</td>
+        <td>${l.account_name ? esc(l.account_name) : (l.account_id || '—')}</td>
+        <td>${statusBadge}</td>
+        <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(l.error_message || '')}</td>
+        <td style="font-size:12px;color:var(--text2)">${time}</td>
+      </tr>`;
+    }).join('');
+    renderPager(pager, st, (p) => { this._campaignLogsPage = p; this._renderCampaignLogs(logs); });
   },
 
   closeCampaignLogs() {
@@ -1920,12 +2034,38 @@ const Members = {
   },
 
   // ── Fetch full results after deep crawl ──
+  // The result set can be thousands of leads (~4 MB). Fetch page 0 slim first so
+  // the table paints immediately, then stream the remaining pages in the
+  // background — the user never waits for data they are not looking at.
   async _fetchDeepCrawlResults() {
+    const PAGE = 100;
     try {
-      const res = await fetch('/api/members/deep-crawl/results');
-      const d = await res.json();
-      if (d.leads && d.leads.length > 0) {
-        this._renderDeepCrawlResults(d.leads);
+      // 1) First page — fast paint.
+      const first = await fetch(`/api/members/deep-crawl/results?slim=1&page=0&limit=${PAGE}`);
+      const d0 = await first.json();
+      const total = d0.total || 0;
+      if (!total) { this._renderDeepCrawlResults([]); return; }
+
+      this._renderDeepCrawlResults(d0.leads || [], { counts: d0.counts, total });
+
+      // 2) Remaining pages — hydrate the rest without blocking the UI.
+      const pages = Math.ceil(total / PAGE);
+      if (pages <= 1) return;
+      const rest = [];
+      for (let p = 1; p < pages; p++) {
+        try {
+          const res = await fetch(`/api/members/deep-crawl/results?slim=1&page=${p}&limit=${PAGE}`);
+          const d = await res.json();
+          if (d.leads && d.leads.length) rest.push(...d.leads);
+          // Merge progressively so filters/select-all see more over time.
+          if (rest.length) {
+            this._renderDeepCrawlResults([...(d0.leads || []), ...rest],
+                                         { counts: d0.counts, total, keepPage: true });
+          }
+        } catch (e) {
+          console.warn('[DeepCrawl] page load error', p, e);
+          break;
+        }
       }
     } catch (e) {
       App.toast('Lỗi tải kết quả deep crawl', 'error');
@@ -2009,7 +2149,8 @@ const Members = {
     return lead.trading_score;
   },
 
-  _renderDeepCrawlResults(leads) {
+  _renderDeepCrawlResults(leads, opts) {
+    opts = opts || {};
     const container = document.getElementById('sim-results-container');
     const tbody = document.getElementById('sim-results-tbody');
     const empty = document.getElementById('sim-empty-state');
@@ -2028,16 +2169,26 @@ const Members = {
       });
     }
 
-    // Detect fresh leads array and build select state
+    // Detect fresh leads array and build select state. During progressive
+    // hydration (keepPage) the user may already be paging/filtering, so keep
+    // their position and selection instead of snapping back to page 0.
     if (this._similarLeads !== leads) {
       this._similarLeads = leads;
-      this._simPage = 0;
-      this._selectedContacts = new Set();
-      leads.forEach(l => {
-        if (l.contacts) {
-          l.contacts.forEach(c => this._selectedContacts.add(c));
-        }
-      });
+      if (!opts.keepPage) {
+        this._simPage = 0;
+        this._selectedContacts = new Set();
+        leads.forEach(l => {
+          if (l.contacts) {
+            l.contacts.forEach(c => this._selectedContacts.add(c));
+          }
+        });
+      } else {
+        leads.forEach(l => {
+          if (l.contacts) {
+            l.contacts.forEach(c => this._selectedContacts.add(c));
+          }
+        });
+      }
     }
 
     if (!leads || !leads.length) {
@@ -2068,8 +2219,21 @@ const Members = {
         if (l.category === 'news_general') newsCount++;
       }
     });
-    const noContactCount = leads.length - contactCount;
-    const allCount = leads.length;
+    let noContactCount = leads.length - contactCount;
+    let allCount = leads.length;
+
+    // When the server supplied counts, they cover the WHOLE result set (not just
+    // the hydrated pages), so the tabs stay accurate while pages stream in.
+    if (opts.counts) {
+      const c = opts.counts;
+      contactCount = c.has_contacts ?? contactCount;
+      vipCount = c.trading_vip ?? vipCount;
+      tradeCount = c.trading_all ?? tradeCount;
+      potentialCount = c.potential_bd ?? potentialCount;
+      newsCount = c.news ?? newsCount;
+      noContactCount = c.no_contacts ?? noContactCount;
+      allCount = c.all ?? opts.total ?? allCount;
+    }
 
     // Build Contact-First Trading Filter Tabs
     if (tradingTabs) {

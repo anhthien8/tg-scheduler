@@ -8,10 +8,38 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.7.2",
+        "date": "02/10/2026",
+        "title": "⚡ Tối ưu tốc độ trang Cào & DM — nhanh hơn 15 lần",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Trang Cào & DM tải rất lâu vì mỗi lần mở đều tải TOÀN BỘ kết quả deep crawl — 6.901 kênh, ~4 MB kèm mô tả đầy đủ — dù chỉ hiển thị 50 dòng. Nay chỉ tải đúng 1 trang cần xem rồi nạp dần phần còn lại ở nền. Trang mở gần như tức thì.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Chỉ tải trang đang xem, không tải cả 6.901 kênh",
+                "desc": "API kết quả deep crawl nay hỗ trợ phân trang: trả về đúng 50 kênh của trang hiện tại (kèm số đếm đầy đủ cho các tab lọc), thay vì gửi cả 4 MB. Payload giảm 68 lần, thời gian mở trang từ ~840ms xuống ~55ms.",
+                "tag": "Hiệu năng"
+            },
+            {
+                "type": "improvement",
+                "title": "Mở trang là thấy ngay, phần còn lại nạp sau",
+                "desc": "Trang 1 hiện ra ngay khi mở, các trang sau tự nạp ở nền. Bạn lật trang hay lọc ngay được, không phải chờ tải hết danh sách. Các tab lọc (VIP Signals, Trading, Tiềm năng BD...) vẫn hiển thị đúng số lượng trên toàn bộ kết quả.",
+                "tag": "Hiệu năng"
+            },
+            {
+                "type": "improvement",
+                "title": "Mô tả dài không còn làm nặng trang",
+                "desc": "Mô tả kênh trong bảng danh sách được rút gọn — bấm vào kênh để xem/xử lý đầy đủ. Trang Cào Group & Chiến dịch, Inbox, Keyword DM, Blacklist vốn đã nhanh (dưới 40ms), không cần thay đổi.",
+                "tag": "Hiệu năng"
+            },
+        ],
+    },
+    {
         "version": "v3.7.0",
         "date": "01/10/2026",
         "title": "📊 Pipeline KOL — quản lý theo giai đoạn, không phải bật/tắt",
-        "is_latest": True,
+        "is_latest": False,
         "badge": "LATEST",
         "summary": "Thay nút Bật/Tắt AI bằng khái niệm GIAI ĐOẠN cho mỗi KOL: Mới → Đang nuôi → Đàm phán → Đã chốt (hoặc Tạm dừng). Nhìn vào là biết KOL đang ở đâu trong phễu, thay vì phải nhớ mình đã bật AI cho ai. Giai đoạn tự đồng bộ với trạng thái AI: chốt deal hoặc tạm dừng thì AI tự im.",
         "changes": [
