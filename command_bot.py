@@ -70,11 +70,18 @@ def _get_state(user_id: int) -> dict | None:
 # Bare /ai* control commands used INSIDE a forum topic (no @username argument —
 # the topic already identifies the lead). Distinct from the /ai-on @user form.
 _AI_CONTROL_CMDS = frozenset({"/ai", "/ai-on", "/aion", "/ai_on", "/ai-off", "/aioff", "/ai_off"})
+_PIPELINE_CMDS = frozenset({"/pipeline", "/attention", "/stage"})
 
 
 def _is_ai_control(text: str | None) -> bool:
     """True when the message is a bare /ai* topic command (case-insensitive)."""
     return (text or "").strip().lower() in _AI_CONTROL_CMDS
+
+
+def _is_pipeline_command(text: str | None) -> bool:
+    """True for /pipeline, /attention or /stage ... — allowed inside the group."""
+    t = (text or "").strip().lower()
+    return t in _PIPELINE_CMDS or t.startswith("/stage ")
 
 
 def _set_state(user_id: int, state: dict):
@@ -178,6 +185,8 @@ def _register_handlers(client: TelegramClient):
              Button.inline("📊 Trạng thái", data="nav:status")],
             [Button.inline("📋 Campaign", data="nav:campaigns"),
              Button.inline("👤 Accounts", data="nav:accounts")],
+            [Button.inline("📊 Pipeline KOL", data="nav:pipeline"),
+             Button.inline("🎯 Cần chú ý", data="nav:attention")],
         ]
         await event.respond(text, parse_mode="md",
                             buttons=buttons)
@@ -254,11 +263,36 @@ def _register_handlers(client: TelegramClient):
         name = event.pattern_match.group(1)
         await _handle_check_account(event, name)
 
+    # ── /pipeline — the KOL funnel at a glance ─────────────────────────────
+    @client.on(events.NewMessage(pattern=r"/pipeline$"))
+    async def cmd_pipeline(event):
+        if not _check_admin(event):
+            return
+        await _handle_pipeline(event)
+
+    # ── /attention — only the leads worth the operator's time ──────────────
+    @client.on(events.NewMessage(pattern=r"/attention$"))
+    async def cmd_attention(event):
+        if not _check_admin(event):
+            return
+        await _handle_attention(event)
+
+    # ── /stage <stage> — move the lead in THIS topic ───────────────────────
+    # Bare form works inside a topic; the /stage <user> <stage> form works
+    # anywhere in the group for a lead named on the command line.
+    @client.on(events.NewMessage(pattern=r"/stage(\s+.+)?"))
+    async def cmd_stage(event):
+        if not _check_admin(event):
+            return
+        await _handle_stage(event)
+
     # ── Forum topic admin messages ──────────────────────────────────────────
     # Slash messages are excluded EXCEPT the /ai* control commands, which are
     # handled per-topic by _handle_forum_admin_message.
     @client.on(events.NewMessage(func=lambda e: (e.is_group or getattr(e, "is_channel", False))
-                                 and (not e.raw_text.startswith("/") or _is_ai_control(e.raw_text))))
+                                 and (not e.raw_text.startswith("/")
+                                      or _is_ai_control(e.raw_text)
+                                      or _is_pipeline_command(e.raw_text))))
     async def on_group_message(event):
         # Command Bot flows can start inside a Forum topic. Consume the active
         # state first; otherwise this text would be misrouted as a forum reply.
@@ -323,6 +357,16 @@ def _register_handlers(client: TelegramClient):
                 await event.delete()
                 # Re-trigger /start
                 await cmd_start(event)
+                return
+
+            if data == "nav:pipeline":
+                await event.delete()
+                await _handle_pipeline(event)
+                return
+
+            if data == "nav:attention":
+                await event.delete()
+                await _handle_attention(event)
                 return
 
             # ── Send flow: select account ──
@@ -1208,6 +1252,134 @@ async def _render_ai_status(event, acc_id: int, uid: int) -> None:
             await event.respond(text, buttons=kb)
         except Exception as e:
             logger.debug("[ForumInbox] render ai status failed: %s", e)
+
+
+_STAGE_LABEL = {
+    "new": "🌱 Mới", "nurture": "🔥 Đang nuôi",
+    "negotiating": "🤝 Đàm phán", "signed": "✅ Đã chốt", "paused": "⏸️ Tạm dừng",
+}
+
+
+def _stage_label(stage: str | None) -> str:
+    return _STAGE_LABEL.get(stage or "new", stage or "new")
+
+
+def _lead_line(r: dict) -> str:
+    """One compact line per lead for the pipeline views."""
+    who = r.get("username") or r.get("name") or str(r.get("user_id"))
+    who = who.lstrip("@")
+    tier = r.get("lead_tier") or "—"
+    intent = r.get("intent_score") or 0
+    reps = r.get("reply_count") or 0
+    return f"• @{who} · {tier} · intent {intent} · {reps} tin · acc{r.get('account_id')}"
+
+
+async def _handle_pipeline(event) -> None:
+    """Show the KOL funnel: how many leads sit in each stage."""
+    counts = await db.get_pipeline_counts()
+    total = sum(counts.values())
+    if not total:
+        await event.respond("📊 Chưa có hội thoại nào trong pipeline.")
+        return
+    lines = [f"📊 **Pipeline KOL** — {total} hội thoại\n"]
+    for st in db.PIPELINE_STAGES:
+        n = counts.get(st, 0)
+        bar = "█" * min(n, 20) if n else ""
+        lines.append(f"{_stage_label(st):<14} **{n:>4}** {bar}")
+    lines.append("\nXem lead cần xử lý: /attention")
+    lines.append("Đổi giai đoạn: vào topic rồi gõ /stage <giai đoạn>")
+    await event.respond("\n".join(lines))
+
+
+async def _handle_attention(event) -> None:
+    """List only the leads worth acting on — the operator's short list."""
+    leads = await db.get_leads_needing_attention()
+    if not leads:
+        await event.respond("✅ Không có lead nào cần bạn xử lý ngay.")
+        return
+    lines = [f"🎯 **{len(leads)} lead cần chú ý**\n"]
+    for r in leads:
+        lines.append(f"{_stage_label(r.get('stage'))} · {_lead_line(r)}")
+    lines.append("\nVào topic của lead để xem hội thoại và gõ /stage để đổi.")
+    await event.respond("\n".join(lines))
+
+
+async def _handle_stage(event) -> None:
+    """Move a lead to a new stage. Bare form targets the topic's own lead."""
+    raw = (event.raw_text or "").strip()[len("/stage"):].strip()
+    topic_id = _extract_topic_id(event.message)
+
+    account_id = user_id = None
+    stage_arg = None
+    handle = None
+
+    if raw:
+        parts = raw.split()
+        if len(parts) == 1:
+            # /stage <stage>  — inside a topic
+            stage_arg = parts[0]
+        elif len(parts) >= 2:
+            # /stage 3 @user nurture  OR  /stage @user nurture
+            if parts[0].isdigit():
+                account_id = int(parts[0])
+                handle = parts[1]
+                stage_arg = parts[2] if len(parts) > 2 else None
+            else:
+                handle = parts[0]
+                stage_arg = parts[1]
+
+    # Resolve the lead from the topic when not named explicitly.
+    if account_id is None and topic_id:
+        cfg = await _load_forum_config()
+        topic = await db.get_telegram_topic_by_thread(cfg.group_id, topic_id)
+        if topic:
+            account_id = int(topic["account_id"])
+            user_id = int(topic["user_id"])
+
+    # Resolve by @username across accounts if we have a handle but no topic lead.
+    if user_id is None and handle:
+        found = await db.find_followup_chat_by_username(handle.lstrip("@"),
+                                                        account_id=account_id)
+        if found:
+            account_id = int(found["account_id"])
+            user_id = int(found["user_id"])
+
+    if user_id is None or account_id is None:
+        await event.respond(
+            "❓ Không xác định được lead.\n"
+            "• Trong topic: gõ `/stage nuoi`\n"
+            "• Ngoài topic: `/stage @username nuoi` hoặc `/stage <acc> @username nuoi`\n\n"
+            "Giai đoạn: new · nurture · negotiating · signed · paused")
+        return
+
+    if not stage_arg:
+        # No stage given → report the current one, don't guess.
+        chat = await db.get_followup_chat(account_id, user_id) or {}
+        cur = chat.get("stage") or "new"
+        await event.respond(
+            f"Lead #{user_id} đang ở: {_stage_label(cur)}\n"
+            f"Đổi bằng: `/stage nuoi|dam|chot|dung`")
+        return
+
+    stage = db.normalize_stage(stage_arg)
+    if not stage:
+        await event.respond(
+            f"⛔ Không nhận ra giai đoạn `{stage_arg}`.\n"
+            "Dùng: new · nurture (nuoi) · negotiating (dam) · signed (chot) · paused (dung)")
+        return
+
+    ok = await db.set_followup_stage(account_id, user_id, stage)
+    if not ok:
+        await event.respond("⛔ Không tìm thấy hội thoại cho lead này.")
+        return
+
+    note = {
+        "signed": "\n🔒 AI đã dừng — bạn toàn quyền xử lý KOL này.",
+        "paused": "\n⏸️ AI tạm dừng cho lead này.",
+    }.get(stage, "\n🤖 AI đang hoạt động cho lead này.")
+    await event.respond(f"✅ Đã chuyển lead #{user_id} → {_stage_label(stage)}{note}")
+    logger.info("[Pipeline] admin=%s set acc=%s user=%s stage=%s",
+                event.sender_id, account_id, user_id, stage)
 
 
 async def _handle_forum_admin_message(event) -> None:

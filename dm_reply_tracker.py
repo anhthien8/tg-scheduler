@@ -1154,6 +1154,16 @@ def _make_handler(account_id: int):
                                 sender_id, current_status)
                     return
 
+                # ── Pipeline stage gate ────────────────────────────────────
+                # The stage is the operator-facing truth. 'signed' and 'paused'
+                # mean a human owns this KOL, so the AI must stay silent even if
+                # the legacy status somehow reads 'active'.
+                _stage = (chat or {}).get("stage") or "new"
+                if _stage in ("signed", "paused"):
+                    logger.info("[AIFollowUp] User %d stage '%s' — recorded msg, AI silent",
+                                sender_id, _stage)
+                    return
+
                 # Handover keywords check
                 account_obj = await db.get_account(account_id)
                 agent_id = account_obj.get("ai_agent_id") if account_obj else None

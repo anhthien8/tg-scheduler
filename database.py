@@ -831,12 +831,36 @@ async def init_db():
             ("last_drip_stage", "INTEGER DEFAULT 0"),
             ("last_user_message_at", "TEXT"),
             ("human_takeover_at", "TEXT"),
-            ("verification_status", "TEXT DEFAULT 'none'")
+            ("verification_status", "TEXT DEFAULT 'none'"),
+            # KOL lifecycle stage: new -> nurture -> negotiating -> signed | paused.
+            # Drives whether the AI may reply, so it is the single source of truth
+            # instead of a per-topic on/off the operator has to remember.
+            ("stage", "TEXT DEFAULT 'new'"),
         ]:
             try:
                 await db.execute(f"ALTER TABLE ai_followup_chats ADD COLUMN {col_name} {col_def}")
             except Exception:
                 pass
+
+        # Backfill stage from the legacy status so no chat is left without one:
+        #   needs_human/paused_admin -> a human owns it -> 'paused'
+        #   bot_ignored              -> never engage -> 'paused'
+        #   active + replied         -> 'nurture' (AI is already talking to them)
+        #   everything else          -> 'new'
+        try:
+            await db.execute("""
+                UPDATE ai_followup_chats
+                SET stage = CASE
+                    WHEN stage IS NOT NULL AND stage != '' AND stage != 'new' THEN stage
+                    WHEN status IN ('needs_human','paused_admin','bot_ignored') THEN 'paused'
+                    WHEN status = 'active' AND COALESCE(reply_count, 0) > 0 THEN 'nurture'
+                    ELSE 'new'
+                END
+                WHERE stage IS NULL OR stage = '' OR stage = 'new'
+            """)
+            await db.commit()
+        except Exception:
+            pass
 
         # Backfill last_user_message_at for rows created before the column
         # existed, so the drip cadence has a sane anchor (fall back to
@@ -4464,6 +4488,142 @@ async def resume_ai_for_user(account_id: int, user_id: int) -> bool:
         """, (account_id, user_id))
         await db.commit()
         return cursor.rowcount > 0
+
+
+# KOL lifecycle stages, in funnel order. 'paused' is an operator hold, not a step.
+PIPELINE_STAGES = ("new", "nurture", "negotiating", "signed", "paused")
+_STAGE_ALIASES = {
+    "n": "new", "moi": "new",
+    "nu": "nurture", "nuoi": "nurture", "nurture": "nurture",
+    "dam": "negotiating", "dam_phan": "negotiating", "thuong_luong": "negotiating",
+    "negotiating": "negotiating", "nego": "negotiating",
+    "ky": "signed", "chot": "signed", "signed": "signed", "done": "signed",
+    "dung": "paused", "tam_dung": "paused", "pause": "paused", "paused": "paused",
+}
+
+
+def normalize_stage(value: str | None) -> str | None:
+    """Map user input (vi/en, with or without accents) to a canonical stage.
+
+    Returns None when unrecognised so callers can reject it instead of silently
+    writing a bogus stage the funnel view would then miscount.
+    """
+    if not value:
+        return None
+    key = value.strip().lower().replace("-", "_").replace(" ", "_")
+    # Strip Vietnamese diacritics so "nuôi"/"nuoi" both work. NFD handles the
+    # tone marks, but 'đ' is a separate letter (not decomposed), so map it by hand.
+    import unicodedata
+    key = key.replace("đ", "d")
+    key = "".join(c for c in unicodedata.normalize("NFD", key)
+                  if unicodedata.category(c) != "Mn")
+    if key in PIPELINE_STAGES:
+        return key
+    return _STAGE_ALIASES.get(key)
+
+
+async def set_followup_stage(account_id: int, user_id: int, stage: str) -> bool:
+    """Move a chat to a pipeline stage and keep `status` consistent with it.
+
+    stage is the operator-facing truth; status stays the AI's gate. They are kept
+    in sync here so no caller has to remember both:
+      signed / paused  -> AI must not speak   (status 'needs_human')
+      new / nurture / negotiating -> AI may speak (status 'active')
+    """
+    stage = normalize_stage(stage) or stage
+    if stage not in PIPELINE_STAGES:
+        return False
+    new_status = "needs_human" if stage in ("signed", "paused") else "active"
+    async with get_db() as db:
+        cursor = await db.execute("""
+            UPDATE ai_followup_chats
+            SET stage = ?, status = ?, updated_at = datetime('now'),
+                human_takeover_at = CASE WHEN ? = 1 THEN COALESCE(human_takeover_at, datetime('now'))
+                                         ELSE NULL END
+            WHERE account_id = ? AND user_id = ?
+        """, (stage, new_status, 1 if stage in ("signed", "paused") else 0,
+              account_id, user_id))
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def get_pipeline_counts() -> dict:
+    """Count leads per stage — the numbers behind /pipeline."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT COALESCE(NULLIF(stage, ''), 'new') AS stage, COUNT(*) AS n
+            FROM ai_followup_chats
+            GROUP BY COALESCE(NULLIF(stage, ''), 'new')
+        """)
+        counts = {r["stage"]: r["n"] for r in await cursor.fetchall()}
+    return {s: counts.get(s, 0) for s in PIPELINE_STAGES}
+
+
+async def find_followup_chat_by_username(username: str, account_id: int | None = None) -> dict | None:
+    """Look up a chat by @username, optionally scoped to one account.
+
+    Usernames are stored with or without the leading '@' and in mixed case, so
+    compare case-insensitively on the stripped form. When several accounts have
+    the same lead, prefer the one with the most replies (the real conversation).
+    """
+    if not username:
+        return None
+    u = username.lstrip("@").strip()
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        sql = """
+            SELECT account_id, user_id, username, name, stage, status
+            FROM ai_followup_chats
+            WHERE LOWER(LTRIM(COALESCE(username, ''), '@')) = LOWER(?)
+        """
+        params: list = [u]
+        if account_id is not None:
+            sql += " AND account_id = ?"
+            params.append(int(account_id))
+        sql += " ORDER BY COALESCE(reply_count, 0) DESC LIMIT 1"
+        cursor = await db.execute(sql, params)
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def get_leads_by_stage(stage: str, limit: int = 20) -> list:
+    """Leads currently in a stage, most recently active first."""
+    stage = normalize_stage(stage) or stage
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT account_id, user_id, username, name, stage, intent_score,
+                   lead_tier, reply_count, last_user_message_at, summary
+            FROM ai_followup_chats
+            WHERE COALESCE(NULLIF(stage, ''), 'new') = ?
+            ORDER BY COALESCE(last_user_message_at, updated_at) DESC
+            LIMIT ?
+        """, (stage, int(limit)))
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def get_leads_needing_attention(limit: int = 15) -> list:
+    """Leads worth the operator's eyes right now.
+
+    Two signals: a high intent score still in 'nurture' (ready to move forward),
+    or a negotiating lead (deal on the table). Ordered by intent so the hottest
+    is first — this is what makes /attention useful instead of noise.
+    """
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT account_id, user_id, username, name, stage, intent_score,
+                   lead_tier, reply_count, last_user_message_at, summary
+            FROM ai_followup_chats
+            WHERE COALESCE(NULLIF(stage, ''), 'new') IN ('nurture', 'negotiating')
+              AND (COALESCE(intent_score, 0) >= 60 OR lead_tier = 'Tier A'
+                   OR COALESCE(NULLIF(stage,''),'new') = 'negotiating')
+            ORDER BY COALESCE(intent_score, 0) DESC,
+                     COALESCE(last_user_message_at, updated_at) DESC
+            LIMIT ?
+        """, (int(limit),))
+        return [dict(r) for r in await cursor.fetchall()]
 
 
 async def update_followup_lead_metrics(

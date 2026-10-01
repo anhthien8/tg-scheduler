@@ -8,10 +8,44 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.7.0",
+        "date": "01/10/2026",
+        "title": "📊 Pipeline KOL — quản lý theo giai đoạn, không phải bật/tắt",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Thay nút Bật/Tắt AI bằng khái niệm GIAI ĐOẠN cho mỗi KOL: Mới → Đang nuôi → Đàm phán → Đã chốt (hoặc Tạm dừng). Nhìn vào là biết KOL đang ở đâu trong phễu, thay vì phải nhớ mình đã bật AI cho ai. Giai đoạn tự đồng bộ với trạng thái AI: chốt deal hoặc tạm dừng thì AI tự im.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Giai đoạn cho từng KOL",
+                "desc": "Mỗi hội thoại có 1 giai đoạn: 🌱 Mới · 🔥 Đang nuôi · 🤝 Đàm phán · ✅ Đã chốt · ⏸️ Tạm dừng. Gõ /stage ngay trong topic để đổi, hoặc /stage @username <giai đoạn> ở ngoài. Nhận cả tiếng Việt có/không dấu (nuoi, nuôi, đàm phán, chốt, tạm dừng).",
+                "tag": "Pipeline"
+            },
+            {
+                "type": "feature",
+                "title": "/pipeline — xem phễu trong 1 lệnh",
+                "desc": "Hiện số KOL ở từng giai đoạn kèm biểu đồ cột. Trả lời ngay câu hỏi 'Mình đang nuôi bao nhiêu KOL, mấy cái đang đàm phán?'.",
+                "tag": "Pipeline"
+            },
+            {
+                "type": "feature",
+                "title": "/attention — chỉ hiện việc cần bạn",
+                "desc": "Lọc ra đúng những KOL đáng để bạn xem: đang đàm phán, hoặc điểm intent ≥ 60, hoặc Tier A. Xếp theo độ 'nóng' giảm dần, thay vì bắt bạn tự dò 365 hội thoại.",
+                "tag": "Pipeline"
+            },
+            {
+                "type": "improvement",
+                "title": "Chốt deal là AI tự im",
+                "desc": "Đặt giai đoạn 'Đã chốt' hoặc 'Tạm dừng' sẽ tự khoá AI cho lead đó — không cần bấm nút Tắt AI riêng. Hết lo AI nói sai với KOL đã ký.",
+                "tag": "Pipeline"
+            },
+        ],
+    },
+    {
         "version": "v3.6.0",
         "date": "01/10/2026",
         "title": "📜 Nạp nội dung hội thoại vào topic — đọc được ngay trong group",
-        "is_latest": True,
+        "is_latest": False,
         "badge": "LATEST",
         "summary": "Trước đây topic chỉ có 1 dòng tiêu đề nên mở group ra không hiểu lead đã nói gì. Nay có nút 'Nạp lịch sử': đăng lại toàn bộ tin nhắn (lead + mình trả lời) trong N ngày qua vào từng topic, theo đúng thứ tự thời gian. Hội thoại không có tin nào trong khoảng đó sẽ tự bỏ qua — không tạo topic rác.",
         "changes": [
