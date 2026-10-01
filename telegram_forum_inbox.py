@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import html
+import logging
 import secrets
 import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable
+
+logger = logging.getLogger("tg-scheduler.forum_inbox")
 
 
 @dataclass(frozen=True)
@@ -170,8 +173,13 @@ async def backfill_topics(db, bot, cfg: ForumConfig, *, days: int = 7, limit: in
                           f"Chỉ hội thoại MỚI kể từ lúc bật mới được relay vào đây.")
                 await bot.send_topic_message(cfg.group_id, int(topic_id), header)
                 created += 1
-        except Exception:
+        except Exception as e:
+            # NEVER swallow silently: an unlogged failure here hid the
+            # CreateForumTopicRequest ImportError and left the group empty for
+            # weeks with no visible error.
             failed += 1
+            logger.warning("[ForumInbox] backfill: create topic failed for acc=%s user=%s: %s: %s",
+                           account_id, user_id, type(e).__name__, e)
     return {"created": created, "skipped": skipped, "failed": failed,
             "candidates": len(candidates), "days": days}
 

@@ -976,14 +976,22 @@ class _TelethonForumBot:
     async def create_forum_topic(self, group_id: int, title: str) -> int:
         import random as _random
 
-        from telethon.tl.functions.channels import CreateForumTopicRequest
+        # NOTE: CreateForumTopicRequest lives in .messages, NOT .channels.
+        # Importing it from .channels raises ImportError on Telethon 1.44, which
+        # the relay swallowed — so no topic was EVER created (0 topics forever).
+        from telethon.tl.functions.messages import CreateForumTopicRequest
         entity = await self._client.get_entity(group_id)
         result = await self._client(CreateForumTopicRequest(
-            channel=entity, title=title, random_id=_random.randint(1, 2**62)))
+            peer=entity, title=title, random_id=_random.randint(1, 2**62)))
         for upd in getattr(result, "updates", []) or []:
             msg = getattr(upd, "message", None)
             if msg is not None and getattr(msg, "id", None):
                 return int(msg.id)
+            # The update may carry the topic directly instead of a message.
+            topic = getattr(upd, "topic", None)
+            tid = getattr(topic, "id", None) if topic is not None else None
+            if tid:
+                return int(tid)
         raise RuntimeError("CreateForumTopicRequest returned no topic id")
 
     async def send_topic_message(self, group_id: int, topic_id: int, text: str, buttons=None):
