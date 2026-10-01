@@ -3405,6 +3405,37 @@ App.backfillForumInboxTopics = async function() {
   }
 };
 
+App.replayForumInboxHistory = async function() {
+  const msg = document.getElementById('forum-inbox-backfill-msg');
+  const daysEl = document.getElementById('forum-inbox-backfill-days');
+  const days = Math.max(1, Math.min(parseInt(daysEl?.value || '30', 10) || 30, 365));
+  if (msg) msg.textContent = `⏳ Đang nạp lịch sử ${days} ngày vào từng topic... (có thể mất vài phút)`;
+  try {
+    const res = await fetch('/api/settings/forum-inbox/replay-history', {
+      method: 'POST',
+      headers: { ...API.getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days: days, limit: 500 })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    if (data.reason === 'bot_offline') {
+      if (msg) msg.textContent = '❌ Command Bot chưa chạy — bật bot ở mục trên rồi thử lại.';
+      return;
+    }
+    if (data.reason === 'disabled') {
+      if (msg) msg.textContent = '❌ Forum Inbox đang tắt — bật và Lưu cấu hình trước.';
+      return;
+    }
+    if (msg) {
+      msg.textContent = `✅ Nạp lịch sử ${data.replayed || 0} topic (bỏ qua ${data.skipped || 0} — `
+        + `không có tin trong ${days} ngày, lỗi ${data.failed || 0}).`;
+    }
+    if (typeof App.toast === 'function') App.toast(`Đã nạp lịch sử ${data.replayed || 0} topic`, 'success');
+  } catch (e) {
+    if (msg) msg.textContent = '❌ Lỗi: ' + e.message;
+  }
+};
+
 App.toggleCmdBotTokenVisibility = function() {
   const input = document.getElementById('cmd-bot-token');
   if (input) input.type = input.type === 'password' ? 'text' : 'password';

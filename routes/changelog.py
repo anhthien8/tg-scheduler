@@ -8,11 +8,45 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
-        "version": "v3.5.8",
+        "version": "v3.6.0",
         "date": "01/10/2026",
-        "title": "🤖 Điều khiển AI từng lead ngay trong topic + sửa lỗi chat kẹt vĩnh viễn",
+        "title": "📜 Nạp nội dung hội thoại vào topic — đọc được ngay trong group",
         "is_latest": True,
         "badge": "LATEST",
+        "summary": "Trước đây topic chỉ có 1 dòng tiêu đề nên mở group ra không hiểu lead đã nói gì. Nay có nút 'Nạp lịch sử': đăng lại toàn bộ tin nhắn (lead + mình trả lời) trong N ngày qua vào từng topic, theo đúng thứ tự thời gian. Hội thoại không có tin nào trong khoảng đó sẽ tự bỏ qua — không tạo topic rác.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Nạp lịch sử hội thoại vào topic",
+                "desc": "Mỗi topic nay chứa bản ghi đầy đủ: tin của lead (📥 Lead) và tin mình gửi (📤 Mình) kèm mốc thời gian, phân biệt được cả tin AI soạn và tin người thật gõ tay ([Human Admin]). Tin dài được chia nhỏ nhiều message để không vượt giới hạn Telegram.",
+                "tag": "Forum Inbox"
+            },
+            {
+                "type": "improvement",
+                "title": "Tự bỏ qua hội thoại không có tin trong khoảng chọn",
+                "desc": "Chỉ nạp những hội thoại thật sự có tin nhắn trong N ngày qua. Chọn 30 ngày thì topic nào im lặng quá 30 ngày sẽ được bỏ qua thay vì tạo topic trống.",
+                "tag": "Forum Inbox"
+            },
+            {
+                "type": "improvement",
+                "title": "Loại topic rác khỏi backfill",
+                "desc": "SpamBot của Telegram, bot phụ của mình và tài khoản chính đều có trạng thái bot_ignored — nay bị loại khỏi danh sách tạo topic, không còn topic chết trong group.",
+                "tag": "Bug Fix"
+            },
+            {
+                "type": "fix",
+                "title": "Sửa sai module gọi API tạo topic",
+                "desc": "CreateForumTopicRequest nằm ở telethon.tl.functions.messages chứ không phải .channels (lỗi ImportError bị nuốt im lặng khiến chưa từng tạo được topic nào). Đã sửa và bỏ thói quen nuốt lỗi — mọi lỗi tạo topic nay đều ghi log rõ.",
+                "tag": "Bug Fix"
+            },
+        ],
+    },
+    {
+        "version": "v3.5.9",
+        "date": "01/10/2026",
+        "title": "🛠️ Tạo topic thật sự chạy được (sai module Telethon)",
+        "is_latest": False,
+        "badge": "v3.5.9",
         "summary": "Hai lỗi khiến AI như 'chết': (1) chat nằm ở needs_human mà không có mốc human_takeover_at thì phần tự mở khoá sau 24h bị bỏ qua hoàn toàn — chat khoá vĩnh viễn, AI không bao giờ trả lời nữa; (2) timestamp SQLite dạng 'YYYY-MM-DD HH:MM:SS' (dấu cách) bị datetime.fromisoformat() từ chối, lỗi bị nuốt im lặng nên kể cả có mốc cũng không auto-resume. Nay đã sửa gốc và thêm nút bấm/lệnh Bật–Tắt AI cho từng lead ngay trong topic.",
         "changes": [
             {

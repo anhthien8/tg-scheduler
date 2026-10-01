@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 import secrets
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
 
 logger = logging.getLogger("tg-scheduler.forum_inbox")
@@ -104,6 +106,91 @@ def _format_inbound(account_id: int, user_id: int, username: str | None, name: s
     if has_media and text and text.strip():
         body += "\n\n[media chưa được hỗ trợ trong Forum Inbox v1]"
     return f"📥 Inbound từ {_lead_label(username, name, user_id)}\nNick phụ #{account_id} · user_id {user_id}\n\n{body}"
+
+
+def _format_history_message(role: str, content: str, ts: str) -> str:
+    """Render one stored history entry as a transcript line.
+
+    `assistant` covers both AI drafts and human-admin replies (the tracker marks
+    manual sends with a '[Human Admin]:' prefix), so both get the same arrow —
+    the prefix already shows who typed it.
+    """
+    when = (ts or "").replace("T", " ")[:16]
+    arrow = "📥 Lead" if role == "user" else "📤 Mình"
+    stamp = f" · {when}" if when else ""
+    return f"{arrow}{stamp}\n{content.strip()}"
+
+
+async def relay_history(db, bot, cfg: ForumConfig, *, account_id: int, user_id: int,
+                        username: str | None = None, name: str | None = None,
+                        days: int = 30) -> dict:
+    """Replay a conversation's stored transcript into its topic.
+
+    The topic is created if missing, then entries are posted in chronological
+    order, chunked so a long conversation stays under Telegram's message-size
+    limit. Only entries newer than `days` are replayed — that is what makes the
+    topic readable ("what did we say this month") without dumping years of
+    messages into the group.
+
+    Returns {"status", "posted", "total", "topic_id"}.
+    """
+    if not cfg.enabled:
+        return {"status": "disabled", "posted": 0, "total": 0}
+
+    chat = await db.get_followup_chat(account_id, user_id)
+    raw = (chat or {}).get("history_json")
+    if not raw:
+        return {"status": "no_history", "posted": 0, "total": 0}
+    try:
+        history = json.loads(raw) or []
+    except (ValueError, TypeError):
+        return {"status": "bad_history", "posted": 0, "total": 0}
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=int(days))).strftime("%Y-%m-%dT%H:%M:%S")
+    entries = [m for m in history
+               if isinstance(m, dict) and (m.get("timestamp") or "") >= cutoff]
+    if not entries:
+        return {"status": "no_recent", "posted": 0, "total": 0}
+
+    async with _topic_lock(cfg.group_id, account_id, user_id):
+        topic = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
+        if not topic:
+            topic_id = await bot.create_forum_topic(
+                cfg.group_id, _topic_title(account_id, user_id, username, name))
+            await db.upsert_telegram_topic({
+                "group_id": cfg.group_id, "topic_id": int(topic_id),
+                "account_id": account_id, "user_id": user_id,
+                "username": username, "name": name, "campaign_name": None,
+                "status": "active", "last_lead_message": None,
+            })
+            topic = {"topic_id": int(topic_id)}
+        topic_id = int(topic["topic_id"])
+
+    header = (f"🗂️ **Hội thoại {days} ngày qua**\n"
+              f"Lead: {_lead_label(username, name, user_id)}\n"
+              f"Nick phụ #{account_id} · user_id {user_id}\n"
+              f"Tổng {len(entries)} tin nhắn (cũ → mới)\n"
+              f"{'─' * 28}")
+    await bot.send_topic_message(cfg.group_id, topic_id, header)
+
+    # Chunk by characters so each Telegram message stays well under 4096.
+    chunk, size, posted = [], 0, 0
+    CHUNK_LIMIT = 3200
+    for m in entries:
+        line = _format_history_message(m.get("role", "user"),
+                                       m.get("content") or "", m.get("timestamp") or "")
+        if size + len(line) > CHUNK_LIMIT and chunk:
+            await bot.send_topic_message(cfg.group_id, topic_id, "\n\n".join(chunk))
+            posted += 1
+            chunk, size = [], 0
+        chunk.append(line)
+        size += len(line) + 2
+    if chunk:
+        await bot.send_topic_message(cfg.group_id, topic_id, "\n\n".join(chunk))
+        posted += 1
+
+    return {"status": "replayed", "posted": posted,
+            "total": len(entries), "topic_id": topic_id}
 
 
 async def relay_general_alert(bot, cfg: ForumConfig, text: str) -> bool:

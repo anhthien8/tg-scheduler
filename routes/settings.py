@@ -675,6 +675,26 @@ async def backfill_forum_inbox(payload: ForumBackfillPayload = ForumBackfillPayl
     return {"message": f"Backfill xong: tạo {report.get('created', 0)} topic", **report}
 
 
+@router.post("/forum-inbox/replay-history")
+async def replay_forum_inbox_history(payload: ForumBackfillPayload = ForumBackfillPayload()):
+    """Load the last-`days` transcript into each topic so it is readable.
+
+    Without this a topic only shows its title line — you cannot tell what the
+    lead said from inside the group.
+    """
+    try:
+        import command_bot
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Forum Inbox cần TG_RUNTIME_MODE=combined (Command Bot phải đang chạy).",
+        )
+    days = max(1, min(int(payload.days), 365))
+    limit = max(1, min(int(payload.limit), 1000))
+    report = await command_bot.replay_forum_history(days=days, limit=limit)
+    return {"message": f"Nạp lịch sử xong: {report.get('replayed', 0)} topic", **report}
+
+
 @router.get("/forum-inbox/topics")
 async def list_forum_inbox_topics(limit: int = 200):
     """Topic mappings currently tracked (for diagnostics in the UI)."""

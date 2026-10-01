@@ -1048,6 +1048,61 @@ async def backfill_forum_topics(days: int = 90, limit: int = 500) -> dict:
         return {"created": 0, "skipped": 0, "failed": 0, "reason": "error"}
 
 
+async def replay_forum_history(days: int = 30, limit: int = 500) -> dict:
+    """Load each topic's last-`days` transcript so the conversation is readable.
+
+    Topics created by backfill only carry a title line; without the transcript
+    you cannot tell what the lead actually said from the group. This posts the
+    stored history (lead + our replies) into every topic, skipping bots and any
+    conversation with no message inside the window.
+    """
+    try:
+        bot = _forum_bot()
+        if not bot:
+            return {"replayed": 0, "skipped": 0, "failed": 0, "reason": "bot_offline"}
+        cfg = await _load_forum_config()
+        if not cfg.enabled:
+            return {"replayed": 0, "skipped": 0, "failed": 0, "reason": "disabled"}
+
+        cands = await db.get_forum_backfill_candidates(days=days, limit=limit)
+        # Include topics that already exist (backfilled ones have no history).
+        existing = await db.get_telegram_topics(cfg.group_id, limit=limit)
+        seen, todo = set(), []
+        for c in cands:
+            key = (int(c["account_id"]), int(c["user_id"]))
+            seen.add(key)
+            todo.append({"account_id": key[0], "user_id": key[1],
+                         "username": c.get("username"), "name": c.get("name")})
+        for t in existing:
+            key = (int(t["account_id"]), int(t["user_id"]))
+            if key not in seen:
+                todo.append({"account_id": key[0], "user_id": key[1],
+                             "username": t.get("username"), "name": t.get("name")})
+
+        replayed = skipped = failed = 0
+        for item in todo:
+            try:
+                res = await fx.relay_history(db, bot, cfg, days=days,
+                                             account_id=item["account_id"],
+                                             user_id=item["user_id"],
+                                             username=item["username"], name=item["name"])
+                if res.get("status") == "replayed":
+                    replayed += 1
+                else:
+                    skipped += 1
+            except Exception as e:
+                failed += 1
+                logger.warning("[ForumInbox] replay failed for acc=%s user=%s: %s: %s",
+                               item["account_id"], item["user_id"], type(e).__name__, e)
+        report = {"replayed": replayed, "skipped": skipped, "failed": failed,
+                  "candidates": len(todo), "days": days}
+        logger.info("[ForumInbox] replay report: %s", report)
+        return report
+    except Exception as e:
+        logger.warning("[ForumInbox] replay top-level failed: %s", e)
+        return {"replayed": 0, "skipped": 0, "failed": 0, "reason": "error"}
+
+
 async def relay_outgoing_to_forum(account_id: int, user_id: int, text: str) -> str:
     """Called by dm_reply_tracker for outgoing messages, to keep the topic transcript complete."""
     try:

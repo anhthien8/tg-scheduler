@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TG Scheduler</title>
   <meta name="description" content="Telegram Userbot Multi-Account Message Scheduler">
-  <link rel="stylesheet" href="/static/css/style.css?v=429">
+  <link rel="stylesheet" href="/static/css/style.css?v=430">
   <!-- Boot splash: paints instantly (CSS-only, no JS) so the user never sees a
        blank white screen while the app bundle parses/executes. Hidden as soon
        as app.js runs (body.app-ready). -->
@@ -785,8 +785,13 @@
                          style="width:90px;font-family:monospace;font-size:13px">
                   <span style="font-size:12px;color:var(--text2)">ngày gần nhất</span>
                   <button class="btn btn-secondary btn-sm" onclick="App.backfillForumInboxTopics()">🔄 Tạo topic</button>
+                  <button class="btn btn-secondary btn-sm" onclick="App.replayForumInboxHistory()">📜 Nạp lịch sử</button>
                   <span id="forum-inbox-backfill-msg" style="font-size:12px;color:var(--text2)"></span>
                 </div>
+                <p style="font-size:12px;color:var(--text2);margin-top:8px">
+                  <strong>📜 Nạp lịch sử</strong> sẽ đăng lại toàn bộ tin nhắn trong N ngày qua vào từng topic
+                  để bạn đọc được nội dung hội thoại ngay trong group. Dùng <strong>30</strong> cho 1 tháng gần đây.
+                </p>
                 <p style="font-size:12px;color:var(--text2);margin-top:8px">
                   Đã có <span id="forum-inbox-topic-count">—</span> topic đang theo dõi.
                   <button class="btn btn-ghost btn-sm" onclick="App.loadForumInboxTopicCount()" style="margin-left:6px">↻</button>
@@ -1916,15 +1921,15 @@
     </div>
   </div>
 
-  <script defer src="/static/js/polling.js?v=429"></script>
-  <script defer src="/static/js/api.js?v=429"></script>
-  <script defer src="/static/js/discord.js?v=429"></script>
-  <script defer src="/static/js/members.js?v=429"></script>
-  <script defer src="/static/js/analytics.js?v=429"></script>
-  <script defer src="/static/js/ai_agents.js?v=429"></script>
-  <script defer src="/static/js/ai_followup.js?v=429"></script>
-  <script defer src="/static/js/changelog.js?v=429"></script>
-  <script defer src="/static/js/app.js?v=429"></script>
+  <script defer src="/static/js/polling.js?v=430"></script>
+  <script defer src="/static/js/api.js?v=430"></script>
+  <script defer src="/static/js/discord.js?v=430"></script>
+  <script defer src="/static/js/members.js?v=430"></script>
+  <script defer src="/static/js/analytics.js?v=430"></script>
+  <script defer src="/static/js/ai_agents.js?v=430"></script>
+  <script defer src="/static/js/ai_followup.js?v=430"></script>
+  <script defer src="/static/js/changelog.js?v=430"></script>
+  <script defer src="/static/js/app.js?v=430"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">
