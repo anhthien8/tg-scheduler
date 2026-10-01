@@ -1121,18 +1121,26 @@ def _make_handler(account_id: int):
 
                 # 24h Timeout check on incoming message — use human_takeover_at
                 if current_status in ("needs_human", "paused_admin"):
-                    # Prefer human_takeover_at; fallback to updated_at for legacy rows
+                    # Prefer human_takeover_at; fallback to updated_at for legacy rows.
+                    # If BOTH are NULL the chat could otherwise stay locked forever,
+                    # so fall back to a fixed epoch-ish baseline: treat "never recorded"
+                    # as stale enough to resume (the lead just messaged us).
                     takeover_at_str = chat.get("human_takeover_at") or chat.get("updated_at")
                     should_resume = False
-                    if takeover_at_str:
+                    if not takeover_at_str:
+                        # No timestamp at all → cannot prove a human is active.
+                        logger.info("[AIFollowUp] ⏰ user %d locked in '%s' with no takeover "
+                                    "timestamp — auto-resuming!", sender_id, current_status)
+                        should_resume = True
+                    else:
                         try:
-                            # SQLite datetime('now') is UTC without tzinfo — always compare in UTC
-                            dt_takeover = datetime.fromisoformat(takeover_at_str).replace(tzinfo=timezone.utc)
+                            dt_takeover = _parse_sqlite_utc(takeover_at_str)
                             now_utc = datetime.now(timezone.utc)
-                            if (now_utc - dt_takeover).total_seconds() >= 86400:  # 24 hours
+                            if dt_takeover is None or (now_utc - dt_takeover).total_seconds() >= 86400:  # 24 hours
                                 should_resume = True
                         except Exception:
-                            pass
+                            # Unparseable timestamp must not lock the chat forever.
+                            should_resume = True
                     if should_resume:
                         logger.info("[AIFollowUp] ⏰ 24h elapsed since human takeover for user %d — auto-resuming!", sender_id)
                         await db.update_followup_chat_status(account_id, sender_id, "active")
@@ -1300,18 +1308,35 @@ async def _load_drip_cadence() -> list[int]:
     return list(DEFAULT_DRIP_CADENCE_HOURS)
 
 
+def _parse_sqlite_utc(value: str | None) -> datetime | None:
+    """Parse a SQLite datetime into an aware UTC datetime, or None if unusable.
+
+    SQLite's datetime('now') emits 'YYYY-MM-DD HH:MM:SS' — a SPACE separator,
+    which datetime.fromisoformat() rejects on Python < 3.11 (and which was
+    silently swallowed by bare excepts, locking chats forever). Try both forms.
+    """
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        ts = datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        try:
+            ts = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return None
+    return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+
+
 def _silence_hours(updated_at: str | None) -> float:
     """Hours since the chat's last update. Returns a large number if unknown,
     so an undatable chat simply becomes eligible for the final stage."""
-    if not updated_at:
+    ts = _parse_sqlite_utc(updated_at)
+    if ts is None:
         return 10**6
-    try:
-        ts = datetime.fromisoformat(str(updated_at))
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        return max(0.0, (datetime.now(timezone.utc) - ts).total_seconds() / 3600)
-    except (ValueError, TypeError):
-        return 10**6
+    return max(0.0, (datetime.now(timezone.utc) - ts).total_seconds() / 3600)
 
 
 def _drip_instruction_for_stage(stage: int, total_stages: int) -> str:

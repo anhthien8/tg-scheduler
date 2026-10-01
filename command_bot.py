@@ -67,6 +67,16 @@ def _get_state(user_id: int) -> dict | None:
     return st
 
 
+# Bare /ai* control commands used INSIDE a forum topic (no @username argument —
+# the topic already identifies the lead). Distinct from the /ai-on @user form.
+_AI_CONTROL_CMDS = frozenset({"/ai", "/ai-on", "/aion", "/ai_on", "/ai-off", "/aioff", "/ai_off"})
+
+
+def _is_ai_control(text: str | None) -> bool:
+    """True when the message is a bare /ai* topic command (case-insensitive)."""
+    return (text or "").strip().lower() in _AI_CONTROL_CMDS
+
+
 def _set_state(user_id: int, state: dict):
     state["ts"] = time.time()
     _STATES[user_id] = state
@@ -245,7 +255,10 @@ def _register_handlers(client: TelegramClient):
         await _handle_check_account(event, name)
 
     # ── Forum topic admin messages ──────────────────────────────────────────
-    @client.on(events.NewMessage(func=lambda e: (e.is_group or getattr(e, "is_channel", False)) and not e.raw_text.startswith("/")))
+    # Slash messages are excluded EXCEPT the /ai* control commands, which are
+    # handled per-topic by _handle_forum_admin_message.
+    @client.on(events.NewMessage(func=lambda e: (e.is_group or getattr(e, "is_channel", False))
+                                 and (not e.raw_text.startswith("/") or _is_ai_control(e.raw_text))))
     async def on_group_message(event):
         # Command Bot flows can start inside a Forum topic. Consume the active
         # state first; otherwise this text would be misrouted as a forum reply.
@@ -278,6 +291,11 @@ def _register_handlers(client: TelegramClient):
                 return
             if data.startswith("fr_no:"):
                 await _handle_forum_cancel(event, data.split(":", 1)[1])
+                return
+
+            # ── AI control buttons inside a lead topic ──
+            if data.startswith("ai:"):
+                await _handle_forum_ai_button(event, data)
                 return
 
             # ── Navigation ──
@@ -1007,7 +1025,7 @@ async def relay_inbound_to_forum(account_id: int, user_id: int, username: str | 
         return "error"
 
 
-async def backfill_forum_topics(days: int = 7, limit: int = 500) -> dict:
+async def backfill_forum_topics(days: int = 90, limit: int = 500) -> dict:
     """Open topics for already-replied conversations (bounded by `days`)."""
     try:
         bot = _forum_bot()
@@ -1048,6 +1066,87 @@ async def send_forum_general_alert(text: str) -> bool:
         return False
 
 
+async def _handle_forum_ai_button(event, data: str) -> None:
+    """Inline AI-control buttons inside a lead topic: ai:on:<acc>:<uid> etc.
+
+    Answering the callback always (even on error) prevents the client from
+    spinning forever on the button.
+    """
+    parts = data.split(":")
+    if len(parts) != 4:
+        await event.answer()
+        return
+    _, action, acc_s, uid_s = parts
+    try:
+        acc_id, uid = int(acc_s), int(uid_s)
+    except ValueError:
+        await event.answer("⛔ Nút hỏng.", alert=True)
+        return
+
+    if action == "on":
+        chat = await db.get_followup_chat(acc_id, uid)
+        if not chat:
+            await event.answer("⛔ Chưa có hội thoại AI cho lead này.", alert=True)
+            return
+        await db.resume_ai_for_user(acc_id, uid)
+        await event.answer("✅ Đã BẬT AI", alert=False)
+        await _render_ai_status(event, acc_id, uid)
+        logger.info("[ForumInbox] button: admin=%s ENABLED AI for acc=%s user=%s",
+                    event.sender_id, acc_id, uid)
+
+    elif action == "off":
+        await db.set_human_takeover(acc_id, uid)
+        await event.answer("🛑 Đã TẮT AI", alert=False)
+        await _render_ai_status(event, acc_id, uid)
+        logger.info("[ForumInbox] button: admin=%s DISABLED AI for acc=%s user=%s",
+                    event.sender_id, acc_id, uid)
+
+    elif action == "st":
+        await event.answer()
+        await _render_ai_status(event, acc_id, uid)
+
+    else:
+        await event.answer()
+
+
+def _ai_status_buttons(acc_id: int, uid: int, status: str):
+    """Build the inline keyboard, highlighting the currently-active action."""
+    from telethon import Button
+
+    on_label = "🟢 AI: ON" if status == "active" else "🟢 Bật AI"
+    off_label = "🔴 AI: OFF" if status in ("needs_human", "paused_admin") else "🔴 Tắt AI"
+    return [[
+        Button.inline(on_label, data=f"ai:on:{acc_id}:{uid}".encode()),
+        Button.inline(off_label, data=f"ai:off:{acc_id}:{uid}".encode()),
+        Button.inline("🔄 Trạng thái", data=f"ai:st:{acc_id}:{uid}".encode()),
+    ]]
+
+
+async def _render_ai_status(event, acc_id: int, uid: int) -> None:
+    """Show/refresh the AI status card for a lead, editing the message in place."""
+    chat = await db.get_followup_chat(acc_id, uid) or {}
+    status = chat.get("status", "—")
+    human = chat.get("human_takeover_at") or "—"
+    name = chat.get("username") or "—"
+    text = (
+        f"🤖 **Điều khiển AI** — lead #{uid} (@{name})\n"
+        f"Nick phụ: #{acc_id}\n"
+        f"Trạng thái: `{status}`\n"
+        f"Human takeover: {human}\n"
+        f"Số lần lead phản hồi: {chat.get('reply_count', 0)}\n\n"
+        f"_Bấm nút bên dưới để bật/tắt AI cho riêng lead này._"
+    )
+    kb = _ai_status_buttons(acc_id, uid, status)
+    try:
+        await event.edit(text, buttons=kb)
+    except Exception:
+        # Message may be too old / not editable → send a fresh one instead.
+        try:
+            await event.respond(text, buttons=kb)
+        except Exception as e:
+            logger.debug("[ForumInbox] render ai status failed: %s", e)
+
+
 async def _handle_forum_admin_message(event) -> None:
     """Admin typed in a lead topic → show a preview bound to admin/group/topic/draft."""
     cfg = await _load_forum_config()
@@ -1061,6 +1160,42 @@ async def _handle_forum_admin_message(event) -> None:
     topic_id = _extract_topic_id(event.message)
     if not topic_id:
         return
+
+    # ── AI control commands inside a lead topic ─────────────────────────────
+    # Must run BEFORE draft handling, otherwise "/ai-on" would be treated as a
+    # reply draft and sent to the lead.
+    cmd = (event.raw_text or "").strip().lower()
+    if _is_ai_control(cmd):
+        topic = await db.get_telegram_topic_by_thread(cfg.group_id, topic_id)
+        if not topic:
+            await event.respond("⛔ Topic này chưa gắn với lead nào.", reply_to=topic_id)
+            return
+        acc_id, uid = int(topic["account_id"]), int(topic["user_id"])
+        chat = await db.get_followup_chat(acc_id, uid)
+        status = (chat or {}).get("status", "—")
+
+        if cmd == "/ai":
+            await _render_ai_status(event, acc_id, uid)
+            return
+
+        if cmd in ("/ai-on", "/aion", "/ai_on"):
+            if not chat:
+                await event.respond("⛔ Chưa có hội thoại AI cho lead này (chưa từng nhắn).", reply_to=topic_id)
+                return
+            await db.resume_ai_for_user(acc_id, uid)
+            await event.respond("✅ Đã BẬT AI cho lead này. Từ giờ AI tự trả lời.",
+                                reply_to=topic_id, buttons=_ai_status_buttons(acc_id, uid, "active"))
+            logger.info("[ForumInbox] admin=%s enabled AI for acc=%s user=%s", sender_id, acc_id, uid)
+            return
+
+        # /ai-off → hand over to a human (locks AI, as if an admin was chatting)
+        await db.set_human_takeover(acc_id, uid)
+        await event.respond("🛑 Đã TẮT AI cho lead này. AI sẽ im cho tới khi bạn bật lại "
+                            "hoặc sau 24h không hoạt động.", reply_to=topic_id,
+                            buttons=_ai_status_buttons(acc_id, uid, "needs_human"))
+        logger.info("[ForumInbox] admin=%s disabled AI for acc=%s user=%s", sender_id, acc_id, uid)
+        return
+
     # Media with a caption would otherwise be relayed as a silent text-only reply,
     # dropping the attachment the admin thinks was sent. V1 is text-only — refuse loudly.
     if getattr(event.message, "media", None) is not None:

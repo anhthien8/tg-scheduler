@@ -8,10 +8,44 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.5.8",
+        "date": "01/10/2026",
+        "title": "🤖 Điều khiển AI từng lead ngay trong topic + sửa lỗi chat kẹt vĩnh viễn",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Hai lỗi khiến AI như 'chết': (1) chat nằm ở needs_human mà không có mốc human_takeover_at thì phần tự mở khoá sau 24h bị bỏ qua hoàn toàn — chat khoá vĩnh viễn, AI không bao giờ trả lời nữa; (2) timestamp SQLite dạng 'YYYY-MM-DD HH:MM:SS' (dấu cách) bị datetime.fromisoformat() từ chối, lỗi bị nuốt im lặng nên kể cả có mốc cũng không auto-resume. Nay đã sửa gốc và thêm nút bấm/lệnh Bật–Tắt AI cho từng lead ngay trong topic.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Chat hết kẹt vĩnh viễn ở trạng thái chờ người",
+                "desc": "Trước đây điều kiện 'if takeover_at_str:' khiến toàn bộ phần kiểm tra tự mở khoá 24h bị bỏ qua khi cả human_takeover_at lẫn updated_at đều NULL — chat khoá mãi, AI im lặng vĩnh viễn. Nay chat không có mốc thời gian vẫn được coi là đủ cũ để mở khoá. Phát hiện đúng 4 chat đang kẹt như vậy trong dữ liệu thật (gồm cả Zoro @zoro_xpr).",
+                "tag": "Bug Fix"
+            },
+            {
+                "type": "fix",
+                "title": "Đọc được timestamp kiểu SQLite",
+                "desc": "SQLite ghi 'YYYY-MM-DD HH:MM:SS' bằng dấu cách, trong khi datetime.fromisoformat() chỉ hiểu dấu 'T'. Lỗi bị nuốt bởi except im lặng nên việc tự mở khoá chưa từng chạy dù có mốc. Thêm _parse_sqlite_utc() hiểu cả hai định dạng, dùng chung cho cả phép tính 'im lặng bao lâu'.",
+                "tag": "Bug Fix"
+            },
+            {
+                "type": "feature",
+                "title": "Bật / Tắt AI cho từng lead ngay trong topic",
+                "desc": "Trong topic của lead, bấm nút 🟢 Bật AI / 🔴 Tắt AI / 🔄 Trạng thái, hoặc gõ /ai, /ai-on, /ai-off. Nút hiển thị rõ đang bật hay tắt. Khi bật, xoá luôn mốc human_takeover_at — nếu chỉ đổi trạng thái thì tin nhắn kế tiếp của lead sẽ khoá lại AI ngay. Không xung đột với lệnh cũ '/ai-on @username'.",
+                "tag": "Forum Inbox"
+            },
+            {
+                "type": "improvement",
+                "title": "Tạo topic phủ trọn lịch sử hội thoại",
+                "desc": "Mặc định tạo topic đổi từ 7 ngày lên 90 ngày — đủ phủ toàn bộ 204 hội thoại lead đã phản hồi. Trước đây 7 ngày chỉ tạo được 17 topic, bỏ sót 187 cuộc. Ô nhập trong dashboard cũng đổi mặc định thành 90.",
+                "tag": "Forum Inbox"
+            },
+        ],
+    },
+    {
         "version": "v3.5.7",
         "date": "01/10/2026",
         "title": "🗂️ Forum Inbox: hết cảnh không có topic nào cho lead đã trả lời",
-        "is_latest": True,
+        "is_latest": False,
         "badge": "LATEST",
         "summary": "Forum Inbox bật nhưng group Telegram không bao giờ có topic nào. Nguyên nhân: cổng tạo topic đòi phải có log campaign/watcher 'success' khớp ID người dùng — nhưng log campaign lưu ID GROUP (số âm), không phải ID lead, nên gần như mọi hội thoại thật bị chặn trong im lặng. Đã nới cổng theo hướng tương tác thật và thêm nút tạo topic cho hội thoại cũ.",
         "changes": [

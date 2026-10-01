@@ -4449,6 +4449,23 @@ async def set_human_takeover(account_id: int, user_id: int) -> bool:
         await db.commit()
         return True
 
+
+async def resume_ai_for_user(account_id: int, user_id: int) -> bool:
+    """Hand the chat back to the AI: clear the lock and the human-takeover stamp.
+
+    Clears human_takeover_at too — leaving it set would keep the chat looking
+    "human-owned" and silently re-lock the AI on the next inbound message.
+    """
+    async with get_db() as db:
+        cursor = await db.execute("""
+            UPDATE ai_followup_chats
+            SET status = 'active', human_takeover_at = NULL, updated_at = datetime('now')
+            WHERE account_id = ? AND user_id = ?
+        """, (account_id, user_id))
+        await db.commit()
+        return cursor.rowcount > 0
+
+
 async def update_followup_lead_metrics(
     account_id: int,
     user_id: int,
@@ -4876,11 +4893,12 @@ async def get_telegram_outreach_proof(account_id: int, user_id: int) -> dict | N
         return dict(row4) if row4 else None
 
 
-async def get_forum_backfill_candidates(days: int = 7, limit: int = 500) -> list:
+async def get_forum_backfill_candidates(days: int = 90, limit: int = 500) -> list:
     """Replied conversations from the last `days` that still have no topic.
 
-    Bounded by `days` on purpose: enabling Forum Inbox must not spam hundreds of
-    topics for stale history.
+    Default 90 days: the user wants EVERY conversation the lead replied to to
+    show up as a topic, and 90d covers the full history (365 chats total, 204
+    with a real lead reply). A shorter window silently drops older ones.
     """
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
