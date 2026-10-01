@@ -94,6 +94,47 @@ async def test_get_leads_by_stage_returns_only_that_stage():
     assert all(r["stage"] == "negotiating" for r in rows)
 
 
+@pytest.mark.asyncio
+async def test_attention_dedupes_a_lead_seen_on_several_accounts():
+    """/attention is a short list — the same KOL contacted from 3 accounts
+    must appear once (the hottest row), not three times."""
+    for acc in (8841, 8842, 8843):
+        await db.get_or_create_followup_chat(acc, 8844, username="MultiAcc")
+        await db.set_followup_stage(acc, 8844, "nurture")
+        async with db.get_db() as conn:
+            await conn.execute(
+                "UPDATE ai_followup_chats SET intent_score=?, lead_tier='Tier A' "
+                "WHERE account_id=? AND user_id=8844", (90 - acc % 10, acc))
+            await conn.commit()
+
+    rows = await db.get_leads_needing_attention(limit=200)
+    mine = [r for r in rows if (r.get("username") or "").lower().lstrip("@") == "multiacc"]
+    assert len(mine) == 1, f"expected 1 deduped row, got {len(mine)}"
+
+
+@pytest.mark.asyncio
+async def test_bot_and_self_accounts_are_not_counted_as_leads():
+    """The funnel must count humans, not SpamBot/helper bots.
+
+    ~106 of 132 'paused' rows in production were bots — without this filter the
+    /pipeline numbers are misleading by ~40%.
+    """
+    before = await db.get_pipeline_counts()
+
+    for acc, uname in ((8851, "SomeSpamBot"), (8852, "duckchain_bot"),
+                       (8853, "weexwill"), (8854, "weexwillbot")):
+        await db.get_or_create_followup_chat(acc, 8855, username=uname)
+        await db.set_followup_stage(acc, 8855, "paused")
+
+    after = await db.get_pipeline_counts()
+    assert after == before, "bot/self rows must not move the funnel counts"
+
+    # ...but a real lead does move them.
+    await db.get_or_create_followup_chat(8861, 8862, username="RealKolPerson")
+    await db.set_followup_stage(8861, 8862, "paused")
+    assert (await db.get_pipeline_counts())["paused"] == before["paused"] + 1
+
+
 # ── username resolution used by '/stage @user <stage>' ───────────────────────
 
 @pytest.mark.asyncio

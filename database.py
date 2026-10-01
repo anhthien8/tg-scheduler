@@ -4551,9 +4551,10 @@ async def get_pipeline_counts() -> dict:
     """Count leads per stage — the numbers behind /pipeline."""
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("""
+        cursor = await db.execute(f"""
             SELECT COALESCE(NULLIF(stage, ''), 'new') AS stage, COUNT(*) AS n
             FROM ai_followup_chats
+            WHERE {_REAL_LEAD_SQL}
             GROUP BY COALESCE(NULLIF(stage, ''), 'new')
         """)
         counts = {r["stage"]: r["n"] for r in await cursor.fetchall()}
@@ -4587,16 +4588,28 @@ async def find_followup_chat_by_username(username: str, account_id: int | None =
         return dict(row) if row else None
 
 
+# A row is a real lead only if it is not a Telegram bot and not one of our own
+# accounts/helper bots. Without this the funnel counts include ~87 automated
+# accounts (SpamBot, DuckChain_bot, weexwillbot, ...) and the 'paused' column
+# reads ~3x larger than the truth.
+_REAL_LEAD_SQL = """
+    LOWER(COALESCE(username, '')) NOT LIKE '%bot'
+    AND LOWER(COALESCE(username, '')) NOT IN ('weexwill', 'weexwillbot')
+    AND COALESCE(status, '') <> 'bot_ignored'
+"""
+
+
 async def get_leads_by_stage(stage: str, limit: int = 20) -> list:
     """Leads currently in a stage, most recently active first."""
     stage = normalize_stage(stage) or stage
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("""
+        cursor = await db.execute(f"""
             SELECT account_id, user_id, username, name, stage, intent_score,
                    lead_tier, reply_count, last_user_message_at, summary
             FROM ai_followup_chats
             WHERE COALESCE(NULLIF(stage, ''), 'new') = ?
+              AND {_REAL_LEAD_SQL}
             ORDER BY COALESCE(last_user_message_at, updated_at) DESC
             LIMIT ?
         """, (stage, int(limit)))
@@ -4609,16 +4622,31 @@ async def get_leads_needing_attention(limit: int = 15) -> list:
     Two signals: a high intent score still in 'nurture' (ready to move forward),
     or a negotiating lead (deal on the table). Ordered by intent so the hottest
     is first — this is what makes /attention useful instead of noise.
+
+    Deduped by username: the same KOL is often contacted from several accounts,
+    and showing them once (their hottest row) is the point of a short list.
     """
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("""
+        cursor = await db.execute(f"""
             SELECT account_id, user_id, username, name, stage, intent_score,
-                   lead_tier, reply_count, last_user_message_at, summary
-            FROM ai_followup_chats
-            WHERE COALESCE(NULLIF(stage, ''), 'new') IN ('nurture', 'negotiating')
-              AND (COALESCE(intent_score, 0) >= 60 OR lead_tier = 'Tier A'
-                   OR COALESCE(NULLIF(stage,''),'new') = 'negotiating')
+                   lead_tier, reply_count, last_user_message_at
+            FROM (
+                SELECT account_id, user_id, username, name, stage, intent_score,
+                       lead_tier, reply_count, last_user_message_at, updated_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY LOWER(LTRIM(COALESCE(username, ''), '@')),
+                                        COALESCE(NULLIF(name, ''), user_id)
+                           ORDER BY COALESCE(intent_score, 0) DESC,
+                                    COALESCE(last_user_message_at, updated_at) DESC
+                       ) AS rn
+                FROM ai_followup_chats
+                WHERE COALESCE(NULLIF(stage, ''), 'new') IN ('nurture', 'negotiating')
+                  AND (COALESCE(intent_score, 0) >= 60 OR lead_tier = 'Tier A'
+                       OR COALESCE(NULLIF(stage, ''), 'new') = 'negotiating')
+                  AND {_REAL_LEAD_SQL}
+            )
+            WHERE rn = 1
             ORDER BY COALESCE(intent_score, 0) DESC,
                      COALESCE(last_user_message_at, updated_at) DESC
             LIMIT ?
