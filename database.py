@@ -4896,6 +4896,10 @@ async def get_telegram_outreach_proof(account_id: int, user_id: int) -> dict | N
 async def get_forum_backfill_candidates(days: int = 90, limit: int = 500) -> list:
     """Replied conversations from the last `days` that still have no topic.
 
+    Skips status='bot_ignored' — Telegram's SpamBot, the operator's own helper
+    bots (weexwillbot) and their main account all land here, and creating a
+    topic for each of those would spam the group with non-lead noise.
+
     Default 90 days: the user wants EVERY conversation the lead replied to to
     show up as a topic, and 90d covers the full history (365 chats total, 204
     with a real lead reply). A shorter window silently drops older ones.
@@ -4907,6 +4911,7 @@ async def get_forum_backfill_candidates(days: int = 90, limit: int = 500) -> lis
                       c.last_user_message_at, c.updated_at
                FROM ai_followup_chats c
                WHERE c.reply_count > 0
+                 AND COALESCE(c.status, '') != 'bot_ignored'
                  AND COALESCE(c.last_user_message_at, c.updated_at) >= datetime('now', ?)
                  AND NOT EXISTS (
                      SELECT 1 FROM telegram_topics t
