@@ -253,6 +253,12 @@ async def analytics_campaign_performance():
     return await analytics_cache.get_or_fetch("campaign_performance", db.get_analytics_campaign_performance)
 
 
+@router.get("/api/analytics/agent-evolution")
+async def analytics_agent_evolution(days: int = Query(default=30, ge=7, le=365)):
+    key = f"agent_evolution_{days}"
+    return await analytics_cache.get_or_fetch(key, lambda: db.get_agent_evolution(days))
+
+
 # ── Template Library ─────────────────────────────────────────────────────────
 
 class TemplatePayload(BaseModel):

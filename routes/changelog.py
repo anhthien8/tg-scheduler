@@ -8,6 +8,34 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.7.6",
+        "date": "02/10/2026",
+        "title": "🧬 Trang Agent Evolution + sửa lỗi 'học rồi quên'",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Hai việc: (1) Trang mới 'Agent Evolution' đo mức độ tiến hóa của AI — tốc độ học, tỷ lệ học trùng, % cần người can thiệp, phân loại lead, số tin AI dùng mỗi hội thoại. (2) Sửa lỗi nền tảng: AI chỉ dùng 30 luật học MỚI NHẤT, nên 790 luật cũ hơn bị 'quên' — nay chọn luật theo ĐỘ LIÊN QUAN với câu hỏi đang hỏi.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Trang Agent Evolution — đo tiến hóa AI",
+                "desc": "Mục mới ở thanh bên: biểu đồ tốc độ học theo tuần, tỷ lệ hội thoại cần người can thiệp, phân loại lead (Tier A/B/C), giai đoạn pipeline, và câu kết luận tự động đánh giá agent đang tiến hóa hay giậm chân tại chỗ.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "fix",
+                "title": "Hết 'học rồi quên' — chọn luật theo độ liên quan",
+                "desc": "Trước đây mỗi lần trả lời AI chỉ nạp 30 luật mới nhất; khi kho luật vượt 820 dòng, phần lớn bài học cũ không bao giờ được dùng lại (8.5% bị học trùng vì lỗi này). Nay hệ thống chấm điểm luật theo từ khóa khớp với câu hỏi của khách và ưu tiên luật đúng chủ đề, kèm 10 luật mới nhất cho chính sách vừa cập nhật.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "improvement",
+                "title": "Bộ nhớ luật không còn giới hạn cứng 30",
+                "desc": "Hàm đọc luật học bỏ tham số giới hạn cứng; bộ chọn mới tự quyết định lấy bao nhiêu luật tùy theo câu hỏi.",
+                "tag": "Cải tiến"
+            },
+        ],
+    },
+    {
         "version": "v3.7.5",
         "date": "02/10/2026",
         "title": "🤖 Nick chính cũng được AI trả lời — cửa sổ bàn giao rút còn 12 giờ",

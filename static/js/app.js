@@ -289,6 +289,80 @@ if(page==='ai-followup'){
 }
 
 
+// ── Agent Evolution (đo tiến hóa AI) ─────────────────────────────
+window.AgentEvolution = {
+  _data: null,
+  init(){ this.load(); },
+  async load(){
+    const days = parseInt(document.getElementById('evo-days')?.value || '30', 10);
+    try{
+      const d = await API.get('/api/analytics/agent-evolution?days=' + days);
+      this._data = d; this._render(d);
+    }catch(e){
+      const v = document.getElementById('evo-verdict');
+      if(v) v.innerHTML = '<span style="color:var(--red)">Không tải được dữ liệu: ' + (e && e.message ? e.message : e) + '</span>';
+    }
+  },
+  _bar(elId, rows, valueKey, color){
+    const el = document.getElementById(elId); if(!el) return;
+    if(!rows || !rows.length){ el.innerHTML = '<div style="color:var(--text2);font-size:13px">Chưa có dữ liệu</div>'; return; }
+    const max = Math.max(1, ...rows.map(r => r[valueKey] || 0));
+    el.innerHTML = rows.map(r => {
+      const v = r[valueKey] || 0, pct = Math.round(100 * v / max);
+      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="width:64px;font-size:11px;color:var(--text2);flex-shrink:0">${esc(r.wk || '')}</span>
+        <div style="flex:1;height:16px;background:var(--bg3);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;transition:width .3s"></div>
+        </div>
+        <span style="width:auto;min-width:38px;text-align:right;font-size:12px;font-weight:600;flex-shrink:0">${v}${valueKey==='handover_pct'?'%':''}</span>
+      </div>`;
+    }).join('');
+  },
+  _chips(elId, obj){
+    const el = document.getElementById(elId); if(!el) return;
+    const entries = Object.entries(obj || {}).filter(([k]) => k && k !== 'null');
+    if(!entries.length){ el.innerHTML = '<div style="color:var(--text2);font-size:13px">Chưa có dữ liệu</div>'; return; }
+    const total = entries.reduce((s,[,v]) => s + v, 0) || 1;
+    el.innerHTML = entries.sort((a,b)=>b[1]-a[1]).map(([k,v]) => {
+      const pct = Math.round(100 * v / total);
+      return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:13px">${esc(k)}</span>
+        <span style="font-size:13px;font-weight:600">${v} <span style="color:var(--text2);font-weight:400">(${pct}%)</span></span></div>`;
+    }).join('');
+  },
+  _render(d){
+    const rep = d.repetition || {};
+    const dis = d.discipline || {};
+    const hw = (d.handover_per_week || []);
+    const lastH = hw.length ? hw[hw.length - 1].handover_pct : 0;
+
+    const set = (id, val) => { const e = document.getElementById(id); if(e) e.textContent = val; };
+    set('evo-total-rules', rep.total_rules || 0);
+    set('evo-distinct', rep.distinct_questions || 0);
+    set('evo-redundant', (rep.redundant || 0) + ' (' + (rep.redundant_pct || 0) + '%)');
+    set('evo-handover', lastH + '%');
+    set('evo-avg-replies', dis.avg_replies || 0);
+    set('evo-engaged', (dis.engaged || 0) + '/' + (dis.chats || 0));
+
+    this._bar('evo-learn-chart', d.learning_per_week || [], 'n', 'rgba(99,102,241,0.85)');
+    this._bar('evo-handover-chart', hw, 'handover_pct', 'rgba(239,68,68,0.8)');
+    this._chips('evo-funnel', d.funnel || {});
+    this._chips('evo-stages', d.stages || {});
+
+    // Verdict — đánh giá tổng hợp bằng tiếng người
+    const v = document.getElementById('evo-verdict');
+    if(v){
+      const tone = (rep.redundant_pct || 0) > 20 ? 'var(--red)' : (rep.redundant_pct || 0) > 8 ? 'var(--orange)' : 'var(--green)';
+      v.innerHTML = `<div style="font-size:14px;line-height:1.6">
+        🧠 Agent đã học <b>${rep.total_rules || 0}</b> luật từ <b>${rep.distinct_questions || 0}</b> câu hỏi khác nhau.
+        Tỷ lệ <b style="color:${tone}">học trùng ${rep.redundant_pct || 0}%</b>
+        ${(rep.redundant_pct || 0) > 8 ? '(AI chưa áp dụng được bài học cũ — đang quên → đã bật chọn luật theo độ liên quan)' : '(AI tận dụng tốt bài học cũ)'}.
+        Tuần gần nhất <b>${lastH}%</b> hội thoại phải nhờ người can thiệp.
+      </div>`;
+    }
+  }
+};
+
 // Analytics Dashboard
 if(page==='analytics'){
   if(!document.getElementById('view-analytics')){
@@ -320,6 +394,60 @@ if(page==='analytics'){
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
   (document.getElementById('view-analytics')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   Analytics.init();
+  return;
+}
+
+// Agent Evolution — đo mức độ tiến hóa của AI agents
+if(page==='agent-evolution'){
+  if(!document.getElementById('view-agent-evolution')){
+    const html = `<div id="view-agent-evolution">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+        <h2 class="page-title" style="margin:0">🧬 Agent Evolution</h2>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="form-label" style="margin:0">Khoảng:</label>
+          <select id="evo-days" class="form-select" style="width:auto" onchange="AgentEvolution.load()">
+            <option value="30">30 ngày</option>
+            <option value="60">60 ngày</option>
+            <option value="90">90 ngày</option>
+            <option value="180">180 ngày</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="AgentEvolution.load()">🔄 Làm mới</button>
+        </div>
+      </div>
+      <div class="card" id="evo-verdict" style="padding:14px 16px;margin-bottom:20px"></div>
+      <div class="stats-grid" style="margin-bottom:24px">
+        <div class="stat-card"><div class="stat-label">Luật đã học</div><div class="stat-value accent" id="evo-total-rules">–</div></div>
+        <div class="stat-card"><div class="stat-label">Câu hỏi phân biệt</div><div class="stat-value green" id="evo-distinct">–</div></div>
+        <div class="stat-card"><div class="stat-label">Học trùng lặp (quên)</div><div class="stat-value" id="evo-redundant">–</div></div>
+        <div class="stat-card"><div class="stat-label">% cần người (tuần mới nhất)</div><div class="stat-value" id="evo-handover">–</div></div>
+        <div class="stat-card"><div class="stat-label">TB tin AI / hội thoại</div><div class="stat-value" id="evo-avg-replies">–</div></div>
+        <div class="stat-card"><div class="stat-label">Hội thoại có AI trả lời</div><div class="stat-value green" id="evo-engaged">–</div></div>
+      </div>
+      <div class="card" style="padding:16px;margin-bottom:20px">
+        <h3 style="margin:0 0 12px">📚 Tốc độ học (luật mới mỗi tuần)</h3>
+        <canvas id="evo-learn-chart" height="90"></canvas>
+      </div>
+      <div class="card" style="padding:16px;margin-bottom:20px">
+        <h3 style="margin:0 0 12px">🛑 Tỷ lệ cần người can thiệp mỗi tuần <span style="font-weight:400;font-size:12px;color:#888">(càng thấp càng tốt)</span></h3>
+        <canvas id="evo-handover-chart" height="90"></canvas>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+        <div class="card" style="padding:16px">
+          <h3 style="margin:0 0 12px">🎯 Phân loại Lead</h3>
+          <div id="evo-funnel"></div>
+        </div>
+        <div class="card" style="padding:16px">
+          <h3 style="margin:0 0 12px">🚦 Giai đoạn Pipeline</h3>
+          <div id="evo-stages"></div>
+        </div>
+      </div>
+    </div>`;
+    const w = document.createElement('div'); w.innerHTML = html;
+    document.querySelector('.main').appendChild(w.firstElementChild);
+  }
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  (document.getElementById('view-agent-evolution')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
+  AgentEvolution.init();
   return;
 }
 

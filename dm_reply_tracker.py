@@ -726,7 +726,15 @@ async def generate_and_send_ai_reply_for_chat(
             combined_prompt += "\nDO NOT ask the user for any of these facts again!"
 
     if agent_config and agent_config.get("id"):
-        learned_rules = await db.get_learned_knowledge_for_agent(agent_config["id"], status="approved")
+        # Relevance-ranked instead of blind newest-30 (v3.7.6): with 800+ rules
+        # the old LIMIT 30 sliding window silently forgot every older lesson.
+        _query_for_rules = ""
+        for _m in reversed(full_history):
+            if _m.get("role") == "user":
+                _query_for_rules = _m.get("content", "") or ""
+                break
+        learned_rules = await db.get_relevant_learned_knowledge(
+            agent_config["id"], _query_for_rules, status="approved")
         if learned_rules:
             combined_prompt += "\n\n--- LEARNED RULES (DISCOVERED FROM HUMAN ADMIN INTERVENTIONS) ---\n"
             for r in learned_rules:

@@ -3386,6 +3386,87 @@ async def get_all_scraped_contacts(limit: int = 1000000, offset: int = 0, last_i
 # ANALYTICS
 # ============================================================
 
+async def get_agent_evolution(days: int = 30) -> dict:
+    """Measure how much the AI agents have actually evolved.
+
+    Returns five evidence-backed signals computed from ai_followup_chats +
+    agent_learned_knowledge — no new tracking tables needed:
+      learning   : new learned rules per ISO week (rate of learning)
+      repetition : learnings re-distilled for an already-seen question
+                   (AI failed to apply the lesson -> it 'forgot')
+      handover   : share of chats that needed a human, per ISO week
+                   (a real improvement pushes this DOWN)
+      funnel     : lead_tier distribution + stage distribution
+      discipline : avg AI replies per chat (fewer = sharper qualification)
+    """
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        span = f"-{int(days)} days"
+
+        cur = await db.execute("""
+            SELECT strftime('%Y-W%W', created_at) AS wk, COUNT(*) AS n
+            FROM agent_learned_knowledge
+            WHERE datetime(created_at) >= datetime('now', ?)
+            GROUP BY wk ORDER BY wk
+        """, (span,))
+        learning = [dict(r) for r in await cur.fetchall()]
+
+        cur = await db.execute("SELECT COUNT(*) AS n, COUNT(DISTINCT question_pattern) AS u FROM agent_learned_knowledge")
+        r = dict(await cur.fetchone())
+        total_rules = r["n"] or 0
+        distinct_q = r["u"] or 0
+        repetition = {
+            "total_rules": total_rules,
+            "distinct_questions": distinct_q,
+            "redundant": max(0, total_rules - distinct_q),
+            "redundant_pct": round(100.0 * max(0, total_rules - distinct_q) / total_rules, 1) if total_rules else 0.0,
+        }
+
+        cur = await db.execute("""
+            SELECT strftime('%Y-W%W', updated_at) AS wk,
+                   COUNT(*) AS n,
+                   SUM(CASE WHEN status IN ('needs_human','paused_admin') THEN 1 ELSE 0 END) AS h
+            FROM ai_followup_chats
+            WHERE datetime(updated_at) >= datetime('now', ?)
+            GROUP BY wk ORDER BY wk
+        """, (span,))
+        handover = []
+        for row in await cur.fetchall():
+            d = dict(row)
+            n, h = d["n"] or 0, d["h"] or 0
+            d["handover_pct"] = round(100.0 * h / n, 1) if n else 0.0
+            handover.append(d)
+
+        cur = await db.execute("SELECT lead_tier, COUNT(*) AS n FROM ai_followup_chats GROUP BY lead_tier")
+        funnel = {str(dict(x)["lead_tier"] or "?"): dict(x)["n"] for x in await cur.fetchall()}
+
+        cur = await db.execute("SELECT stage, COUNT(*) AS n FROM ai_followup_chats GROUP BY stage")
+        stages = {str(dict(x)["stage"] or "?"): dict(x)["n"] for x in await cur.fetchall()}
+
+        cur = await db.execute("""
+            SELECT COUNT(*) AS chats, AVG(reply_count) AS avg_replies,
+                   SUM(CASE WHEN reply_count > 0 THEN 1 ELSE 0 END) AS engaged
+            FROM ai_followup_chats
+        """)
+        d = dict(await cur.fetchone())
+        chats = d["chats"] or 0
+        discipline = {
+            "chats": chats,
+            "engaged": d["engaged"] or 0,
+            "avg_replies": round(d["avg_replies"] or 0.0, 2),
+        }
+
+    return {
+        "range_days": days,
+        "learning_per_week": learning,
+        "repetition": repetition,
+        "handover_per_week": handover,
+        "funnel": funnel,
+        "stages": stages,
+        "discipline": discipline,
+    }
+
+
 async def get_analytics_overview() -> dict:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
@@ -5010,15 +5091,68 @@ async def add_learned_knowledge(ai_agent_id: int, source_user_id: int, question:
         return cursor.lastrowid
 
 
-async def get_learned_knowledge_for_agent(ai_agent_id: int, status: str = "approved") -> list[dict]:
+async def get_learned_knowledge_for_agent(ai_agent_id: int, status: str = "approved",
+                                          limit: int | None = None) -> list[dict]:
+    """All learned rules for an agent (newest first). ``limit`` optional."""
+    sql = "SELECT * FROM agent_learned_knowledge WHERE ai_agent_id = ? AND status = ? ORDER BY id DESC"
+    params: tuple = (ai_agent_id, status)
+    if limit:
+        sql += " LIMIT ?"
+        params = (ai_agent_id, status, limit)
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM agent_learned_knowledge WHERE ai_agent_id = ? AND status = ? ORDER BY id DESC LIMIT 30",
-            (ai_agent_id, status)
-        )
+        cursor = await db.execute(sql, params)
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+
+def _rule_tokens(text: str) -> set:
+    """Lowercased word tokens (len>=3) for crude relevance matching (vi+en)."""
+    import re as _re
+    return {w for w in _re.findall(r"\w+", (text or "").lower()) if len(w) >= 3}
+
+
+async def get_relevant_learned_knowledge(ai_agent_id: int, query_text: str,
+                                         top_relevant: int = 20, top_recent: int = 10,
+                                         status: str = "approved") -> list[dict]:
+    """Pick learned rules worth injecting into the prompt.
+
+    Replaces the old blind ``LIMIT 30`` (newest-only): with 800+ rules the
+    agent was using only a 30-rule sliding window and 'forgot' everything
+    older. Now: up to ``top_relevant`` rules scored by keyword overlap with
+    the user's current message + up to ``top_recent`` newest rules (fresh
+    policy), deduped by question_pattern.
+    ponytail: token-overlap scoring; upgrade path = embeddings/FTS5 if quality lags.
+    """
+    all_rules = await get_learned_knowledge_for_agent(ai_agent_id, status=status)
+    if not all_rules:
+        return []
+
+    # Dedupe repeated distillations of the same question — keep the newest.
+    seen_q: set = set()
+    deduped: list[dict] = []
+    for r in all_rules:  # already newest-first
+        key = (r.get("question_pattern") or "").strip().lower()
+        if key and key not in seen_q:
+            seen_q.add(key)
+            deduped.append(r)
+
+    recent = deduped[:top_recent]
+    recent_ids = {r["id"] for r in recent}
+
+    q_tokens = _rule_tokens(query_text)
+    scored = []
+    if q_tokens:
+        for r in deduped:
+            if r["id"] in recent_ids:
+                continue
+            overlap = len(q_tokens & _rule_tokens(
+                (r.get("question_pattern") or "") + " " + (r.get("learned_answer") or "")))
+            if overlap >= 2:  # 1 shared common word is noise
+                scored.append((overlap, r))
+        scored.sort(key=lambda t: (-t[0], -t[1]["id"]))
+
+    return recent + [r for _, r in scored[:top_relevant]]
 
 
 async def delete_learned_knowledge(rule_id: int) -> bool:
