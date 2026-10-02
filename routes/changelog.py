@@ -8,6 +8,22 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.7.8",
+        "date": "02/10/2026",
+        "title": "⚡ Sửa trang Tài khoản treo 30-40 giây sau khi khởi động",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Trang Tài khoản Telegram load rất lâu mỗi khi vừa khởi động lại hệ thống. Nguyên nhân: với mỗi tài khoản, server chờ tối đa 2 giây gọi Telegram để lấy tên/trạng thái — 19 tài khoản cộng lại thành 30-40 giây. Nay server trả dữ liệu ngay (dùng bộ nhớ đệm đã có), danh sách hiện tức thì kể cả ngay sau restart.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Danh sách tài khoản hiện tức thì, không còn chờ Telegram",
+                "desc": "Bỏ các lời gọi Telegram có timeout trong đường trả về của /api/auth/accounts. Tài khoản có sẵn thông tin trong bộ nhớ đệm thì dùng luôn; chưa có thì hiện tên trong CSDL + trạng thái kết nối. Bộ nhớ đệm tự đầy lại khi tài khoản kết nối.",
+                "tag": "Sửa lỗi"
+            },
+        ],
+    },
+    {
         "version": "v3.7.7",
         "date": "02/10/2026",
         "title": "👤 Topic hiện tên tài khoản thay vì 'Nick phụ #18'",
