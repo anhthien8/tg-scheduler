@@ -8,6 +8,22 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.7.7",
+        "date": "02/10/2026",
+        "title": "👤 Topic hiện tên tài khoản thay vì 'Nick phụ #18'",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Trong nhóm Telegram (Forum Inbox), mọi tin relay trước đây ghi 'Nick phụ #18 · user_id 7445768831' — dài và khó nhớ. Nay hiển thị thẳng tên tài khoản Telegram (ví dụ: 'Nauy | Weex'), nhìn phát biết ngay tin thuộc nick nào.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Tin inbound/outbound trong topic hiện tên nick",
+                "desc": "Header tin đến, tin gửi đi, header replay lịch sử, header backfill và màn xác nhận gửi reply đều dùng tên tài khoản (có cache, không tốn truy vấn lặp). Nick không còn trong hệ thống thì hiện 'Nick #<id>' để không vỡ.",
+                "tag": "Cải tiến"
+            },
+        ],
+    },
+    {
         "version": "v3.7.6",
         "date": "02/10/2026",
         "title": "🧬 Trang Agent Evolution + sửa lỗi 'học rồi quên'",
