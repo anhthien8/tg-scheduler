@@ -1468,8 +1468,10 @@ async def _handle_forum_admin_message(event) -> None:
     preview = await fx.prepare_reply(db, cfg, sender_id, cfg.group_id, topic_id, event.raw_text or "")
     if not preview:
         return
+    _acc = await db.get_account(preview.account_id)
+    _acc_label = (_acc.get("name") or "").strip() if _acc else ""
     await _bot.send_message(
-        cfg.group_id, fx.render_reply_preview(preview), reply_to=topic_id,
+        cfg.group_id, fx.render_reply_preview(preview, _acc_label or None), reply_to=topic_id,
         buttons=[[Button.inline("✅ Gửi ngay", data=f"fr_ok:{preview.token}"),
                   Button.inline("❌ Hủy", data=f"fr_no:{preview.token}")]])
 

@@ -101,11 +101,34 @@ def _lead_label(username: str | None, name: str | None, user_id: int) -> str:
     return f"{name} ({user})" if name and name != user else user
 
 
-def _format_inbound(account_id: int, user_id: int, username: str | None, name: str | None, text: str, has_media: bool) -> str:
+# account_id -> display name, so the forum shows "Will - SEA Weex" instead of
+# the cryptic "Nick phụ #3 · user_id 1393222596". Cached: account names rarely
+# change and this runs on every relayed message.
+_ACCOUNT_NAME_CACHE: dict[int, str] = {}
+
+
+async def _account_label(db, account_id: int) -> str:
+    """Human-readable account name (falls back to 'Nick #<id>' if unknown)."""
+    cached = _ACCOUNT_NAME_CACHE.get(int(account_id))
+    if cached:
+        return cached
+    name = None
+    try:
+        acc = await db.get_account(int(account_id))
+        if acc:
+            name = (acc.get("name") or "").strip()
+    except Exception:
+        name = None
+    label = name or f"Nick #{account_id}"
+    _ACCOUNT_NAME_CACHE[int(account_id)] = label
+    return label
+
+
+def _format_inbound(account_label: str, user_id: int, username: str | None, name: str | None, text: str, has_media: bool) -> str:
     body = text.strip() if text and text.strip() else "[media chưa được hỗ trợ trong Forum Inbox v1]"
     if has_media and text and text.strip():
         body += "\n\n[media chưa được hỗ trợ trong Forum Inbox v1]"
-    return f"📥 Inbound từ {_lead_label(username, name, user_id)}\nNick phụ #{account_id} · user_id {user_id}\n\n{body}"
+    return f"📥 Inbound từ {_lead_label(username, name, user_id)}\n{account_label}\n\n{body}"
 
 
 def _format_history_message(role: str, content: str, ts: str) -> str:
@@ -168,7 +191,7 @@ async def relay_history(db, bot, cfg: ForumConfig, *, account_id: int, user_id: 
 
     header = (f"🗂️ **Hội thoại {days} ngày qua**\n"
               f"Lead: {_lead_label(username, name, user_id)}\n"
-              f"Nick phụ #{account_id} · user_id {user_id}\n"
+              f"{await _account_label(db, account_id)}\n"
               f"Tổng {len(entries)} tin nhắn (cũ → mới)\n"
               f"{'─' * 28}")
     await bot.send_topic_message(cfg.group_id, topic_id, header)
@@ -220,7 +243,8 @@ async def relay_inbound(db, bot, cfg: ForumConfig, *, account_id: int, user_id: 
         else:
             await db.update_telegram_topic_last_message(cfg.group_id, int(topic["topic_id"]), text)
 
-    await bot.send_topic_message(cfg.group_id, int(topic["topic_id"]), _format_inbound(account_id, user_id, username, name, text, has_media))
+    _label = await _account_label(db, account_id)
+    await bot.send_topic_message(cfg.group_id, int(topic["topic_id"]), _format_inbound(_label, user_id, username, name, text, has_media))
     return "relayed"
 
 
@@ -256,7 +280,7 @@ async def backfill_topics(db, bot, cfg: ForumConfig, *, days: int = 7, limit: in
                 })
                 header = (f"🗂️ Topic tạo bởi backfill ({days} ngày gần nhất)\n"
                           f"Lead: {_lead_label(username, name, user_id)}\n"
-                          f"Nick phụ #{account_id} · user_id {user_id}\n\n"
+                          f"{await _account_label(db, account_id)}\n\n"
                           f"Chỉ hội thoại MỚI kể từ lúc bật mới được relay vào đây.")
                 await bot.send_topic_message(cfg.group_id, int(topic_id), header)
                 created += 1
@@ -279,7 +303,7 @@ async def relay_outgoing(db, bot, cfg: ForumConfig, *, account_id: int, user_id:
     topic = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
     if not topic:
         return "no_topic"
-    await bot.send_topic_message(cfg.group_id, int(topic["topic_id"]), f"📤 Nick phụ #{account_id}:\n\n{text}")
+    await bot.send_topic_message(cfg.group_id, int(topic["topic_id"]), f"📤 {await _account_label(db, account_id)}:\n\n{text}")
     return "relayed"
 
 
@@ -300,10 +324,11 @@ async def prepare_reply(db, cfg: ForumConfig, admin_id: int, group_id: int, topi
     return preview
 
 
-def render_reply_preview(preview: ReplyPreview) -> str:
+def render_reply_preview(preview: ReplyPreview, account_label: str | None = None) -> str:
+    nick = account_label or f"Nick phụ: #{preview.account_id}"
     return ("🧾 Xác nhận gửi reply\n"
             f"Admin: {preview.admin_id}\nGroup: {preview.group_id}\nTopic: {preview.topic_id}\n"
-            f"Nick phụ: #{preview.account_id}\nLead user_id: {preview.user_id}\n\nDraft:\n{html.escape(preview.text)}")
+            f"Gửi từ: {nick}\nLead user_id: {preview.user_id}\n\nDraft:\n{html.escape(preview.text)}")
 
 
 async def _audit_reply(db, preview: ReplyPreview | None, admin_id: int, group_id: int, topic_id: int,
