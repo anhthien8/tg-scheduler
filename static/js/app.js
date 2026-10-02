@@ -1332,19 +1332,26 @@ async _loadWatcherChatList(selectedIds=[]){const el=document.getElementById('w-c
 
   }catch(e){el.innerHTML=`<div style="padding:12px;color:var(--red)">Lỗi: ${e.message}</div>`}},
 
+// Only real groups can ever produce a member-join / keyword message we can act on.
+// Channels (broadcast) have subscribers, not joinable members; bots have neither —
+// so they must never appear in the "Nhóm cần theo dõi" picker.
+_watcherGroupOnly(chats){return (chats||[]).filter(c=>{const t=(c.chat_type||'').toLowerCase();return t==='group'||t==='supergroup'})},
+
 _renderWatcherChatList(chats,preSelected=null){
 
   const sel=preSelected||this._watcherSelectedGroups;
 
   const el=document.getElementById('w-chat-list');
 
-  if(!chats.length){el.innerHTML='<div style="padding:12px;color:var(--text2)">Không tìm thấy nhóm</div>';return}
+  const groups=this._watcherGroupOnly(chats);
 
-  el.innerHTML=chats.map(c=>{const icon=c.chat_type==='channel'?'📢':c.chat_type==='supergroup'?'👥':'💬';const chk=sel.has(Number(c.chat_id))?'checked':'';return`<label class="chat-item"><input type="checkbox" value="${c.chat_id}" data-title="${esc(c.chat_title)}" ${chk} onchange="App._onWatcherGroupToggle(this)"><span class="chat-type-icon">${icon}</span><span class="chat-name">${esc(c.chat_title)}</span><span class="chat-type-badge">${c.chat_type}</span></label>`}).join('')},
+  if(!groups.length){el.innerHTML='<div style="padding:12px;color:var(--text2)">Không tìm thấy nhóm</div>';return}
+
+  el.innerHTML=groups.map(c=>{const icon=c.chat_type==='supergroup'?'👥':'💬';const chk=sel.has(Number(c.chat_id))?'checked':'';return`<label class="chat-item"><input type="checkbox" value="${c.chat_id}" data-title="${esc(c.chat_title)}" ${chk} onchange="App._onWatcherGroupToggle(this)"><span class="chat-type-icon">${icon}</span><span class="chat-name">${esc(c.chat_title)}</span><span class="chat-type-badge">${c.chat_type}</span></label>`}).join('')},
 
 _onWatcherGroupToggle(cb){const id=parseInt(cb.value);if(cb.checked)this._watcherSelectedGroups.add(id);else this._watcherSelectedGroups.delete(id)},
 
-filterWatcherChats: debounce(function(){const q=document.getElementById('w-chat-search')?.value.toLowerCase();this._renderWatcherChatList(this._watcherChats.filter(c=>c.chat_title.toLowerCase().includes(q)))}, 250),
+filterWatcherChats: debounce(function(){const q=(document.getElementById('w-chat-search')?.value||'').toLowerCase();this._renderWatcherChatList(this._watcherChats.filter(c=>String(c.chat_title||'').toLowerCase().includes(q)))}, 250),
 
 addWatcherKeyword(){const inp=document.getElementById('w-keyword-input');const v=inp.value.trim();if(!v)return;if(!this._watcherKeywords.includes(v))this._watcherKeywords.push(v);inp.value='';this._renderWatcherKeywords()},
 

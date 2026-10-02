@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.7.3",
+        "date": "02/10/2026",
+        "title": "🎯 Ô tìm nhóm chỉ hiện nhóm thật — bỏ kênh và bot",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Khi chọn nhóm để theo dõi trong Keyword DM Rule, ô tìm kiếm trước đây liệt kê lẫn cả kênh (channel) và bot — những thứ không có thành viên tham gia nên không dùng được cho tính năng DM khi member join. Nay chỉ hiện đúng nhóm (group/supergroup).",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Ô \"Tìm kiếm nhóm\" không còn hiện kênh và bot",
+                "desc": "Danh sách chọn nhóm nay lọc bỏ kênh phát sóng (channel) và bot — chỉ giữ nhóm thường và supergroup, là những nơi thực sự có thành viên join. Với tài khoản nhiều kênh, danh sách gọn hơn hẳn (ví dụ tài khoản 3: 86 mục → 36 nhóm thật).",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "improvement",
+                "title": "Ghi chú rõ ngay dưới ô chọn nhóm",
+                "desc": "Thêm dòng giải thích: chỉ hiển thị nhóm (group/supergroup) vì kênh và bot không có thành viên tham gia.",
+                "tag": "Giao diện"
+            },
+        ],
+    },
+    {
         "version": "v3.7.2",
         "date": "02/10/2026",
         "title": "⚡ Tối ưu tốc độ trang Cào & DM — nhanh hơn 15 lần",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": None,
         "summary": "Trang Cào & DM tải rất lâu vì mỗi lần mở đều tải TOÀN BỘ kết quả deep crawl — 6.901 kênh, ~4 MB kèm mô tả đầy đủ — dù chỉ hiển thị 50 dòng. Nay chỉ tải đúng 1 trang cần xem rồi nạp dần phần còn lại ở nền. Trang mở gần như tức thì.",
         "changes": [
             {
