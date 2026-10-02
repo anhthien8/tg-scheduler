@@ -26,10 +26,16 @@ _DEFAULT_API_HASH = "b18441a1ff607e10a989891a5462e627"
 
 @router.get("/accounts")
 async def list_accounts():
-    """List all Telegram accounts."""
+    """List all Telegram accounts.
+
+    Fast path: never block the HTTP response on Telegram RPC. Accounts whose
+    `_me_cache` is warm (the engine fills it as each account connects) carry
+    their user_info immediately; a cold entry (engine still starting, or dead
+    session) falls back to DB name + connection state. Previously a cold cache
+    meant EVERY account called is_authorized()+get_me() with a 2s timeout each
+    — 19 accounts could hang the Accounts page for 30-40s after a restart.
+    """
     accounts = await db.get_all_accounts()
-    
-    import asyncio
 
     async def get_acc_status(acc):
         # Ưu tiên _me_cache (đã sync khi connect) — tránh gọi get_me() mỗi request
@@ -38,15 +44,14 @@ async def list_accounts():
             acc["is_logged_in"] = True
             acc["user_info"] = cached
             return
-        try:
-            acc["is_logged_in"] = await tg.is_authorized(acc["id"], timeout=2.0)
-            me = await tg.get_me(acc["id"], timeout=2.0)
-            if me:
-                acc["user_info"] = me
-        except Exception:
-            acc["is_logged_in"] = False
+        # Cache cold: connected clients are authorized by definition (the engine
+        # only keeps live ones); do NOT pay a Telegram round-trip here.
+        acc["is_logged_in"] = acc["id"] in tg._clients and tg._clients[acc["id"]].is_connected()
+        acc.setdefault("user_info", None)
 
-    await asyncio.gather(*(get_acc_status(acc) for acc in accounts), return_exceptions=True)
+    for acc in accounts:
+        await get_acc_status(acc)
+
     return {"accounts": accounts}
 
 
