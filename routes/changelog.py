@@ -8,6 +8,28 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.7.5",
+        "date": "02/10/2026",
+        "title": "🤖 Nick chính cũng được AI trả lời — cửa sổ bàn giao rút còn 12 giờ",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Trước đây nick chính bị khóa cứng ở chế độ 'chỉ người thật': AI không bao giờ tự trả lời, mọi hội thoại trên nick chính tự động rơi vào 'Cần người xử lý' — kể cả khi đã gõ /aion. Nay mọi tài khoản đều được AI hỗ trợ theo cùng một luật: bạn im lặng 12 giờ thì AI trả lời thay; bạn nhắn tiếp thì AI lại lùi ra 12 giờ nữa.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Bỏ chế độ 'nick chính chỉ người thật'",
+                "desc": "Mọi tài khoản (kể cả nick chính) đều dùng chung một cơ chế: AI tự trả lời khi admin im lặng, nhường lời ngay khi admin vào chat. Guard chống AI chat với tài khoản nội bộ vẫn giữ nguyên.",
+                "tag": "Cải tiến"
+            },
+            {
+                "type": "improvement",
+                "title": "Cửa sổ bàn giao người-thật rút từ 24 giờ còn 12 giờ",
+                "desc": "Khi admin trả lời một lead, AI im lặng 12 giờ (trước là 24). Hết 12 giờ mà admin không nhắn tiếp, AI tự tiếp quản. Muốn AI im hẳn với một lead: gõ /aioff trong topic của lead đó.",
+                "tag": "Cải tiến"
+            },
+        ],
+    },
+    {
         "version": "v3.7.4",
         "date": "02/10/2026",
         "title": "🐛 Sửa lệnh /aion trong topic không bật được AI",

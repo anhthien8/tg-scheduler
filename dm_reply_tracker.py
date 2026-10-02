@@ -460,16 +460,16 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
                            new_status: str = "active", drip_stage: int | None = None) -> bool:
     from telegram_forum_inbox import get_send_lock
     async with get_send_lock(account_id, user_id):
-        if account_id == MAIN_ACCOUNT_ID or await is_internal_account_user(user_id):
+        if await is_internal_account_user(user_id):
             return False
         chat = await db.get_followup_chat(account_id, user_id)
-        if account_id == MAIN_ACCOUNT_ID or not chat or chat.get("status") != "active":
+        if not chat or chat.get("status") != "active":
             return False
         takeover = chat.get("human_takeover_at")
         if takeover:
             try:
                 elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(takeover).replace(tzinfo=timezone.utc)).total_seconds()
-                if elapsed < 86400:
+                if elapsed < 43200:  # 12 hours — admin was active; stay silent
                     return False
             except (ValueError, TypeError):
                 return False  # Malformed takeover data must fail closed.
@@ -516,24 +516,17 @@ async def generate_and_send_ai_reply_for_chat(
             pass
         return False
 
-    # 0a. HARD GUARD: main account is human-only. AI must NEVER auto-reply on nick chính —
-    # a sloppy AI reply there destroys the main account's credibility with KOLs.
-    if account_id == MAIN_ACCOUNT_ID:
-        logger.info(
-            "[AIFollowUp] 🛡️ Account #%d is the MAIN account — AI auto-reply blocked. "
-            "Marking chat needs_human for user %d", account_id, user_id)
-        try:
-            await db.update_followup_chat_status(account_id, user_id, "needs_human")
-        except Exception:
-            pass
-        return False
+    # 0a. Nick chính (MAIN_ACCOUNT_ID) is no longer human-only: per operator
+    # decision, the main account may auto-reply too — the 12h human-takeover
+    # window (see _send_ai_message / auto-resume) is the sole gate. Guards keep
+    # only the genuine exclusions: internal-account chatter and blacklist.
 
     # 0. Check blacklist
     if await db.is_user_blacklisted(user_id=user_id, username=sender_username or ""):
         logger.info("[AIFollowUp] 🚫 User %s (id=%d) is blacklisted — skipping AI reply", sender_username or "?", user_id)
         return False
 
-    # 0b. Check if human admin is actively chatting (human_takeover_at < 24h)
+    # 0b. Check if human admin is actively chatting (human_takeover_at < 12h)
     chat_check = await db.get_followup_chat(account_id, user_id)
     if chat_check:
         takeover_str = chat_check.get("human_takeover_at")
@@ -543,8 +536,8 @@ async def generate_and_send_ai_reply_for_chat(
                 dt_tk = datetime.fromisoformat(takeover_str).replace(tzinfo=timezone.utc)
                 now_utc = datetime.now(timezone.utc)
                 elapsed = (now_utc - dt_tk).total_seconds()
-                if elapsed < 86400:  # 24 hours
-                    logger.info("[AIFollowUp] 🛑 Human admin active (takeover %ds ago, <24h) — skipping AI reply for user %d",
+                if elapsed < 43200:  # 12 hours — admin was active, stay silent
+                    logger.info("[AIFollowUp] 🛑 Human admin active (takeover %ds ago, <12h) — skipping AI reply for user %d",
                                 int(elapsed), user_id)
                     return False
             except Exception:
@@ -850,7 +843,7 @@ async def generate_and_send_ai_reply_for_chat(
         if fresh_chat and fresh_chat.get("status") == "needs_human" and takeover_str:
             try:
                 dt_tk = datetime.fromisoformat(takeover_str).replace(tzinfo=timezone.utc)
-                if (datetime.now(timezone.utc) - dt_tk).total_seconds() < 86400:
+                if (datetime.now(timezone.utc) - dt_tk).total_seconds() < 43200:  # 12h window
                     logger.info("[AIFollowUp] 🛑 Admin took over during typing delay — dropping AI reply for user %d", user_id)
                     return False
             except Exception:
@@ -1136,13 +1129,13 @@ def _make_handler(account_id: int):
                         try:
                             dt_takeover = _parse_sqlite_utc(takeover_at_str)
                             now_utc = datetime.now(timezone.utc)
-                            if dt_takeover is None or (now_utc - dt_takeover).total_seconds() >= 86400:  # 24 hours
+                            if dt_takeover is None or (now_utc - dt_takeover).total_seconds() >= 43200:  # 12 hours
                                 should_resume = True
                         except Exception:
                             # Unparseable timestamp must not lock the chat forever.
                             should_resume = True
                     if should_resume:
-                        logger.info("[AIFollowUp] ⏰ 24h elapsed since human takeover for user %d — auto-resuming!", sender_id)
+                        logger.info("[AIFollowUp] ⏰ 12h elapsed since human takeover for user %d — auto-resuming!", sender_id)
                         await db.update_followup_chat_status(account_id, sender_id, "active")
                         current_status = "active"
 
@@ -1372,7 +1365,7 @@ def _drip_instruction_for_stage(stage: int, total_stages: int) -> str:
 
 async def process_drip_followups() -> dict:
     """
-    1. Scan human takeover chats (>24h since update) where user is waiting for a reply -> Auto-resume & Send AI Reply!
+    1. Scan human takeover chats (>12h since update) where user is waiting for a reply -> Auto-resume & Send AI Reply!
     2. Scan stuck active chats (>2m since user message with 0 replies generated) -> Send AI Reply!
     3. Scan inactive followup chats -> Process configurable multi-step Drip Follow-ups
        (default day 1/3/7 via ai_followup_drip_cadence).
@@ -1381,15 +1374,15 @@ async def process_drip_followups() -> dict:
     sent_count = 0
     errors = []
 
-    # ── 1. Auto-resume chats paused for human takeover if >24h elapsed ──
+    # ── 1. Auto-resume chats paused for human takeover if >12h elapsed ──
     try:
         async with db.get_db() as db_conn:
             db_conn.row_factory = aiosqlite.Row
             cur_to = await db_conn.execute("""
                 SELECT * FROM ai_followup_chats
                 WHERE status IN ('needs_human', 'paused_admin')
-                  AND (human_takeover_at IS NULL OR datetime(human_takeover_at) <= datetime('now', '-24 hours'))
-                  AND datetime(updated_at) <= datetime('now', '-24 hours')
+                  AND (human_takeover_at IS NULL OR datetime(human_takeover_at) <= datetime('now', '-12 hours'))
+                  AND datetime(updated_at) <= datetime('now', '-12 hours')
                 LIMIT 20
             """)
             to_chats = [dict(r) for r in await cur_to.fetchall()]
