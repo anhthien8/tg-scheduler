@@ -8,11 +8,33 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.7.4",
+        "date": "02/10/2026",
+        "title": "🐛 Sửa lệnh /aion trong topic không bật được AI",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Gõ /aion @username bên trong topic của lead (Forum Inbox) trước đây bị hệ thống nuốt mất — lệnh không tới được bộ xử lý nên AI vẫn im. Nguyên nhân: bộ lọc tin nhắn nhóm so khớp CHÍNH XÁC cả câu nên '/aion @Nelajackson1' không khớp '/aion'. Nay ô bật AI trong topic hoạt động đúng.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Lệnh /aion, /aioff, /ai trong topic hoạt động trở lại",
+                "desc": "Bộ lọc chỉ lấy từ khóa lệnh đầu tiên, bỏ qua phần đối số (@username) và hậu tố tên bot (/aion@weexos_command_bot). Trước đây lệnh kèm @username bị chặn ngay từ bộ lọc nên không bao giờ chạy.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "Không còn xử lý trùng khi gõ /aion trong nhóm",
+                "desc": "Lệnh /aion ở chat riêng với bot và trong topic nhóm nay tách bạch: trong topic sẽ do bộ xử lý theo-topic đảm nhiệm (khớp đúng lead của topic thay vì khớp username toàn cục).",
+                "tag": "Sửa lỗi"
+            },
+        ],
+    },
+    {
         "version": "v3.7.3",
         "date": "02/10/2026",
         "title": "🎯 Ô tìm nhóm chỉ hiện nhóm thật — bỏ kênh và bot",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": None,
         "summary": "Khi chọn nhóm để theo dõi trong Keyword DM Rule, ô tìm kiếm trước đây liệt kê lẫn cả kênh (channel) và bot — những thứ không có thành viên tham gia nên không dùng được cho tính năng DM khi member join. Nay chỉ hiện đúng nhóm (group/supergroup).",
         "changes": [
             {

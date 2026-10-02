@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TG Scheduler</title>
   <meta name="description" content="Telegram Userbot Multi-Account Message Scheduler">
-  <link rel="stylesheet" href="/static/css/style.css?v=432">
+  <link rel="stylesheet" href="/static/css/style.css?v=433">
   <!-- Boot splash: paints instantly (CSS-only, no JS) so the user never sees a
        blank white screen while the app bundle parses/executes. Hidden as soon
        as app.js runs (body.app-ready). -->
@@ -1772,10 +1772,19 @@
 
         <!-- Accounts -->
         <div class="form-group">
-          <label class="form-label">Tài khoản gửi DM (chọn nhiều – ưu tiên theo thứ tự, fallback nếu lỗi)</label>
+          <label class="form-label" id="w-sender-label">Tài khoản gửi DM (chọn nhiều – ưu tiên theo thứ tự, fallback nếu lỗi)</label>
           <div id="w-accounts-list" style="display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:var(--bg-secondary);border-radius:8px;min-height:44px">
             <!-- rendered by JS -->
           </div>
+        </div>
+
+        <!-- Observer accounts (only for watch_type=join) -->
+        <div class="form-group hidden" id="w-observer-block">
+          <label class="form-label">Nick theo dõi nhóm (nick PHẢI ở trong nhóm)</label>
+          <div id="w-observers-list" style="display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:var(--bg-secondary);border-radius:8px;min-height:44px">
+            <!-- rendered by JS -->
+          </div>
+          <p class="form-hint">Nick này phải <b>đang ở trong nhóm</b> để nhận sự kiện thành viên mới join. Nick gửi DM ở trên <b>không cần</b> ở trong nhóm. Bỏ trống = dùng luôn nick gửi DM làm nick theo dõi.</p>
         </div>
 
         <!-- Trigger type -->
@@ -1922,15 +1931,15 @@
     </div>
   </div>
 
-  <script defer src="/static/js/polling.js?v=432"></script>
-  <script defer src="/static/js/api.js?v=432"></script>
-  <script defer src="/static/js/discord.js?v=432"></script>
-  <script defer src="/static/js/members.js?v=432"></script>
-  <script defer src="/static/js/analytics.js?v=432"></script>
-  <script defer src="/static/js/ai_agents.js?v=432"></script>
-  <script defer src="/static/js/ai_followup.js?v=432"></script>
-  <script defer src="/static/js/changelog.js?v=432"></script>
-  <script defer src="/static/js/app.js?v=432"></script>
+  <script defer src="/static/js/polling.js?v=433"></script>
+  <script defer src="/static/js/api.js?v=433"></script>
+  <script defer src="/static/js/discord.js?v=433"></script>
+  <script defer src="/static/js/members.js?v=433"></script>
+  <script defer src="/static/js/analytics.js?v=433"></script>
+  <script defer src="/static/js/ai_agents.js?v=433"></script>
+  <script defer src="/static/js/ai_followup.js?v=433"></script>
+  <script defer src="/static/js/changelog.js?v=433"></script>
+  <script defer src="/static/js/app.js?v=433"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

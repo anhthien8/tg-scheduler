@@ -90,7 +90,12 @@ async def test_stuck_chat_with_null_takeover_is_dateless_and_resumable():
 
 
 def test_topic_ai_commands_are_recognised_and_do_not_collide_with_username_form():
-    """Bare /ai* (topic-scoped) vs '/ai-on @user' (global) must not overlap."""
+    """Bare /ai* AND argument-bearing /ai* @user forms are both valid topic controls.
+
+    Regression (v3.7.4): the group filter used an EXACT full-string match, so
+    "/ai-on @zoro" was rejected and the message was silently dropped inside a
+    Forum topic — the admin's /aion @user never enabled AI.
+    """
     import re
 
     import command_bot
@@ -98,8 +103,13 @@ def test_topic_ai_commands_are_recognised_and_do_not_collide_with_username_form(
     for cmd in ("/ai-on", "/ai-off", "/ai", "/AI-ON", " /ai-off "):
         assert command_bot._is_ai_control(cmd), f"{cmd!r} should be a topic control"
 
-    for not_cmd in ("/ai-on @zoro", "hello", "", "/status"):
-        assert not command_bot._is_ai_control(not_cmd), f"{not_cmd!r} is not a bare control"
+    # Argument-bearing and bot-suffixed forms must now be recognised too.
+    for cmd in ("/ai-on @zoro", "/aion @Nelajackson1",
+                "/aion@weexos_command_bot", "/aion@weexos_command_bot @Nelajackson1"):
+        assert command_bot._is_ai_control(cmd), f"{cmd!r} should be a topic control"
+
+    for not_cmd in ("hello", "", "/status", "/aionx", "@x /aion"):
+        assert not command_bot._is_ai_control(not_cmd), f"{not_cmd!r} is not a control"
 
     # The legacy per-username command requires an argument, so it never swallows
     # the bare form.

@@ -301,6 +301,11 @@ async def init_db():
             "ALTER TABLE keyword_watchers ADD COLUMN watch_type TEXT DEFAULT 'keyword'",
             "ALTER TABLE keyword_watchers ADD COLUMN join_dm_delay_min INTEGER DEFAULT 3",
             "ALTER TABLE keyword_watchers ADD COLUMN join_dm_delay_max INTEGER DEFAULT 15",
+            # Observer accounts: the nick(s) that sit IN the group and listen for
+            # ChatAction join events. Kept separate from sender_account_ids so a
+            # watcher can observe from one nick (e.g. a secondary account that is a
+            # member) while DMing from another nick that need not be in the group.
+            "ALTER TABLE keyword_watchers ADD COLUMN observer_account_ids TEXT NOT NULL DEFAULT '[]'",
         ]:
             try:
                 await db.execute(col_sql)
@@ -1669,11 +1674,12 @@ async def create_watcher(data: dict) -> int:
         import json as _json
         cursor = await db.execute(
             """INSERT INTO keyword_watchers
-               (name, sender_account_ids, keywords, group_ids, cooldown_hours, dm_once, excluded_usernames, is_active, platform, watch_type, join_dm_delay_min, join_dm_delay_max)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (name, sender_account_ids, observer_account_ids, keywords, group_ids, cooldown_hours, dm_once, excluded_usernames, is_active, platform, watch_type, join_dm_delay_min, join_dm_delay_max)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data["name"],
                 _json.dumps(data.get("sender_account_ids", [])),
+                _json.dumps(data.get("observer_account_ids", [])),
                 _json.dumps(data.get("keywords", [])),
                 _json.dumps(data.get("group_ids", [])),
                 data.get("cooldown_hours", 24),
@@ -1703,11 +1709,13 @@ async def _load_watcher_row(db, row: dict) -> dict:
     """Helper: attach messages to a watcher row."""
     import json as _json
     w = dict(row)
-    for f in ("sender_account_ids", "keywords", "group_ids", "excluded_usernames"):
+    for f in ("sender_account_ids", "observer_account_ids", "keywords", "group_ids", "excluded_usernames"):
         try:
             w[f] = _json.loads(w.get(f) or "[]")
         except Exception:
             w[f] = []
+    if "observer_account_ids" not in w or w["observer_account_ids"] is None:
+        w["observer_account_ids"] = []
     c = await db.execute(
         "SELECT * FROM watcher_messages WHERE watcher_id=? ORDER BY msg_order", (w["id"],))
     w["messages"] = [dict(r) for r in await c.fetchall()]
@@ -1717,11 +1725,13 @@ async def _load_watcher_row(db, row: dict) -> dict:
 
 def _parse_watcher_json_fields(w: dict) -> dict:
     import json as _json
-    for f in ("sender_account_ids", "keywords", "group_ids", "excluded_usernames"):
+    for f in ("sender_account_ids", "observer_account_ids", "keywords", "group_ids", "excluded_usernames"):
         try:
             w[f] = _json.loads(w.get(f) or "[]")
         except Exception:
             w[f] = []
+    if not w.get("observer_account_ids"):
+        w["observer_account_ids"] = []
     return w
 
 
@@ -1814,7 +1824,7 @@ async def update_watcher(watcher_id: int, data: dict) -> bool:
         import json as _json
         await db.execute(
             """UPDATE keyword_watchers
-               SET name=?, sender_account_ids=?, keywords=?, group_ids=?,
+               SET name=?, sender_account_ids=?, observer_account_ids=?, keywords=?, group_ids=?,
                    cooldown_hours=?, dm_once=?, excluded_usernames=?,
                    reply_in_group=?, group_reply_text=?, group_reply_account_id=?,
                    watch_type=?, join_dm_delay_min=?, join_dm_delay_max=?,
@@ -1823,6 +1833,7 @@ async def update_watcher(watcher_id: int, data: dict) -> bool:
             (
                 data["name"],
                 _json.dumps(data.get("sender_account_ids", data.get("account_ids", []))),
+                _json.dumps(data.get("observer_account_ids", [])),
                 _json.dumps(data.get("keywords", [])),
                 _json.dumps(data.get("group_ids", [])),
                 data.get("cooldown_hours", 24),

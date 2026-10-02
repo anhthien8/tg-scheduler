@@ -74,8 +74,20 @@ _PIPELINE_CMDS = frozenset({"/pipeline", "/attention", "/stage"})
 
 
 def _is_ai_control(text: str | None) -> bool:
-    """True when the message is a bare /ai* topic command (case-insensitive)."""
-    return (text or "").strip().lower() in _AI_CONTROL_CMDS
+    """True when the message is a /ai* topic command (case-insensitive).
+
+    Tolerant of a trailing argument (e.g. "/aion @Nelajackson1") and a bot-name
+    suffix (e.g. "/aion@weexos_command_bot"): only the leading command token is
+    matched. Being strict here silently dropped the message in the group filter,
+    so a command with an @username argument never reached the handler at all.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    token = raw.split()[0].lower()
+    if "@" in token:
+        token = token.split("@", 1)[0]
+    return token in _AI_CONTROL_CMDS
 
 
 def _is_pipeline_command(text: str | None) -> bool:
@@ -247,8 +259,13 @@ def _register_handlers(client: TelegramClient):
         await _handle_pause(event, cid)
 
     # ── /ai-on | /aion @username / /ai-off | /aioff @username ───────────────
+    # Private-chat only: inside a Forum topic the topic-based handler
+    # (_handle_forum_admin_message) owns /ai* commands, because it resolves the
+    # lead from the topic rather than by a global username match.
     @client.on(events.NewMessage(pattern=r"/ai-?(on|off)\s+(@?\w+)"))
     async def cmd_ai_toggle(event):
+        if event.is_group or getattr(event, "is_channel", False):
+            return
         if not _check_admin(event):
             return
         action = event.pattern_match.group(1)
@@ -1399,7 +1416,14 @@ async def _handle_forum_admin_message(event) -> None:
     # ── AI control commands inside a lead topic ─────────────────────────────
     # Must run BEFORE draft handling, otherwise "/ai-on" would be treated as a
     # reply draft and sent to the lead.
-    cmd = (event.raw_text or "").strip().lower()
+    # The command may carry a trailing argument (e.g. "/aion @Nelajackson1") —
+    # match the FIRST token only, otherwise the whole string never matches and
+    # the command silently falls through to the draft/preview path.
+    _raw = (event.raw_text or "").strip()
+    cmd = _raw.split()[0].lower() if _raw else ""
+    # Telegram may suffix the command with the bot username: "/aion@weexos_command_bot"
+    if "@" in cmd:
+        cmd = cmd.split("@", 1)[0]
     if _is_ai_control(cmd):
         topic = await db.get_telegram_topic_by_thread(cfg.group_id, topic_id)
         if not topic:

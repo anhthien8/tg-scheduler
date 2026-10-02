@@ -1351,7 +1351,19 @@ def _make_join_handler(watcher: dict):
 
 
 def _register_watcher(watcher: dict):
-    """Register Telethon handlers for all sender accounts of a watcher."""
+    """Register Telethon handlers for a watcher.
+
+    Two distinct roles:
+      • OBSERVER accounts — the nick(s) that sit IN the group and receive the
+        ChatAction/NewMessage events. Handlers attach here.
+      • SENDER accounts — the nick(s) that actually send the DM; they need NOT
+        be in the group (a valid access_hash or @username is enough).
+
+    For 'join' watchers, observer_account_ids (falling back to sender_account_ids
+    when unset) are observed, while the DM itself always goes out from
+    sender_account_ids. For keyword watchers behaviour is unchanged: the same
+    sender_account_ids both observe and send.
+    """
     if watcher.get("platform", "telegram") != "telegram":
         return
     watcher_id = watcher["id"]
@@ -1369,13 +1381,20 @@ def _register_watcher(watcher: dict):
     if watch_type == "join":
         handler_fn = _make_join_handler(watcher)
         _make_event = lambda: events.ChatAction()
+        # Observe from the dedicated observer nick(s) — these are the ones that
+        # must be inside the group. Fall back to the sender list when the user
+        # has not split the roles (keeps existing configs working). Senders are
+        # NOT registered for events: a sender absent from the group would get
+        # nothing, and a sender that happens to be a member would double-fire.
+        observer_ids = watcher.get("observer_account_ids") or account_ids
+        register_ids = list(dict.fromkeys(observer_ids))
     else:
         handler_fn = _make_handler(watcher)
         _make_event = lambda: events.NewMessage(incoming=True)
+        register_ids = account_ids
 
-    # Register on ALL configured sender accounts so any active one can catch events
-    # (events are per-client, so all accounts in the group will receive them)
-    for acc_id in account_ids:
+    # Register on the observer accounts so they catch events.
+    for acc_id in register_ids:
         client = tg.get_client(acc_id)
         if not client:
             logger.warning(f"[Watcher {watcher_id}] Account {acc_id} not found, skipping")

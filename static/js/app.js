@@ -1100,13 +1100,42 @@ logPage(p){this.logOffset=p*this.logLimit;this.loadLogs()},
 
 // ── Watcher ──────────────────────────────────────────────────────
 
-_watcherKeywords:[],_watcherExcludes:[],_watcherChats:[],_watcherSelectedGroups:new Set(),_watcherAccountOrder:[],_watcherType:'keyword',_wlOffset:0,_wlLimit:40,
+_watcherKeywords:[],_watcherExcludes:[],_watcherChats:[],_watcherSelectedGroups:new Set(),_watcherAccountOrder:[],_watcherObserverIds:[],_watcherType:'keyword',_wlOffset:0,_wlLimit:40,
 
 setWatcherType(t){this._watcherType=t;
   document.getElementById('w-type-keyword')?.classList.toggle('active',t==='keyword');
   document.getElementById('w-type-join')?.classList.toggle('active',t==='join');
   document.getElementById('w-keywords-block')?.classList.toggle('hidden',t==='join');
-  document.getElementById('w-join-delay-block')?.classList.toggle('hidden',t!=='join')},
+  document.getElementById('w-join-delay-block')?.classList.toggle('hidden',t!=='join');
+  // Observer picker only matters for join watchers.
+  document.getElementById('w-observer-block')?.classList.toggle('hidden',t!=='join');
+  const sl=document.getElementById('w-sender-label');
+  if(sl)sl.textContent = t==='join'
+    ? 'Nick gửi DM (không cần ở trong nhóm)'
+    : 'Tài khoản gửi DM (chọn nhiều – ưu tiên theo thứ tự, fallback nếu lỗi)';
+  // Keep the sender/observer lists in sync with the current checkbox state.
+  const senders=[...document.querySelectorAll('#w-accounts-list input[type=checkbox]:checked')].map(cbx=>parseInt(cbx.value));
+  const observers=[...document.querySelectorAll('#w-observers-list input[type=checkbox]:checked')].map(cbx=>parseInt(cbx.value));
+  this._renderWatcherAccounts(senders);
+  this._renderWatcherObservers(observers)},
+
+toggleWatcherObserver(id,cbx){
+  const cur=new Set([...document.querySelectorAll('#w-observers-list input[type=checkbox]:checked')].map(c=>parseInt(c.value)));
+  if(cbx.checked)cur.add(id);else cur.delete(id);
+  this._watcherObserverIds=[...cur]},
+
+_renderWatcherObservers(selectedIds=null){
+  const el=document.getElementById('w-observers-list');
+  if(!el)return;
+  const sel=selectedIds||this._watcherObserverIds||[];
+  el.innerHTML=this.accounts.map(a=>{
+    const chk=sel.includes(a.id)?'checked':'';
+    return `<div style="display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px">
+      <input type="checkbox" value="${a.id}" ${chk} style="accent-color:var(--accent)" onchange="App.toggleWatcherObserver(${a.id}, this)">
+      <span>${esc(accDisplayName(a))}</span>
+      <small style="color:var(--text2);margin-left:4px">${a.phone}</small>
+    </div>`;
+  }).join('')},
 
 async loadWatchers(){try{
 
@@ -1175,9 +1204,13 @@ async openWatcherModal(){
 
   this._watcherActiveAccountId=null;
 
+  this._watcherObserverIds=[];
+
   this._renderWatcherKeywords();this._renderWatcherExcludes();
 
   await this._loadWatcherAccounts([]);await this._loadWatcherChatList([]);
+
+  this._renderWatcherObservers([]);
 
   (document.getElementById('watcher-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
 
@@ -1214,7 +1247,11 @@ async editWatcher(id){try{
 
   this._watcherActiveAccountId = w.sender_account_ids && w.sender_account_ids.length ? w.sender_account_ids[0] : null;
 
+  this._watcherObserverIds = [...(w.observer_account_ids||[])];
+
   await this._loadWatcherAccounts(w.sender_account_ids||[]);await this._loadWatcherChatList(w.group_ids||[]);
+
+  this._renderWatcherObservers(this._watcherObserverIds);
 
   (document.getElementById('watcher-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')
 
@@ -1410,7 +1447,8 @@ async saveWatcher(){
 
   if(!this._watcherSelectedGroups.size)return this.toast('Chọn ít nhất 1 nhóm','error');
 
-  const accIds=[...document.querySelectorAll('#w-accounts-list input[type="checkbox"]:checked')].map(cb=>parseInt(cb.value));
+  const accIds=[...document.querySelectorAll('#w-accounts-list input[type="checkbox"]:checked')].map(cbx=>parseInt(cbx.value));
+  const observerIds=[...document.querySelectorAll('#w-observers-list input[type="checkbox"]:checked')].map(cbx=>parseInt(cbx.value));
 
   if(!accIds.length)return this.toast('Chọn ít nhất 1 tài khoản','error');
 
@@ -1430,7 +1468,7 @@ async saveWatcher(){
   const replyInGroup=document.getElementById('w-reply-in-group')?.checked;
   const groupReplyText=(document.getElementById('w-group-reply-text')?.value || "").trim()||'Check my DM 😊';
 
-  const payload={name,sender_account_ids:accIds,keywords:watchType==='join'?[]:this._watcherKeywords,excluded_usernames:this._watcherExcludes,group_ids:[...this._watcherSelectedGroups],cooldown_hours:cooldown,dm_once:dmOnce,reply_in_group:replyInGroup,group_reply_text:groupReplyText,is_active:1,messages,watch_type:watchType,join_dm_delay_min:joinDelayMin,join_dm_delay_max:joinDelayMax};
+  const payload={name,sender_account_ids:accIds,observer_account_ids:watchType==='join'?observerIds:[],keywords:watchType==='join'?[]:this._watcherKeywords,excluded_usernames:this._watcherExcludes,group_ids:[...this._watcherSelectedGroups],cooldown_hours:cooldown,dm_once:dmOnce,reply_in_group:replyInGroup,group_reply_text:groupReplyText,is_active:1,messages,watch_type:watchType,join_dm_delay_min:joinDelayMin,join_dm_delay_max:joinDelayMax};
 
   try{
     const savedId = editId ? parseInt(editId) : null;

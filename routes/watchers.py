@@ -20,6 +20,10 @@ router = APIRouter(prefix="/api/watchers", tags=["watchers"])
 class WatcherPayload(BaseModel):
     name: str
     sender_account_ids: list[int] = []
+    # Observer accounts for join watchers: the nick(s) that sit INSIDE the group
+    # and listen for new-member events. Senders need not be in the group. When
+    # empty, senders are used as observers (back-compat for single-list configs).
+    observer_account_ids: list[int] = []
     keywords: list[str] = []
     group_ids: list[int] = []
     cooldown_hours: int = 24
@@ -47,6 +51,12 @@ def _validate_watcher_payload(payload: "WatcherPayload"):
         raise HTTPException(status_code=400, detail="join_dm_delay_max must be >= join_dm_delay_min")
     if payload.join_dm_delay_max > 120:
         raise HTTPException(status_code=400, detail="join_dm_delay_max must be <= 120 minutes")
+    # A join watcher with no sender cannot DM anyone.
+    if payload.watch_type == "join" and not payload.sender_account_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="join watcher needs at least one sender account (nick gửi DM)",
+        )
 
 
 @router.get("")
@@ -59,10 +69,12 @@ async def create_watcher(payload: WatcherPayload):
     _validate_watcher_payload(payload)
     watcher_id = await db.create_watcher(payload.model_dump())
     await kw.reload_watcher(watcher_id)
-    # Auto-join sender accounts into required groups
-    if payload.sender_account_ids and payload.group_ids:
+    # Auto-join the nick(s) that must be INSIDE the group. For join watchers that
+    # is the observer list; for keyword watchers the senders (unchanged).
+    join_accts = payload.observer_account_ids if (payload.watch_type == "join" and payload.observer_account_ids) else payload.sender_account_ids
+    if join_accts and payload.group_ids:
         import asyncio
-        asyncio.create_task(tg.auto_join_accounts_to_groups(payload.sender_account_ids, payload.group_ids))
+        asyncio.create_task(tg.auto_join_accounts_to_groups(join_accts, payload.group_ids))
     return {"id": watcher_id, "message": "Watcher created"}
 
 
@@ -205,9 +217,10 @@ async def update_watcher(watcher_id: int, payload: WatcherPayload):
 
     if platform == "telegram":
         await kw.reload_watcher(watcher_id)
-        if payload.sender_account_ids and payload.group_ids:
+        join_accts = payload.observer_account_ids if (payload.watch_type == "join" and payload.observer_account_ids) else payload.sender_account_ids
+        if join_accts and payload.group_ids:
             import asyncio
-            asyncio.create_task(tg.auto_join_accounts_to_groups(payload.sender_account_ids, payload.group_ids))
+            asyncio.create_task(tg.auto_join_accounts_to_groups(join_accts, payload.group_ids))
     elif platform == "discord":
         try:
             import discord_watcher as dw
