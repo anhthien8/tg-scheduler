@@ -1071,6 +1071,39 @@ async def auto_join_accounts_to_groups(account_ids: list[int], group_ids: list[i
     return {"results": results}
 
 
+async def resolve_chat_link(account_id: int, link: str) -> dict | None:
+    """Resolve a t.me link / @username / id to {chat_id, chat_title, chat_type}.
+
+    Used by the watcher rule picker so the operator can add groups too large or
+    too quiet to appear in get_dialogs(limit=200). Call AFTER join_channel —
+    private invite links only resolve for members.
+    """
+    client = _clients.get(account_id)
+    if not client or not client.is_connected():
+        return None
+    try:
+        from telethon.tl.types import Channel as _Ch
+        from telethon.tl.types import Chat as _Chat
+        entity = await client.get_entity(link)
+        if isinstance(entity, _Ch):
+            chat_type = "channel" if entity.broadcast else "supergroup"
+        elif isinstance(entity, _Chat):
+            chat_type = "group"
+        else:
+            return None  # user/bot — not a group
+        return {
+            "chat_id": entity.id,
+            "chat_title": getattr(entity, "title", str(link)),
+            "chat_type": chat_type,
+            "username": getattr(entity, "username", "") or "",
+            "participants_count": getattr(entity, "participants_count", None),
+            "is_forum": bool(getattr(entity, "forum", False)),
+        }
+    except Exception as e:
+        logger.warning("[resolve_chat_link] acc=%s link=%r failed: %s", account_id, link, e)
+        return None
+
+
 async def get_similar_channels_and_contacts(account_id: int, channel_link: str) -> list[dict]:
     """Get recommendations of similar channels and extract admin contact handles from their description."""
     client = _clients.get(account_id)

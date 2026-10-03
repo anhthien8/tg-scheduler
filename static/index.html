@@ -1848,6 +1848,14 @@
             <div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>
           </div>
           <p class="form-hint">Chỉ hiển thị nhóm (group/supergroup) — kênh và bot không có thành viên tham gia nên không dùng được cho tính năng này.</p>
+          <div style="margin-top:10px;padding:10px;border:1px dashed var(--border);border-radius:8px;background:var(--bg3)">
+            <label class="form-label" style="font-size:12px">🔗 Không thấy nhóm trong danh sách? Dán link nhóm (group topic lớn thường bị ẩn)</label>
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <input type="text" class="form-input" id="w-group-link" placeholder="https://t.me/... hoặc @username" style="flex:1">
+              <button type="button" class="btn btn-primary btn-sm" id="w-link-btn" onclick="App.resolveWatcherGroupLink()">➕ Thêm &amp; Join</button>
+            </div>
+            <div id="w-link-status" style="font-size:12px;margin-top:6px"></div>
+          </div>
         </div>
 
         <!-- Cooldown -->
@@ -1942,7 +1950,7 @@
   <script defer src="/static/js/ai_agents.js?v=433"></script>
   <script defer src="/static/js/ai_followup.js?v=433"></script>
   <script defer src="/static/js/changelog.js?v=433"></script>
-  <script defer src="/static/js/app.js?v=434"></script>
+  <script defer src="/static/js/app.js?v=435"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

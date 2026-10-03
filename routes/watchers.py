@@ -310,3 +310,27 @@ async def auto_join_groups(payload: CheckMembershipPayload):
     result = await tg.auto_join_accounts_to_groups(payload.account_ids, payload.group_ids)
     return result
 
+
+class ResolveLinkPayload(BaseModel):
+    account_id: int
+    link: str
+
+
+@router.post("/resolve-link")
+async def resolve_link(payload: ResolveLinkPayload):
+    """Resolve a group link / @username to {chat_id, title, type} using one account.
+
+    Lets the operator add huge forum groups (100k+ members) that never surface in
+    get_dialogs(limit=200). We join the account first (so it can read the group),
+    then resolve the entity — without this the group is unselectable in the rule
+    picker.
+    """
+    link = (payload.link or "").strip()
+    if not link:
+        raise HTTPException(400, "Thiếu link nhóm")
+    joined = await tg.join_channel(payload.account_id, link)
+    info = await tg.resolve_chat_link(payload.account_id, link)
+    if not info:
+        return {"ok": False, "joined": joined, "error": joined.get("error") or "Không đọc được thông tin nhóm"}
+    return {"ok": True, "joined": joined, **info}
+

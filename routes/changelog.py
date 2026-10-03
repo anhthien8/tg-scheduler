@@ -8,6 +8,28 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.7.10",
+        "date": "03/10/2026",
+        "title": "🔗 Thêm nhóm bằng link — không còn bỏ sót group Topic lớn",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Những group khổng lồ dạng Topic (hàng trăm nghìn thành viên) thường không hiện trong ô tìm nhóm của Keyword DM Rule, vì Telegram chỉ trả về 200 hội thoại gần nhất. Nay bạn chỉ cần dán link nhóm — hệ thống tự cho nick đã chọn vào nhóm, đọc tên nhóm và tick chọn luôn để DM theo từ khóa.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Ô dán link nhóm + tự động join",
+                "desc": "Trong form tạo/sửa Keyword DM Rule có thêm ô 'Không thấy nhóm? Dán link nhóm'. Dán link t.me hoặc @username → nick đang chọn (nick gửi hoặc nick theo dõi) tự vào nhóm, hệ thống đọc tên/loại nhóm rồi thêm vào danh sách và tick sẵn.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "improvement",
+                "title": "Hiện rõ nhóm dạng Topic",
+                "desc": "Khi thêm thành công, hệ thống ghi chú '(nhóm dạng Topic)' để bạn biết đây là group forum — loại nhóm trước đây hay bị ẩn khỏi danh sách tìm kiếm.",
+                "tag": "Cải tiến"
+            },
+        ],
+    },
+    {
         "version": "v3.7.9",
         "date": "03/10/2026",
         "title": "🔴 /aioff tắt AI VĨNH VIỄN cho lead — không tự bật lại sau 12 giờ",

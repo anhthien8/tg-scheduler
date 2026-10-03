@@ -1334,6 +1334,9 @@ async openWatcherModal(){
 
   this._watcherObserverIds=[];
 
+  const _gl=document.getElementById('w-group-link'); if(_gl) _gl.value='';
+  const _gs=document.getElementById('w-link-status'); if(_gs) _gs.innerHTML='';
+
   this._renderWatcherKeywords();this._renderWatcherExcludes();
 
   await this._loadWatcherAccounts([]);await this._loadWatcherChatList([]);
@@ -1517,6 +1520,37 @@ _renderWatcherChatList(chats,preSelected=null){
 _onWatcherGroupToggle(cb){const id=parseInt(cb.value);if(cb.checked)this._watcherSelectedGroups.add(id);else this._watcherSelectedGroups.delete(id)},
 
 filterWatcherChats: debounce(function(){const q=(document.getElementById('w-chat-search')?.value||'').toLowerCase();this._renderWatcherChatList(this._watcherChats.filter(c=>String(c.chat_title||'').toLowerCase().includes(q)))}, 250),
+
+async resolveWatcherGroupLink(){
+  const inp=document.getElementById('w-group-link');
+  const st=document.getElementById('w-link-status');
+  const btn=document.getElementById('w-link-btn');
+  const link=(inp?.value||'').trim();
+  if(!link){st.innerHTML='<span style="color:var(--orange)">Dán link nhóm trước đã.</span>';return}
+  const accId=this._watcherActiveAccountId||(this.accounts[0]?.id);
+  if(!accId){st.innerHTML='<span style="color:var(--red)">Chọn nick gửi/theo dõi trước.</span>';return}
+  btn.disabled=true;st.innerHTML='<span class="spinner"></span> Đang join &amp; đọc thông tin nhóm (nick #'+accId+')...';
+  try{
+    const r=await fetch('/api/watchers/resolve-link',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({account_id:accId,link})});
+    const d=await r.json();
+    if(!r.ok||!d.ok){throw new Error(d.error||d.detail||'Không resolve được nhóm')}
+    const t=(d.chat_type||'').toLowerCase();
+    if(t!=='group'&&t!=='supergroup'){throw new Error('Đây là '+t+' — chỉ nhận group/supergroup.')}
+    // thêm vào danh sách (nếu chưa có) và tự tick chọn
+    const cid=Number(d.chat_id);
+    if(!this._watcherChats.some(c=>Number(c.chat_id)===cid)){
+      this._watcherChats.unshift({chat_id:cid,chat_title:d.chat_title,chat_type:d.chat_type,username:d.username||''});
+    }
+    this._watcherSelectedGroups.add(cid);
+    this._renderWatcherChatList(this._watcherChats);
+    const forum=d.is_forum?' (nhóm dạng Topic)':'';
+    st.innerHTML='<span style="color:var(--green)">✅ Đã thêm &amp; chọn: '+esc(d.chat_title)+forum+' — nick #'+accId+' đã join.</span>';
+    inp.value='';
+  }catch(e){
+    st.innerHTML='<span style="color:var(--red)">❌ '+esc(e.message||String(e))+'</span>';
+  }finally{btn.disabled=false}
+},
 
 addWatcherKeyword(){const inp=document.getElementById('w-keyword-input');const v=inp.value.trim();if(!v)return;if(!this._watcherKeywords.includes(v))this._watcherKeywords.push(v);inp.value='';this._renderWatcherKeywords()},
 
