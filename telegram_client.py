@@ -1082,22 +1082,61 @@ async def resolve_chat_link(account_id: int, link: str) -> dict | None:
     if not client or not client.is_connected():
         return None
     try:
+        from telethon.tl.functions.channels import GetFullChannelRequest
         from telethon.tl.types import Channel as _Ch
         from telethon.tl.types import Chat as _Chat
-        entity = await client.get_entity(link)
+        from telethon.tl.types import PeerChannel, PeerChat
+
+        target = link
+        if isinstance(target, str) and (target.isdigit() or target.startswith("-100")
+                                        or (target.startswith("-") and target[1:].isdigit())):
+            try:
+                target = int(target)
+            except ValueError:
+                pass
+
+        entity = None
+        try:
+            entity = await client.get_entity(target)
+        except Exception:
+            # Bare numeric ids and -100... ids need an explicit peer wrapper,
+            # exactly like join_channel does.
+            if isinstance(target, int):
+                clean_id = abs(target)
+                if str(clean_id).startswith("100"):
+                    clean_id = int(str(clean_id)[3:])
+                try:
+                    entity = await client.get_entity(PeerChannel(clean_id))
+                except Exception:
+                    entity = await client.get_entity(PeerChat(clean_id))
+            else:
+                raise
+
         if isinstance(entity, _Ch):
             chat_type = "channel" if entity.broadcast else "supergroup"
         elif isinstance(entity, _Chat):
             chat_type = "group"
         else:
             return None  # user/bot — not a group
+
+        # participants_count/forum are only on the full object, not the dialog entity.
+        is_forum = bool(getattr(entity, "forum", False))
+        participants = getattr(entity, "participants_count", None)
+        if isinstance(entity, _Ch):
+            try:
+                full = await client(GetFullChannelRequest(channel=entity))
+                is_forum = bool(getattr(full.full_chat, "forum", is_forum))
+                participants = getattr(full.full_chat, "participants_count", participants)
+            except Exception:
+                pass
+
         return {
             "chat_id": entity.id,
             "chat_title": getattr(entity, "title", str(link)),
             "chat_type": chat_type,
             "username": getattr(entity, "username", "") or "",
-            "participants_count": getattr(entity, "participants_count", None),
-            "is_forum": bool(getattr(entity, "forum", False)),
+            "participants_count": participants,
+            "is_forum": is_forum,
         }
     except Exception as e:
         logger.warning("[resolve_chat_link] acc=%s link=%r failed: %s", account_id, link, e)
