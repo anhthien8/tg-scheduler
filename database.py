@@ -847,21 +847,21 @@ async def init_db():
             except Exception:
                 pass
 
-        # Backfill stage from the legacy status so no chat is left without one:
-        #   needs_human/paused_admin -> a human owns it -> 'paused'
-        #   bot_ignored              -> never engage -> 'paused'
-        #   active + replied         -> 'nurture' (AI is already talking to them)
-        #   everything else          -> 'new'
+        # Backfill stage from the legacy status so no chat is left without one.
+        # NOTE: only bot_ignored maps to 'paused'. 'needs_human'/'paused_admin'
+        # mean "a human is reviewing this lead", NOT "operator turned AI off" —
+        # mapping them to 'paused' froze 30+ live conversations behind the
+        # v3.7.0 stage gate, so those now land in 'nurture' (AI keeps working).
         try:
             await db.execute("""
                 UPDATE ai_followup_chats
                 SET stage = CASE
-                    WHEN stage IS NOT NULL AND stage != '' AND stage != 'new' THEN stage
-                    WHEN status IN ('needs_human','paused_admin','bot_ignored') THEN 'paused'
+                    WHEN status IN ('needs_human','paused_admin') THEN 'nurture'
+                    WHEN status = 'bot_ignored' THEN 'paused'
                     WHEN status = 'active' AND COALESCE(reply_count, 0) > 0 THEN 'nurture'
                     ELSE 'new'
                 END
-                WHERE stage IS NULL OR stage = '' OR stage = 'new'
+                WHERE stage IS NULL OR stage = ''
             """)
             await db.commit()
         except Exception:

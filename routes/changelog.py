@@ -8,6 +8,28 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.7.11",
+        "date": "03/10/2026",
+        "title": "🔓 Sửa lỗi AI tự nhiên im với hàng loạt lead đang trò chuyện",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Một số lead đang được AI tư vấn bình thường bỗng nhiên không được trả lời nữa dù bạn không hề tắt AI. Nguyên nhân: khi hệ thống cập nhật, các lead 'đang chờ người xem' bị xếp nhầm vào nhóm 'đã tạm dừng' — mà nhóm này thì AI im vĩnh viễn. Đã sửa và mở khoá 32 lead bị ảnh hưởng.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Lead 'chờ người xem' không còn bị coi là 'đã tắt AI'",
+                "desc": "Trước đây lead ở trạng thái chờ người xử lý bị gán vào nhóm tạm dừng, khiến AI im mãi. Nay chỉ những hội thoại với bot (không bao giờ chat) mới vào nhóm tạm dừng; lead chờ người xem vẫn để AI tiếp tục hỗ trợ.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "Mở khoá 32 hội thoại đang bị đóng băng",
+                "desc": "Các lead thật (có lịch sử trò chuyện dài, có lead 20 lượt trao đổi) đã được đưa trở lại trạng thái AI tiếp tục trả lời. Riêng lead Digitech Sahil đang onboard dở đã được bật lại ngay.",
+                "tag": "Sửa lỗi"
+            },
+        ],
+    },
+    {
         "version": "v3.7.10",
         "date": "03/10/2026",
         "title": "🔗 Thêm nhóm bằng link — không còn bỏ sót group Topic lớn",
