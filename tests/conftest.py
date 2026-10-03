@@ -9,6 +9,11 @@ from datetime import datetime
 
 import pytest
 
+# Set before any app import: tells main.py's lifespan NOT to start the Telethon
+# background engines. Those raced clean_database's per-test DROP TABLE and
+# produced flaky "no such table: settings/accounts" errors.
+os.environ["TG_SKIP_ENGINES"] = "1"
+
 _original_sleep = asyncio.sleep
 async def _mock_sleep(seconds, *args, **kwargs):
     # Check stack to see if called from campaign/watcher logic

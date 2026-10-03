@@ -135,10 +135,16 @@ async def lifespan(app: FastAPI):
             await rc.init_schema(conn)
         logger.info("Database initialized")
         if TG_RUNTIME_MODE == "combined":
-            # Background connect task, same as before: HTTP must not wait on Telethon.
-            _startup_task = await lc.start_engines()
-            # Failures inside the background task must be visible in the log, not silent.
-            _startup_task.add_done_callback(_log_startup_task_result)
+            # Under pytest the background engines race the per-test clean_database
+            # fixture (it DROPs every table between tests) → "no such table"
+            # errors. Tests exercise HTTP/DB directly and never need Telethon.
+            if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TG_SKIP_ENGINES"):
+                logger.info("Test/opt-out env detected — skipping background engines")
+            else:
+                # Background connect task, same as before: HTTP must not wait on Telethon.
+                _startup_task = await lc.start_engines()
+                # Failures inside the background task must be visible in the log, not silent.
+                _startup_task.add_done_callback(_log_startup_task_result)
         else:
             logger.info("Running in TG_RUNTIME_MODE=web; skipping all Telethon/background engines")
 
