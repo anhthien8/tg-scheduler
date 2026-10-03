@@ -1120,8 +1120,11 @@ def _make_handler(account_id: int):
 
                 current_status = chat.get("status", "active")
 
-                # 24h Timeout check on incoming message — use human_takeover_at
-                if current_status in ("needs_human", "paused_admin"):
+                # 12h timeout check on incoming message — use human_takeover_at.
+                # Stage 'paused'/'signed' is an explicit operator hold (/aioff):
+                # NEVER auto-resume those, regardless of elapsed time.
+                _held_stage = (chat.get("stage") or "new") in ("paused", "signed")
+                if current_status in ("needs_human", "paused_admin") and not _held_stage:
                     # Prefer human_takeover_at; fallback to updated_at for legacy rows.
                     # If BOTH are NULL the chat could otherwise stay locked forever,
                     # so fall back to a fixed epoch-ish baseline: treat "never recorded"
@@ -1389,6 +1392,7 @@ async def process_drip_followups() -> dict:
             cur_to = await db_conn.execute("""
                 SELECT * FROM ai_followup_chats
                 WHERE status IN ('needs_human', 'paused_admin')
+                  AND COALESCE(NULLIF(stage, ''), 'new') NOT IN ('paused', 'signed')
                   AND (human_takeover_at IS NULL OR datetime(human_takeover_at) <= datetime('now', '-12 hours'))
                   AND datetime(updated_at) <= datetime('now', '-12 hours')
                 LIMIT 20

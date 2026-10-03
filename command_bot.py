@@ -1213,13 +1213,18 @@ async def _handle_forum_ai_button(event, data: str) -> None:
             await event.answer("⛔ Chưa có hội thoại AI cho lead này.", alert=True)
             return
         await db.resume_ai_for_user(acc_id, uid)
+        if (chat.get("stage") or "") in ("paused", "signed"):
+            await db.set_followup_stage(acc_id, uid, "nurture")
         await event.answer("✅ Đã BẬT AI", alert=False)
         await _render_ai_status(event, acc_id, uid)
         logger.info("[ForumInbox] button: admin=%s ENABLED AI for acc=%s user=%s",
                     event.sender_id, acc_id, uid)
 
     elif action == "off":
-        await db.set_human_takeover(acc_id, uid)
+        # Per operator: /aioff must silence the AI for THIS lead permanently —
+        # not for 12h. 'paused' is the stage gate that keeps the AI silent until
+        # an explicit /aion; the 12h auto-resume only touches needs_human rows.
+        await db.set_followup_stage(acc_id, uid, "paused")
         await event.answer("🛑 Đã TẮT AI", alert=False)
         await _render_ai_status(event, acc_id, uid)
         logger.info("[ForumInbox] button: admin=%s DISABLED AI for acc=%s user=%s",
@@ -1250,12 +1255,18 @@ async def _render_ai_status(event, acc_id: int, uid: int) -> None:
     """Show/refresh the AI status card for a lead, editing the message in place."""
     chat = await db.get_followup_chat(acc_id, uid) or {}
     status = chat.get("status", "—")
+    stage = chat.get("stage") or "new"
     human = chat.get("human_takeover_at") or "—"
     name = chat.get("username") or "—"
+    acc = await db.get_account(acc_id)
+    acc_label = ((acc.get("name") or "").strip() if acc else "") or f"Nick #{acc_id}"
+    ai_state = "🔴 TẮT (vĩnh viễn — gõ /aion để bật)" if stage in ("paused", "signed") \
+        else ("🟢 BẬT" if status == "active" else f"🟡 Tạm im ({status})")
     text = (
         f"🤖 **Điều khiển AI** — lead #{uid} (@{name})\n"
-        f"Nick phụ: #{acc_id}\n"
-        f"Trạng thái: `{status}`\n"
+        f"Nick: {acc_label}\n"
+        f"AI: {ai_state}\n"
+        f"Stage: `{stage}` · Status: `{status}`\n"
         f"Human takeover: {human}\n"
         f"Số lần lead phản hồi: {chat.get('reply_count', 0)}\n\n"
         f"_Bấm nút bên dưới để bật/tắt AI cho riêng lead này._"
@@ -1442,15 +1453,18 @@ async def _handle_forum_admin_message(event) -> None:
                 await event.respond("⛔ Chưa có hội thoại AI cho lead này (chưa từng nhắn).", reply_to=topic_id)
                 return
             await db.resume_ai_for_user(acc_id, uid)
+            if (chat.get("stage") or "") in ("paused", "signed"):
+                await db.set_followup_stage(acc_id, uid, "nurture")
             await event.respond("✅ Đã BẬT AI cho lead này. Từ giờ AI tự trả lời.",
                                 reply_to=topic_id, buttons=_ai_status_buttons(acc_id, uid, "active"))
             logger.info("[ForumInbox] admin=%s enabled AI for acc=%s user=%s", sender_id, acc_id, uid)
             return
 
-        # /ai-off → hand over to a human (locks AI, as if an admin was chatting)
-        await db.set_human_takeover(acc_id, uid)
-        await event.respond("🛑 Đã TẮT AI cho lead này. AI sẽ im cho tới khi bạn bật lại "
-                            "hoặc sau 24h không hoạt động.", reply_to=topic_id,
+        # /ai-off → silence the AI for THIS lead permanently (stage 'paused').
+        # NOT set_human_takeover: that only lasts 12h and auto-resumes.
+        await db.set_followup_stage(acc_id, uid, "paused")
+        await event.respond("🛑 Đã TẮT AI cho lead này. AI sẽ im cho tới khi bạn gõ /aion để bật lại.",
+                            reply_to=topic_id,
                             buttons=_ai_status_buttons(acc_id, uid, "needs_human"))
         logger.info("[ForumInbox] admin=%s disabled AI for acc=%s user=%s", sender_id, acc_id, uid)
         return

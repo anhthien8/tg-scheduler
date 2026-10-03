@@ -8,6 +8,34 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.7.9",
+        "date": "03/10/2026",
+        "title": "🔴 /aioff tắt AI VĨNH VIỄN cho lead — không tự bật lại sau 12 giờ",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Trước đây gõ /aioff (hoặc bấm nút AI: OFF) chỉ tạm im AI 12 giờ rồi tự bật lại — đúng ra khi bạn tắt cho một lead thì phải tắt hẳn. Nay /aioff khoá AI vĩnh viễn cho lead đó, chỉ khi bạn gõ /aion mới bật lại.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Tắt AI cho lead là tắt hẳn, không tự bật lại",
+                "desc": "/aioff và nút AI: OFF giờ chuyển lead sang trạng thái 'tạm dừng' (paused) — AI im cho tới khi bạn chủ động bật lại bằng /aion. Cả cơ chế tự bật sau 12h lẫn cơ chế tự bật khi lead nhắn tin đều bị chặn với lead đã tắt.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "/aion bật lại được lead đã tắt",
+                "desc": "Khi bạn gõ /aion (hoặc bấm Bật AI) cho một lead đang ở trạng thái tạm dừng, hệ thống đưa lead về trạng thái nuôi dưỡng và AI trả lời trở lại.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "improvement",
+                "title": "Thẻ Trạng thái hiện rõ AI đang BẬT hay TẮT",
+                "desc": "Nút Trạng thái giờ ghi rõ '🔴 TẮT (vĩnh viễn — gõ /aion để bật)' để bạn biết chắc AI đã tắt hẳn, kèm tên tài khoản thay vì 'Nick phụ #id'.",
+                "tag": "Cải tiến"
+            },
+        ],
+    },
+    {
         "version": "v3.7.8",
         "date": "02/10/2026",
         "title": "⚡ Sửa trang Tài khoản treo 30-40 giây sau khi khởi động",
