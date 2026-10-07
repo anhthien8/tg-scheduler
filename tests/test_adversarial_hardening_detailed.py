@@ -9,8 +9,6 @@ from fastapi.testclient import TestClient
 import database as db
 from routes.analytics import AsyncTTLCache, analytics_cache
 
-pytestmark = pytest.mark.asyncio
-
 # ==============================================================================
 # 1. DATABASE STRESS, CONCURRENCY, ROLLBACKS AND STARVATION
 # ==============================================================================

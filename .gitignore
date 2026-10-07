@@ -24,6 +24,8 @@ scratch/
 start_server.bat
 
 # Test / tooling artifacts
+_bench_out.txt
+_bench_ai.py
 .pytest_cache/
 .coverage
 .coverage.*

@@ -1,12 +1,8 @@
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 import database as db
 import dm_reply_tracker as tracker
 from routes.ai_followup import KOLBulkSendRequest, KOLRecipient, bulk_send_kol_messages
-
-pytestmark = pytest.mark.asyncio
 
 
 def test_personalize_weex_links_only_weex_domains():
