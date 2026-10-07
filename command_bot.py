@@ -111,6 +111,22 @@ async def _get_managed_accounts() -> list[dict]:
     return [a for a in accounts if a.get("is_logged_in") and not a.get("is_paused")]
 
 
+def _acc_label(acc: dict | None, account_id=None) -> str:
+    """Account NAME for user-facing text; "Acc #<id>" when the name is missing.
+
+    The operator reads these lines to know which Telegram nick is acting, so a
+    bare numeric id ("acc3") is useless. Empty/NULL names fall back to the id so
+    the layout never breaks.
+    """
+    name = ((acc or {}).get("name") or "").strip()
+    return name or f"Acc #{(acc or {}).get('id', account_id)}"
+
+
+async def _account_name_map() -> dict[int, str]:
+    """id → display name, fetched once (list views must not do N+1 lookups)."""
+    return {int(a["id"]): _acc_label(a) for a in await db.get_all_accounts()}
+
+
 async def _get_recent_kol_targets(limit: int = 8) -> list[dict]:
     """Get recent KOLs that have chatted with managed accounts."""
     try:
@@ -234,12 +250,23 @@ def _register_handlers(client: TelegramClient):
             return
         await _handle_campaigns(event)
 
-    # ── /kol @username ─────────────────────────────────────────────────────
-    @client.on(events.NewMessage(pattern=r"/kol\s+(@?\w+)"))
+    # ── /kol [@username] ───────────────────────────────────────────────────
+    # Pattern chấp nhận cả dạng trần ("/kol") và suffix bot-name mà Telegram tự
+    # chèn trong group ("/kol@weexos_command_bot"). Pattern cũ r"/kol\s+(@?\w+)"
+    # KHÔNG khớp hai dạng này → bot im lặng hoàn toàn, không cả báo lỗi.
+    @client.on(events.NewMessage(pattern=r"/kol(?:@\w+)?(?:\s+(@?\w+))?$"))
     async def cmd_kol(event):
         if not _check_admin(event):
             return
         username = event.pattern_match.group(1)
+        if not username:
+            await event.respond(
+                "ℹ️ **Cách dùng lệnh /kol:**\n\n"
+                "• Gõ: `/kol @username` hoặc `/kol username`\n"
+                "• Ví dụ: `/kol @elonmusk`",
+                parse_mode="md"
+            )
+            return
         await _handle_kol_info(event, username)
 
     # ── /resume <id> ───────────────────────────────────────────────────────
@@ -404,7 +431,7 @@ def _register_handlers(client: TelegramClient):
                     _set_state(uid, st)
                     acc = next((a for a in await _get_managed_accounts()
                                 if a["id"] == st["account_id"]), None)
-                    acc_name = acc["name"] if acc else f"Acc #{st['account_id']}"
+                    acc_name = _acc_label(acc, st["account_id"])
                     await event.edit(
                         f"📝 Nhập username KOL cần gửi tin:\n\n"
                         f"📤 Từ: **{acc_name}**\n"
@@ -426,7 +453,7 @@ def _register_handlers(client: TelegramClient):
                     _set_state(uid, st)
                     acc = next((a for a in await _get_managed_accounts()
                                 if a["id"] == st["account_id"]), None)
-                    acc_name = acc["name"] if acc else f"Acc #{st['account_id']}"
+                    acc_name = _acc_label(acc, st["account_id"])
                     await event.edit(
                         f"📝 Nhập nội dung tin nhắn:\n\n"
                         f"📤 Từ: **{acc_name}** → 🎯 **{target}**\n\n"
@@ -535,7 +562,7 @@ async def _handle_send_flow_text(event):
         _set_state(event.sender_id, st)
         acc = next((a for a in await _get_managed_accounts()
                     if a["id"] == st["account_id"]), None)
-        acc_name = acc["name"] if acc else f"Acc #{st['account_id']}"
+        acc_name = _acc_label(acc, st["account_id"])
         await event.respond(
             f"📝 Nhập nội dung tin nhắn:\n\n"
             f"📤 Từ: **{acc_name}** → 🎯 **{target}**\n\n"
@@ -560,7 +587,7 @@ async def _start_send_flow(event, target: str | None):
     row = []
     for a in accounts:
         premium = "⭐" if a.get("is_premium") else ""
-        name = a.get("name", f"Acc #{a['id']}")
+        name = _acc_label(a)
         me = tg._me_cache.get(a["id"]) or {}
         uname = me.get("username") or ""
         label = f"{premium}{name}" + (f" @{uname}" if uname else "")
@@ -592,7 +619,7 @@ async def _show_target_picker(event, state: dict):
         _set_state(event.sender_id, state)
         acc = next((a for a in await _get_managed_accounts()
                     if a["id"] == state["account_id"]), None)
-        acc_name = acc["name"] if acc else f"Acc #{state['account_id']}"
+        acc_name = _acc_label(acc, state["account_id"])
         if hasattr(event, "edit"):
             await event.edit(
                 f"📝 Nhập nội dung tin nhắn:\n\n"
@@ -616,11 +643,16 @@ async def _show_target_picker(event, state: dict):
 
     # Recent KOL targets
     if recent:
+        acc_map = await _account_name_map()
         for r in recent[:6]:
             username = r.get("username") or r.get("sender_username") or ""
             uid = r.get("user_id") or r.get("sender_user_id") or ""
             name = r.get("name") or r.get("sender_name") or username or f"User #{uid}"
-            acc_name = r.get("account_name", "")
+            row_acc_id = r.get("account_id")
+            acc_name = acc_map.get(int(row_acc_id)) if row_acc_id else ""
+            if not acc_name:
+                acc_name = (r.get("account_name") or "").strip() \
+                    or (f"Acc #{row_acc_id}" if row_acc_id else "")
             label = f"@{username}" if username else f"ID:{uid}"
             if name and name != username:
                 label = f"{name} ({label})"
@@ -645,7 +677,7 @@ async def _show_confirm(event, state: dict):
     """Step 4: Preview and confirm."""
     acc = next((a for a in await _get_managed_accounts()
                 if a["id"] == state["account_id"]), None)
-    acc_name = acc["name"] if acc else f"Acc #{state['account_id']}"
+    acc_name = _acc_label(acc, state["account_id"])
     target = state.get("target", "?")
     message = state.get("message", "")
 
@@ -690,7 +722,7 @@ async def _execute_send(event, state: dict):
 
         acc = next((a for a in await _get_managed_accounts()
                     if a["id"] == account_id), None)
-        acc_name = acc["name"] if acc else f"Acc #{account_id}"
+        acc_name = _acc_label(acc, account_id)
         ts = datetime.now(timezone.utc).strftime("%d/%m %H:%M UTC")
 
         await event.edit(
@@ -767,7 +799,7 @@ async def _handle_status(event):
         lines.append(f"\n🚨 **Account cần chú ý: {len(flagged)}**")
         for a in flagged[:3]:
             reason = a.get("flag_reason") or a.get("pause_reason") or "?"
-            lines.append(f"  {a['name']}: {reason[:40]}")
+            lines.append(f"  {_acc_label(a)}: {reason[:40]}")
 
     buttons = [
         [Button.inline("🔄 Reload", data="nav:status"),
@@ -798,7 +830,7 @@ async def _handle_accounts(event):
         peerflood = ""
         if a.get("peerflood_until", 0) > time.time():
             peerflood = " ⛔Flood"
-        lines.append(f"{status} **{a['name']}**{premium}{peerflood}")
+        lines.append(f"{status} **{_acc_label(a)}**{premium}{peerflood}")
 
     buttons = [
         [Button.inline("🔍 Check SpamBot", data="nav:check_prompt"),
@@ -887,10 +919,12 @@ async def _handle_kol_info(event, username: str):
 
         c = matches[0]
         name = c.get("name") or c.get("sender_name") or username_clean
+        acc_name = (c.get("account_name") or "").strip() \
+            or f"Acc #{c.get('account_id', '?')}"
         text = (
             f"👤 **KOL: {name}** (@{username_clean})\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"💬 Nick phụ chat: **{c.get('account_name', '?')}**\n"
+            f"💬 Nick phụ chat: **{acc_name}**\n"
             f"📊 Trạng thái: **{c.get('status', '?')}**\n"
             f"🕐 Tin cuối: {c.get('updated_at', '?')}\n"
         )
@@ -992,7 +1026,7 @@ async def _handle_check_account(event, name: str):
 
     client = tg.get_client(acc["id"])
     if not client or not client.is_connected():
-        await event.respond(f"🔴 {acc['name']}: không kết nối")
+        await event.respond(f"🔴 {_acc_label(acc)}: không kết nối")
         return
 
     try:
@@ -1002,12 +1036,12 @@ async def _handle_check_account(event, name: str):
         message = result.get("message", "")
         icon = {"free": "🟢", "limited": "🟡", "unknown": "⚪"}.get(status, "⚪")
         await event.respond(
-            f"{icon} **{acc['name']}**\n"
+            f"{icon} **{_acc_label(acc)}**\n"
             f"Trạng thái: **{status}**\n"
             f"Chi tiết: {message}"
         )
     except Exception as e:
-        await event.respond(f"❌ Check thất bại {acc['name']}: {e}")
+        await event.respond(f"❌ Check thất bại {_acc_label(acc)}: {e}")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1259,7 +1293,7 @@ async def _render_ai_status(event, acc_id: int, uid: int) -> None:
     human = chat.get("human_takeover_at") or "—"
     name = chat.get("username") or "—"
     acc = await db.get_account(acc_id)
-    acc_label = ((acc.get("name") or "").strip() if acc else "") or f"Nick #{acc_id}"
+    acc_label = _acc_label(acc, acc_id)
     ai_state = "🔴 TẮT (vĩnh viễn — gõ /aion để bật)" if stage in ("paused", "signed") \
         else ("🟢 BẬT" if status == "active" else f"🟡 Tạm im ({status})")
     text = (
@@ -1292,14 +1326,17 @@ def _stage_label(stage: str | None) -> str:
     return _STAGE_LABEL.get(stage or "new", stage or "new")
 
 
-def _lead_line(r: dict) -> str:
+def _lead_line(r: dict, acc_map: dict[int, str] | None = None) -> str:
     """One compact line per lead for the pipeline views."""
     who = r.get("username") or r.get("name") or str(r.get("user_id"))
     who = who.lstrip("@")
     tier = r.get("lead_tier") or "—"
     intent = r.get("intent_score") or 0
     reps = r.get("reply_count") or 0
-    return f"• @{who} · {tier} · intent {intent} · {reps} tin · acc{r.get('account_id')}"
+    acc_id = r.get("account_id")
+    acc_name = (acc_map or {}).get(acc_id) or r.get("account_name") \
+        or (f"Acc #{acc_id}" if acc_id is not None else "—")
+    return f"• @{who} · {tier} · intent {intent} · {reps} tin · {acc_name}"
 
 
 async def _handle_pipeline(event) -> None:
@@ -1325,9 +1362,10 @@ async def _handle_attention(event) -> None:
     if not leads:
         await event.respond("✅ Không có lead nào cần bạn xử lý ngay.")
         return
+    acc_map = await _account_name_map()
     lines = [f"🎯 **{len(leads)} lead cần chú ý**\n"]
     for r in leads:
-        lines.append(f"{_stage_label(r.get('stage'))} · {_lead_line(r)}")
+        lines.append(f"{_stage_label(r.get('stage'))} · {_lead_line(r, acc_map)}")
     lines.append("\nVào topic của lead để xem hội thoại và gõ /stage để đổi.")
     await event.respond("\n".join(lines))
 

@@ -1,6 +1,43 @@
 /**
  * API Client - multi-account aware, with optional X-API-Key header support.
  */
+
+// ── Client-side pagination helpers (dùng chung cho mọi bảng lớn) ──
+// Khai báo ở đây vì api.js được nạp TRƯỚC members.js và app.js.
+// Trả về slice của rows cho trang hiện tại + metadata để render pager.
+function paginate(rows, page, perPage = 50) {
+  const list = Array.isArray(rows) ? rows : [];
+  const total = list.length;
+  const pages = Math.max(1, Math.ceil(total / perPage));
+  const p = Math.min(Math.max(1, page || 1), pages);
+  const start = (p - 1) * perPage;
+  return { slice: list.slice(start, start + perPage), page: p, pages, total, start, perPage };
+}
+
+// Render điều hướng phân trang vào `el`. `state` là kết quả của paginate().
+// onGo(page) được gọi khi user bấm; page luôn nằm trong [1, state.pages].
+function renderPager(el, state, onGo) {
+  if (!el) return;
+  if (!state || state.pages <= 1) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  el.style.display = '';
+  const { page, pages, total, start, perPage } = state;
+  const from = start + 1;
+  const to = Math.min(start + perPage, total);
+  const btn = (label, page, disabled) =>
+    `<button class="pager-btn" ${disabled ? 'disabled' : ''} data-page="${page}">${label}</button>`;
+  el.innerHTML =
+    `<span class="pager-info">${from}–${to} / ${total}</span>` +
+    btn('‹', page - 1, page <= 1) +
+    `<span class="pager-info">Trang ${page}/${pages}</span>` +
+    btn('›', page + 1, page >= pages);
+  el.querySelectorAll('.pager-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      const p = parseInt(b.getAttribute('data-page'));
+      if (p >= 1 && p <= pages) onGo(p);
+    });
+  });
+}
+
 const API = {
   base: '',
 

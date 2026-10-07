@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TG Scheduler</title>
   <meta name="description" content="Telegram Userbot Multi-Account Message Scheduler">
-  <link rel="stylesheet" href="/static/css/style.css?v=433">
+  <link rel="stylesheet" href="/static/css/style.css?v=436">
   <!-- Boot splash: paints instantly (CSS-only, no JS) so the user never sees a
        blank white screen while the app bundle parses/executes. Hidden as soon
        as app.js runs (body.app-ready). -->
@@ -178,6 +178,9 @@
         </button>
         <button type="button" class="nav-item" data-page="changelog" onclick="App.navigate('changelog')">
           🚀 Cập Nhật <span class="badge" style="background:linear-gradient(135deg, #8b5cf6, #ec4899);color:#fff;font-size:10px;padding:2px 6px;border-radius:10px;margin-left:6px;font-weight:700">NEW</span>
+        </button>
+        <button type="button" class="nav-item" data-page="help" onclick="App.navigate('help')">
+          📖 Hướng dẫn
         </button>
       </nav>
       <div class="sidebar-footer">
@@ -1023,6 +1026,20 @@
           <button class="btn btn-outline" onclick="window.Changelog.showModal()">✨ Xem Tóm Tắt Bản Mới</button>
         </div>
         <div id="changelog-content"></div>
+      </div>
+
+      <!-- ══ Help / Hướng dẫn View ══ -->
+      <div id="view-help" class="hidden">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">📖 Hướng dẫn sử dụng</h2>
+          <input type="search" class="form-input help-search" id="help-search"
+                 placeholder="Tìm trong mục lục…" oninput="Help.filter(this.value)"
+                 aria-label="Tìm trong mục lục hướng dẫn">
+        </div>
+        <div class="help-layout">
+          <nav class="help-toc" id="help-toc-list" aria-label="Mục lục hướng dẫn"></nav>
+          <article class="card help-body" id="help-content"></article>
+        </div>
       </div>
 
       <!-- AI Agent Create/Edit Modal -->
@@ -1950,6 +1967,7 @@
   <script defer src="/static/js/ai_agents.js?v=433"></script>
   <script defer src="/static/js/ai_followup.js?v=433"></script>
   <script defer src="/static/js/changelog.js?v=433"></script>
+  <script defer src="/static/js/help.js?v=436"></script>
   <script defer src="/static/js/app.js?v=435"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->

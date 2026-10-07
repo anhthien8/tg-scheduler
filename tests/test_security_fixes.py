@@ -26,6 +26,21 @@ def test_allow_private_still_permits_loopback():
     assert validate_outbound_url("http://127.0.0.1:20128/v1", allow_private=True)
 
 
+def test_allow_loopback_permits_local_router_only():
+    assert validate_outbound_url(
+        "http://127.0.0.1:20128/v1", allow_loopback=True
+    )
+    with pytest.raises(UrlNotAllowed):
+        validate_outbound_url("http://192.168.1.10:8080", allow_loopback=True)
+
+
+def test_allow_loopback_still_blocks_cloud_metadata():
+    with pytest.raises(UrlNotAllowed):
+        validate_outbound_url(
+            "http://169.254.169.254/latest/meta-data", allow_loopback=True
+        )
+
+
 def test_blocks_non_http_scheme():
     with pytest.raises(UrlNotAllowed):
         validate_outbound_url("file:///etc/passwd")

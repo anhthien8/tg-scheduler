@@ -48,6 +48,7 @@ from routes import ai_agents as ai_agents_routes
 from routes import analytics, blacklist, logs, settings
 from routes import changelog as changelog_routes
 from routes import discord as discord_routes
+from routes import help as help_routes
 from routes import ipc as ipc_routes
 
 if TG_RUNTIME_MODE == "combined":
@@ -237,7 +238,7 @@ if TG_RUNTIME_MODE == "web":
         path = request.url.path
         if path.startswith("/api/ipc"):
             return await call_next(request)
-        allowed = ("/api/logs", "/api/analytics", "/api/changelog", "/api/health/telegram-worker")
+        allowed = ("/api/logs", "/api/analytics", "/api/changelog", "/api/help", "/api/health/telegram-worker")
         if path.startswith("/api/") and (
             request.method != "GET" or not any(path == p or path.startswith(p + "/") for p in allowed)
         ):
@@ -262,6 +263,7 @@ app.include_router(discord_routes.router, dependencies=_auth_dep)
 app.include_router(analytics.router, dependencies=_auth_dep)
 app.include_router(ai_agents_routes.router, dependencies=_auth_dep)
 app.include_router(changelog_routes.router, dependencies=_auth_dep)
+app.include_router(help_routes.router, dependencies=_auth_dep)
 app.include_router(ipc_routes.router, dependencies=_auth_dep)
 
 if TG_RUNTIME_MODE == "combined":

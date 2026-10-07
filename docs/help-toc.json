@@ -1,0 +1,338 @@
+[
+  {
+    "id": "h1-1",
+    "title": "Hướng dẫn sử dụng TG Scheduler",
+    "level": 1,
+    "anchor": "huong-dan-su-dung-tg-scheduler"
+  },
+  {
+    "id": "h2-2",
+    "title": "1. Giới thiệu",
+    "level": 2,
+    "anchor": "1-gioi-thieu"
+  },
+  {
+    "id": "h2-3",
+    "title": "2. Cài đặt & Khởi động",
+    "level": 2,
+    "anchor": "2-cai-dat-khoi-dong"
+  },
+  {
+    "id": "h3-4",
+    "title": "Yêu cầu",
+    "level": 3,
+    "anchor": "yeu-cau"
+  },
+  {
+    "id": "h3-5",
+    "title": "Biến môi trường (.env)",
+    "level": 3,
+    "anchor": "bien-moi-truong-env"
+  },
+  {
+    "id": "h3-6",
+    "title": "Chạy",
+    "level": 3,
+    "anchor": "chay"
+  },
+  {
+    "id": "h2-7",
+    "title": "3. Đăng nhập tài khoản Telegram",
+    "level": 2,
+    "anchor": "3-dang-nhap-tai-khoan-telegram"
+  },
+  {
+    "id": "h3-8",
+    "title": "Thêm tài khoản",
+    "level": 3,
+    "anchor": "them-tai-khoan"
+  },
+  {
+    "id": "h3-9",
+    "title": "Quản lý session",
+    "level": 3,
+    "anchor": "quan-ly-session"
+  },
+  {
+    "id": "h2-10",
+    "title": "4. Tạo lịch gửi tin",
+    "level": 2,
+    "anchor": "4-tao-lich-gui-tin"
+  },
+  {
+    "id": "h3-11",
+    "title": "Tạo lịch mới",
+    "level": 3,
+    "anchor": "tao-lich-moi"
+  },
+  {
+    "id": "h3-12",
+    "title": "Multi-media & Bulk",
+    "level": 3,
+    "anchor": "multi-media-bulk"
+  },
+  {
+    "id": "h2-13",
+    "title": "5. Bulk sending + Rate limiting",
+    "level": 2,
+    "anchor": "5-bulk-sending-rate-limiting"
+  },
+  {
+    "id": "h3-14",
+    "title": "Hàng đợi & Giới hạn",
+    "level": 3,
+    "anchor": "hang-doi-gioi-han"
+  },
+  {
+    "id": "h3-15",
+    "title": "An toàn",
+    "level": 3,
+    "anchor": "an-toan"
+  },
+  {
+    "id": "h2-16",
+    "title": "6. Keyword Watcher",
+    "level": 2,
+    "anchor": "6-keyword-watcher"
+  },
+  {
+    "id": "h3-17",
+    "title": "Cấu hình",
+    "level": 3,
+    "anchor": "cau-hinh"
+  },
+  {
+    "id": "h3-18",
+    "title": "Hành vi an toàn",
+    "level": 3,
+    "anchor": "hanh-vi-an-toan"
+  },
+  {
+    "id": "h2-19",
+    "title": "7. Join Watcher",
+    "level": 2,
+    "anchor": "7-join-watcher"
+  },
+  {
+    "id": "h2-20",
+    "title": "8. Reaction engine (\"Tăng Tương Tác\")",
+    "level": 2,
+    "anchor": "8-reaction-engine-tang-tuong-tac"
+  },
+  {
+    "id": "h3-21",
+    "title": "Thêm kênh",
+    "level": 3,
+    "anchor": "them-kenh"
+  },
+  {
+    "id": "h3-22",
+    "title": "Lịch sử",
+    "level": 3,
+    "anchor": "lich-su"
+  },
+  {
+    "id": "h2-23",
+    "title": "9. Invite engine + Warmup",
+    "level": 2,
+    "anchor": "9-invite-engine-warmup"
+  },
+  {
+    "id": "h3-24",
+    "title": "Invite Campaign",
+    "level": 3,
+    "anchor": "invite-campaign"
+  },
+  {
+    "id": "h3-25",
+    "title": "Warmup",
+    "level": 3,
+    "anchor": "warmup"
+  },
+  {
+    "id": "h2-26",
+    "title": "10. Member / Campaign, KOL outreach, AI follow-up, AI agents",
+    "level": 2,
+    "anchor": "10-member-campaign-kol-outreach-ai-follow-up-ai-agents"
+  },
+  {
+    "id": "h3-27",
+    "title": "Cào & DM (Members)",
+    "level": 3,
+    "anchor": "cao-dm-members"
+  },
+  {
+    "id": "h3-28",
+    "title": "KOL Outreach & AI Follow-up",
+    "level": 3,
+    "anchor": "kol-outreach-ai-follow-up"
+  },
+  {
+    "id": "h3-29",
+    "title": "AI Agents",
+    "level": 3,
+    "anchor": "ai-agents"
+  },
+  {
+    "id": "h2-30",
+    "title": "11. Forum Inbox (Sales War Room)",
+    "level": 2,
+    "anchor": "11-forum-inbox-sales-war-room"
+  },
+  {
+    "id": "h3-31",
+    "title": "Yêu cầu",
+    "level": 3,
+    "anchor": "yeu-cau-1"
+  },
+  {
+    "id": "h3-32",
+    "title": "Cấu hình",
+    "level": 3,
+    "anchor": "cau-hinh-1"
+  },
+  {
+    "id": "h3-33",
+    "title": "Tính năng v1",
+    "level": 3,
+    "anchor": "tinh-nang-v1"
+  },
+  {
+    "id": "h2-34",
+    "title": "12. Proxy manager + Blacklist",
+    "level": 2,
+    "anchor": "12-proxy-manager-blacklist"
+  },
+  {
+    "id": "h3-35",
+    "title": "Proxy",
+    "level": 3,
+    "anchor": "proxy"
+  },
+  {
+    "id": "h3-36",
+    "title": "Blacklist",
+    "level": 3,
+    "anchor": "blacklist"
+  },
+  {
+    "id": "h2-37",
+    "title": "13. Analytics / Dashboard / Changelog",
+    "level": 2,
+    "anchor": "13-analytics-dashboard-changelog"
+  },
+  {
+    "id": "h3-38",
+    "title": "Dashboard (Tổng quan)",
+    "level": 3,
+    "anchor": "dashboard-tong-quan"
+  },
+  {
+    "id": "h3-39",
+    "title": "Analytics",
+    "level": 3,
+    "anchor": "analytics"
+  },
+  {
+    "id": "h3-40",
+    "title": "Changelog",
+    "level": 3,
+    "anchor": "changelog"
+  },
+  {
+    "id": "h2-41",
+    "title": "14. Discord watcher",
+    "level": 2,
+    "anchor": "14-discord-watcher"
+  },
+  {
+    "id": "h2-42",
+    "title": "15. Dành cho ADMIN",
+    "level": 2,
+    "anchor": "15-danh-cho-admin"
+  },
+  {
+    "id": "h3-43",
+    "title": "Runtime mode",
+    "level": 3,
+    "anchor": "runtime-mode"
+  },
+  {
+    "id": "h3-44",
+    "title": "Singleton lock",
+    "level": 3,
+    "anchor": "singleton-lock"
+  },
+  {
+    "id": "h3-45",
+    "title": "Xác thực",
+    "level": 3,
+    "anchor": "xac-thuc"
+  },
+  {
+    "id": "h3-46",
+    "title": "Sao lưu & Vận hành",
+    "level": 3,
+    "anchor": "sao-luu-van-hanh"
+  },
+  {
+    "id": "h3-47",
+    "title": "engine.lock & DATA_DIR",
+    "level": 3,
+    "anchor": "engine-lock-data-dir"
+  },
+  {
+    "id": "h2-48",
+    "title": "16. Xử lý sự cố thường gặp (FAQ)",
+    "level": 2,
+    "anchor": "16-xu-ly-su-co-thuong-gap-faq"
+  },
+  {
+    "id": "h3-49",
+    "title": "FloodWait / PeerFlood",
+    "level": 3,
+    "anchor": "floodwait-peerflood"
+  },
+  {
+    "id": "h3-50",
+    "title": "Account bị hạn chế / PeerFlood",
+    "level": 3,
+    "anchor": "account-bi-han-che-peerflood"
+  },
+  {
+    "id": "h3-51",
+    "title": "Dashboard không mở / 403 Unauthorized",
+    "level": 3,
+    "anchor": "dashboard-khong-mo-403-unauthorized"
+  },
+  {
+    "id": "h3-52",
+    "title": "Watcher không chạy",
+    "level": 3,
+    "anchor": "watcher-khong-chay"
+  },
+  {
+    "id": "h3-53",
+    "title": "Session hết hạn / disconnect",
+    "level": 3,
+    "anchor": "session-het-han-disconnect"
+  },
+  {
+    "id": "h3-54",
+    "title": "Command Bot / Forum Inbox không hoạt động",
+    "level": 3,
+    "anchor": "command-bot-forum-inbox-khong-hoat-dong"
+  },
+  {
+    "id": "h3-55",
+    "title": "Lỗi 503 trong web mode",
+    "level": 3,
+    "anchor": "loi-503-trong-web-mode"
+  },
+  {
+    "id": "h2-56",
+    "title": "17. Bảng thuật ngữ ngắn",
+    "level": 2,
+    "anchor": "17-bang-thuat-ngu-ngan"
+  }
+]

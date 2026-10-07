@@ -125,6 +125,15 @@ if(page==='changelog'){
   return;
 }
 
+// User guide page
+if(page==='help'){
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  const helpView = document.getElementById('view-help');
+  if(helpView) helpView.classList.remove('hidden');
+  if(window.Help) window.Help.init();
+  return;
+}
+
 // AI Follow-Up Sales Agent Page
 if(page==='ai-followup'){
   if(!document.getElementById('view-ai-followup')){

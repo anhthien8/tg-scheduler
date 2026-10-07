@@ -8,6 +8,7 @@ var me_dummy = me_dummy || {}; var me_dummy_style = me_dummy_style || {};
 const AIFollowUp = {
   settings: null,
   _chats: [],
+  _chatsLoadedAt: 0,   // thời điểm fetch chats gần nhất (để cache 30s)
   _statusFilter: '',
   _page: 1,
   _modalChat: null,
@@ -22,10 +23,19 @@ const AIFollowUp = {
     bot_ignored:  { label: '🚫 Ignored bot',      badge: 'badge badge-gray' }
   },
 
-  async init() {
+  async init(force = false) {
     await Promise.all([this.loadSettings(), this.loadKolChannelSettings()]);
     this.switchTab('leads');
-    await this.loadChats();
+    // Cache: chỉ fetch lại 86KB chats nếu quá 30s hoặc bị yêu cầu (nút 🔄 / force).
+    const fresh = this._chatsLoadedAt && (Date.now() - this._chatsLoadedAt) < 30000 && this._chats.length;
+    if (force || !fresh) {
+      await this.loadChats();
+    } else {
+      // Dùng lại dữ liệu sẵn có — không fetch lại, render tức thì.
+      this.renderStats();
+      this.renderChips();
+      this.renderPage();
+    }
   },
 
   // ── Tabs ──────────────────────────────────────────────────────────
@@ -158,6 +168,7 @@ const AIFollowUp = {
       if (!res.ok) throw new Error('Lỗi tải danh sách lead');
       const data = await res.json();
       this._chats = data.chats || [];
+      this._chatsLoadedAt = Date.now();
       this._page = 1;
       this.renderStats();
       this.renderChips();

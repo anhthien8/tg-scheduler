@@ -21,12 +21,15 @@ class UrlNotAllowed(ValueError):
     """Raised when a URL fails the SSRF policy."""
 
 
-def validate_outbound_url(url: str, *, allow_private: bool = False) -> str:
+def validate_outbound_url(
+    url: str, *, allow_private: bool = False, allow_loopback: bool = False
+) -> str:
     """Return the URL if it is safe to fetch server-side, else raise UrlNotAllowed.
 
-    allow_private=True permits loopback/private (for a deliberately local
-    router) but STILL blocks link-local / reserved / multicast / unspecified —
-    so cloud-metadata SSRF (169.254.169.254) stays blocked either way.
+    allow_loopback=True permits only loopback targets for a deliberately local
+    router. allow_private=True additionally permits private network targets.
+    Link-local / reserved / multicast / unspecified addresses are always
+    blocked, so cloud-metadata SSRF (169.254.169.254) stays blocked.
     """
     if not url or not isinstance(url, str):
         raise UrlNotAllowed("URL trống hoặc không hợp lệ")
@@ -54,6 +57,8 @@ def validate_outbound_url(url: str, *, allow_private: bool = False) -> str:
         if (ip.is_link_local or ip.is_reserved
                 or ip.is_multicast or ip.is_unspecified):
             raise UrlNotAllowed(f"Host '{host}' trỏ tới địa chỉ bị chặn ({ip_str})")
-        if not allow_private and (ip.is_private or ip.is_loopback):
+        if ip.is_loopback and not (allow_loopback or allow_private):
+            raise UrlNotAllowed(f"Host '{host}' trỏ tới địa chỉ nội bộ ({ip_str})")
+        if ip.is_private and not ip.is_loopback and not allow_private:
             raise UrlNotAllowed(f"Host '{host}' trỏ tới địa chỉ nội bộ ({ip_str})")
     return url.strip()

@@ -271,6 +271,12 @@ async def _notify_main_account_handover(
         except Exception as e:
             logger.debug("[Handover] Command bot alert skipped: %s", e)
 
+        # Saved Messages mirror: tắt mặc định (Command Bot + Forum đã nhận alert).
+        # Bật lại: settings key kol_pending_saved_msg_enabled = "1".
+        if await db.get_setting("kol_pending_saved_msg_enabled", "0") != "1":
+            logger.debug("[Handover] Saved Messages alert disabled by setting, skipping")
+            return
+
         # Send to main account's Saved Messages
         main_client = tg.get_client(MAIN_ACCOUNT_ID)
         if main_client and main_client.is_connected():
