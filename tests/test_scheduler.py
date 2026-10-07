@@ -139,10 +139,24 @@ def test_stop_scheduler_is_safe_when_never_started():
     sch.stop_scheduler()  # must not raise
 
 
-def test_get_next_run_on_pending_job_returns_none_not_raise(scheduler_instance):
+def test_get_next_run_on_pending_job_returns_none_not_raise():
     """Regression: APScheduler 3.11.3 doesn't set Job.next_run_time on a
     pending (not-yet-started) scheduler. get_next_run must not AttributeError.
+
+    Deliberately does NOT use the scheduler_instance fixture: that fixture
+    wraps get_job in _JobView (which defines next_run_time = None) and would
+    mask the very attribute this test guards. Here the real pending Job is
+    used, so `job.next_run_time` raises and only getattr(..., None) passes.
     """
-    _add({"id": 9, "name": "p", "schedule_type": "daily", "time_of_day": "09:00"},
-         scheduler_instance)
-    assert sch.get_next_run(9) is None
+    sch._scheduler = None
+    sched = sch.get_scheduler()
+    try:
+        sch.add_schedule_job({"id": 9, "name": "p", "schedule_type": "daily",
+                              "time_of_day": "09:00"})
+        job = sched.get_job("schedule_9")
+        assert job is not None
+        # Precondition: a pending Job genuinely lacks the attribute.
+        assert not hasattr(job, "next_run_time")
+        assert sch.get_next_run(9) is None
+    finally:
+        sch._scheduler = None
