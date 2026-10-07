@@ -137,3 +137,12 @@ async def test_load_all_jobs_skips_schedules_over_max_sends(fake_db, scheduler_i
 def test_stop_scheduler_is_safe_when_never_started():
     sch._scheduler = None
     sch.stop_scheduler()  # must not raise
+
+
+def test_get_next_run_on_pending_job_returns_none_not_raise(scheduler_instance):
+    """Regression: APScheduler 3.11.3 doesn't set Job.next_run_time on a
+    pending (not-yet-started) scheduler. get_next_run must not AttributeError.
+    """
+    _add({"id": 9, "name": "p", "schedule_type": "daily", "time_of_day": "09:00"},
+         scheduler_instance)
+    assert sch.get_next_run(9) is None

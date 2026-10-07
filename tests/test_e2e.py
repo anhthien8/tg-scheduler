@@ -32,20 +32,34 @@ async def test_02_list_accounts(client):
     # Insert account
     acc_id = await db.create_account({
         "name": "Test Account List",
-        "phone": "+8499999999",
+        "phone": "+849****9999",
         "api_id": "2040",
         "api_hash": "b18441a1ff607e10a989891a5462e627",
         "session_name": "account_list_test",
         "proxy_url": None
     })
-    response = client.get("/api/auth/accounts")
-    assert response.status_code == 200
-    data = response.json()
-    assert "accounts" in data
-    assert len(data["accounts"]) >= 1
-    # Check that mocked user_info details are returned
-    acc = next(a for a in data["accounts"] if a["id"] == acc_id)
-    assert acc["user_info"]["username"] == "mocked_user"
+    # /api/auth/accounts không gọi Telegram RPC nữa (commit 867a828): user_info
+    # chỉ đến từ _me_cache mà engine nạp khi account connect. Mô phỏng cache ấm.
+    import telegram_client as tg
+    tg._me_cache[acc_id] = {
+        "user_id": 12345,
+        "first_name": "Mocked User",
+        "last_name": "Telegram",
+        "username": "mocked_user",
+        "phone": "+841****5678",
+    }
+    try:
+        response = client.get("/api/auth/accounts")
+        assert response.status_code == 200
+        data = response.json()
+        assert "accounts" in data
+        assert len(data["accounts"]) >= 1
+        # Check that mocked user_info details are returned
+        acc = next(a for a in data["accounts"] if a["id"] == acc_id)
+        assert acc["user_info"]["username"] == "mocked_user"
+        assert acc["is_logged_in"] is True
+    finally:
+        tg._me_cache.pop(acc_id, None)
 
 # 3. Check status endpoint (authorized / unauthorized accounts).
 async def test_03_auth_status(client):

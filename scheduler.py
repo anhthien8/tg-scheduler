@@ -97,7 +97,7 @@ def add_schedule_job(schedule: dict):
     )
 
     next_run = scheduler.get_job(job_id)
-    next_str = str(next_run.next_run_time) if next_run else "N/A"
+    next_str = str(getattr(next_run, "next_run_time", None)) if next_run else "N/A"
     logger.info(f"Job added: {job_id} ({stype} at {time_str}) → next: {next_str}")
 
 
@@ -112,8 +112,9 @@ def remove_schedule_job(schedule_id: int):
 def get_next_run(schedule_id: int) -> str | None:
     scheduler = get_scheduler()
     job = scheduler.get_job(f"schedule_{schedule_id}")
-    if job and job.next_run_time:
-        return job.next_run_time.isoformat()
+    next_run_time = getattr(job, "next_run_time", None)
+    if next_run_time:
+        return next_run_time.isoformat()
     return None
 
 
@@ -171,7 +172,7 @@ def add_campaign_schedule_job(campaign_id: int, scheduled_at: str, target_timezo
     )
 
     next_run = scheduler.get_job(job_id)
-    next_str = str(next_run.next_run_time) if next_run else "N/A"
+    next_str = str(getattr(next_run, "next_run_time", None)) if next_run else "N/A"
     logger.info(f"📅 Campaign {campaign_id} scheduled at {next_str} ({target_timezone})")
 
 
