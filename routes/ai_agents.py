@@ -244,44 +244,37 @@ async def test_agent(agent_id: int, req: AgentTestRequest):
     if not agent:
         raise HTTPException(404, "Agent not found")
 
-    kwargs = {}
-    provider = agent.get("provider")
-    api_keys = agent.get("api_keys_json", [])
-    if isinstance(api_keys, str):
-        try:
-            api_keys = json.loads(api_keys)
-        except Exception:
-            api_keys = []
+    # Single source of truth: provider/model/base_url/keys ALWAYS come from the
+    # global Settings. Per-agent provider/model/keys are legacy fields and are
+    # intentionally ignored (they used to shadow Settings and break agents).
+    provider, api_keys, kwargs = await _get_system_ai_config()
 
-    # If agent doesn't have keys, fallback to global system settings
+    # Only fall back to the agent's own legacy provider/model/keys when the
+    # global Settings define nothing at all (e.g. fresh install, nobody saved yet).
     if not api_keys:
-        provider, api_keys, kwargs = await _get_system_ai_config()
+        legacy_keys = agent.get("api_keys_json", [])
+        if isinstance(legacy_keys, str):
+            try:
+                legacy_keys = json.loads(legacy_keys)
+            except Exception:
+                legacy_keys = []
+        if legacy_keys:
+            provider = agent.get("provider") or provider
+            api_keys = legacy_keys
+            kwargs = {"base_url": agent.get("base_url") or "",
+                      "model": agent.get("model") or ""}
 
     if not api_keys:
         raise HTTPException(400, f"AI Agent '{agent['name']}' chưa có API Key và hệ thống chưa cấu hình API Key!")
 
-    # Merge base_url and model for openai_compatible
-    if provider in ("openai_compatible", "chatgpt_oauth"):
-        prefix = "oai_compat" if provider == "openai_compatible" else "chatgpt_oauth"
-        b_url = agent.get("base_url", "")
-        mod = agent.get("model", "")
-        need_b = not b_url or not b_url.strip()
-        need_m = not mod or not mod.strip()
-        if need_b or need_m:
-            fallback = await db.get_settings_bulk({
-                f"ai_{prefix}_base_url": "",
-                f"ai_{prefix}_model": "",
-            })
-            if need_b:
-                b_url = fallback[f"ai_{prefix}_base_url"]
-            if need_m:
-                mod = fallback[f"ai_{prefix}_model"]
-        if provider == "openai_compatible":
-            kwargs["base_url"] = b_url.strip() if b_url and b_url.strip() else kwargs.get("base_url", "")
-            kwargs["model"] = mod.strip() if mod and mod.strip() else kwargs.get("model", "")
-        else:
-            kwargs["base_url"] = b_url.strip() if b_url and b_url.strip() else kwargs.get("base_url") or "https://api.openai.com/v1"
-            kwargs["model"] = mod.strip() if mod and mod.strip() else kwargs.get("model") or "gpt-4o"
+    # base_url/model already resolved from Settings by _get_system_ai_config().
+    # Only apply safe defaults for the OpenAI-OAuth provider, and never let an
+    # agent-level value override what Settings say.
+    if provider == "chatgpt_oauth":
+        if not kwargs.get("base_url"):
+            kwargs["base_url"] = "https://api.openai.com/v1"
+        if not kwargs.get("model"):
+            kwargs["model"] = "gpt-4o"
 
     sys_prompt = agent.get("system_prompt", "")
     kb = agent.get("knowledge_base", "")

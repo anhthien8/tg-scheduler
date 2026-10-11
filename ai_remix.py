@@ -520,51 +520,79 @@ async def generate_chat_response(
         if res:
             logger.info("[AI Chat] %s key[%d] generated %dc response", provider, idx, len(res))
             return res
+        logger.warning("[AI Chat] %s key[%d] returned an empty response", provider, idx)
+        _mark_key_failed(provider, idx)
     except Exception as e:
         logger.warning("[AI Chat] %s key[%d] failed: %s", provider, idx, e)
         _mark_key_failed(provider, idx)
-        if len(api_keys) > 1:
-            try:
-                idx2, key2 = _next_key(api_keys, provider)
-                if idx2 != idx:
-                    logger.info("[AI Chat] Retrying with %s key[%d]...", provider, idx2)
-                    return await _call_chat_provider(provider, key2, formatted_messages, **kwargs)
-            except Exception as e2:
-                logger.warning("[AI Chat] Retry failed: %s", e2)
+
+    # Try the provider's remaining keys before giving up on the whole provider.
+    # NOTE: never `return` from inside this loop — a failing retry used to short-circuit
+    # the fallback block below and surface as an empty reply in the UI.
+    for i in range(len(api_keys)):
+        idx2, key2 = _next_key(api_keys, provider)
+        if idx2 == idx or not key2:
+            continue
+        try:
+            logger.info("[AI Chat] Retrying with %s key[%d]...", provider, idx2)
+            res2 = await _call_chat_provider(provider, key2, formatted_messages, **kwargs)
+            if res2:
+                logger.info("[AI Chat] %s key[%d] succeeded", provider, idx2)
+                return res2
+        except Exception as e2:
+            logger.warning("[AI Chat] %s key[%d] retry failed: %s", provider, idx2, e2)
+            _mark_key_failed(provider, idx2)
+        idx = idx2  # move past the key we just tried
 
     # ── Automatic Fallback to alternative providers if primary fails ──
+    # Ensure the provider we actually failed on is tried again with its own keys
+    # (it may have more than one) before moving down the chain.
     try:
         import database as db
-        fallback_order = ["chatgpt_oauth", "openai_compatible", "gemini", "groq", "openai", "deepseek"]
+        fallback_order = [provider, "chatgpt_oauth", "openai_compatible", "gemini", "groq", "openai", "deepseek"]
+        seen = set()
         for alt_prov in fallback_order:
-            if alt_prov == provider:
+            if not alt_prov or alt_prov in seen:
                 continue
+            seen.add(alt_prov)
             alt_raw = await db.get_setting(f"ai_keys_{alt_prov}", "[]")
-            alt_keys = json.loads(alt_raw) if alt_raw else []
-            if not alt_keys and alt_prov == "gemini":
-                legacy_k = await db.get_setting("gemini_api_key", "")
+            try:
+                alt_keys = json.loads(alt_raw) if alt_raw else []
+            except (json.JSONDecodeError, TypeError):
+                alt_keys = []
+            # Only consult the legacy single-key setting when nothing is saved for
+            # this provider at all — never as a silent replacement for a real list.
+            if not alt_keys:
+                legacy_k = await db.get_setting(f"{alt_prov}_api_key", "")
                 if legacy_k and legacy_k.strip():
                     alt_keys = [legacy_k.strip()]
-            if alt_keys:
-                alt_kwargs = {}
-                if alt_prov == "openai_compatible":
-                    alt_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
-                    alt_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
-                elif alt_prov == "chatgpt_oauth":
-                    alt_kwargs["base_url"] = await db.get_setting("ai_chatgpt_oauth_base_url", "")
-                    alt_kwargs["model"] = await db.get_setting("ai_chatgpt_oauth_model", "")
-                logger.info("[AI Chat] 🔄 Provider '%s' failed. Auto-fallback to '%s' (%d keys)...", provider, alt_prov, len(alt_keys))
-                for a_key in alt_keys:
-                    try:
-                        res = await _call_chat_provider(alt_prov, a_key, formatted_messages, **alt_kwargs)
-                        if res:
-                            logger.info("[AI Chat] ✨ Fallback to '%s' succeeded!", alt_prov)
-                            return res
-                    except Exception as _sub_fb_err:
-                        logger.warning("[AI Chat] Fallback key for '%s' failed: %s", alt_prov, _sub_fb_err)
+            alt_keys = [k.strip() for k in alt_keys if k and str(k).strip()]
+            if not alt_keys:
+                continue
+            alt_kwargs = {}
+            if alt_prov == "openai_compatible":
+                alt_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
+                alt_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
+            elif alt_prov == "chatgpt_oauth":
+                alt_kwargs["base_url"] = await db.get_setting("ai_chatgpt_oauth_base_url", "")
+                alt_kwargs["model"] = await db.get_setting("ai_chatgpt_oauth_model", "")
+            logger.info("[AI Chat] 🔄 Trying provider '%s' (%d keys)...", alt_prov, len(alt_keys))
+            for a_key in alt_keys:
+                try:
+                    res = await _call_chat_provider(alt_prov, a_key, formatted_messages, **alt_kwargs)
+                    if res:
+                        logger.info("[AI Chat] ✨ Provider '%s' succeeded!", alt_prov)
+                        return res
+                except Exception as _sub_fb_err:
+                    logger.warning("[AI Chat] Provider '%s' key failed: %s", alt_prov, _sub_fb_err)
     except Exception as _fb_err:
         logger.warning("[AI Chat] Fallback provider error: %s", _fb_err)
 
+    logger.error(
+        "[AI Chat] All providers failed for primary provider '%s' (model=%r, base_url=%r). "
+        "No reply produced — check Settings: AI provider, API keys, base URL and model name.",
+        provider, kwargs.get("model"), kwargs.get("base_url"),
+    )
     return None
 
 

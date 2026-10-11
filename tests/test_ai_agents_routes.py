@@ -113,26 +113,61 @@ async def test_test_router_models_success(mock_chat, mock_get, client):
 # ── 3. Agent Execution Test ──────────────────────────────────────────────────
 
 @patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
-async def test_test_agent_success(mock_chat, client):
+async def test_test_agent_uses_global_settings_over_agent_fields(mock_chat, client):
+    """Settings is the single source of truth: agent provider/model/keys are ignored."""
     agent_id = await db.create_ai_agent({
         "name": "Test Agent API",
         "provider": "gemini",
-        "api_keys_json": ["api-key-123"],
+        "api_keys_json": ["agent-own-key"],
         "system_prompt": "Prompt system",
         "knowledge_base": "Knowledge content"
     })
+    # Global Settings — must win over the agent's own provider/model/keys.
+    await db.set_setting("ai_provider", "openai_compatible")
+    await db.set_setting("ai_keys_openai_compatible", '["global-key"]')
+    await db.set_setting("ai_oai_compat_base_url", "http://127.0.0.1:20128/v1")
+    await db.set_setting("ai_oai_compat_model", "fable")
     mock_chat.return_value = "AI Reply"
-    
+
     payload = {"text": "Hello agent"}
     response = client.post(f"/api/ai-agents/{agent_id}/test", json=payload)
     assert response.status_code == 200
     assert response.json()["reply"] == "AI Reply"
-    
+    assert response.json()["provider"] == "openai_compatible"
+    assert response.json()["model"] == "fable"
+
     mock_chat.assert_called_once_with(
         [{"role": "user", "content": "Hello agent"}],
         "Prompt system\n\n--- KNOWLEDGE BASE ---\nKnowledge content",
+        "openai_compatible",
+        ["global-key"],
+        base_url="http://127.0.0.1:20128/v1",
+        model="fable"
+    )
+
+
+@patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
+async def test_test_agent_falls_back_to_legacy_fields_when_settings_empty(mock_chat, client):
+    """With no global keys at all, legacy per-agent keys still work."""
+    agent_id = await db.create_ai_agent({
+        "name": "Legacy Agent",
+        "provider": "gemini",
+        "api_keys_json": ["legacy-key"],
+        "system_prompt": "P"
+    })
+    await db.set_setting("ai_provider", "")
+    mock_chat.return_value = "Legacy Reply"
+
+    response = client.post(f"/api/ai-agents/{agent_id}/test", json={"text": "Hi"})
+    assert response.status_code == 200
+    assert response.json()["reply"] == "Legacy Reply"
+    mock_chat.assert_called_once_with(
+        [{"role": "user", "content": "Hi"}],
+        "P",
         "gemini",
-        ["api-key-123"]
+        ["legacy-key"],
+        base_url="",
+        model=""
     )
 
 async def test_test_agent_no_keys_fallback_success(client):
