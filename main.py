@@ -60,6 +60,7 @@ if TG_RUNTIME_MODE == "combined":
     import scheduler as sch
     import telegram_client as tg
     from routes import ai_followup, auth, chats, inbox, invite, members, messages, proxy, reactions, schedules, watchers
+    from routes import engagement as engagement_routes
     from routes import warmup as warmup_routes
 else:
     tg = sch = mq = kw = rw = drt = kcw = None
@@ -279,6 +280,7 @@ if TG_RUNTIME_MODE == "combined":
     app.include_router(invite.router, dependencies=_auth_dep)
     app.include_router(warmup_routes.router, dependencies=_auth_dep)
     app.include_router(ai_followup.router, dependencies=_auth_dep)
+    app.include_router(engagement_routes.router, dependencies=_auth_dep)
 else:
     def _split_runtime_pending(route_name: str):
         async def endpoint():

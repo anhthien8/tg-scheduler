@@ -516,6 +516,52 @@ Tab **Discord**.
 | **Command Bot** | Bot Telegram nhận lệnh admin và relay tin nhắn từ Forum Inbox. |
 | **ICP Score**   | Điểm chất lượng lead (dựa username, Premium, hoạt động gần đây). |
 | **Drip Cadence**| Nhịp follow-up tự động sau N giờ im lặng. |
+---
+
+## 18. Cộng Đồng (Engagement)
+
+### Tổng quan
+
+Community Engagement Engine cho phép account Telegram join nhóm cộng đồng crypto (nhóm support sàn, nhóm trader) và tự động reply có giá trị khi có người hỏi câu hỏi liên quan. User tự tìm đến DM → funnel AI hiện có tiếp quản.
+
+**Phiên bản v1 (REACTIVE):** chỉ reply khi có từ khóa trigger khớp. Không tự đăng bài.
+
+### Tạo chiến dịch
+
+1. Vào tab **🌐 Cộng Đồng** trong sidebar.
+2. Điền thông tin: tên, nhóm mục tiêu (chat_id), accounts, từ khóa trigger, AI agent.
+3. **Bắt buộc tick checkbox consent** trước khi bật chiến dịch.
+4. Bấm "Tạo mới" hoặc "Lưu & Bật".
+
+### Rate limit
+
+| Ngưỡng | Giá trị mặc định |
+|--------|------------------|
+| Reply/nhóm/giờ | ≤ 4 (tối đa 6) |
+| Reply/nhóm/ngày | ≤ 12 (tối đa 20) |
+| Reply toàn cục/ngày/nick | ≤ 25 |
+| Gap cùng nhóm | ≥ 180 giây |
+| Gap cùng nick (toàn cục) | ≥ 120 giây |
+| Số nick reply 1 tin | Đúng 1 |
+
+### An toàn
+
+- **Consent gate:** chiến dịch mặc định DENY. Phải tick xác nhận trước khi bật.
+- **Auto-pause:** khi ≥2 nick bị mute/ban, hệ thống tự dừng chiến dịch.
+- **Dedup:** 1 tin nhắn chỉ được 1 nick reply, không bao giờ 2 nick cùng reply.
+- **Không reply admin/bot/nick mình:** tự động lọc bỏ.
+- **Delay 20-90 giây:** trước khi reply, có typing simulation.
+
+### Join nhóm
+
+Dùng nút "Join dần dần" để account join nhóm với delay 15-45 phút giữa các account. Không join đồng loạt.
+
+### Log & Sức khoẻ
+
+- Panel sức khoẻ hiện reply hôm nay, reply giờ vừa rồi, nick bị mute.
+- Bảng log chi tiết: thời gian, nhóm, nick, câu hỏi, reply, trạng thái, lý do skip.
+
+**Nguồn tham chiếu:** `routes/engagement.py`, `claimer.py`, `account_busy.py`, `static/js/engagement.js`.
 
 ---
 

@@ -334,5 +334,47 @@
     "title": "17. Bảng thuật ngữ ngắn",
     "level": 2,
     "anchor": "17-bang-thuat-ngu-ngan"
+  },
+  {
+    "id": "h2-57",
+    "title": "18. Cộng Đồng (Engagement)",
+    "level": 2,
+    "anchor": "18-cong-dong-engagement"
+  },
+  {
+    "id": "h3-58",
+    "title": "Tổng quan",
+    "level": 3,
+    "anchor": "tong-quan"
+  },
+  {
+    "id": "h3-59",
+    "title": "Tạo chiến dịch",
+    "level": 3,
+    "anchor": "tao-chien-dich"
+  },
+  {
+    "id": "h3-60",
+    "title": "Rate limit",
+    "level": 3,
+    "anchor": "rate-limit"
+  },
+  {
+    "id": "h3-61",
+    "title": "An toàn",
+    "level": 3,
+    "anchor": "an-toan-1"
+  },
+  {
+    "id": "h3-62",
+    "title": "Join nhóm",
+    "level": 3,
+    "anchor": "join-nhom"
+  },
+  {
+    "id": "h3-63",
+    "title": "Log & Sức khoẻ",
+    "level": 3,
+    "anchor": "log-suc-khoe"
   }
 ]

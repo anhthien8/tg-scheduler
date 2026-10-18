@@ -1221,6 +1221,158 @@ async def init_db():
             "ON dm_blacklist(username) WHERE username IS NOT NULL"
         )
 
+        # ══════════════════════════════════════════════════════════════
+        # ══ Community Engagement Engine ══════════════════════════════
+        # ══════════════════════════════════════════════════════════════
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS engagement_campaigns (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                name                TEXT NOT NULL,
+
+                -- Target groups (JSON list of negative chat_ids)
+                group_ids           TEXT NOT NULL DEFAULT '[]',
+                group_titles        TEXT DEFAULT '[]',
+
+                -- Account configuration
+                observer_account_ids TEXT NOT NULL DEFAULT '[]',
+                reply_account_ids   TEXT DEFAULT '[]',
+
+                -- Knowledge / AI
+                ai_agent_id         INTEGER DEFAULT NULL,
+                knowledge_extra     TEXT DEFAULT '',
+                reply_mode          TEXT DEFAULT 'reactive',
+
+                -- Trigger keywords (JSON list)
+                trigger_keywords    TEXT DEFAULT '[]',
+
+                -- Rate limits
+                max_replies_per_hour_per_group INTEGER DEFAULT 4,
+                max_replies_per_day_per_group  INTEGER DEFAULT 12,
+                min_gap_seconds     INTEGER DEFAULT 180,
+                participation_min   INTEGER DEFAULT 1,
+                participation_max   INTEGER DEFAULT 1,
+
+                -- Schedule window (Vietnam time HH:MM)
+                schedule_start      TEXT DEFAULT '13:00',
+                schedule_end        TEXT DEFAULT '23:00',
+                active_days         TEXT DEFAULT '[1,2,3,4,5,6,7]',
+                schedule_jitter_min INTEGER DEFAULT 0,
+
+                -- Funnel
+                signal_group_link   TEXT DEFAULT '',
+                signal_group_title  TEXT DEFAULT '',
+
+                -- Status
+                status              TEXT DEFAULT 'draft',
+                pause_reason        TEXT DEFAULT '',
+                platform            TEXT DEFAULT 'telegram',
+
+                -- Consent gate (fail-closed, default DENY)
+                operator_consent_confirmed INTEGER DEFAULT 0,
+                operator_consent_at        TEXT DEFAULT NULL,
+                operator_consent_by        TEXT DEFAULT '',
+
+                created_at          TEXT DEFAULT (datetime('now')),
+                updated_at          TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS engagement_logs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id     INTEGER NOT NULL,
+                group_id        INTEGER,
+                group_title     TEXT,
+                account_id      INTEGER,
+                reply_account_ids TEXT DEFAULT '[]',
+                trigger_user_id INTEGER,
+                trigger_msg_id  INTEGER,
+                trigger_text    TEXT,
+                reply_text      TEXT,
+                reply_msg_id    INTEGER,
+                kind            TEXT DEFAULT 'reply',
+                status          TEXT DEFAULT 'success',
+                skip_reason     TEXT,
+                latency_ms      INTEGER,
+                created_at      TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        # Rate-limit claims: detailed log for each claim attempt
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS engagement_claims (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                group_id    INTEGER,
+                account_id  INTEGER NOT NULL,
+                window_key  TEXT NOT NULL,
+                created_at  TEXT DEFAULT (datetime('now')),
+                kind        TEXT DEFAULT 'reply'
+            )
+        """)
+
+        # Atomic counters for limit-type windows
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS engagement_window_counters (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                window_kind TEXT NOT NULL,
+                acct_key    INTEGER NOT NULL,
+                group_key   INTEGER NOT NULL,
+                window_key  TEXT NOT NULL,
+                count       INTEGER NOT NULL DEFAULT 0,
+                limit_      INTEGER NOT NULL,
+                updated_at  TEXT DEFAULT (datetime('now')),
+                UNIQUE(window_kind, acct_key, group_key, window_key)
+            )
+        """)
+
+        # DM attribution map for engagement leads
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS engagement_dm_map (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                account_id  INTEGER NOT NULL,
+                user_id     INTEGER NOT NULL,
+                created_at  TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        # Engagement indexes
+        await db.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_engagement_claim_gap_unique
+                ON engagement_claims(account_id, window_key)
+                WHERE window_key LIKE 'gap:%' OR window_key LIKE 'gapacct:%'
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_engagement_claim_acct_time "
+            "ON engagement_claims(account_id, created_at)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_engagement_claim_group_time "
+            "ON engagement_claims(group_id, created_at)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_engagement_counter_acct "
+            "ON engagement_window_counters(acct_key, window_key)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_engagement_counter_group "
+            "ON engagement_window_counters(group_key, window_key)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_engagement_logs_campaign_time "
+            "ON engagement_logs(campaign_id, created_at)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_engagement_logs_account_time "
+            "ON engagement_logs(account_id, created_at)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_engagement_dm_map_lookup "
+            "ON engagement_dm_map(account_id, user_id, created_at)"
+        )
+
         await db.commit()
 
     # Seed default templates after init
@@ -5489,3 +5641,340 @@ async def get_nudge_for_user(account_id: int, target_user_id: int) -> dict | Non
             (account_id, target_user_id),
         )).fetchone()
         return dict(row) if row else None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ══ Engagement Campaign CRUD ═════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+async def create_engagement_campaign(data: dict) -> int:
+    async with get_db() as db:
+        cursor = await db.execute(
+            """INSERT INTO engagement_campaigns
+               (name, group_ids, group_titles, observer_account_ids, reply_account_ids,
+                ai_agent_id, knowledge_extra, reply_mode, trigger_keywords,
+                max_replies_per_hour_per_group, max_replies_per_day_per_group,
+                min_gap_seconds, participation_min, participation_max,
+                schedule_start, schedule_end, active_days, schedule_jitter_min,
+                signal_group_link, signal_group_title, status, platform,
+                operator_consent_confirmed, operator_consent_at, operator_consent_by)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                data["name"],
+                json.dumps(data.get("group_ids", [])),
+                json.dumps(data.get("group_titles", [])),
+                json.dumps(data.get("observer_account_ids", [])),
+                json.dumps(data.get("reply_account_ids", [])),
+                data.get("ai_agent_id"),
+                data.get("knowledge_extra", ""),
+                data.get("reply_mode", "reactive"),
+                json.dumps(data.get("trigger_keywords", [])),
+                data.get("max_replies_per_hour_per_group", 4),
+                data.get("max_replies_per_day_per_group", 12),
+                data.get("min_gap_seconds", 180),
+                data.get("participation_min", 1),
+                data.get("participation_max", 1),
+                data.get("schedule_start", "13:00"),
+                data.get("schedule_end", "23:00"),
+                json.dumps(data.get("active_days", [1, 2, 3, 4, 5, 6, 7])),
+                data.get("schedule_jitter_min", 0),
+                data.get("signal_group_link", ""),
+                data.get("signal_group_title", ""),
+                data.get("status", "draft"),
+                data.get("platform", "telegram"),
+                data.get("operator_consent_confirmed", 0),
+                data.get("operator_consent_at"),
+                data.get("operator_consent_by", ""),
+            ),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+def _parse_engagement_campaign(row: dict) -> dict:
+    """Parse JSON fields in an engagement campaign row."""
+    if not row:
+        return row
+    for field in ("group_ids", "group_titles", "observer_account_ids",
+                  "reply_account_ids", "trigger_keywords", "active_days"):
+        val = row.get(field)
+        if isinstance(val, str):
+            try:
+                row[field] = json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                row[field] = []
+    return row
+
+
+async def get_all_engagement_campaigns() -> list:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM engagement_campaigns ORDER BY created_at DESC"
+        )
+        return [_parse_engagement_campaign(dict(row)) for row in await cursor.fetchall()]
+
+
+async def get_engagement_campaign(campaign_id: int) -> dict | None:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM engagement_campaigns WHERE id=?", (campaign_id,)
+        )
+        row = await cursor.fetchone()
+        return _parse_engagement_campaign(dict(row)) if row else None
+
+
+async def get_active_engagement_campaigns() -> list:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM engagement_campaigns WHERE status='active' ORDER BY id"
+        )
+        return [_parse_engagement_campaign(dict(row)) for row in await cursor.fetchall()]
+
+
+async def update_engagement_campaign(campaign_id: int, data: dict) -> bool:
+    fields = []
+    values = []
+    for key in (
+        "name", "ai_agent_id", "knowledge_extra", "reply_mode",
+        "max_replies_per_hour_per_group", "max_replies_per_day_per_group",
+        "min_gap_seconds", "participation_min", "participation_max",
+        "schedule_start", "schedule_end", "schedule_jitter_min",
+        "signal_group_link", "signal_group_title", "status", "pause_reason",
+        "operator_consent_confirmed", "operator_consent_at", "operator_consent_by",
+    ):
+        if key in data:
+            fields.append(f"{key}=?")
+            values.append(data[key])
+    # JSON fields
+    for key in ("group_ids", "group_titles", "observer_account_ids",
+                "reply_account_ids", "trigger_keywords", "active_days"):
+        if key in data:
+            fields.append(f"{key}=?")
+            values.append(json.dumps(data[key]) if isinstance(data[key], (list, dict)) else data[key])
+
+    if not fields:
+        return False
+
+    fields.append("updated_at=datetime('now')")
+    values.append(campaign_id)
+
+    async with get_db() as db:
+        cursor = await db.execute(
+            f"UPDATE engagement_campaigns SET {', '.join(fields)} WHERE id=?",
+            tuple(values),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def delete_engagement_campaign(campaign_id: int) -> bool:
+    async with get_db() as db:
+        cursor = await db.execute(
+            "DELETE FROM engagement_campaigns WHERE id=?", (campaign_id,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def toggle_engagement_campaign(campaign_id: int, active: bool) -> bool:
+    """Toggle campaign status between 'active' and 'paused'.
+    Cannot activate if operator_consent_confirmed is 0."""
+    async with get_db() as db:
+        if active:
+            # Check consent gate
+            db.row_factory = aiosqlite.Row
+            row = await (await db.execute(
+                "SELECT operator_consent_confirmed FROM engagement_campaigns WHERE id=?",
+                (campaign_id,)
+            )).fetchone()
+            if not row:
+                return False
+            if not row["operator_consent_confirmed"]:
+                return False  # consent required
+            cursor = await db.execute(
+                "UPDATE engagement_campaigns SET status='active', pause_reason='', updated_at=datetime('now') WHERE id=?",
+                (campaign_id,),
+            )
+        else:
+            cursor = await db.execute(
+                "UPDATE engagement_campaigns SET status='paused', updated_at=datetime('now') WHERE id=?",
+                (campaign_id,),
+            )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+# ── Engagement Logs ──
+
+async def create_engagement_log(data: dict) -> int:
+    async with get_db() as db:
+        cursor = await db.execute(
+            """INSERT INTO engagement_logs
+               (campaign_id, group_id, group_title, account_id, reply_account_ids,
+                trigger_user_id, trigger_msg_id, trigger_text, reply_text,
+                reply_msg_id, kind, status, skip_reason, latency_ms)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                data.get("campaign_id"),
+                data.get("group_id"),
+                data.get("group_title"),
+                data.get("account_id"),
+                json.dumps(data.get("reply_account_ids", [])),
+                data.get("trigger_user_id"),
+                data.get("trigger_msg_id"),
+                data.get("trigger_text"),
+                data.get("reply_text"),
+                data.get("reply_msg_id"),
+                data.get("kind", "reply"),
+                data.get("status", "success"),
+                data.get("skip_reason"),
+                data.get("latency_ms"),
+            ),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_engagement_logs(
+    campaign_id: int | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    status: str | None = None,
+    kind: str | None = None,
+) -> list:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        conditions = []
+        params = []
+        if campaign_id is not None:
+            conditions.append("campaign_id=?")
+            params.append(campaign_id)
+        if status:
+            conditions.append("status=?")
+            params.append(status)
+        if kind:
+            conditions.append("kind=?")
+            params.append(kind)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.extend([limit, offset])
+        cursor = await db.execute(
+            f"SELECT * FROM engagement_logs {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            tuple(params),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+async def get_engagement_log_count(campaign_id: int | None = None) -> int:
+    async with get_db() as db:
+        if campaign_id is not None:
+            row = await (await db.execute(
+                "SELECT COUNT(*) FROM engagement_logs WHERE campaign_id=?", (campaign_id,)
+            )).fetchone()
+        else:
+            row = await (await db.execute("SELECT COUNT(*) FROM engagement_logs")).fetchone()
+        return row[0] if row else 0
+
+
+# ── Engagement DM Map ──
+
+async def create_engagement_dm_map(campaign_id: int, account_id: int, user_id: int) -> int:
+    async with get_db() as db:
+        cursor = await db.execute(
+            "INSERT INTO engagement_dm_map (campaign_id, account_id, user_id) VALUES (?,?,?)",
+            (campaign_id, account_id, user_id),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def find_engagement_dm_map(account_id: int, user_id: int, days: int = 7) -> dict | None:
+    """Find engagement attribution for a user who DM'd us within N days."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute(
+            "SELECT * FROM engagement_dm_map "
+            "WHERE account_id=? AND user_id=? AND created_at >= datetime('now', '-' || ? || ' days') "
+            "ORDER BY created_at DESC LIMIT 1",
+            (account_id, user_id, str(days)),
+        )).fetchone()
+        return dict(row) if row else None
+
+
+# ── Engagement Stats ──
+
+async def get_engagement_stats(campaign_id: int | None = None, days: int = 7) -> dict:
+    """Aggregate engagement statistics."""
+    async with get_db() as db:
+        day_filter = f"AND created_at >= datetime('now', '-{days} days')"
+        camp_filter = f"AND campaign_id={campaign_id}" if campaign_id else ""
+        base = f"FROM engagement_logs WHERE 1=1 {camp_filter} {day_filter}"
+
+        total = (await (await db.execute(f"SELECT COUNT(*) {base}")).fetchone())[0]
+        success = (await (await db.execute(
+            f"SELECT COUNT(*) {base} AND status='success'"
+        )).fetchone())[0]
+        skipped = (await (await db.execute(
+            f"SELECT COUNT(*) {base} AND status='skipped'"
+        )).fetchone())[0]
+        failed = (await (await db.execute(
+            f"SELECT COUNT(*) {base} AND status='failed'"
+        )).fetchone())[0]
+
+        # Today's replies
+        today_base = f"FROM engagement_logs WHERE 1=1 {camp_filter} AND created_at >= datetime('now', 'start of day')"
+        today_replies = (await (await db.execute(
+            f"SELECT COUNT(*) {today_base} AND kind='reply' AND status='success'"
+        )).fetchone())[0]
+
+        # Last hour
+        hour_base = f"FROM engagement_logs WHERE 1=1 {camp_filter} AND created_at >= datetime('now', '-1 hour')"
+        hour_replies = (await (await db.execute(
+            f"SELECT COUNT(*) {hour_base} AND kind='reply' AND status='success'"
+        )).fetchone())[0]
+
+        # Skip reasons
+        cursor = await db.execute(
+            f"SELECT skip_reason, COUNT(*) as cnt {base} AND status='skipped' GROUP BY skip_reason"
+        )
+        skip_reasons = {r[0]: r[1] for r in await cursor.fetchall() if r[0]}
+
+        # Muted accounts in last 24h
+        muted_24h = (await (await db.execute(
+            f"SELECT COUNT(DISTINCT account_id) FROM engagement_logs "
+            f"WHERE 1=1 {camp_filter} AND skip_reason='muted' AND created_at >= datetime('now', '-1 day')"
+        )).fetchone())[0]
+
+        return {
+            "total": total,
+            "success": success,
+            "skipped": skipped,
+            "failed": failed,
+            "today_replies": today_replies,
+            "hour_replies": hour_replies,
+            "skip_reasons": skip_reasons,
+            "muted_accounts_24h": muted_24h,
+            "days": days,
+        }
+
+
+# ── Engagement Claims Cleanup ──
+
+async def cleanup_engagement_claims(max_age_days: int = 2) -> int:
+    """Remove old claim records and expired counter rows."""
+    async with get_db() as db:
+        c1 = await db.execute(
+            "DELETE FROM engagement_claims WHERE created_at < datetime('now', '-' || ? || ' days')",
+            (str(max_age_days),),
+        )
+        c2 = await db.execute(
+            "DELETE FROM engagement_window_counters WHERE updated_at < datetime('now', '-' || ? || ' days')",
+            (str(max_age_days),),
+        )
+        total = (c1.rowcount or 0) + (c2.rowcount or 0)
+        if total > 0:
+            await db.commit()
+        return total

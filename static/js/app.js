@@ -107,6 +107,15 @@ if(page==='discord'){
   return;
 }
 
+// Community Engagement Page
+if(page==='engagement'){
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  const engView = document.getElementById('view-engagement');
+  if(engView) engView.classList.remove('hidden');
+  if(window.Engagement) Engagement.init();
+  return;
+}
+
 // AI Agents Management Page
 if(page==='ai-agents'){
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));

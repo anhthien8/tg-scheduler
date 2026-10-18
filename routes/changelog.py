@@ -8,11 +8,57 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.8.0",
+        "date": "18/10/2026",
+        "title": "🌐 Community Engagement Engine — Reactive v1",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Tính năng mới: tự động tương tác có giá trị trong nhóm cộng đồng crypto. Account Telegram chỉ định join nhóm mục tiêu, theo dõi từ khóa, và reply bằng nhận định TA do AI sinh — user tự tìm đến DM, funnel AI hiện có tiếp quản. Reactive mode only (v1): chỉ reply khi có người hỏi. Bao gồm hệ thống rate-limit atomic 5 lớp, consent gate fail-closed, auto-pause khi mute/ban, và tab UI Cộng Đồng mới.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Tab \"Cộng Đồng\" mới trong sidebar",
+                "desc": "Quản lý chiến dịch engagement: chọn nhóm, account, từ khóa trigger, AI agent, rate limit, lịch hoạt động. Bảng log tương tác và panel sức khoẻ chiến dịch.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "Engine REACTIVE — reply tự động khi khớp từ khóa",
+                "desc": "Khi có người hỏi trong nhóm mục tiêu khớp trigger keywords, engine chọn 1 nick ngẫu nhiên, delay 20-90s, gọi AI sinh nhận định TA, rồi reply trong nhóm. Tối đa 4 reply/giờ/nhóm, 25/ngày/nick.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "Rate-limit atomic 5 lớp (claim-before-send)",
+                "desc": "Hệ thống claim/reserve trước khi gửi: counter atomic cho trần limit (4/giờ, 12/ngày/nhóm, 25/ngày/nick), gap enforcement (≥180s/nhóm, ≥120s/nick). Rollback theo claim_id, không xoá claim hợp lệ.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "Consent gate fail-closed",
+                "desc": "Campaign không thể bật nếu operator chưa tick xác nhận đồng ý. Mặc định DENY (operator_consent_confirmed=0). API trả 409 consent_required nếu chưa tick.",
+                "tag": "An toàn"
+            },
+            {
+                "type": "feature",
+                "title": "Per-account busy registry",
+                "desc": "Module account_busy.py ngăn 1 nick chạy đồng thời engagement + DM + funnel + invite. TTL tự nhả nếu task chết giữa chừng.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "Join stagger (15-45 phút/account)",
+                "desc": "Endpoint join-stagger để account join nhóm dần dần, không join đồng loạt. Giảm rủi ro bị phát hiện bot.",
+                "tag": "An toàn"
+            },
+        ],
+    },
+    {
         "version": "v3.7.12",
         "date": "05/10/2026",
         "title": "📖 Thêm trang Hướng dẫn sử dụng trong app",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Giờ bạn không cần hỏi lại hay lục tài liệu rời — toàn bộ hướng dẫn sử dụng (56 mục, có tìm kiếm) nằm ngay trong app ở nhóm Hệ thống. Ngoài ra Command Bot giờ hiện đúng tên tài khoản thay vì mã số, /kol gõ trần đã có phản hồi, và cảnh báo KOL CAMPAIGN PENDING vào Saved Messages mặc định đã tắt (Command Bot + Forum vẫn nhận bình thường).",
         "changes": [
             {

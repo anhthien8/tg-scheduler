@@ -128,6 +128,9 @@
         <button type="button" class="nav-item" data-page="reactions" onclick="App.navigate('reactions')">
           ❤️ Tăng Tương Tác
         </button>
+        <button type="button" class="nav-item" data-page="engagement" onclick="App.navigate('engagement')">
+          🌐 Cộng Đồng
+        </button>
         <button type="button" class="nav-item" data-page="inbox" onclick="App.navigate('inbox')" id="nav-inbox">
           📬 Inbox <span id="inbox-badge" class="inbox-badge hidden">0</span>
         </button>
@@ -1002,6 +1005,39 @@
             </table>
           </div>
           <div id="rt-logs-pager" class="pager"></div>
+        </div>
+      </div>
+      <!-- ══ Community Engagement Page ══════════════════════════════════ -->
+      <div id="view-engagement" class="hidden" data-page="engagement">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">🌐 Cộng Đồng (Engagement)</h2>
+          <button class="btn btn-ghost btn-sm" onclick="Engagement.init()" title="Tải lại">🔄 Làm mới</button>
+        </div>
+        <p style="color:var(--text2);margin-bottom:1rem;font-size:.9rem">
+          Tương tác có giá trị trong nhóm cộng đồng crypto — REACTIVE mode: chỉ reply khi có người hỏi khớp từ khóa.
+        </p>
+
+        <!-- Health Panel -->
+        <div class="card" style="margin-bottom:1.5rem">
+          <h3 style="margin:0 0 .75rem;font-size:1rem;color:var(--accent)">📊 Sức khoẻ chiến dịch</h3>
+          <div id="engagement-health"><div class="empty-state">Đang tải...</div></div>
+        </div>
+
+        <!-- Campaign List -->
+        <div class="card" style="margin-bottom:1.5rem">
+          <h3 style="margin:0 0 .75rem;font-size:1rem;color:var(--accent)">📋 Chiến dịch</h3>
+          <div id="engagement-campaign-list"><div class="empty-state">Đang tải...</div></div>
+        </div>
+
+        <!-- Campaign Form -->
+        <div class="card" style="margin-bottom:1.5rem">
+          <div id="engagement-form"><div class="empty-state">Đang tải...</div></div>
+        </div>
+
+        <!-- Logs -->
+        <div class="card" style="margin-bottom:1.5rem">
+          <h3 style="margin:0 0 .75rem;font-size:1rem;color:var(--accent)">📝 Log tương tác</h3>
+          <div id="engagement-log-table"><div class="empty-state">Đang tải...</div></div>
         </div>
       </div>
       <!-- ══ AI Agents Management View ══ -->
@@ -1968,6 +2004,7 @@
   <script defer src="/static/js/ai_followup.js?v=433"></script>
   <script defer src="/static/js/changelog.js?v=433"></script>
   <script defer src="/static/js/help.js?v=436"></script>
+  <script defer src="/static/js/engagement.js?v=380"></script>
   <script defer src="/static/js/app.js?v=435"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->

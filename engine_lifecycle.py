@@ -271,6 +271,15 @@ async def _connect_accounts_and_watchers() -> None:
     await drt.start_reply_tracker()
     await kcw.start_kol_channel_watcher()
 
+    # Community Engagement Engine (optional — gracefully skip if missing)
+    try:
+        import engagement_engine as eng
+        await eng.start_all_engagement_campaigns()
+    except ImportError:
+        logger.debug("engagement_engine not available — skipping")
+    except Exception as e:
+        logger.warning("Engagement engine startup failed: %s", e)
+
     # Discord bots (optional dependency)
     try:
         import discord_reaction_watcher as drw
