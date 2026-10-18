@@ -1259,6 +1259,11 @@ async def _followup_periodic_loop():
         try:
             await asyncio.sleep(300)  # Check every 5 minutes
             await process_drip_followups()
+            # Outreach nudge engine — follow-up lần 2 cho KOL không reply
+            try:
+                await process_outreach_nudges()
+            except Exception as e_nudge:
+                logger.error("[NudgeEngine] Error in nudge batch: %s", e_nudge)
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -1543,3 +1548,205 @@ async def process_drip_followups() -> dict:
         logger.error("[DripEngine] Error in drip batch: %s", e_drip)
 
     return {"sent": sent_count, "errors": errors}
+
+
+# ── Outreach Nudge Engine ──────────────────────────────────────────────────
+# Follow-up lần 2 cho KOL không reply (design-followup-lan-2.md §3–§4).
+
+# In-mem dedup guard (mirrors _pending_ai_sends pattern)
+_pending_nudges: set[tuple[int, int]] = set()
+
+
+async def _remove_nudge_after_delay(account_id: int, user_id: int):
+    await asyncio.sleep(30)
+    _pending_nudges.discard((account_id, user_id))
+
+
+async def _load_nudge_settings() -> tuple[int, int]:
+    """Load outreach_nudge_delay_hours and outreach_nudge_max from settings.
+
+    Returns (delay_hours, max_nudges). Falls back to (24, 1) if missing/invalid.
+    """
+    raw_delay = await db.get_setting("outreach_nudge_delay_hours", "24")
+    raw_max = await db.get_setting("outreach_nudge_max", "1")
+    try:
+        delay = int(raw_delay)
+        if delay <= 0:
+            delay = 24
+    except (ValueError, TypeError):
+        delay = 24
+    try:
+        max_n = int(raw_max)
+        if max_n < 0:
+            max_n = 1
+    except (ValueError, TypeError):
+        max_n = 1
+    return delay, max_n
+
+
+_NUDGE_PROMPT_INSTRUCTION = (
+    "[CONTEXT]: This is a FOLLOW-UP NUDGE after we sent an introductory DM "
+    "but the recipient has not replied in over 24 hours.\n\n"
+    "[TASK]: Write ONE short follow-up message (1-2 sentences), friendly tone, "
+    "NOT pushy, do NOT repeat the first message verbatim. Open a NEW angle "
+    "(exclusive Maker fee discount, VIP tier benefits, or a current trading "
+    "competition). End with an easy open question so they can reply effortlessly. "
+    "Do NOT reveal you are AI. Do NOT use pressure words."
+)
+
+
+async def process_outreach_nudges() -> dict:
+    """Scan for KOLs who received a DM but never replied, and send ONE gentle nudge.
+
+    Safety:
+    - Candidates from watcher_dm_logs + dm_campaign_logs (never replied, not yet nudged).
+    - Re-check inbound INSIDE get_send_lock (TOCTOU protection, §4.4).
+    - Goes through _send_ai_message pipeline for all existing guards.
+    - Random delay between sends (1–5 min) to avoid PeerFlood.
+    - Respects daily DM limit, PeerFlood cooldown, blacklist, account paused.
+    """
+    from keyword_watcher import _is_peerflood_blocked
+    from telegram_forum_inbox import get_send_lock
+
+    delay_hours, max_nudges = await _load_nudge_settings()
+    if max_nudges <= 0:
+        return {"sent": 0, "skipped": 0, "errors": [], "note": "nudge disabled (max=0)"}
+
+    candidates = await db.get_nudge_candidates(delay_hours=delay_hours, limit=20)
+    sent_count = 0
+    skipped = 0
+    errors = []
+
+    for cand in candidates:
+        account_id = cand["account_id"]
+        user_id = cand["target_user_id"]
+        channel = cand["channel"]
+        watcher_id = cand.get("watcher_id")
+        campaign_id = cand.get("campaign_id")
+        sent_at = cand["sent_at"]
+
+        try:
+            # ── Pre-flight safety checks (§2.1) ──
+            if await db.is_account_paused(account_id):
+                continue
+            if _is_peerflood_blocked(account_id):
+                continue
+            limit_reached, _, _ = await db.is_account_dm_limit_reached(account_id)
+            if limit_reached:
+                continue
+            if await db.is_user_blacklisted(user_id=user_id, username=cand.get("target_username", "")):
+                await db.record_nudge(account_id, user_id, channel, "skipped",
+                                      watcher_id=watcher_id, campaign_id=campaign_id,
+                                      error_message="blacklisted")
+                skipped += 1
+                continue
+            if await is_internal_account_user(user_id):
+                continue
+
+            client = tg.get_client(account_id)
+            if not client or not client.is_connected():
+                continue
+
+            # Check if chat exists and is in a non-nudgeable state
+            existing_chat = await db.get_followup_chat(account_id, user_id)
+            if existing_chat:
+                stage = existing_chat.get("stage", "new")
+                if stage in ("paused", "signed"):
+                    await db.record_nudge(account_id, user_id, channel, "skipped",
+                                          watcher_id=watcher_id, campaign_id=campaign_id,
+                                          error_message=f"stage={stage}")
+                    skipped += 1
+                    continue
+                status = existing_chat.get("status", "active")
+                if status in ("needs_human", "paused_admin", "bot_ignored"):
+                    await db.record_nudge(account_id, user_id, channel, "skipped",
+                                          watcher_id=watcher_id, campaign_id=campaign_id,
+                                          error_message=f"status={status}")
+                    skipped += 1
+                    continue
+
+            # ── Generate nudge content via AI (§3) ──
+            account_obj = await db.get_account(account_id)
+            agent_id = account_obj.get("ai_agent_id") if account_obj else None
+            agent_config = await db.get_ai_agent(agent_id) if agent_id else None
+
+            sys_p = agent_config.get("system_prompt", "") if agent_config else ""
+            combined_prompt = sys_p + "\n\n[OUTREACH NUDGE INSTRUCTION]: " + _NUDGE_PROMPT_INSTRUCTION
+
+            ai_provider = agent_config.get("provider", "gemini") if agent_config else "gemini"
+            ai_keys = agent_config.get("api_keys_json", []) if agent_config else []
+            if isinstance(ai_keys, str):
+                ai_keys = json.loads(ai_keys)
+            if not ai_keys:
+                logger.warning("[NudgeEngine] No AI keys for account %d, skipping nudge for user %d", account_id, user_id)
+                continue
+
+            kwargs = {}
+            if ai_provider in ("openai_compatible", "chatgpt_oauth") and agent_config:
+                if agent_config.get("base_url"):
+                    kwargs["base_url"] = agent_config["base_url"]
+                if agent_config.get("model"):
+                    kwargs["model"] = agent_config["model"]
+
+            # Minimal history: just the system prompt + nudge instruction
+            msg = await ai_rmx.generate_chat_response([], combined_prompt, ai_provider, ai_keys, **kwargs)
+            if not msg:
+                logger.warning("[NudgeEngine] AI returned empty for user %d, skipping", user_id)
+                continue
+
+            msg = sanitize_telegram_html(msg)
+            if contains_ai_disclosure(msg):
+                logger.warning("[NudgeEngine] 🚫 Blocked AI-disclosure nudge for user %d", user_id)
+                await db.record_nudge(account_id, user_id, channel, "skipped",
+                                      watcher_id=watcher_id, campaign_id=campaign_id,
+                                      error_message="ai_disclosure")
+                skipped += 1
+                continue
+
+            # ── TOCTOU-safe send (§4.4) ──
+            async with get_send_lock(account_id, user_id):
+                # Re-check: did they reply between scan and now?
+                if await db.has_inbound_since(account_id, user_id, sent_at):
+                    logger.info("[NudgeEngine] Lead %d replied between scan and send — skipping", user_id)
+                    await db.record_nudge(account_id, user_id, channel, "skipped",
+                                          watcher_id=watcher_id, campaign_id=campaign_id,
+                                          error_message="replied_before_send")
+                    skipped += 1
+                    continue
+                # In-mem dedup
+                if (account_id, user_id) in _pending_nudges:
+                    continue
+                _pending_nudges.add((account_id, user_id))
+
+                try:
+                    # Ensure followup chat exists so _send_ai_message can work
+                    await db.get_or_create_followup_chat(
+                        account_id=account_id, user_id=user_id,
+                        username=cand.get("target_username"),
+                        name=cand.get("target_username") or f"User {user_id}",
+                    )
+                    if await tg.send_text_message(account_id, user_id, msg) is False:
+                        await db.record_nudge(account_id, user_id, channel, "failed",
+                                              watcher_id=watcher_id, campaign_id=campaign_id,
+                                              error_message="send_failed")
+                        errors.append(f"send_failed for user {user_id}")
+                        continue
+                    # Record in chat history
+                    await db.append_followup_chat_message(account_id, user_id, "assistant", msg, inc_reply_count=True)
+                    # Record nudge
+                    await db.record_nudge(account_id, user_id, channel, "sent",
+                                          watcher_id=watcher_id, campaign_id=campaign_id)
+                    sent_count += 1
+                    logger.info("[NudgeEngine] ✅ Nudge sent to user %d via account %d", user_id, account_id)
+                finally:
+                    _spawn_background(_remove_nudge_after_delay(account_id, user_id))
+
+            # Random delay between nudges (1–5 min) to avoid spam detection (§4.2)
+            if sent_count < len(candidates):
+                await asyncio.sleep(random.uniform(60, 300))
+
+        except Exception as e:
+            logger.error("[NudgeEngine] Error processing nudge for user %d: %s", user_id, e)
+            errors.append(str(e))
+
+    return {"sent": sent_count, "skipped": skipped, "errors": errors}

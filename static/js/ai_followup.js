@@ -187,6 +187,7 @@ const AIFollowUp = {
     set('aifu-stat-active', count('active'));
     set('aifu-stat-onboarded', count('onboarded'));
     set('aifu-stat-total', this._chats.length);
+    set('aifu-stat-nudged', this._chats.filter(c => c.nudged).length);
   },
 
   renderChips() {
@@ -248,6 +249,7 @@ const AIFollowUp = {
     tb.innerHTML = rows.map(c => {
       const meta = this.STATUS_META[c.status] || { label: c.status, badge: 'badge badge-gray' };
       const uName = c.name || (c.username ? `@${c.username}` : `User #${c.user_id}`);
+      const nudgeBadge = c.nudged ? ' <span class="badge badge-gray" title="\u0110\u00e3 nh\u1eafc l\u1ea7n 2" style="font-size:10px;vertical-align:middle">\ud83d\udd14 Nudged</span>' : '';
       const tier = c.lead_tier || 'Tier C';
       const score = c.intent_score || 0;
       const tierBadge = tier === 'Tier A'
@@ -261,7 +263,7 @@ const AIFollowUp = {
       const accLabel = c.account_name || `Acc #${c.account_id}`;
       return `<tr>
         <td style="width:34px;text-align:center"><input type="checkbox" aria-label="Chọn ${esc(uName)}" ${this._selected.has(`${c.account_id}:${c.user_id}`) ? 'checked' : ''} onchange="AIFollowUp.toggleSelection('${c.account_id}:${c.user_id}',this.checked)"></td>
-        <td><div style="font-weight:600">${esc(uName)}</div><div style="font-size:11px;color:var(--text2);font-family:monospace">ID ${c.user_id} • 👤 ${esc(accLabel)}</div></td>
+        <td><div style="font-weight:600">${esc(uName)}${nudgeBadge}</div><div style="font-size:11px;color:var(--text2);font-family:monospace">ID ${c.user_id} • 👤 ${esc(accLabel)}</div></td>
         <td><div style="display:flex;align-items:center;gap:6px">${tierBadge}<span style="font-size:11px;color:var(--text2)">${score}%</span></div><div style="width:70px;height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:${Math.min(100, Math.max(0, score))}%;height:100%;background:${score >= 80 ? 'var(--orange)' : score >= 50 ? 'var(--accent)' : 'var(--text3)'}"></div></div></td>
         <td>${c.reply_count || 0}</td>
         <td><span class="${meta.badge}">${meta.label}</span></td>

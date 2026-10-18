@@ -78,7 +78,18 @@ async def run_invite_campaign(campaign_id: int):
         invited = campaign.get("invited_count", 0) or 0
         failed = campaign.get("failed_count", 0) or 0
         skipped = campaign.get("skipped_count", 0) or 0
-        daily_sent = 0
+        # Restore today's count from DB (survives restart)
+        try:
+            async with db.get_db() as _db:
+                row = await _db.execute_fetchone(
+                    "SELECT COUNT(*) as cnt FROM invite_campaign_logs "
+                    "WHERE campaign_id = ? AND status = 'success' "
+                    "AND created_at >= date('now')",
+                    (campaign_id,)
+                )
+                daily_sent = row["cnt"] if row else 0
+        except Exception:
+            daily_sent = 0
         consecutive_errors = 0
         account_idx = 0
         flooded_accounts = set()

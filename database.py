@@ -555,6 +555,11 @@ async def init_db():
             "CREATE INDEX IF NOT EXISTS idx_dm_replies_unread "
             "ON dm_replies(is_read, received_at DESC)"
         )
+        # Compound index for outreach nudge candidate detection (§7 T7.7)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dm_replies_sender "
+            "ON dm_replies(sender_user_id, received_at)"
+        )
         await db.commit()
 
         # ── Discord Bots ──────────────────────────────────────────────────
@@ -748,6 +753,29 @@ async def init_db():
                 FOREIGN KEY (campaign_id) REFERENCES dm_campaigns(id) ON DELETE CASCADE
             )
         """)
+
+        # ── Outreach Nudges (follow-up lần 2 cho KOL không reply) ────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS nudges (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id     INTEGER NOT NULL,
+                target_user_id INTEGER NOT NULL,
+                watcher_id     INTEGER,
+                campaign_id    INTEGER,
+                channel        TEXT NOT NULL,
+                nudge_count    INTEGER DEFAULT 1,
+                last_nudge_at  TEXT DEFAULT (datetime('now')),
+                status         TEXT NOT NULL CHECK(status IN ('sent','skipped','failed')),
+                error_message  TEXT,
+                UNIQUE(account_id, target_user_id)
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nudges_lookup ON nudges(account_id, target_user_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nudges_last ON nudges(last_nudge_at)"
+        )
 
         # ── DM Templates ──────────────────────────────────────────────────────
         await db.execute("""
@@ -1068,6 +1096,11 @@ async def init_db():
         # inequality so a (status, updated_at) prefix can't be used)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_aifu_updated ON ai_followup_chats(updated_at DESC)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_reaction_logs_acc_sent ON reaction_logs(account_id, sent_at)")
+
+        # ── v3.2.5 Quick-Win indexes ──
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_followup_stage_updated ON ai_followup_chats(stage, updated_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_followup_account_id ON ai_followup_chats(account_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_replies_sender_received ON dm_replies(sender_user_id, received_at)")
 
 
         # ══════════════════════════════════════════════════════════════
@@ -4800,15 +4833,21 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
             SELECT c.id, c.account_id, c.user_id, c.username, c.name, c.campaign_id, c.watcher_id,
                    c.status, c.reply_count, c.created_at, c.updated_at, c.intent_score,
                    c.lead_tier, c.summary, c.last_drip_stage, c.human_takeover_at, c.verification_status,
-                   a.name AS account_name
+                   a.name AS account_name,
+                   CASE WHEN n.status = 'sent' THEN 1 ELSE 0 END AS nudged,
+                   COALESCE(n.nudge_count, 0) AS nudge_count
                    {", c.history_json" if include_history else ""}
             FROM ai_followup_chats c
             LEFT JOIN accounts a ON a.id = c.account_id
+            LEFT JOIN nudges n ON n.account_id = c.account_id AND n.target_user_id = c.user_id
             {where_clause}
             ORDER BY c.updated_at DESC
             LIMIT ? OFFSET ?
         """, params)
         rows = [dict(r) for r in await cursor.fetchall()]
+        for r in rows:
+            r["nudged"] = bool(r.get("nudged", 0))
+            r["nudge_count"] = r.get("nudge_count", 0)
         if include_history:
             for r in rows:
                 r["history"] = json.loads(r.get("history_json", "[]"))
@@ -5333,3 +5372,120 @@ async def update_telegram_topic_last_message(group_id: int, topic_id: int, messa
         )
         await db.commit()
 
+
+# ── Outreach Nudges (follow-up lần 2) ─────────────────────────────────────
+
+async def get_nudge_candidates(delay_hours: int = 24, max_age_hours: int = 120, limit: int = 20) -> list[dict]:
+    """Find DM-outreach leads who never replied and haven't been nudged yet.
+
+    Combines watcher_dm_logs + dm_campaign_logs as the source of first-contact.
+    Filters: status='success', silence >= delay_hours, age <= max_age_hours,
+    NOT EXISTS in dm_replies (no inbound), NOT EXISTS in nudges (not yet nudged).
+    """
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        # Parameterized delay strings for SQLite datetime arithmetic
+        delay_str = f"-{int(delay_hours)} hours"
+        age_str = f"-{int(max_age_hours)} hours"
+
+        cursor = await db.execute("""
+            SELECT 'watcher' AS channel, w.watcher_id, NULL AS campaign_id,
+                   w.account_id, w.target_user_id, w.target_username, w.sent_at
+            FROM watcher_dm_logs w
+            WHERE w.status = 'success'
+              AND w.sent_at <= datetime('now', ?)
+              AND w.sent_at >= datetime('now', ?)
+              AND NOT EXISTS (
+                    SELECT 1 FROM dm_replies r
+                    WHERE r.sender_user_id = w.target_user_id
+                      AND r.received_at >= w.sent_at
+              )
+              AND NOT EXISTS (
+                    SELECT 1 FROM nudges n
+                    WHERE n.account_id = w.account_id
+                      AND n.target_user_id = w.target_user_id
+              )
+            UNION ALL
+            SELECT 'campaign' AS channel, NULL AS watcher_id, c.campaign_id,
+                   c.account_id, c.target_user_id, c.target_username, c.sent_at
+            FROM dm_campaign_logs c
+            WHERE c.status = 'success'
+              AND c.sent_at <= datetime('now', ?)
+              AND c.sent_at >= datetime('now', ?)
+              AND NOT EXISTS (
+                    SELECT 1 FROM dm_replies r
+                    WHERE r.sender_user_id = c.target_user_id
+                      AND r.received_at >= c.sent_at
+              )
+              AND NOT EXISTS (
+                    SELECT 1 FROM nudges n
+                    WHERE n.account_id = c.account_id
+                      AND n.target_user_id = c.target_user_id
+              )
+            ORDER BY sent_at ASC
+            LIMIT ?
+        """, (delay_str, age_str, delay_str, age_str, limit))
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def has_inbound_since(account_id: int, target_user_id: int, since_iso: str) -> bool:
+    """Check whether target_user_id sent us any DM reply since `since_iso`.
+
+    Used as the TOCTOU re-check inside the send lock to avoid nudging
+    a lead who just replied between candidate-scan and actual send.
+    """
+    async with get_db() as db:
+        row = await (await db.execute(
+            "SELECT 1 FROM dm_replies WHERE sender_user_id = ? AND received_at >= ? LIMIT 1",
+            (target_user_id, since_iso),
+        )).fetchone()
+        return row is not None
+
+
+async def record_nudge(
+    account_id: int,
+    target_user_id: int,
+    channel: str,
+    status: str,
+    watcher_id: int | None = None,
+    campaign_id: int | None = None,
+    error_message: str | None = None,
+) -> int | None:
+    """Record a nudge attempt. UNIQUE(account_id, target_user_id) prevents dupes.
+
+    Returns the row id on success, None if a duplicate was silently skipped.
+    """
+    async with get_db() as db:
+        try:
+            cursor = await db.execute(
+                """INSERT INTO nudges
+                   (account_id, target_user_id, channel, status, watcher_id, campaign_id, error_message)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (account_id, target_user_id, channel, status, watcher_id, campaign_id, error_message),
+            )
+            await db.commit()
+            return cursor.lastrowid
+        except Exception:
+            # UNIQUE constraint violation → already nudged
+            return None
+
+
+async def get_nudge_stats() -> dict:
+    """Count nudges by status for the stats endpoint."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT status, COUNT(*) as cnt FROM nudges GROUP BY status"
+        )
+        rows = await cursor.fetchall()
+        return {r[0]: r[1] for r in rows}
+
+
+async def get_nudge_for_user(account_id: int, target_user_id: int) -> dict | None:
+    """Get nudge record for a specific user (for UI badge)."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute(
+            "SELECT * FROM nudges WHERE account_id = ? AND target_user_id = ? LIMIT 1",
+            (account_id, target_user_id),
+        )).fetchone()
+        return dict(row) if row else None

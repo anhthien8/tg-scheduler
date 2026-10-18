@@ -10,7 +10,7 @@ import database as db
 logger = logging.getLogger("tg-scheduler.template-rotation")
 
 # Minimum sends before a variant's response rate is considered reliable
-MIN_SENDS_FOR_STATS = 5
+MIN_SENDS_FOR_STATS = 30
 
 
 async def select_variant(messages_list: list, template_id: int | None = None,

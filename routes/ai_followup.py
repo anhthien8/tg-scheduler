@@ -26,6 +26,9 @@ class AIFollowUpSettings(BaseModel):
     handover_keywords: list[str] = ["gặp admin", "tư vấn viên", "gọi điện", "số điện thoại", "lừa đảo"]
     # Drip cadence: hours of silence before each follow-up. Default day 1/3/7.
     drip_cadence_hours: list[int] = [24, 72, 168]
+    # Outreach nudge: delay hours before nudging and max nudge count.
+    outreach_nudge_delay_hours: int = 24
+    outreach_nudge_max: int = 1
 
 
 class UpdateChatStatusRequest(BaseModel):
@@ -189,6 +192,24 @@ async def get_settings():
     except Exception:
         cadence = [24, 72, 168]
 
+    # Outreach nudge settings
+    nudge_s = await db.get_settings_bulk({
+        "outreach_nudge_delay_hours": "24",
+        "outreach_nudge_max": "1",
+    })
+    try:
+        nudge_delay = int(nudge_s["outreach_nudge_delay_hours"])
+        if nudge_delay <= 0:
+            nudge_delay = 24
+    except (ValueError, TypeError):
+        nudge_delay = 24
+    try:
+        nudge_max = int(nudge_s["outreach_nudge_max"])
+        if nudge_max < 0:
+            nudge_max = 1
+    except (ValueError, TypeError):
+        nudge_max = 1
+
     return {
         "enabled": enabled_str.lower() in ("true", "1"),
         "system_prompt": default_prompt if sys_prompt is None else sys_prompt,
@@ -196,6 +217,8 @@ async def get_settings():
         "max_replies_per_user": int(max_replies_str) if max_replies_str.isdigit() else 5,
         "handover_keywords": handover_kw,
         "drip_cadence_hours": cadence,
+        "outreach_nudge_delay_hours": nudge_delay,
+        "outreach_nudge_max": nudge_max,
     }
 
 
@@ -207,6 +230,9 @@ async def save_settings(req: AIFollowUpSettings):
     await db.set_setting("ai_followup_knowledge_base", req.knowledge_base)
     await db.set_setting("ai_followup_max_replies", str(req.max_replies_per_user))
     await db.set_setting("ai_followup_handover_keywords", json.dumps(req.handover_keywords))
+    # Outreach nudge settings
+    await db.set_setting("outreach_nudge_delay_hours", str(max(1, req.outreach_nudge_delay_hours)))
+    await db.set_setting("outreach_nudge_max", str(max(0, req.outreach_nudge_max)))
     # Validate + persist the drip cadence (hours, increasing, positive).
     cadence = [int(h) for h in (req.drip_cadence_hours or [])]
     if (not cadence or any(h <= 0 for h in cadence)
@@ -221,7 +247,9 @@ async def get_stats():
     """Lightweight stats — counts by status. No chat data, no history."""
     counts = await db.get_followup_chat_counts()
     total = sum(counts.values())
-    return {"counts": counts, "total": total}
+    nudge_stats = await db.get_nudge_stats()
+    nudged_total = sum(nudge_stats.values())
+    return {"counts": counts, "total": total, "nudge_stats": nudge_stats, "nudged_total": nudged_total}
 
 
 @router.get("/chats")
@@ -254,6 +282,14 @@ async def trigger_drip_followup():
     """Trigger automated Drip Follow-up for inactive chats (>48h)."""
     import dm_reply_tracker
     res = await dm_reply_tracker.process_drip_followups()
+    return {"status": "ok", "result": res}
+
+
+@router.post("/trigger-nudge")
+async def trigger_outreach_nudge():
+    """Trigger outreach nudge for KOLs who received DM but never replied."""
+    import dm_reply_tracker
+    res = await dm_reply_tracker.process_outreach_nudges()
     return {"status": "ok", "result": res}
 
 

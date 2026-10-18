@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>TG-Scheduler Kanban</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--card);color:var(--foreground);padding:12px}
+h2{font-size:15px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+h2 .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.cols{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;height:calc(100vh - 80px)}
+.col{background:var(--background);border-radius:8px;padding:10px;overflow-y:auto;border:1px solid var(--border)}
+.col-head{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px;display:flex;align-items:center;gap:6px;color:var(--muted-foreground)}
+.col-head .cnt{font-size:11px;background:var(--border);color:var(--foreground);border-radius:10px;padding:1px 7px;font-weight:500}
+.card{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:9px 10px;margin-bottom:8px;transition:transform .12s ease,box-shadow .12s ease}
+.card:hover{transform:translateY(-1px);box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.card-title{font-size:12.5px;font-weight:600;line-height:1.4}
+.card-meta{font-size:11px;color:var(--muted-foreground);margin-top:5px}
+.tag{display:inline-block;font-size:10px;font-weight:500;padding:1px 6px;border-radius:4px;margin-top:4px;margin-right:3px}
+.tag-pink{background:#e91e8c22;color:#e91e8c}
+.tag-green{background:#22c55e22;color:#22c55e}
+.tag-blue{background:#3b82f622;color:#3b82f6}
+.tag-yellow{background:#eab30822;color:#eab308}
+.badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;vertical-align:middle}
+.b-pass{background:#22c55e33;color:#22c55e}
+.b-run{background:#3b82f633;color:#3b82f6;animation:pulse 1.5s ease infinite}
+.b-commit{background:#64748b33;color:var(--muted-foreground);font-family:monospace;font-size:9.5px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+</style>
+</head>
+<body>
+<h2><span class="dot" style="background:#22c55e"></span>TG-Scheduler — Kanban Board <span style="font-size:11px;font-weight:400;color:var(--muted-foreground);margin-left:auto">15/09/2026</span></h2>
+<div class="cols">
+
+<!-- 🔴 Backlog -->
+<div class="col">
+  <div class="col-head">🔴 Backlog <span class="cnt">2</span></div>
+  <div class="card">
+    <div class="card-title">Task-105: Full Inbox Telegram System</div>
+    <div class="card-meta">Chưa bắt đầu</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Task-111: Server-side cache `/stats` endpoints</div>
+    <div class="card-meta">Khi query GROUP BY chậm hơn → thêm cache</div>
+    <span class="tag tag-blue">Hiệu năng</span>
+  </div>
+</div>
+
+<!-- 🟡 In Progress -->
+<div class="col">
+  <div class="col-head">🟡 In Progress <span class="cnt">2</span></div>
+  <div class="card" style="border-left:3px solid var(--accent)">
+    <div class="card-title">Task-106: Multi-Account Proxy Auto-rotation</div>
+    <div class="card-meta">Đang chờ tiếp tục</div>
+  </div>
+  <div class="card" style="border-left:3px solid #3b82f6">
+    <div class="card-title">Task-109: Random Reaction Count <span class="badge b-run">RUNNING</span></div>
+    <div class="card-meta">Bài mới → random k acc react (min-max), thay vì 100% acc. Engine + API + UI + test.</div>
+    <span class="tag tag-pink">Reactions</span>
+    <span class="tag tag-blue">Hiệu năng</span>
+    <span class="tag tag-yellow">Anti-spam</span>
+  </div>
+</div>
+
+<!-- 🟢 Done -->
+<div class="col">
+  <div class="col-head">🟢 Done <span class="cnt">2</span></div>
+  <div class="card">
+    <div class="card-title">Task-108: Join Watcher v3.3.0</div>
+    <div class="card-meta">Auto-DM thành viên mới join nhóm · Admin/bot/self-add skip · Delay anti-spam 3-15p</div>
+    <span class="badge b-pass">QC PASS</span>
+    <span class="badge b-commit">dd9935e</span>
+    <span class="tag tag-green">merged</span>
+  </div>
+  <div class="card">
+    <div class="card-title">Task-104: Command Bot v3.2.2 + Blacklist UI</div>
+    <div class="card-meta">Fix 5 lỗi QC: race condition, XSS, session cleanup, SQL trim</div>
+    <span class="badge b-pass">QC PASS</span>
+    <span class="badge b-commit">e6c0018</span>
+    <span class="tag tag-green">merged</span>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

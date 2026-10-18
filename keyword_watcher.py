@@ -139,7 +139,8 @@ import time as _time
 
 # {account_id: timestamp_when_unblocked}  — PeerFlood blocks for 45 min
 _peerflood_cooldown: dict = {}
-PEERFLOOD_COOLDOWN_SECS = 45 * 60  # 45 minutes
+PEERFLOOD_COOLDOWN_SECS = 45 * 60  # 45 minutes (legacy default)
+_peerflood_count: dict[int, int] = {}  # {acc_id: consecutive_flood_count} for exponential backoff
 
 # {user_id: timestamp_last_dm}  — prevent duplicate DMs to same user
 _user_dm_sent: dict = {}
@@ -231,11 +232,16 @@ def _is_peerflood_blocked(acc_id: int) -> bool:
     until = _peerflood_cooldown.get(acc_id)
     if until and _time.time() < until:
         return True
+    if until and _time.time() >= until:
+        _peerflood_count.pop(acc_id, None)  # reset escalation on expiry
     return False
 
 
 def _mark_peerflood(acc_id: int):
-    until = _time.time() + PEERFLOOD_COOLDOWN_SECS
+    count = _peerflood_count.get(acc_id, 0) + 1
+    _peerflood_count[acc_id] = count
+    cooldown_secs = min(4 * 3600 * (2 ** (count - 1)), 72 * 3600)  # 4h, 8h, 16h, 32h, 64h, cap 72h
+    until = _time.time() + cooldown_secs
     _peerflood_cooldown[acc_id] = until
     # Persist to DB asynchronously so it survives server restarts
     import asyncio
@@ -250,8 +256,10 @@ def _mark_peerflood(acc_id: int):
             asyncio.ensure_future(_persist())
     except Exception:
         pass
+    cooldown_hrs = cooldown_secs / 3600
     logger.warning(
-        f"[CoolDown] Account {acc_id} marked PeerFlood-blocked for {PEERFLOOD_COOLDOWN_SECS//60} min (persisted)"
+        f"[CoolDown] Account {acc_id} marked PeerFlood-blocked for {cooldown_hrs:.1f}h "
+        f"(flood #{count}, persisted)"
     )
 
 
@@ -627,7 +635,11 @@ async def _do_send_dm_with_fallback(
                 # ── Simulate realistic typing action (human-like behavior) ──
                 try:
                     typing_action = "typing" if msg_to_send.get("msg_type") == "text" else "photo"
-                    typing_duration = min(max(len(msg_to_send.get("content") or "") * 0.012, 1.5), 3.5)
+                    _ct = msg_to_send.get("content") or ""
+                    _base = len(_ct) * random.uniform(0.008, 0.018)
+                    _think = random.uniform(1.5, 4.0)  # thinking before typing
+                    _typo = random.uniform(0.5, 2.0) if random.random() < 0.3 else 0  # occasional correction
+                    typing_duration = min(_think + _base + _typo, 8.0)  # cap at 8s
                     if hasattr(client, "action") and callable(client.action):
                         async with client.action(peer, typing_action):
                             await asyncio.sleep(typing_duration)

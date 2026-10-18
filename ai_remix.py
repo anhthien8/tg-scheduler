@@ -604,7 +604,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             "model": kwargs.get("model", "gpt-4o-mini"),
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 1000
+            "max_tokens": 1500
         }
         async with httpx.AsyncClient(timeout=25) as client:
             resp = await client.post(url, headers=headers, json=payload)
@@ -634,7 +634,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             "model": model,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 1000
+            "max_tokens": 1500
         }
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(url, headers=headers, json=payload)
@@ -650,7 +650,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             "model": "deepseek-chat",
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 1000
+            "max_tokens": 1500
         }
         async with httpx.AsyncClient(timeout=25) as client:
             resp = await client.post(url, headers=headers, json=payload)
@@ -664,7 +664,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             "model": "llama-3.3-70b-versatile",
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 1000
+            "max_tokens": 1500
         }
         async with httpx.AsyncClient(timeout=25) as client:
             resp = await client.post(url, headers=headers, json=payload)
@@ -717,7 +717,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             "model": model,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 1000
+            "max_tokens": 1500
         }
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(url, headers=headers, json=payload)
