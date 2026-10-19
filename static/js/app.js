@@ -18,12 +18,18 @@ async init(){
 // Reveal the app shell immediately and drop the boot splash.
 document.body.classList.add('app-ready');
 const cachedAccs = sessionStorage.getItem('tgs_accounts_cache');
-if(cachedAccs){try{const parsed=JSON.parse(cachedAccs);if(parsed.accounts&&parsed.accounts.length>0){App._accounts=parsed.accounts;this.showDashboard(null);API.authStatus().then(s=>{if(s&&s.user){const n=[s.user.first_name,s.user.last_name].filter(Boolean).join(' ');const esc=x=>String(x||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');(document.getElementById('user-info')||me_dummy).innerHTML=`<strong>${esc(n)}</strong><span>@${esc(s.user.username||s.user.phone||'')}</span>`}}).catch(()=>{});return}}catch{}}
+let hasCached = false;
+if(cachedAccs){try{const parsed=JSON.parse(cachedAccs);if(parsed.accounts&&parsed.accounts.length>0){App._accounts=parsed.accounts;hasCached=true;(document.getElementById('login-page')?.classList||{add:()=>{},remove:()=>{}}).add('hidden');(document.getElementById('dashboard-page')?.classList||{add:()=>{},remove:()=>{}}).remove('hidden');const firstUi=parsed.accounts.find(a=>a.user_info)?.user_info;if(firstUi)this._setUserInfo(firstUi)}}catch{}}
+// Defer initial API fetches until after window.load so browser tab spinner finishes immediately
+if(document.readyState!=='complete'){await new Promise(r=>window.addEventListener('load',()=>setTimeout(r,0),{once:true}))}else{await new Promise(r=>setTimeout(r,0))}
+if(hasCached){this.showDashboard(null);API.authStatus().then(s=>{if(s&&s.user)this._setUserInfo(s.user)}).catch(()=>{});return}
 try{const s=await API.authStatus();if(s.authenticated){this.showDashboard(s.user);return}}catch{}
 
 try{const a=await API.getAccounts();App._accounts=a.accounts||[];if(a.accounts&&a.accounts.length>0){this.showDashboard(null);return}}catch{}
 
 this.showLogin()},
+
+_setUserInfo(user){if(!user)return;const n=[user.first_name,user.last_name].filter(Boolean).join(' ');const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');(document.getElementById('user-info')||me_dummy).innerHTML=`<strong>${esc(n||'TG Scheduler')}</strong><span>@${esc(user.username||user.phone||'')}</span>`},
 
 toast(m,t='info'){const e=document.createElement('div');e.className=`toast ${t}`;e.textContent=m;(document.getElementById('toasts') || document.createElement("div")).appendChild(e);setTimeout(()=>e.remove(),4000)},
 
@@ -34,7 +40,7 @@ showLogin(){(document.getElementById('login-page')?.classList || {add:()=>{},rem
 
 showDashboard(user){(document.getElementById('login-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('dashboard-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
 
-if(user){const n=[user.first_name,user.last_name].filter(Boolean).join(' ');const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');(document.getElementById('user-info') || me_dummy).innerHTML = `<strong>${esc(n)}</strong><span>@${esc(user.username||user.phone||'')}</span>`}
+if(user){this._setUserInfo(user)}else if(App._accounts&&App._accounts.length){const firstUi=App._accounts.find(a=>a.user_info)?.user_info;if(firstUi)this._setUserInfo(firstUi)}
 
 this.navigate('dashboard');document.querySelectorAll('.day-btn').forEach(b=>b.addEventListener('click',()=>b.classList.toggle('active')))},
 

@@ -28,6 +28,11 @@ from fastapi.security.api_key import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipResponder, IdentityResponder
+from starlette.responses import Response
+
+# Read static assets up to 1 MB in a single chunk so GZipResponder sets an
+# exact Content-Length instead of falling back to Transfer-Encoding: chunked.
+FileResponse.chunk_size = 1024 * 1024
 
 
 class CacheControlledStaticFiles(StaticFiles):
@@ -193,11 +198,15 @@ GZIP_EXCLUDED_CONTENT_TYPES = (
 
 
 class BinaryAwareGZipResponder(GZipResponder):
-    """GZipResponder that also skips already-compressed binary media types."""
+    """GZipResponder that skips 204/304/1xx responses and already-compressed binary media types."""
 
     async def send_with_compression(self, message):
         if message["type"] == "http.response.start":
             await super().send_with_compression(message)
+            status = message.get("status", 200)
+            if status < 200 or status in (204, 304):
+                self.content_type_is_excluded = True
+                return
             headers = Headers(raw=message["headers"])
             content_type = headers.get("content-type", "").lower()
             if content_type.startswith(GZIP_EXCLUDED_CONTENT_TYPES):
@@ -313,6 +322,19 @@ async def telegram_worker_health():
     return {"runtime_mode": TG_RUNTIME_MODE, "worker": await lc.read_worker_health()}
 
 
+_FAVICON_SVG = (
+    b"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+    b"<rect width='64' height='64' rx='14' fill='#6366f1'/>"
+    b"<path d='M49 16L13 30c-2 1-2 3 0 4l9 3 21-13c1-1 2 0 1 1L27 40v9c0 2 2 3 3 1l5-5 9 7c2 1 4 0 4-2l3-31c0-2-1-3-2-3z' fill='#fff'/>"
+    b"</svg>"
+)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(content=_FAVICON_SVG, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/")
 async def root():
     return FileResponse(os.path.join(static_dir, "index.html"), headers={"Cache-Control": "no-cache"})
@@ -340,10 +362,10 @@ if __name__ == "__main__":
         except OSError:
             pass
         if sockets:
-            config = uvicorn.Config("main:app", host=host, port=port, reload=False, timeout_keep_alive=65)
+            config = uvicorn.Config("main:app", host=host, port=port, reload=False, timeout_keep_alive=15)
             uvicorn.Server(config).run(sockets=sockets)
         else:
-            uvicorn.run("main:app", host=host, port=port, reload=False, timeout_keep_alive=65)
+            uvicorn.run("main:app", host=host, port=port, reload=False, timeout_keep_alive=15)
     else:
-        uvicorn.run("main:app", host=host, port=port, reload=False, timeout_keep_alive=65)
+        uvicorn.run("main:app", host=host, port=port, reload=False, timeout_keep_alive=15)
 
