@@ -158,7 +158,12 @@ async def list_all_progress():
             SELECT wp.*,
                    a.name   AS account_name,
                    a.phone  AS account_phone,
-                   a.status AS account_status,
+                   CASE
+                       WHEN a.is_flagged = 1 THEN 'flagged'
+                       WHEN a.is_paused = 1 THEN 'paused'
+                       WHEN a.is_logged_in = 1 THEN 'active'
+                       ELSE 'inactive'
+                   END AS account_status,
                    COALESCE(
                        CAST((julianday('now') - julianday(wp.started_at)) AS INTEGER),
                        0
@@ -194,7 +199,14 @@ async def get_account_progress(account_id: int):
     async with get_db() as conn:
         conn.row_factory = aiosqlite.Row
         cursor = await conn.execute(
-            "SELECT name, phone, status FROM accounts WHERE id = ?",
+            """SELECT name, phone,
+                      CASE
+                          WHEN is_flagged = 1 THEN 'flagged'
+                          WHEN is_paused = 1 THEN 'paused'
+                          WHEN is_logged_in = 1 THEN 'active'
+                          ELSE 'inactive'
+                      END AS status
+               FROM accounts WHERE id = ?""",
             (account_id,)
         )
         acct = await cursor.fetchone()
