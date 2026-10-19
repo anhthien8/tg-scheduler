@@ -559,6 +559,12 @@ async def _do_send_dm_with_fallback(
             logger.debug(f"[Watcher {watcher_id}] Skipping paused account {acc_id}")
             continue
 
+        # C3: Skip accounts outside their active hours
+        _acc_data = await db.get_account(acc_id)
+        if not db.check_account_active_hours(_acc_data):
+            logger.debug(f"[Watcher {watcher_id}] Account {acc_id} outside active hours, skipping")
+            continue
+
         # ── Daily DM limit check ─────────────────────────────────────────────
         limit_reached, dm_count, dm_limit = await db.is_account_dm_limit_reached(acc_id)
         if limit_reached:

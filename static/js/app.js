@@ -248,9 +248,26 @@ if(page==='ai-followup'){
               <input type="text" id="aifu-handover-kw" class="form-input" placeholder="gặp admin, tư vấn viên, số điện thoại, lừa đảo...">
             </div>
             <div style="grid-column:1/-1">
-              <label class="form-label" for="aifu-drip-cadence" style="font-weight:600">⏰ Nhịp follow-up tự động (giờ cách nhau, phân cách dấu phẩy)</label>
+              <label class="form-label" for="aifu-drip-cadence" style="font-weight:600">⏰ Nhịp follow-up mặc định (giờ cách nhau, phân cách dấu phẩy)</label>
               <input type="text" id="aifu-drip-cadence" class="form-input" placeholder="24, 72, 168">
               <small style="color:#9ca3af;font-size:0.72rem;">Số giờ im lặng trước mỗi lần nhắc. Mặc định 24, 72, 168 = Ngày 1 / 3 / 7. Tăng dần, tối đa tùy ý.</small>
+            </div>
+            <div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+              <div>
+                <label class="form-label" for="aifu-drip-tier-a" style="font-weight:600;color:#4ade80">🔥 Nhịp Tier A (Hot Lead)</label>
+                <input type="text" id="aifu-drip-tier-a" class="form-input" placeholder="12, 24, 48, 96">
+                <small style="color:#9ca3af;font-size:0.7rem;">Mặc định: 12, 24, 48, 96 (4 bước)</small>
+              </div>
+              <div>
+                <label class="form-label" for="aifu-drip-tier-b" style="font-weight:600;color:#60a5fa">⚡ Nhịp Tier B (Warm Lead)</label>
+                <input type="text" id="aifu-drip-tier-b" class="form-input" placeholder="24, 72, 168">
+                <small style="color:#9ca3af;font-size:0.7rem;">Mặc định: 24, 72, 168 (3 bước)</small>
+              </div>
+              <div>
+                <label class="form-label" for="aifu-drip-tier-c" style="font-weight:600;color:#facc15">🌱 Nhịp Tier C (Cold Lead)</label>
+                <input type="text" id="aifu-drip-tier-c" class="form-input" placeholder="48, 168">
+                <small style="color:#9ca3af;font-size:0.7rem;">Mặc định: 48, 168 (2 bước)</small>
+              </div>
             </div>
           </div>
           <div style="text-align:right;margin-top:16px">
@@ -275,6 +292,37 @@ if(page==='ai-followup'){
           </div>
           <div style="text-align:right;margin-top:12px">
             <button class="btn btn-primary btn-sm" onclick="AIFollowUp.saveKolChannelSettings()">💾 Lưu KOL Channel</button>
+          </div>
+        </div>
+        <div class="card" style="padding:20px;margin-top:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              <h3 style="margin:0 0 4px;font-size:14px">🎁 Referral / Viral Loop KOL</h3>
+              <div style="font-size:12px;color:var(--text2)">Tạo mã giới thiệu <code>REF-XXXXXXXX</code> cho KOL đã onboard. Khi KOL mới nhắn mã này vào DM, hệ thống tự động ghi nhận quy kết (attribution).</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.loadReferrals()">🔄 Làm mới</button>
+          </div>
+          <div id="aifu-ref-stats" style="display:flex;gap:16px;font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;margin-bottom:12px">
+            <div>
+              <label class="form-label" for="ref-acc-id" style="font-weight:600">Account ID</label>
+              <input type="number" id="ref-acc-id" class="form-input" placeholder="VD: 1" value="1">
+            </div>
+            <div>
+              <label class="form-label" for="ref-user-id" style="font-weight:600">KOL User ID (Referrer)</label>
+              <input type="number" id="ref-user-id" class="form-input" placeholder="Telegram User ID">
+            </div>
+            <div>
+              <label class="form-label" for="ref-max-uses" style="font-weight:600">Số lượt tối đa</label>
+              <input type="number" id="ref-max-uses" class="form-input" value="10" min="1">
+            </div>
+            <button class="btn btn-primary btn-sm" style="height:36px" onclick="AIFollowUp.createReferralCode()">+ Tạo mã REF</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Mã REF</th><th>KOL User ID</th><th>Lượt dùng</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+              <tbody id="aifu-ref-codes-body"><tr><td colspan="5" style="text-align:center;color:var(--text2);padding:12px">Đang tải...</td></tr></tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -548,7 +596,18 @@ if(page==='warmup'){
     const html = `<div id="view-warmup">
       <h2 class="page-title">Warmup Nhom</h2>
 
-      <!-- Stats -->
+      <!-- Safety Warning Banner -->
+      <div class="card" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);padding:16px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:1.5rem">⚠️</span>
+          <div>
+            <strong style="color:#f59e0b">Lưu ý An toàn</strong>
+            <p style="margin:4px 0 0;font-size:.85rem;color:var(--text2)">Chỉ thêm nhóm PUBLIC dùng cho mục đích warmup. KHÔNG thêm nhóm private hoặc nhóm có khách hàng tiềm năng (KOL) để tránh lộ bot.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats (Enhanced) -->
       <div class="stats-grid" id="warmup-stats" style="margin-bottom:20px"></div>
 
       <!-- Groups -->
@@ -576,9 +635,44 @@ if(page==='warmup'){
         <div id="warmup-job-list"></div>
       </div>
 
-      <!-- Logs -->
+      <!-- Account Warmup Progress Panel -->
       <div style="margin-top:24px">
-        <h3>Logs gan day</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0">📊 Account Progress</h3>
+          <button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.3)" onclick="Warmup.loadProgress()">↻ Refresh</button>
+        </div>
+        <div id="warmup-progress-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px"></div>
+      </div>
+
+      <!-- Action Logs v2 -->
+      <div style="margin-top:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <h3 style="margin:0">📋 Action Logs</h3>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="warmup-log-filter-account" class="form-select" style="width:auto;min-width:140px;padding:4px 8px;font-size:.82rem" onchange="Warmup.loadActionLogs()">
+              <option value="">Tat ca accounts</option>
+            </select>
+            <select id="warmup-log-filter-status" class="form-select" style="width:auto;min-width:120px;padding:4px 8px;font-size:.82rem" onchange="Warmup.loadActionLogs()">
+              <option value="">Tat ca status</option>
+              <option value="success">✅ Success</option>
+              <option value="error">❌ Error</option>
+              <option value="flood">🟠 Flood</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;color:var(--text2)">
+              <input type="checkbox" id="warmup-log-autorefresh" onchange="Warmup.toggleAutoRefresh()"> Auto-refresh
+            </label>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table"><thead><tr>
+            <th>Thoi gian</th><th>Account</th><th>Action</th><th>Target Chat</th><th>Status</th><th>Error</th>
+          </tr></thead><tbody id="warmup-action-log-body"></tbody></table>
+        </div>
+      </div>
+
+      <!-- Legacy Logs (kept for compatibility) -->
+      <div style="margin-top:24px">
+        <h3>Logs gan day (Jobs)</h3>
         <div class="table-wrap">
           <table class="data-table"><thead><tr>
             <th>Thoi gian</th><th>Job</th><th>Account</th><th>Noi dung</th><th>Trang thai</th>
@@ -650,6 +744,7 @@ if(page==='warmup'){
   }
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
   (document.getElementById('view-warmup')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
+  Warmup.cleanup();
   Warmup.init();
   return;
 }
@@ -942,6 +1037,14 @@ grid.innerHTML = this.accounts.map(a => {
       ${agentOptions}
     </select>
 
+    <!-- C3: Active Hours (Online/Offline Cycle) -->
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)" title="Khung giờ hoạt động tự động (Online/Offline Cycle) để chống ban">
+      <span>🕒 Giờ chạy:</span>
+      <input type="time" id="acc-ah-start-${a.id}" value="${esc(a.active_hours_start || '08:00')}" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:4px;color:#f3f4f6;font-size:11px;padding:1px 4px" onchange="App.setAccountActiveHours(${a.id})">
+      <span>→</span>
+      <input type="time" id="acc-ah-end-${a.id}" value="${esc(a.active_hours_end || '22:00')}" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:4px;color:#f3f4f6;font-size:11px;padding:1px 4px" onchange="App.setAccountActiveHours(${a.id})">
+    </div>
+
     <!-- Actions: compact row -->
     <div style="display:flex;align-items:center;gap:6px;border-top:1px solid rgba(255,255,255,0.06);padding-top:8px">
       ${isOff ?
@@ -962,6 +1065,8 @@ closeAccountModal(){(document.getElementById('account-modal')?.classList || {add
 async toggleAccountActive(accId,isActive){const actionText=isActive?'Bật (ON)':'Tắt (OFF)';const confirmMsg=isActive?'Bật lại tài khoản này? Tài khoản sẽ bắt đầu nhận tin nhắn và chạy tự động hóa trở lại.':'Bạn có chắc muốn TẮT tài khoản này?\nKhi TẮT: Tất cả AI Agent, Chiến dịch DM, Keyword Watcher và Tự động hóa của tài khoản này sẽ BỊ NGẮT HOÀN TOÀN để tránh ảnh hưởng danh bạ khách hàng.';if(!await customConfirm(confirmMsg))return;try{const res=await API.toggleAccountActive(accId,isActive);this.toast(res.message||`Đã ${actionText} tài khoản`,isActive?'success':'error');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
 
 async setAccountAiAgent(accId,agentId){try{const res=await API.setAccountAiAgent(accId,agentId);this.toast(res.message||'Đã cập nhật AI Agent cho tài khoản','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
+
+async setAccountActiveHours(accId){const start=document.getElementById(`acc-ah-start-${accId}`)?.value||'08:00';const end=document.getElementById(`acc-ah-end-${accId}`)?.value||'22:00';try{const res=await API.post(`/api/auth/accounts/${accId}/active-hours`,{active_hours_start:start,active_hours_end:end,active_timezone:'Asia/Ho_Chi_Minh'});API.clearAccountsCache();this.toast(res.message||`Đã lưu khung giờ ${start}-${end}`,'success');}catch(e){this.toast(e.message,'error')}},
 
 async unflagAccount(accId){if(!await customConfirm('Bỏ cảnh báo tài khoản này?'))return;try{await fetch(`/api/auth/accounts/${accId}/unflag`,{method:'POST'});API.clearAccountsCache();this.toast('Đã bỏ cảnh báo','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
 
@@ -4437,9 +4542,18 @@ const Warmup = {
   _selectedGroupId: null,
   _groups: [],
   _jobs: [],
+  _refreshTimer: null,
+  _actionLogSummary: null,
 
   async init() {
-    await Promise.all([this.loadGroups(), this.loadJobs(), this.loadRecentLogs()]);
+    await Promise.all([this.loadGroups(), this.loadJobs(), this.loadRecentLogs(), this.loadProgress(), this.loadActionLogs(), this.loadActionLogSummary()]);
+  },
+
+  cleanup() {
+    if (this._refreshTimer) {
+      clearInterval(this._refreshTimer);
+      this._refreshTimer = null;
+    }
   },
 
   // ── Groups ──
@@ -4580,23 +4694,13 @@ const Warmup = {
       if (!this._jobs.length) {
         el.innerHTML = '<div style="color:var(--text2);padding:12px">Chua co job nao.</div>';
 
-        // Update stats
-        const statsEl = document.getElementById('warmup-stats');
-        statsEl.innerHTML = `
-          <div class="stat-card"><div class="stat-label">Nhom</div><div class="stat-value accent">${this._groups.length}</div></div>
-          <div class="stat-card"><div class="stat-label">Jobs</div><div class="stat-value">0</div></div>
-          <div class="stat-card"><div class="stat-label">Dang chay</div><div class="stat-value green">0</div></div>
-        `;
+        // Update stats (enhanced)
+        this._renderStats(0, 0);
         return;
       }
 
       const running = this._jobs.filter(j => j.is_running || j.status === 'running').length;
-      const statsEl = document.getElementById('warmup-stats');
-      statsEl.innerHTML = `
-        <div class="stat-card"><div class="stat-label">Nhom</div><div class="stat-value accent">${this._groups.length}</div></div>
-        <div class="stat-card"><div class="stat-label">Jobs</div><div class="stat-value">${this._jobs.length}</div></div>
-        <div class="stat-card"><div class="stat-label">Dang chay</div><div class="stat-value green">${running}</div></div>
-      `;
+      this._renderStats(this._jobs.length, running);
 
       el.innerHTML = this._jobs.map(j => {
         const grp = this._groups.find(g => g.id === j.group_id);
@@ -4766,6 +4870,147 @@ const Warmup = {
       }).join('');
     } catch(e) {
       // Silent fail for initial load
+    }
+  },
+
+  // ── Render Enhanced Stats ──
+  _renderStats(jobCount, runningCount) {
+    const statsEl = document.getElementById('warmup-stats');
+    const s = this._actionLogSummary || {};
+    statsEl.innerHTML = `
+      <div class="stat-card"><div class="stat-label">Nhom</div><div class="stat-value accent">${this._groups.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Jobs</div><div class="stat-value">${jobCount}</div></div>
+      <div class="stat-card"><div class="stat-label">Dang chay</div><div class="stat-value green">${runningCount}</div></div>
+      <div class="stat-card"><div class="stat-label">Actions (hom nay)</div><div class="stat-value">${s.total_today || 0}</div></div>
+      <div class="stat-card"><div class="stat-label">Dang warmup</div><div class="stat-value" style="color:#60a5fa">${s.accounts_active || 0}</div></div>
+      <div class="stat-card"><div class="stat-label">🎓 Graduated</div><div class="stat-value green">${s.accounts_graduated || 0}</div></div>
+      <div class="stat-card"><div class="stat-label">⚠️ Flood (3 ngay)</div><div class="stat-value" style="color:#f59e0b">${s.flood_events_3d || 0}</div></div>
+    `;
+  },
+
+  // ── Account Warmup Progress ──
+  async loadProgress() {
+    try {
+      const data = await API.get('/api/warmup/progress');
+      const progress = data.progress || [];
+      const el = document.getElementById('warmup-progress-list');
+      if (!el) return;
+      if (!progress.length) {
+        el.innerHTML = '<div style="color:var(--text2);padding:12px">Chua co account nao trong warmup.</div>';
+        return;
+      }
+
+      // Populate account filter dropdown
+      const filterSel = document.getElementById('warmup-log-filter-account');
+      if (filterSel && filterSel.options.length <= 1) {
+        progress.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.account_id;
+          opt.textContent = p.account_name || ('Acc #' + p.account_id);
+          filterSel.appendChild(opt);
+        });
+      }
+
+      el.innerHTML = progress.map(p => {
+        const stageNames = {1: 'PASSIVE', 2: 'WARMING', 3: 'ACTIVE', 4: 'READY'};
+        const stageColors = {1: '#60a5fa', 2: '#facc15', 3: '#fb923c', 4: '#4ade80'};
+        const stage = p.graduated_at ? 5 : (p.stage || 1);
+        const stageColor = stage === 5 ? '#4ade80' : (stageColors[stage] || '#60a5fa');
+        const stageName = stage === 5 ? 'GRADUATED' : (stageNames[stage] || 'PASSIVE');
+        const statusBadge = stage === 5
+          ? '<span style="background:rgba(74,222,128,.15);color:#4ade80;padding:2px 8px;border-radius:12px;font-size:.78rem">🎓 Graduated</span>'
+          : `<span style="background:${stageColor}22;color:${stageColor};padding:2px 8px;border-radius:12px;font-size:.78rem">Stage ${p.stage || 1} - ${stageName}</span>`;
+
+        const msgPct = Math.min(100, ((p.messages_sent || 0) / 10) * 100);
+        const reactPct = Math.min(100, ((p.reactions_sent || 0) / 15) * 100);
+        const chanPct = Math.min(100, ((p.channels_joined || 0) / 3) * 100);
+
+        const started = p.started_at ? p.started_at.replace('T', ' ').slice(0, 10) : 'N/A';
+
+        return `<div class="card" style="padding:14px;border-left:3px solid ${stageColor}">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <strong>${this._esc(p.account_name || 'Acc #' + p.account_id)}</strong>
+            ${statusBadge}
+          </div>
+          <div style="font-size:.82rem;color:var(--text2);margin-bottom:8px">
+            Bat dau: ${started} | ${p.days_in_warmup || 0} ngay${p.flood_count_3d ? ' | <span style="color:#f59e0b">⚠️ ' + p.flood_count_3d + ' flood</span>' : ''}
+          </div>
+          <div style="margin-bottom:4px">
+            <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--text2)"><span>💬 Messages</span><span>${p.messages_sent || 0}/10</span></div>
+            <div style="background:var(--bg3);border-radius:4px;height:6px;margin-top:2px"><div style="background:#60a5fa;height:100%;border-radius:4px;width:${msgPct}%;transition:width .3s"></div></div>
+          </div>
+          <div style="margin-bottom:4px">
+            <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--text2)"><span>😀 Reactions</span><span>${p.reactions_sent || 0}/15</span></div>
+            <div style="background:var(--bg3);border-radius:4px;height:6px;margin-top:2px"><div style="background:#facc15;height:100%;border-radius:4px;width:${reactPct}%;transition:width .3s"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--text2)"><span>📢 Channels</span><span>${p.channels_joined || 0}/3</span></div>
+            <div style="background:var(--bg3);border-radius:4px;height:6px;margin-top:2px"><div style="background:#4ade80;height:100%;border-radius:4px;width:${chanPct}%;transition:width .3s"></div></div>
+          </div>
+        </div>`;
+      }).join('');
+    } catch(e) { /* silent - endpoint may not exist yet */ }
+  },
+
+  // ── Action Logs v2 ──
+  async loadActionLogs() {
+    try {
+      const accFilter = (document.getElementById('warmup-log-filter-account') || {}).value || '';
+      const statusFilter = (document.getElementById('warmup-log-filter-status') || {}).value || '';
+      let url = '/api/warmup/action-logs?limit=50';
+      if (accFilter) url += '&account_id=' + accFilter;
+      if (statusFilter) url += '&status=' + statusFilter;
+      const data = await API.get(url);
+      const logs = data.logs || [];
+      const tbody = document.getElementById('warmup-action-log-body');
+      if (!tbody) return;
+      if (!logs.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:16px">Chua co action log</td></tr>';
+        return;
+      }
+      const actionIcons = {read_history:'📖',react_emoji:'😀',view_profile:'👤',post_message:'💬',forward_message:'↗️',join_channel:'📢'};
+      const statusColors = {success:'#4ade80',error:'#f87171',flood:'#f59e0b'};
+      tbody.innerHTML = logs.map(l => {
+        const time = l.created_at ? l.created_at.replace('T', ' ').slice(0, 19) : '';
+        const icon = actionIcons[l.action_type] || '🔹';
+        const sColor = statusColors[l.status] || 'var(--text2)';
+        return `<tr>
+          <td style="font-size:.82rem;white-space:nowrap">${time}</td>
+          <td>${this._esc(l.account_name || 'Acc #' + l.account_id)}</td>
+          <td>${icon} ${this._esc(l.action_type || '')}</td>
+          <td style="font-size:.82rem;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.target_chat_id || '-'}</td>
+          <td style="color:${sColor};font-weight:500">${l.status || ''}</td>
+          <td style="font-size:.78rem;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._esc((l.error_detail || '').substring(0, 80))}</td>
+        </tr>`;
+      }).join('');
+    } catch(e) { /* silent - endpoint may not exist yet */ }
+  },
+
+  // ── Action Log Summary ──
+  async loadActionLogSummary() {
+    try {
+      const data = await API.get('/api/warmup/action-logs/summary');
+      this._actionLogSummary = data;
+      // Re-render stats if jobs already loaded
+      const running = this._jobs.filter(j => j.is_running || j.status === 'running').length;
+      this._renderStats(this._jobs.length, running);
+    } catch(e) { /* silent - endpoint may not exist yet */ }
+  },
+
+  // ── Auto-refresh Toggle ──
+  toggleAutoRefresh() {
+    const cb = document.getElementById('warmup-log-autorefresh');
+    if (cb && cb.checked) {
+      this._refreshTimer = setInterval(() => {
+        this.loadActionLogs();
+        this.loadProgress();
+        this.loadActionLogSummary();
+      }, 30000);
+    } else {
+      if (this._refreshTimer) {
+        clearInterval(this._refreshTimer);
+        this._refreshTimer = null;
+      }
     }
   },
 

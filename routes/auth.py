@@ -295,3 +295,32 @@ async def set_account_ai_agent_route(account_id: int, req: SetAccountAiAgentRequ
         "ai_agent_id": req.ai_agent_id,
         "message": msg
     }
+
+
+class SetAccountActiveHoursRequest(BaseModel):
+    active_hours_start: str = "08:00"
+    active_hours_end: str = "22:00"
+    active_timezone: str = "Asia/Ho_Chi_Minh"
+
+
+@router.post("/accounts/{account_id}/active-hours")
+async def set_account_active_hours_route(account_id: int, req: SetAccountActiveHoursRequest):
+    """Update active hours window and timezone for a Telegram account (C3)."""
+    acc = await db.get_account(account_id)
+    if not acc:
+        raise HTTPException(404, "Tài khoản không tồn tại")
+    async with db.get_db() as conn:
+        await conn.execute(
+            "UPDATE accounts SET active_hours_start = ?, active_hours_end = ?, active_timezone = ? WHERE id = ?",
+            (req.active_hours_start.strip(), req.active_hours_end.strip(), req.active_timezone.strip(), account_id),
+        )
+        await conn.commit()
+    return {
+        "success": True,
+        "account_id": account_id,
+        "active_hours_start": req.active_hours_start,
+        "active_hours_end": req.active_hours_end,
+        "active_timezone": req.active_timezone,
+        "message": f"Đã lưu khung giờ hoạt động ({req.active_hours_start} - {req.active_hours_end})",
+    }
+

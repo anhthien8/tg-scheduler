@@ -11,7 +11,7 @@ def test_full_profile_scores_high():
         "username": "trader", "first_name": "Al", "last_name": "Ice",
         "is_premium": True, "last_seen": "recently",
     }, now=NOW)
-    assert lead.score >= 90
+    assert lead.score >= 80
     assert any("complete_profile" in r for r in lead.reasons)
 
 
@@ -23,7 +23,7 @@ def test_throwaway_profile_scores_low():
 
 def test_username_only_is_modest():
     lead = score_lead({"username": "someone"}, now=NOW)
-    assert 20 <= lead.score <= 30
+    assert 10 <= lead.score <= 20
 
 
 def test_recent_activity_beats_stale():

@@ -8,11 +8,57 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.9.0",
+        "date": "19/10/2026",
+        "title": "🚀 Track C: Advanced KOL Outreach Engine — 6 tính năng nâng cao",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Nâng cấp toàn diện hệ thống outreach KOL với 6 module mới: Tier-Differentiated Drip Cadence, Enhanced Lead Scoring (8+ signals + dynamic re-score), Online/Offline Cycle per account, Self-Learning FTS5, Referral/Viral Loop, và Warmup Engine v2 (6 hành vi + graduation 4 giai đoạn).",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "C1: Tier-Differentiated Drip Cadence",
+                "desc": "Drip follow-up khác nhau theo tier: Tier A [12h, 24h, 48h, 96h], Tier B [24h, 72h, 168h], Tier C [48h, 168h]. Hỗ trợ custom cadence per tier qua settings. Tier C không còn bị loại khỏi drip pipeline.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "C2: Enhanced Lead Scoring v2 (8+ tín hiệu)",
+                "desc": "Scoring engine 2 pha: Static (bio keywords, username, premium, activity) + Dynamic (reply velocity, reply count, UID provided, community size, silence penalty). Deterministic tier assignment thay thế LLM-assigned tier. Auto rescore sau mỗi reply.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "C3: Online/Offline Cycle per Account",
+                "desc": "Cấu hình giờ hoạt động cho mỗi account (active_hours_start, active_hours_end, active_timezone). Tự động skip account ngoài giờ hoạt động trong DM send, drip, warmup. Hỗ trợ overnight window (22:00-06:00).",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "C4: Self-Learning 2.0 (FTS5 Full-Text Search)",
+                "desc": "Nâng cấp knowledge retrieval từ LIKE query sang FTS5 BM25 ranking. Tìm kiếm ngữ nghĩa trong learned knowledge base. Auto-rebuild FTS index, graceful fallback. Hỗ trợ unicode diacritics.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "C5: Referral / Viral Loop",
+                "desc": "Hệ thống mã giới thiệu: tạo REF-XXXXXXXX codes cho KOL, tracking attributions, reward management. API endpoints CRUD codes + process referrals. Phát hiện mã giới thiệu trong DM tự động.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "C6: Warmup Engine v2 — 6 hành vi + Graduation 4 giai đoạn",
+                "desc": "Nâng cấp warmup từ 1 hành vi (post) lên 6: read_history, react_emoji, view_profile, forward_message, post_message, join_channel. Hệ thống graduation 4 stage (Passive → Warming → Active → Ready). Tích hợp account_busy, flood detection, consecutive error tracking.",
+                "tag": "Tính năng"
+            },
+        ],
+    },
+    {
         "version": "v3.8.0",
         "date": "18/10/2026",
         "title": "🌐 Community Engagement Engine — Reactive v1",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Tính năng mới: tự động tương tác có giá trị trong nhóm cộng đồng crypto. Account Telegram chỉ định join nhóm mục tiêu, theo dõi từ khóa, và reply bằng nhận định TA do AI sinh — user tự tìm đến DM, funnel AI hiện có tiếp quản. Reactive mode only (v1): chỉ reply khi có người hỏi. Bao gồm hệ thống rate-limit atomic 5 lớp, consent gate fail-closed, auto-pause khi mute/ban, và tab UI Cộng Đồng mới.",
         "changes": [
             {

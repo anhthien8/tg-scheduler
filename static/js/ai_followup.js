@@ -24,7 +24,7 @@ const AIFollowUp = {
   },
 
   async init(force = false) {
-    await Promise.all([this.loadSettings(), this.loadKolChannelSettings()]);
+    await Promise.all([this.loadSettings(), this.loadKolChannelSettings(), this.loadReferrals()]);
     this.switchTab('leads');
     // Cache: chỉ fetch lại 86KB chats nếu quá 30s hoặc bị yêu cầu (nút 🔄 / force).
     const fresh = this._chatsLoadedAt && (Date.now() - this._chatsLoadedAt) < 30000 && this._chats.length;
@@ -75,6 +75,12 @@ const AIFollowUp = {
     if (handoverEl) handoverEl.value = (this.settings.handover_keywords || []).join(', ');
     const cadenceEl = document.getElementById('aifu-drip-cadence');
     if (cadenceEl) cadenceEl.value = (this.settings.drip_cadence_hours || [24, 72, 168]).join(', ');
+    const tierAEl = document.getElementById('aifu-drip-tier-a');
+    if (tierAEl) tierAEl.value = (this.settings.drip_cadence_tier_a || [12, 24, 48, 96]).join(', ');
+    const tierBEl = document.getElementById('aifu-drip-tier-b');
+    if (tierBEl) tierBEl.value = (this.settings.drip_cadence_tier_b || [24, 72, 168]).join(', ');
+    const tierCEl = document.getElementById('aifu-drip-tier-c');
+    if (tierCEl) tierCEl.value = (this.settings.drip_cadence_tier_c || [48, 168]).join(', ');
   },
 
   // ── KOL Channel Auto-Forward Settings ──────────────────────────────
@@ -107,6 +113,84 @@ const AIFollowUp = {
     } catch (e) { App.toast(e.message, 'error'); }
   },
 
+  // ── C5: Referral / Viral Loop KOL ──────────────────────────────────
+  async loadReferrals() {
+    try {
+      const [codesRes, statsRes] = await Promise.all([
+        fetch('/api/referrals/codes'),
+        fetch('/api/referrals/stats')
+      ]);
+      if (statsRes.ok) {
+        const st = await statsRes.json();
+        const stEl = document.getElementById('aifu-ref-stats');
+        if (stEl) {
+          stEl.innerHTML = `<span>Mã đang hoạt động: <strong style="color:var(--text)">${st.active_codes || 0}</strong></span>`
+            + `<span>Lượt giới thiệu: <strong style="color:#60a5fa">${st.total_attributions || 0}</strong></span>`
+            + `<span>Đã chốt (Signed): <strong style="color:#4ade80">${st.conversions || 0}</strong> (${st.conversion_rate || 0}%)</span>`;
+        }
+      }
+      if (codesRes.ok) {
+        const d = await codesRes.json();
+        const codes = d.codes || [];
+        const tb = document.getElementById('aifu-ref-codes-body');
+        if (!tb) return;
+        if (!codes.length) {
+          tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:12px">Chưa có mã giới thiệu nào</td></tr>';
+          return;
+        }
+        tb.innerHTML = codes.map(c => `<tr>
+          <td><code style="color:#a5b4fc;font-weight:700">${esc(c.code)}</code></td>
+          <td>${c.referrer_user_id} <small style="color:var(--text2)">(Acc #${c.account_id})</small></td>
+          <td>${c.uses_count || 0} / ${c.max_uses || 10}</td>
+          <td>${c.is_active ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>'}</td>
+          <td>${c.is_active ? `<button class="btn btn-ghost btn-sm" style="color:#f87171" onclick="AIFollowUp.deactivateReferralCode(${c.id})">Vô hiệu</button>` : '—'}</td>
+        </tr>`).join('');
+      }
+    } catch (_) {}
+  },
+
+  async createReferralCode() {
+    const account_id = parseInt(document.getElementById('ref-acc-id')?.value || '1', 10);
+    const referrer_user_id = parseInt(document.getElementById('ref-user-id')?.value || '0', 10);
+    const max_uses = parseInt(document.getElementById('ref-max-uses')?.value || '10', 10);
+    if (!referrer_user_id) {
+      App.toast('Vui lòng nhập KOL User ID', 'error');
+      return;
+    }
+    try {
+      const res = await fetch('/api/referrals/codes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id, referrer_user_id, max_uses })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Tạo mã thất bại');
+      App.toast(`Đã tạo mã giới thiệu: ${data.code}`, 'success');
+      const uidEl = document.getElementById('ref-user-id');
+      if (uidEl) uidEl.value = '';
+      this.loadReferrals();
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+  },
+
+  async deactivateReferralCode(id) {
+    try {
+      const res = await fetch(`/api/referrals/codes/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Không thể vô hiệu mã');
+      App.toast('Đã vô hiệu mã giới thiệu', 'success');
+      this.loadReferrals();
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+  },
+
+  _parseHoursInput(id, fallback) {
+    const raw = (document.getElementById(id)?.value || '')
+      .split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n) && n > 0);
+    return raw.length ? raw : fallback;
+  },
+
   _collectSettingsForm() {
     return {
       enabled: document.getElementById('aifu-enabled')?.checked || false,
@@ -114,8 +198,10 @@ const AIFollowUp = {
       knowledge_base: (document.getElementById('aifu-kb')?.value || '').trim(),
       max_replies_per_user: parseInt(document.getElementById('aifu-max-replies')?.value || '5', 10),
       handover_keywords: (document.getElementById('aifu-handover-kw')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
-      drip_cadence_hours: (document.getElementById('aifu-drip-cadence')?.value || '')
-        .split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n) && n > 0)
+      drip_cadence_hours: this._parseHoursInput('aifu-drip-cadence', [24, 72, 168]),
+      drip_cadence_tier_a: this._parseHoursInput('aifu-drip-tier-a', [12, 24, 48, 96]),
+      drip_cadence_tier_b: this._parseHoursInput('aifu-drip-tier-b', [24, 72, 168]),
+      drip_cadence_tier_c: this._parseHoursInput('aifu-drip-tier-c', [48, 168])
     };
   },
 
@@ -151,7 +237,10 @@ const AIFollowUp = {
         knowledge_base: s.knowledge_base || '',
         max_replies_per_user: s.max_replies_per_user || 5,
         handover_keywords: s.handover_keywords || [],
-        drip_cadence_hours: s.drip_cadence_hours || [24, 72, 168]
+        drip_cadence_hours: s.drip_cadence_hours || [24, 72, 168],
+        drip_cadence_tier_a: s.drip_cadence_tier_a || [12, 24, 48, 96],
+        drip_cadence_tier_b: s.drip_cadence_tier_b || [24, 72, 168],
+        drip_cadence_tier_c: s.drip_cadence_tier_c || [48, 168]
       });
       this.settings = { ...s, enabled };
       App.toast(enabled ? 'Đã BẬT AI Agent' : 'Đã TẮT AI Agent', enabled ? 'success' : 'info');

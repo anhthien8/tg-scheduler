@@ -739,7 +739,7 @@ async def generate_and_send_ai_reply_for_chat(
             if _m.get("role") == "user":
                 _query_for_rules = _m.get("content", "") or ""
                 break
-        learned_rules = await db.get_relevant_learned_knowledge(
+        learned_rules = await db.get_relevant_learned_knowledge_v2(
             agent_config["id"], _query_for_rules, status="approved")
         if learned_rules:
             combined_prompt += "\n\n--- LEARNED RULES (DISCOVERED FROM HUMAN ADMIN INTERVENTIONS) ---\n"
@@ -790,6 +790,16 @@ async def generate_and_send_ai_reply_for_chat(
             ai_reply = re.sub(r'\[?METRICS\s*:.*$', '', ai_reply, flags=re.DOTALL | re.IGNORECASE).strip()
 
         await db.update_followup_lead_metrics(account_id, user_id, intent_score, lead_tier, summary_text)
+
+        # ── C2: Deterministic re-score (dynamic signals override LLM-assigned) ──
+        try:
+            from lead_scoring import rescore_and_update
+            rescored = await rescore_and_update(user_id, account_id)
+            if rescored:
+                intent_score = rescored.score
+                lead_tier = rescored.tier
+        except Exception as _rescore_err:
+            logger.debug("[AIFollowUp] rescore_and_update failed: %s", _rescore_err)
 
         # ── Auto-escalation: Tier A/B + high intent + enough replies → needs_human ──
         current_reply_count = chat.get("reply_count", 0) if chat else 0
@@ -1069,6 +1079,13 @@ def _make_handler(account_id: int):
             "platform": "telegram",
         })
 
+        # C5: Auto-detect and attribute referral codes in incoming DM
+        try:
+            from routes.referrals import check_referral_in_message
+            await check_referral_in_message(message_text, sender_id, sender_username)
+        except Exception as _ref_err:
+            logger.debug("[Inbox] Referral code check error: %s", _ref_err)
+
         # Forum inbox relay is best-effort and never blocks AI/fallback paths.
         try:
             import command_bot
@@ -1310,9 +1327,40 @@ def unregister_account(account_id: int) -> None:
 # `ai_followup_drip_cadence` setting (JSON array of hours, e.g. [24, 72, 168]).
 DEFAULT_DRIP_CADENCE_HOURS = [24, 72, 168]
 
+# Per-tier cadence: Tier A (hot) gets faster follow-up, Tier C gets slower.
+# Overridable via ai_followup_drip_cadence_tier_a / _tier_b / _tier_c settings.
+DEFAULT_TIER_CADENCE = {
+    "Tier A": [12, 24, 48, 96],   # 4 stages, aggressive
+    "Tier B": [24, 72, 168],      # 3 stages, balanced (same as global default)
+    "Tier C": [48, 168],          # 2 stages, conservative
+}
+
+# Minimum first-stage hours across all tiers (for SQL pre-filter).
+_MIN_FIRST_STAGE_HOURS = 12
+
+_TIER_SETTING_KEYS = {
+    "Tier A": "ai_followup_drip_cadence_tier_a",
+    "Tier B": "ai_followup_drip_cadence_tier_b",
+    "Tier C": "ai_followup_drip_cadence_tier_c",
+}
+
+
+def _validate_cadence(raw: str) -> list[int] | None:
+    """Parse and validate a cadence JSON string. Returns None if invalid."""
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+        hours = [int(h) for h in parsed]
+        if hours and all(h > 0 for h in hours) and all(
+            hours[i] < hours[i + 1] for i in range(len(hours) - 1)
+        ):
+            return hours
+    except (ValueError, TypeError, json.JSONDecodeError):
+        pass
+    return None
+
 
 async def _load_drip_cadence() -> list[int]:
-    """Read the configured drip cadence (hours). Falls back to the default.
+    """Read the configured global drip cadence (hours). Falls back to the default.
 
     Validates: JSON list of positive ints, strictly increasing, length >= 1.
     Any malformed value falls back to DEFAULT_DRIP_CADENCE_HOURS so a bad
@@ -1320,17 +1368,31 @@ async def _load_drip_cadence() -> list[int]:
     """
     raw = await db.get_setting("ai_followup_drip_cadence", "")
     if raw:
-        try:
-            parsed = json.loads(raw) if isinstance(raw, str) else raw
-            hours = [int(h) for h in parsed]
-            if hours and all(h > 0 for h in hours) and all(
-                hours[i] < hours[i + 1] for i in range(len(hours) - 1)
-            ):
-                return hours
-            logger.warning("[DripEngine] Invalid drip cadence %r, using default", raw)
-        except (ValueError, TypeError, json.JSONDecodeError):
-            logger.warning("[DripEngine] Unparseable drip cadence %r, using default", raw)
+        result = _validate_cadence(raw)
+        if result:
+            return result
+        logger.warning("[DripEngine] Invalid global drip cadence %r, using default", raw)
     return list(DEFAULT_DRIP_CADENCE_HOURS)
+
+
+async def _load_drip_cadence_for_tier(tier: str) -> list[int]:
+    """Load cadence for a specific tier, falling back to tier default then global.
+
+    Priority: DB setting per tier → DEFAULT_TIER_CADENCE[tier] → global cadence.
+    """
+    tier_key = _TIER_SETTING_KEYS.get(tier)
+    if tier_key:
+        raw = await db.get_setting(tier_key, "")
+        if raw:
+            result = _validate_cadence(raw)
+            if result:
+                return result
+            logger.warning("[DripEngine] Invalid tier cadence %r for %s, using tier default", raw, tier)
+
+    if tier in DEFAULT_TIER_CADENCE:
+        return list(DEFAULT_TIER_CADENCE[tier])
+
+    return await _load_drip_cadence()
 
 
 def _parse_sqlite_utc(value: str | None) -> datetime | None:
@@ -1364,24 +1426,44 @@ def _silence_hours(updated_at: str | None) -> float:
     return max(0.0, (datetime.now(timezone.utc) - ts).total_seconds() / 3600)
 
 
-def _drip_instruction_for_stage(stage: int, total_stages: int) -> str:
-    """Prompt instruction for a given drip stage (1-indexed)."""
+def _drip_instruction_for_stage(stage: int, total_stages: int, tier: str = "Tier B") -> str:
+    """Prompt instruction for a given drip stage (1-indexed), adapted by tier."""
     if stage == 1:
+        if tier == "Tier A":
+            return (
+                "The user (a high-value KOL) has not replied in about half a day. Send a friendly, "
+                "personalized follow-up (1-2 short sentences) referencing a specific benefit relevant "
+                "to their profile — e.g. exclusive fee tier, revenue share, or VIP trading event."
+            )
         return (
             "The user has not replied in about 1 day. Send a friendly, non-pushy follow-up "
             "(1-2 short sentences) mentioning our latest crypto trading competition with "
             "$50,000 prize pool and VIP Maker fee discounts."
         )
-    if stage < total_stages:
+    if stage == total_stages:
         return (
-            "The user has been silent for several days. Send a brief, value-adding follow-up "
-            "(1-2 short sentences) with a different angle than before — do not repeat the "
-            "previous message. Offer a concrete benefit (fee discount, VIP tier, or event)."
+            "The user has been silent for a long time. Send a courteous, brief FINAL check-in asking "
+            "if they need any customized rate proposal or have any questions, and make clear this is "
+            "the last message so we don't keep bothering them."
         )
+    # Middle stages — tier-specific content
+    if tier == "Tier A":
+        if stage == 2:
+            return (
+                "The KOL has not replied after the first follow-up. Share a brief, compelling "
+                "case study or testimonial from a similar KOL who benefited from our partnership "
+                "(1-2 sentences). Keep it specific and value-driven."
+            )
+        if stage == 3:
+            return (
+                "The KOL has been silent for a few days. Offer a concrete next step — a quick "
+                "demo call, a personalized rate proposal, or an exclusive event invitation. "
+                "Keep it brief and low-pressure."
+            )
     return (
-        "The user has been silent for a long time. Send a courteous, brief FINAL check-in asking "
-        "if they need any customized rate proposal or have any questions, and make clear this is "
-        "the last message so we don't keep bothering them."
+        "The user has been silent for several days. Send a brief, value-adding follow-up "
+        "(1-2 short sentences) with a different angle than before — do not repeat the "
+        "previous message. Offer a concrete benefit (fee discount, VIP tier, or event)."
     )
 
 
@@ -1467,12 +1549,11 @@ async def process_drip_followups() -> dict:
     except Exception as e_stuck:
         logger.error("[AIFollowUp] Error recovering stuck chats: %s", e_stuck)
 
-    # ── 3. Process Drip Follow-ups (configurable multi-step cadence) ──
+    # ── 3. Process Drip Follow-ups (per-tier multi-step cadence) ──
     try:
-        cadence = await _load_drip_cadence()
-        total_stages = len(cadence)
-        # Only fetch chats silent for at least the first cadence threshold.
-        first_hours = cadence[0]
+        # Pre-filter: fetch chats silent for at least the minimum first-stage
+        # across all tiers (12h for Tier A). Per-chat tier cadence is checked
+        # in the loop below to avoid fetching tier-specific settings N times.
         async with db.get_db() as db_conn:
             db_conn.row_factory = aiosqlite.Row
             # Anchor silence on COALESCE(last_user_message_at, updated_at):
@@ -1481,23 +1562,32 @@ async def process_drip_followups() -> dict:
             cursor = await db_conn.execute("""
                 SELECT * FROM ai_followup_chats
                 WHERE status = 'active'
-                  AND (lead_tier IN ('Tier A', 'Tier B') OR intent_score >= 50)
-                  AND last_drip_stage < ?
+                  AND last_user_message_at IS NOT NULL
                   AND datetime(COALESCE(last_user_message_at, updated_at)) <= datetime('now', ?)
                 ORDER BY COALESCE(last_user_message_at, updated_at) ASC
-                LIMIT 20
-            """, (total_stages, f"-{first_hours} hours"))
+                LIMIT 30
+            """, (f"-{_MIN_FIRST_STAGE_HOURS} hours",))
             drip_chats = [dict(r) for r in await cursor.fetchall()]
 
         for chat in drip_chats:
             account_id = chat["account_id"]
             user_id = chat["user_id"]
-            silence_hours = _silence_hours(chat.get("last_user_message_at") or chat.get("updated_at"))
+            tier = chat.get("lead_tier") or "Tier C"
+            silence = _silence_hours(chat.get("last_user_message_at") or chat.get("updated_at"))
+
+            # Load tier-specific cadence
+            cadence = await _load_drip_cadence_for_tier(tier)
+            total_stages = len(cadence)
+
+            # Skip if all stages exhausted for this tier
+            last_stage = chat.get("last_drip_stage", 0)
+            if last_stage >= total_stages:
+                continue
 
             # Determine the highest cadence stage whose threshold has been crossed,
             # then advance one past last_drip_stage so we never skip or repeat.
-            due_stage = sum(1 for h in cadence if silence_hours >= h)
-            stage = max(chat.get("last_drip_stage", 0) + 1, 1)
+            due_stage = sum(1 for h in cadence if silence >= h)
+            stage = max(last_stage + 1, 1)
             if stage > due_stage:
                 continue  # not yet due for the next stage
             if stage > total_stages:
@@ -1514,10 +1604,10 @@ async def process_drip_followups() -> dict:
             agent_id = account_obj.get("ai_agent_id") if account_obj else None
             agent_config = await db.get_ai_agent(agent_id) if agent_id else None
 
-            drip_instruction = _drip_instruction_for_stage(stage, total_stages)
+            drip_instruction = _drip_instruction_for_stage(stage, total_stages, tier)
 
             sys_p = agent_config.get("system_prompt", "") if agent_config else ""
-            combined = sys_p + f"\n\n[DRIP FOLLOWUP STAGE {stage}/{total_stages} INSTRUCTION]: " + drip_instruction
+            combined = sys_p + f"\n\n[DRIP FOLLOWUP STAGE {stage}/{total_stages} — {tier} INSTRUCTION]: " + drip_instruction
 
             try:
                 history = json.loads(chat.get("history_json", "[]"))

@@ -493,6 +493,17 @@ async def init_db():
             "ON accounts(telegram_user_id) WHERE telegram_user_id IS NOT NULL"
         )
 
+        # C3: Online/Offline Cycle — per-account active hours
+        for _ah_col, _ah_def in [
+            ("active_hours_start", "TEXT DEFAULT '08:00'"),
+            ("active_hours_end",   "TEXT DEFAULT '22:00'"),
+            ("active_timezone",    "TEXT DEFAULT 'Asia/Ho_Chi_Minh'"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE accounts ADD COLUMN {_ah_col} {_ah_def}")
+            except Exception:
+                pass
+
         # Member lang_code & Campaign auto_translate_native columns
         try:
             await db.execute("ALTER TABLE scraped_members ADD COLUMN lang_code TEXT DEFAULT NULL")
@@ -977,7 +988,153 @@ async def init_db():
             )
         """)
 
-        # ── Invite Campaigns ─────────────────────────────────────────────────
+        # C4: FTS5 full-text search index for learned knowledge (semantic retrieval)
+        await db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS agent_learned_knowledge_fts
+            USING fts5(
+                question_pattern,
+                learned_answer,
+                content='agent_learned_knowledge',
+                content_rowid='id',
+                tokenize='unicode61 remove_diacritics 2'
+            )
+        """)
+        # Sync triggers: keep FTS in sync with the main table
+        for _fts_trigger in [
+            """CREATE TRIGGER IF NOT EXISTS learned_knowledge_fts_ai
+               AFTER INSERT ON agent_learned_knowledge BEGIN
+                   INSERT INTO agent_learned_knowledge_fts(rowid, question_pattern, learned_answer)
+                   VALUES (new.id, new.question_pattern, new.learned_answer);
+               END""",
+            """CREATE TRIGGER IF NOT EXISTS learned_knowledge_fts_ad
+               AFTER DELETE ON agent_learned_knowledge BEGIN
+                   INSERT INTO agent_learned_knowledge_fts(agent_learned_knowledge_fts, rowid, question_pattern, learned_answer)
+                   VALUES ('delete', old.id, old.question_pattern, old.learned_answer);
+               END""",
+            """CREATE TRIGGER IF NOT EXISTS learned_knowledge_fts_au
+               AFTER UPDATE ON agent_learned_knowledge BEGIN
+                   INSERT INTO agent_learned_knowledge_fts(agent_learned_knowledge_fts, rowid, question_pattern, learned_answer)
+                   VALUES ('delete', old.id, old.question_pattern, old.learned_answer);
+                   INSERT INTO agent_learned_knowledge_fts(rowid, question_pattern, learned_answer)
+                   VALUES (new.id, new.question_pattern, new.learned_answer);
+               END""",
+        ]:
+            try:
+                await db.execute(_fts_trigger)
+            except Exception:
+                pass  # trigger already exists
+        # One-time FTS rebuild to index pre-existing data
+        try:
+            await db.execute(
+                "INSERT INTO agent_learned_knowledge_fts(agent_learned_knowledge_fts) VALUES('rebuild')"
+            )
+        except Exception:
+            pass
+
+        # ── C5: Referral / Viral Loop ─────────────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS referral_codes (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id      INTEGER NOT NULL,
+                referrer_user_id INTEGER NOT NULL,
+                code            TEXT NOT NULL UNIQUE,
+                max_uses        INTEGER DEFAULT 10,
+                uses_count      INTEGER DEFAULT 0,
+                is_active       INTEGER DEFAULT 1,
+                created_at      TEXT DEFAULT (datetime('now')),
+                expires_at      TEXT
+            )
+        """)
+        await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_referral_code ON referral_codes(code)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_referral_referrer ON referral_codes(referrer_user_id)")
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS referral_attributions (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                referral_code_id INTEGER NOT NULL,
+                referrer_user_id INTEGER NOT NULL,
+                referred_user_id INTEGER NOT NULL,
+                referred_username TEXT,
+                status          TEXT DEFAULT 'pending',
+                attributed_at   TEXT DEFAULT (datetime('now')),
+                converted_at    TEXT,
+                FOREIGN KEY (referral_code_id) REFERENCES referral_codes(id)
+            )
+        """)
+
+
+        # ── C2: Lead Score History ──────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS lead_score_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                static_score INTEGER DEFAULT 0,
+                dynamic_score INTEGER DEFAULT 0,
+                total_score INTEGER DEFAULT 0,
+                tier TEXT DEFAULT 'Cold',
+                signals_json TEXT DEFAULT '{}',
+                scored_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_score_history_user ON lead_score_history(user_id, scored_at DESC)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_score_history_account ON lead_score_history(account_id, user_id)")
+
+        # ── C6: Warmup Progress ────────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS warmup_progress (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL UNIQUE,
+                warmup_job_id INTEGER,
+                stage INTEGER DEFAULT 1,
+                started_at TEXT DEFAULT (datetime('now')),
+                messages_sent INTEGER DEFAULT 0,
+                reactions_sent INTEGER DEFAULT 0,
+                channels_joined INTEGER DEFAULT 0,
+                history_reads INTEGER DEFAULT 0,
+                forwards_sent INTEGER DEFAULT 0,
+                profiles_viewed INTEGER DEFAULT 0,
+                last_flood_at TEXT,
+                graduated_at TEXT,
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_warmup_progress_stage ON warmup_progress(stage)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_warmup_progress_account ON warmup_progress(account_id)")
+
+        # ── C6: Warmup Action Log ──────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS warmup_action_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                action_type TEXT NOT NULL,
+                target_chat_id INTEGER,
+                target_message_id INTEGER,
+                status TEXT DEFAULT 'success',
+                error_detail TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_warmup_log_account ON warmup_action_log(account_id, created_at DESC)")
+
+
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_attribution_referrer ON referral_attributions(referrer_user_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_attribution_referred ON referral_attributions(referred_user_id)")
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS referral_rewards (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                referrer_user_id INTEGER NOT NULL,
+                attribution_id  INTEGER NOT NULL,
+                reward_type     TEXT NOT NULL,
+                reward_detail   TEXT,
+                is_claimed      INTEGER DEFAULT 0,
+                created_at      TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (attribution_id) REFERENCES referral_attributions(id)
+            )
+        """)
+
+                # ── Invite Campaigns ─────────────────────────────────────────────────
         await db.execute("""
             CREATE TABLE IF NOT EXISTS invite_campaigns (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5346,6 +5503,85 @@ async def get_relevant_learned_knowledge(ai_agent_id: int, query_text: str,
     return recent + [r for _, r in scored[:top_relevant]]
 
 
+def _sanitize_fts_query(query: str) -> str:
+    """Sanitize a query string for FTS5 MATCH — escape special characters.
+
+    FTS5 special chars: " * ( ) : ^ ~ AND OR NOT NEAR
+    We quote each token to treat them as literals.
+    """
+    import re as _re
+    if not query or not query.strip():
+        return ""
+    # Split into tokens, quote each to escape special chars
+    tokens = _re.findall(r'\w+', query, _re.UNICODE)
+    tokens = [t for t in tokens if len(t) >= 2]
+    if not tokens:
+        return ""
+    # Join with spaces — FTS5 implicit AND
+    return " ".join(f'"{t}"' for t in tokens[:20])  # limit to 20 terms
+
+
+async def get_relevant_learned_knowledge_v2(
+    ai_agent_id: int,
+    query_text: str,
+    limit: int = 20,
+    top_recent: int = 5,
+    status: str = "approved",
+) -> list[dict]:
+    """FTS5-based knowledge retrieval with BM25 ranking.
+
+    Upgrade from token-overlap (v1) to full-text search. Falls back to v1
+    if FTS5 table is not available (graceful degradation).
+
+    Returns: list of dicts with keys: id, question_pattern, learned_answer, created_at.
+    """
+    fts_results: list[dict] = []
+
+    if query_text and query_text.strip():
+        safe_query = _sanitize_fts_query(query_text)
+        if safe_query:
+            try:
+                async with get_db() as db:
+                    db.row_factory = aiosqlite.Row
+                    cursor = await db.execute("""
+                        SELECT k.id, k.question_pattern, k.learned_answer, k.created_at,
+                               bm25(agent_learned_knowledge_fts) AS rank
+                        FROM agent_learned_knowledge_fts fts
+                        JOIN agent_learned_knowledge k ON k.id = fts.rowid
+                        WHERE agent_learned_knowledge_fts MATCH ?
+                          AND k.ai_agent_id = ?
+                          AND k.status = ?
+                        ORDER BY rank
+                        LIMIT ?
+                    """, (safe_query, ai_agent_id, status, limit))
+                    fts_results = [dict(r) for r in await cursor.fetchall()]
+            except Exception as _fts_err:
+                logger.warning("[KnowledgeFTS] FTS5 query failed (%s), falling back to v1", _fts_err)
+                return await get_relevant_learned_knowledge(ai_agent_id, query_text)
+
+    # Always include recent rules as fallback
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT id, question_pattern, learned_answer, created_at
+            FROM agent_learned_knowledge
+            WHERE ai_agent_id = ? AND status = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (ai_agent_id, status, top_recent))
+        recent = [dict(r) for r in await cursor.fetchall()]
+
+    # Merge and deduplicate by id
+    seen_ids: set[int] = set()
+    results: list[dict] = []
+    for row in fts_results + recent:
+        if row["id"] not in seen_ids:
+            seen_ids.add(row["id"])
+            results.append(row)
+
+    return results[:limit]
+
+
 async def delete_learned_knowledge(rule_id: int) -> bool:
     async with get_db() as db:
         await db.execute("DELETE FROM agent_learned_knowledge WHERE id = ?", (rule_id,))
@@ -5978,3 +6214,305 @@ async def cleanup_engagement_claims(max_age_days: int = 2) -> int:
         if total > 0:
             await db.commit()
         return total
+
+# ── C5: Referral / Viral Loop CRUD ─────────────────────────────────────────
+
+import secrets as _secrets
+import string as _string
+
+
+def generate_referral_code() -> str:
+    """Generate unique 8-char alphanumeric referral code."""
+    chars = _string.ascii_uppercase + _string.digits
+    return "REF-" + "".join(_secrets.choice(chars) for _ in range(8))
+
+
+
+
+
+async def create_referral_code(
+    account_id: int, referrer_user_id: int, code: str | None = None,
+    max_uses: int = 10, expires_at: str | None = None,
+) -> dict:
+    if not code:
+        code = generate_referral_code()
+    async with get_db() as db:
+        cursor = await db.execute("""
+            INSERT INTO referral_codes (account_id, referrer_user_id, code, max_uses, expires_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (account_id, referrer_user_id, code, max_uses, expires_at))
+        await db.commit()
+        row_id = cursor.lastrowid
+    return {"id": row_id, "code": code}
+
+
+async def get_referral_code(code: str) -> dict | None:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM referral_codes WHERE code = ?", (code,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def get_referral_code_by_user(referrer_user_id: int) -> dict | None:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM referral_codes WHERE referrer_user_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1",
+            (referrer_user_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def get_all_referral_codes() -> list[dict]:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM referral_codes ORDER BY created_at DESC")
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def increment_referral_uses(code_id: int):
+    async with get_db() as db:
+        await db.execute("UPDATE referral_codes SET uses_count = uses_count + 1 WHERE id = ?", (code_id,))
+        await db.commit()
+
+
+async def deactivate_referral_code(code_id: int):
+    async with get_db() as db:
+        await db.execute("UPDATE referral_codes SET is_active = 0 WHERE id = ?", (code_id,))
+        await db.commit()
+
+
+async def create_referral_attribution(
+    referral_code_id: int, referrer_user_id: int,
+    referred_user_id: int, referred_username: str | None = None,
+) -> int:
+    async with get_db() as db:
+        cursor = await db.execute("""
+            INSERT OR IGNORE INTO referral_attributions
+            (referral_code_id, referrer_user_id, referred_user_id, referred_username)
+            VALUES (?, ?, ?, ?)
+        """, (referral_code_id, referrer_user_id, referred_user_id, referred_username))
+        await db.commit()
+        return cursor.lastrowid or 0
+
+
+async def get_attribution_by_referred(referred_user_id: int) -> dict | None:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM referral_attributions WHERE referred_user_id = ? ORDER BY attributed_at DESC LIMIT 1",
+            (referred_user_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def get_attributions_by_referrer(referrer_user_id: int) -> list[dict]:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM referral_attributions WHERE referrer_user_id = ? ORDER BY attributed_at DESC",
+            (referrer_user_id,)
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def update_attribution_status(attribution_id: int, status: str, converted_at: str | None = None):
+    async with get_db() as db:
+        if converted_at:
+            await db.execute(
+                "UPDATE referral_attributions SET status = ?, converted_at = ? WHERE id = ?",
+                (status, converted_at, attribution_id)
+            )
+        else:
+            await db.execute(
+                "UPDATE referral_attributions SET status = ? WHERE id = ?",
+                (status, attribution_id)
+            )
+        await db.commit()
+
+
+async def create_referral_reward(
+    referrer_user_id: int, attribution_id: int,
+    reward_type: str, reward_detail: str | None = None,
+) -> int:
+    async with get_db() as db:
+        cursor = await db.execute("""
+            INSERT INTO referral_rewards (referrer_user_id, attribution_id, reward_type, reward_detail)
+            VALUES (?, ?, ?, ?)
+        """, (referrer_user_id, attribution_id, reward_type, reward_detail))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_referral_stats() -> dict:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        codes = await (await db.execute("SELECT COUNT(*) AS n FROM referral_codes WHERE is_active = 1")).fetchone()
+        total_attr = await (await db.execute("SELECT COUNT(*) AS n FROM referral_attributions")).fetchone()
+        conversions = await (await db.execute(
+            "SELECT COUNT(*) AS n FROM referral_attributions WHERE status = 'signed'"
+        )).fetchone()
+        return {
+            "active_codes": codes["n"] if codes else 0,
+            "total_attributions": total_attr["n"] if total_attr else 0,
+            "conversions": conversions["n"] if conversions else 0,
+            "conversion_rate": round(
+                (conversions["n"] / total_attr["n"] * 100) if total_attr and total_attr["n"] > 0 else 0, 1
+            ),
+        }
+
+
+# ── C3: Online/Offline Cycle — Active Hours Utilities ──────────────────────
+
+import zoneinfo
+from datetime import datetime as _dt
+
+
+def is_account_in_active_hours(
+    start: str = "08:00",
+    end: str = "22:00",
+    tz_name: str = "Asia/Ho_Chi_Minh",
+) -> bool:
+    """Check if the current time falls within the account's active hours.
+
+    Supports overnight windows (e.g. 22:00-06:00 for night shift).
+    Returns True if timezone is invalid (safe default — never blocks).
+    """
+    try:
+        tz = zoneinfo.ZoneInfo(tz_name)
+    except (KeyError, Exception):
+        return True  # invalid tz → safe fallback, allow activity
+
+    now = _dt.now(tz)
+    current_time = now.strftime("%H:%M")
+
+    if start <= end:
+        # Normal range: e.g. 08:00 - 22:00
+        return start <= current_time < end
+    else:
+        # Overnight range: e.g. 22:00 - 06:00
+        return current_time >= start or current_time < end
+
+
+def check_account_active_hours(account_data: dict | None) -> bool:
+    """Convenience wrapper: check active hours from an account dict.
+
+    Returns True if account_data is None or missing fields (safe default).
+    """
+    if not account_data:
+        return True
+    return is_account_in_active_hours(
+        start=account_data.get("active_hours_start", "08:00"),
+        end=account_data.get("active_hours_end", "22:00"),
+        tz_name=account_data.get("active_timezone", "Asia/Ho_Chi_Minh"),
+    )
+
+
+# ── C6: Warmup Progress CRUD ───────────────────────────────────
+
+async def get_warmup_progress(account_id: int) -> dict | None:
+    """Get warmup progress for an account."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM warmup_progress WHERE account_id = ?",
+            (account_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def create_or_update_warmup_progress(account_id: int, **kwargs):
+    """Create or update warmup progress record."""
+    async with get_db() as db:
+        existing = await get_warmup_progress(account_id)
+        if existing:
+            sets = []
+            vals = []
+            for k, v in kwargs.items():
+                sets.append(f"{k} = ?")
+                vals.append(v)
+            sets.append("updated_at = datetime('now')")
+            vals.append(account_id)
+            await db.execute(
+                f"UPDATE warmup_progress SET {', '.join(sets)} WHERE account_id = ?",
+                tuple(vals)
+            )
+            await db.commit()
+        else:
+            cols = ["account_id"] + list(kwargs.keys())
+            vals = [account_id] + list(kwargs.values())
+            placeholders = ", ".join(["?"] * len(vals))
+            await db.execute(
+                f"INSERT INTO warmup_progress ({', '.join(cols)}) VALUES ({placeholders})",
+                tuple(vals)
+            )
+            await db.commit()
+
+
+async def increment_warmup_counter(account_id: int, counter_name: str, amount: int = 1):
+    """Increment a specific counter in warmup_progress."""
+    allowed = {"messages_sent", "reactions_sent", "channels_joined",
+               "history_reads", "forwards_sent", "profiles_viewed"}
+    if counter_name not in allowed:
+        raise ValueError(f"Invalid counter: {counter_name}")
+    async with get_db() as db:
+        await db.execute(
+            f"UPDATE warmup_progress SET {counter_name} = {counter_name} + ?, updated_at = datetime('now') WHERE account_id = ?",
+            (amount, account_id)
+        )
+        await db.commit()
+
+
+async def add_warmup_action_log(account_id: int, action_type: str,
+                                 target_chat_id: int = None, target_message_id: int = None,
+                                 status: str = "success", error_detail: str = None):
+    """Log a warmup action."""
+    async with get_db() as db:
+        await db.execute(
+            """INSERT INTO warmup_action_log
+               (account_id, action_type, target_chat_id, target_message_id, status, error_detail)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (account_id, action_type, target_chat_id, target_message_id, status, error_detail)
+        )
+        await db.commit()
+
+
+async def get_warmup_stats(account_id: int) -> dict:
+    """Get aggregate warmup stats for an account."""
+    progress = await get_warmup_progress(account_id)
+    if not progress:
+        return {"stage": 0, "messages_sent": 0, "reactions_sent": 0,
+                "channels_joined": 0, "history_reads": 0, "forwards_sent": 0,
+                "profiles_viewed": 0, "graduated": False}
+    return {
+        "stage": progress.get("stage", 1),
+        "messages_sent": progress.get("messages_sent", 0),
+        "reactions_sent": progress.get("reactions_sent", 0),
+        "channels_joined": progress.get("channels_joined", 0),
+        "history_reads": progress.get("history_reads", 0),
+        "forwards_sent": progress.get("forwards_sent", 0),
+        "profiles_viewed": progress.get("profiles_viewed", 0),
+        "graduated": progress.get("graduated_at") is not None,
+        "started_at": progress.get("started_at"),
+        "graduated_at": progress.get("graduated_at"),
+        "last_flood_at": progress.get("last_flood_at"),
+    }
+
+
+async def get_recent_warmup_floods(account_id: int, days: int = 3) -> int:
+    """Count FloodWait events in last N days."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT COUNT(*) as cnt FROM warmup_action_log
+               WHERE account_id = ? AND status = 'flood'
+               AND created_at >= datetime('now', ?)""",
+            (account_id, f"-{days} days")
+        )
+        row = await cursor.fetchone()
+        return dict(row)["cnt"] if row else 0
+

@@ -26,6 +26,10 @@ class AIFollowUpSettings(BaseModel):
     handover_keywords: list[str] = ["gặp admin", "tư vấn viên", "gọi điện", "số điện thoại", "lừa đảo"]
     # Drip cadence: hours of silence before each follow-up. Default day 1/3/7.
     drip_cadence_hours: list[int] = [24, 72, 168]
+    # C1: Per-tier drip cadence (hours)
+    drip_cadence_tier_a: list[int] = [12, 24, 48, 96]
+    drip_cadence_tier_b: list[int] = [24, 72, 168]
+    drip_cadence_tier_c: list[int] = [48, 168]
     # Outreach nudge: delay hours before nudging and max nudge count.
     outreach_nudge_delay_hours: int = 24
     outreach_nudge_max: int = 1
@@ -150,6 +154,16 @@ async def get_kol_broadcast_log(limit: int = 30, offset: int = 0):
     return {"logs": rows, "count": len(rows)}
 
 
+def _parse_cadence_or_default(raw: str | list[int] | None, default: list[int]) -> list[int]:
+    try:
+        vals = [int(h) for h in (json.loads(raw) if isinstance(raw, str) else (raw or []))]
+        if vals and all(h > 0 for h in vals) and all(vals[i] < vals[i + 1] for i in range(len(vals) - 1)):
+            return vals
+    except Exception:
+        pass
+    return list(default)
+
+
 @router.get("/settings")
 async def get_settings():
     """Get AI Follow-Up Agent configuration settings."""
@@ -160,6 +174,9 @@ async def get_settings():
         "ai_followup_max_replies": "5",
         "ai_followup_handover_keywords": '["gặp admin", "tư vấn viên", "số điện thoại"]',
         "ai_followup_drip_cadence": "",
+        "ai_followup_drip_cadence_tier_a": "",
+        "ai_followup_drip_cadence_tier_b": "",
+        "ai_followup_drip_cadence_tier_c": "",
     })
     enabled_str = s["ai_followup_enabled"]
     sys_prompt = s["ai_followup_system_prompt"]
@@ -185,12 +202,10 @@ async def get_settings():
     except Exception:
         handover_kw = ["gặp admin", "tư vấn viên", "số điện thoại"]
 
-    try:
-        cadence = [int(h) for h in json.loads(cadence_raw)] if cadence_raw else [24, 72, 168]
-        if not cadence or any(h <= 0 for h in cadence):
-            cadence = [24, 72, 168]
-    except Exception:
-        cadence = [24, 72, 168]
+    cadence = _parse_cadence_or_default(cadence_raw, [24, 72, 168])
+    tier_a = _parse_cadence_or_default(s["ai_followup_drip_cadence_tier_a"], [12, 24, 48, 96])
+    tier_b = _parse_cadence_or_default(s["ai_followup_drip_cadence_tier_b"], [24, 72, 168])
+    tier_c = _parse_cadence_or_default(s["ai_followup_drip_cadence_tier_c"], [48, 168])
 
     # Outreach nudge settings
     nudge_s = await db.get_settings_bulk({
@@ -217,6 +232,9 @@ async def get_settings():
         "max_replies_per_user": int(max_replies_str) if max_replies_str.isdigit() else 5,
         "handover_keywords": handover_kw,
         "drip_cadence_hours": cadence,
+        "drip_cadence_tier_a": tier_a,
+        "drip_cadence_tier_b": tier_b,
+        "drip_cadence_tier_c": tier_c,
         "outreach_nudge_delay_hours": nudge_delay,
         "outreach_nudge_max": nudge_max,
     }
@@ -233,12 +251,15 @@ async def save_settings(req: AIFollowUpSettings):
     # Outreach nudge settings
     await db.set_setting("outreach_nudge_delay_hours", str(max(1, req.outreach_nudge_delay_hours)))
     await db.set_setting("outreach_nudge_max", str(max(0, req.outreach_nudge_max)))
-    # Validate + persist the drip cadence (hours, increasing, positive).
-    cadence = [int(h) for h in (req.drip_cadence_hours or [])]
-    if (not cadence or any(h <= 0 for h in cadence)
-            or any(cadence[i] >= cadence[i + 1] for i in range(len(cadence) - 1))):
-        cadence = [24, 72, 168]
+    # Validate + persist the drip cadences (hours, increasing, positive).
+    cadence = _parse_cadence_or_default(req.drip_cadence_hours, [24, 72, 168])
+    tier_a = _parse_cadence_or_default(req.drip_cadence_tier_a, [12, 24, 48, 96])
+    tier_b = _parse_cadence_or_default(req.drip_cadence_tier_b, [24, 72, 168])
+    tier_c = _parse_cadence_or_default(req.drip_cadence_tier_c, [48, 168])
     await db.set_setting("ai_followup_drip_cadence", json.dumps(cadence))
+    await db.set_setting("ai_followup_drip_cadence_tier_a", json.dumps(tier_a))
+    await db.set_setting("ai_followup_drip_cadence_tier_b", json.dumps(tier_b))
+    await db.set_setting("ai_followup_drip_cadence_tier_c", json.dumps(tier_c))
     return {"status": "ok", "message": "Đã lưu cài đặt AI Follow-Up Agent"}
 
 
