@@ -161,6 +161,11 @@ async def get_db():
     owner_token = _current_db_owner.set(current_task)
     try:
         yield conn
+        # Ensure no connection is ever returned to the pool with an open write
+        # transaction (e.g. a DELETE/UPDATE with rowcount=0 that skipped commit),
+        # which would hold the SQLite WAL write lock and cause "database is locked".
+        if getattr(conn, "_connection", None) is not None and conn.in_transaction:
+            await conn.commit()
     except BaseException:
         try:
             if getattr(conn, "_connection", None) is not None:
@@ -1541,8 +1546,8 @@ async def init_db():
             cur = await db.execute(
                 "DELETE FROM reaction_logs WHERE sent_at < datetime('now', '-30 days')"
             )
+            await db.commit()
             if cur.rowcount > 0:
-                await db.commit()
                 logging.getLogger(__name__).info("[DB] Pruned %d reaction_logs >30d", cur.rowcount)
     except Exception as e:
         logging.getLogger(__name__).warning("[DB] reaction_logs prune failed: %s", e)
@@ -6211,8 +6216,7 @@ async def cleanup_engagement_claims(max_age_days: int = 2) -> int:
             (str(max_age_days),),
         )
         total = (c1.rowcount or 0) + (c2.rowcount or 0)
-        if total > 0:
-            await db.commit()
+        await db.commit()
         return total
 
 # ── C5: Referral / Viral Loop CRUD ─────────────────────────────────────────
