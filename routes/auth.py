@@ -164,36 +164,31 @@ async def logout(account_id: int):
 
 @router.get("/status")
 async def auth_status():
-    """Global auth status - checks if any account is logged in."""
+    """Global auth status - fast path using in-memory _me_cache without blocking on Telegram RPC."""
     accounts = await db.get_all_accounts()
     if not accounts:
         return {"authenticated": False, "has_accounts": False}
 
-    import asyncio
-
-    async def check_acc(acc):
-        try:
-            is_auth = await tg.is_authorized(acc["id"], timeout=2.5)
-            if is_auth:
-                me = await tg.get_me(acc["id"], timeout=2.5)
-                return {
-                    "account_id": acc["id"],
-                    "name": acc["name"],
-                    "phone": acc["phone"],
-                    "user": me
-                }
-        except Exception:
-            pass
-        return None
-
-    results = await asyncio.gather(*(check_acc(acc) for acc in accounts), return_exceptions=True)
-    logged_accounts = [r for r in results if r and not isinstance(r, Exception)]
+    logged_accounts = []
+    for acc in accounts:
+        acc_id = acc["id"]
+        me = tg._me_cache.get(acc_id)
+        is_conn = acc_id in tg._clients and tg._clients[acc_id].is_connected()
+        if me or is_conn or acc.get("is_logged_in"):
+            logged_accounts.append({
+                "account_id": acc_id,
+                "name": acc["name"],
+                "phone": acc["phone"],
+                "user": me or {"first_name": acc["name"], "phone": acc["phone"]},
+            })
 
     if logged_accounts:
+        # Prefer an account that has full _me_cache info for header display
+        primary_user = next((a["user"] for a in logged_accounts if tg._me_cache.get(a["account_id"])), logged_accounts[0]["user"])
         return {
             "authenticated": True,
             "accounts": logged_accounts,
-            "user": logged_accounts[0]["user"] if logged_accounts else None
+            "user": primary_user,
         }
 
     return {"authenticated": False, "has_accounts": len(accounts) > 0}

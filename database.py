@@ -1263,6 +1263,9 @@ async def init_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_followup_stage_updated ON ai_followup_chats(stage, updated_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_followup_account_id ON ai_followup_chats(account_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_replies_sender_received ON dm_replies(sender_user_id, received_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_watcher_dm_logs_target_status ON watcher_dm_logs(target_user_id, status)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_target_status ON dm_campaign_logs(target_user_id, status)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_replies_unread_cov ON dm_replies(is_read, sender_user_id, sender_username)")
 
 
         # ══════════════════════════════════════════════════════════════

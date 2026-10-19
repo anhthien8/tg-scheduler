@@ -315,10 +315,35 @@ async def telegram_worker_health():
 
 @app.get("/")
 async def root():
-    return FileResponse(os.path.join(static_dir, "index.html"), headers={"Cache-Control": "public, max-age=3600"})
+    return FileResponse(os.path.join(static_dir, "index.html"), headers={"Cache-Control": "no-cache"})
 
 
 if __name__ == "__main__":
+    import socket
     host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8888"))
-    uvicorn.run("main:app", host=host, port=port, reload=False)
+    if host in ("127.0.0.1", "localhost"):
+        sockets = []
+        try:
+            s4 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s4.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s4.bind(("127.0.0.1", port))
+            sockets.append(s4)
+        except OSError:
+            pass
+        try:
+            s6 = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+            s6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            s6.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s6.bind(("::1", port))
+            sockets.append(s6)
+        except OSError:
+            pass
+        if sockets:
+            config = uvicorn.Config("main:app", host=host, port=port, reload=False, timeout_keep_alive=65)
+            uvicorn.Server(config).run(sockets=sockets)
+        else:
+            uvicorn.run("main:app", host=host, port=port, reload=False, timeout_keep_alive=65)
+    else:
+        uvicorn.run("main:app", host=host, port=port, reload=False, timeout_keep_alive=65)
+

@@ -785,7 +785,7 @@ async def get_dialogs(account_id: int, timeout: float = 20.0, force_refresh: boo
     now = time.time()
     if not force_refresh and account_id in _dialogs_cache:
         cached_time, cached_list = _dialogs_cache[account_id]
-        if now - cached_time < 60.0:  # 60s TTL cache for ultra-fast instant UI navigation
+        if now - cached_time < 300.0:  # 5m TTL cache for ultra-fast instant UI navigation
             return cached_list
 
     if not await is_authorized(account_id, timeout=min(5.0, timeout)):

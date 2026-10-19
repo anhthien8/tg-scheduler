@@ -15,10 +15,10 @@ function customConfirm(msg){return new Promise(r=>{const o=document.getElementBy
 const App={currentPage:'dashboard',chats:[],schedules:[],accounts:[],phoneCodeHash:'',loginAccountId:null,loginPhone:'',logOffset:0,logLimit:30,
 
 async init(){
-// Reveal the app shell immediately and drop the boot splash. Without this the
-// page stays blank until authStatus()+getAccounts() resolve — and on slower
-// machines the 500KB+ script bundle already delayed first paint by seconds.
-document.body.classList.add('app-ready');this.showLogin();
+// Reveal the app shell immediately and drop the boot splash.
+document.body.classList.add('app-ready');
+const cachedAccs = sessionStorage.getItem('tgs_accounts_cache');
+if(cachedAccs){try{const parsed=JSON.parse(cachedAccs);if(parsed.accounts&&parsed.accounts.length>0){App._accounts=parsed.accounts;this.showDashboard(null);API.authStatus().then(s=>{if(s&&s.user){const n=[s.user.first_name,s.user.last_name].filter(Boolean).join(' ');const esc=x=>String(x||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');(document.getElementById('user-info')||me_dummy).innerHTML=`<strong>${esc(n)}</strong><span>@${esc(s.user.username||s.user.phone||'')}</span>`}}).catch(()=>{});return}}catch{}}
 try{const s=await API.authStatus();if(s.authenticated){this.showDashboard(s.user);return}}catch{}
 
 try{const a=await API.getAccounts();App._accounts=a.accounts||[];if(a.accounts&&a.accounts.length>0){this.showDashboard(null);return}}catch{}
@@ -1064,7 +1064,7 @@ closeAccountModal(){(document.getElementById('account-modal')?.classList || {add
 
 async toggleAccountActive(accId,isActive){const actionText=isActive?'Bật (ON)':'Tắt (OFF)';const confirmMsg=isActive?'Bật lại tài khoản này? Tài khoản sẽ bắt đầu nhận tin nhắn và chạy tự động hóa trở lại.':'Bạn có chắc muốn TẮT tài khoản này?\nKhi TẮT: Tất cả AI Agent, Chiến dịch DM, Keyword Watcher và Tự động hóa của tài khoản này sẽ BỊ NGẮT HOÀN TOÀN để tránh ảnh hưởng danh bạ khách hàng.';if(!await customConfirm(confirmMsg))return;try{const res=await API.toggleAccountActive(accId,isActive);this.toast(res.message||`Đã ${actionText} tài khoản`,isActive?'success':'error');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
 
-async setAccountAiAgent(accId,agentId){try{const res=await API.setAccountAiAgent(accId,agentId);this.toast(res.message||'Đã cập nhật AI Agent cho tài khoản','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
+async setAccountAiAgent(accId,agentId){try{const res=await API.setAccountAiAgent(accId,agentId);const parsedId=agentId?parseInt(agentId):null;const acc=(this.accounts||[]).find(a=>a.id===accId);if(acc)acc.ai_agent_id=parsedId;this.toast(res.message||'Đã cập nhật AI Agent cho tài khoản','success');}catch(e){this.toast(e.message,'error');this.loadAccounts();}},
 
 async setAccountActiveHours(accId){const start=document.getElementById(`acc-ah-start-${accId}`)?.value||'08:00';const end=document.getElementById(`acc-ah-end-${accId}`)?.value||'22:00';try{const res=await API.post(`/api/auth/accounts/${accId}/active-hours`,{active_hours_start:start,active_hours_end:end,active_timezone:'Asia/Ho_Chi_Minh'});API.clearAccountsCache();this.toast(res.message||`Đã lưu khung giờ ${start}-${end}`,'success');}catch(e){this.toast(e.message,'error')}},
 
