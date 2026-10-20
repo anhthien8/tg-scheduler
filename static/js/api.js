@@ -78,6 +78,7 @@ const API = {
   put(path, body) { return this.request('PUT', path, body); },
   patch(path, body) { return this.request('PATCH', path, body); },
   del(path) { return this.request('DELETE', path); },
+  delete(path) { return this.request('DELETE', path); },
 
   // ── Split-runtime (web/worker) awareness ───────────────────────────────────
   // The server runs as TG_RUNTIME_MODE=combined (default, everything in one
@@ -259,13 +260,16 @@ const API = {
   },
   async toggleAccountActive(id, isActive) {
     this.clearAccountsCache();
-    return parseApiResponse(await fetch(`/api/auth/accounts/${id}/toggle-active?is_active=${isActive}`, { method: 'POST' }));
+    return parseApiResponse(await fetch(`/api/auth/accounts/${id}/toggle-active?is_active=${isActive}`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+    }));
   },
   async setAccountAiAgent(id, aiAgentId) {
     this.clearAccountsCache();
     return parseApiResponse(await fetch(`/api/auth/accounts/${id}/set-ai-agent`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...this.getHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ ai_agent_id: aiAgentId ? parseInt(aiAgentId) : null })
     }));
   },
@@ -527,4 +531,27 @@ const AutoReplyAPI = {
   toggleRule: (id)         => apiPost(`/api/auto-reply/rules/${id}/toggle`, {}),
   getLogs:    (ruleId, limit = 100) => apiGet(`/api/auto-reply/logs/${ruleId}?limit=${limit}`),
 };
+
+// Automatically attach X-API-Key to any raw fetch('/api/...') call when tgs_api_key is configured in localStorage
+if (typeof globalThis !== 'undefined' && typeof globalThis.fetch === 'function' && !globalThis.fetch._tgsWrapped) {
+  const _origFetch = globalThis.fetch;
+  const _wrappedFetch = function(input, init) {
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+      const apiKey = typeof localStorage !== 'undefined' ? localStorage.getItem('tgs_api_key') : null;
+      if (apiKey && (url.startsWith('/api/') || url.includes('/api/'))) {
+        const nextInit = init ? { ...init } : {};
+        const headers = { ...(nextInit.headers || {}) };
+        if (!headers['X-API-Key'] && !headers['x-api-key']) {
+          headers['X-API-Key'] = apiKey;
+        }
+        nextInit.headers = headers;
+        return _origFetch.call(this, input, nextInit);
+      }
+    } catch (_) {}
+    return init === undefined ? _origFetch.call(this, input) : _origFetch.call(this, input, init);
+  };
+  _wrappedFetch._tgsWrapped = true;
+  globalThis.fetch = _wrappedFetch;
+}
 

@@ -13,9 +13,7 @@ const Discord = (() => {
 
   // ── Init ──
   async function init() {
-    await loadStats();
-    await loadBots();
-    await loadWatchers();
+    await Promise.all([loadStats(), loadBots(), loadWatchers()]);
   }
 
   // ── Stats ──
@@ -279,3 +277,7 @@ const Discord = (() => {
   };
 
 })();
+
+if (typeof window !== 'undefined') {
+  window.Discord = Discord;
+}

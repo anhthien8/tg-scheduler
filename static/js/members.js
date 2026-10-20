@@ -93,7 +93,12 @@ const Members = {
     groupSel.innerHTML = '<option value="">Đang tải...</option>';
     try {
       const d = await API.getChats(accountId);
-      const groups = (d.chats || []).filter(c =>
+      const chats = Array.isArray(d?.chats)
+        ? d.chats
+        : (d?.command_id && typeof API.pollCommand === 'function'
+            ? ((await API.pollCommand(d.command_id))?.result?.chats || [])
+            : []);
+      const groups = chats.filter(c =>
         c.chat_type === 'group' || c.chat_type === 'supergroup' || c.chat_type === 'megagroup'
       );
       this._groupsCache[accountId] = groups;
@@ -3353,7 +3358,7 @@ const Members = {
 
       const freeCount = results.filter(r => r.status === 'free').length;
       const limitedCount = results.filter(r => r.status === 'limited').length;
-      App.toast(`Spam check: ${freeCount} sạch, ${limitedCount} bị giới hạn`, freeCount > 0 && limitedCount === 0 ? 'success' : 'warning');
+      App.toast(`Spam check: ${freeCount} sạch, ${limitedCount} bị giới hạn`, freeCount > 0 && limitedCount === 0 ? 'success' : 'error');
     } catch (e) {
       App.toast(e.message || 'Lỗi kiểm tra spam', 'error');
     } finally {
@@ -3361,6 +3366,10 @@ const Members = {
     }
   },
 };
+
+if (typeof window !== 'undefined') {
+  window.Members = Members;
+}
 
 // ── Helper: HTML escape (reuse App.esc if available, fallback) ──
 if (typeof esc !== 'function') {

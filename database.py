@@ -1538,6 +1538,17 @@ async def init_db():
             "ON engagement_dm_map(account_id, user_id, created_at)"
         )
 
+        # ── v3.9.1 All-Pages Performance Indexes ──
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_send_logs_sent_at ON send_logs(sent_at DESC)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_eng_logs_created_at ON engagement_logs(created_at DESC)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_watcher_dm_logs_watcher_sent ON watcher_dm_logs(watcher_id, sent_at DESC)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_watcher_dm_logs_status_sent ON watcher_dm_logs(status, sent_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_camp_sent ON dm_campaign_logs(campaign_id, sent_at DESC)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_status_sent ON dm_campaign_logs(status, sent_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_scraped_members_user_id ON scraped_members(user_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_reaction_logs_status_sent ON reaction_logs(status, sent_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_wal_status_created ON warmup_action_log(status, created_at DESC)")
+
         await db.commit()
 
     # Seed default templates after init
@@ -1986,7 +1997,9 @@ async def get_log_stats() -> dict:
             SELECT 
                 COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END), 0) as success,
                 COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0) as failed,
-                COALESCE(SUM(CASE WHEN status='success' AND date(sent_at)=date('now', '+7 hours') THEN 1 ELSE 0 END), 0) as today
+                COALESCE(SUM(CASE WHEN status='success'
+                    AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours')
+                    THEN 1 ELSE 0 END), 0) as today
             FROM send_logs
         """)
         log_row = await cursor.fetchone()
@@ -2351,19 +2364,25 @@ async def get_watcher_dm_logs(
 async def get_watcher_log_stats() -> dict:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        c = await db.execute("SELECT COUNT(*) FROM watcher_dm_logs WHERE status='success'")
-        success = (await c.fetchone())[0]
-        c = await db.execute("SELECT COUNT(*) FROM watcher_dm_logs WHERE status='failed'")
-        failed = (await c.fetchone())[0]
-        c = await db.execute("SELECT COUNT(*) FROM watcher_dm_logs WHERE status='skipped'")
-        skipped = (await c.fetchone())[0]
-        c = await db.execute(
-            "SELECT COUNT(*) FROM watcher_dm_logs WHERE status='success' AND date(sent_at)=date('now', '+7 hours')")
-        today = (await c.fetchone())[0]
-        c = await db.execute("SELECT COUNT(*) FROM keyword_watchers WHERE is_active=1")
-        active = (await c.fetchone())[0]
-        return {"success": success, "failed": failed, "skipped": skipped,
-                "today": today, "active_watchers": active}
+        c = await db.execute("""
+            SELECT
+                COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END), 0) AS success,
+                COALESCE(SUM(CASE WHEN status='failed'  THEN 1 ELSE 0 END), 0) AS failed,
+                COALESCE(SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END), 0) AS skipped,
+                COALESCE(SUM(CASE WHEN status='success'
+                    AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours')
+                    THEN 1 ELSE 0 END), 0) AS today,
+                (SELECT COUNT(*) FROM keyword_watchers WHERE is_active=1) AS active_watchers
+            FROM watcher_dm_logs
+        """)
+        row = dict(await c.fetchone())
+        return {
+            "success": row["success"],
+            "failed": row["failed"],
+            "skipped": row["skipped"],
+            "today": row["today"],
+            "active_watchers": row["active_watchers"],
+        }
 
 
 async def get_setting(key: str, default=None):
@@ -3756,7 +3775,7 @@ async def get_agent_evolution(days: int = 30) -> dict:
         cur = await db.execute("""
             SELECT strftime('%Y-W%W', created_at) AS wk, COUNT(*) AS n
             FROM agent_learned_knowledge
-            WHERE datetime(created_at) >= datetime('now', ?)
+            WHERE created_at >= datetime('now', ?)
             GROUP BY wk ORDER BY wk
         """, (span,))
         learning = [dict(r) for r in await cur.fetchall()]
@@ -3777,7 +3796,7 @@ async def get_agent_evolution(days: int = 30) -> dict:
                    COUNT(*) AS n,
                    SUM(CASE WHEN status IN ('needs_human','paused_admin') THEN 1 ELSE 0 END) AS h
             FROM ai_followup_chats
-            WHERE datetime(updated_at) >= datetime('now', ?)
+            WHERE updated_at >= datetime('now', ?)
             GROUP BY wk ORDER BY wk
         """, (span,))
         handover = []
@@ -3821,13 +3840,27 @@ async def get_analytics_overview() -> dict:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("""
+            WITH camp_agg AS (
+                SELECT
+                    COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END), 0) AS sent,
+                    COALESCE(SUM(CASE WHEN status='failed'  THEN 1 ELSE 0 END), 0) AS failed,
+                    COALESCE(SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END), 0) AS skipped
+                FROM dm_campaign_logs
+            ),
+            watch_agg AS (
+                SELECT
+                    COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END), 0) AS sent,
+                    COALESCE(SUM(CASE WHEN status='failed'  THEN 1 ELSE 0 END), 0) AS failed,
+                    COALESCE(SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END), 0) AS skipped
+                FROM watcher_dm_logs
+            )
             SELECT
-                (SELECT COUNT(*) FROM dm_campaign_logs WHERE status='success') as campaign_sent,
-                (SELECT COUNT(*) FROM watcher_dm_logs WHERE status='success') as watcher_sent,
-                (SELECT COUNT(*) FROM dm_campaign_logs WHERE status='failed') as campaign_failed,
-                (SELECT COUNT(*) FROM watcher_dm_logs WHERE status='failed') as watcher_failed,
-                (SELECT COUNT(*) FROM dm_campaign_logs WHERE status='skipped') as campaign_skipped,
-                (SELECT COUNT(*) FROM watcher_dm_logs WHERE status='skipped') as watcher_skipped,
+                c.sent AS campaign_sent,
+                w.sent AS watcher_sent,
+                c.failed AS campaign_failed,
+                w.failed AS watcher_failed,
+                c.skipped AS campaign_skipped,
+                w.skipped AS watcher_skipped,
                 (SELECT COUNT(*) FROM dm_replies r 
                  WHERE (r.sender_username IS NULL OR r.sender_username NOT LIKE '%bot')
                    AND (
@@ -3843,6 +3876,7 @@ async def get_analytics_overview() -> dict:
                 (SELECT COUNT(*) FROM reaction_logs WHERE status='success') as total_reactions,
                 (SELECT COUNT(*) FROM accounts) as accounts_count,
                 (SELECT COUNT(*) FROM schedules WHERE is_active=1) as active_schedules_count
+            FROM camp_agg c, watch_agg w
         """)
         row = await cursor.fetchone()
         
@@ -3945,7 +3979,7 @@ async def get_analytics_account_health() -> list:
                 FROM (
                     SELECT
                         account_id,
-                        SUM(CASE WHEN status = 'success' AND DATE(sent_at) = DATE('now', '+7 hours') THEN 1 ELSE 0 END) as sent_today,
+                        SUM(CASE WHEN status = 'success' AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours') THEN 1 ELSE 0 END) as sent_today,
                         SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as sent_total,
                         SUM(CASE WHEN status = 'failed' AND (error_message LIKE '%Flood%' OR error_message LIKE '%PeerFlood%') THEN 1 ELSE 0 END) as flood_total,
                         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_total
@@ -3956,7 +3990,7 @@ async def get_analytics_account_health() -> list:
                     
                     SELECT
                         account_id,
-                        SUM(CASE WHEN status = 'success' AND DATE(sent_at) = DATE('now', '+7 hours') THEN 1 ELSE 0 END) as sent_today,
+                        SUM(CASE WHEN status = 'success' AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours') THEN 1 ELSE 0 END) as sent_today,
                         SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as sent_total,
                         SUM(CASE WHEN status = 'failed' AND (error_message LIKE '%Flood%' OR error_message LIKE '%PeerFlood%') THEN 1 ELSE 0 END) as flood_total,
                         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_total
@@ -6112,14 +6146,27 @@ async def get_engagement_logs(
         return [dict(row) for row in await cursor.fetchall()]
 
 
-async def get_engagement_log_count(campaign_id: int | None = None) -> int:
+async def get_engagement_log_count(
+    campaign_id: int | None = None,
+    status: str | None = None,
+    kind: str | None = None,
+) -> int:
     async with get_db() as db:
+        conditions = []
+        params = []
         if campaign_id is not None:
-            row = await (await db.execute(
-                "SELECT COUNT(*) FROM engagement_logs WHERE campaign_id=?", (campaign_id,)
-            )).fetchone()
-        else:
-            row = await (await db.execute("SELECT COUNT(*) FROM engagement_logs")).fetchone()
+            conditions.append("campaign_id=?")
+            params.append(campaign_id)
+        if status:
+            conditions.append("status=?")
+            params.append(status)
+        if kind:
+            conditions.append("kind=?")
+            params.append(kind)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        row = await (await db.execute(
+            f"SELECT COUNT(*) FROM engagement_logs {where}", tuple(params)
+        )).fetchone()
         return row[0] if row else 0
 
 
@@ -6151,56 +6198,47 @@ async def find_engagement_dm_map(account_id: int, user_id: int, days: int = 7) -
 # ── Engagement Stats ──
 
 async def get_engagement_stats(campaign_id: int | None = None, days: int = 7) -> dict:
-    """Aggregate engagement statistics."""
+    """Aggregate engagement statistics in two parameterized passes."""
     async with get_db() as db:
-        day_filter = f"AND created_at >= datetime('now', '-{days} days')"
-        camp_filter = f"AND campaign_id={campaign_id}" if campaign_id else ""
-        base = f"FROM engagement_logs WHERE 1=1 {camp_filter} {day_filter}"
+        db.row_factory = aiosqlite.Row
+        span = f"-{int(days)} days"
+        camp_sql = "AND campaign_id=?" if campaign_id is not None else ""
+        camp_params = (campaign_id,) if campaign_id is not None else ()
 
-        total = (await (await db.execute(f"SELECT COUNT(*) {base}")).fetchone())[0]
-        success = (await (await db.execute(
-            f"SELECT COUNT(*) {base} AND status='success'"
-        )).fetchone())[0]
-        skipped = (await (await db.execute(
-            f"SELECT COUNT(*) {base} AND status='skipped'"
-        )).fetchone())[0]
-        failed = (await (await db.execute(
-            f"SELECT COUNT(*) {base} AND status='failed'"
-        )).fetchone())[0]
+        cur = await db.execute(f"""
+            SELECT
+                COALESCE(SUM(CASE WHEN created_at >= datetime('now', ?) THEN 1 ELSE 0 END), 0) AS total,
+                COALESCE(SUM(CASE WHEN created_at >= datetime('now', ?) AND status='success' THEN 1 ELSE 0 END), 0) AS success,
+                COALESCE(SUM(CASE WHEN created_at >= datetime('now', ?) AND status='skipped' THEN 1 ELSE 0 END), 0) AS skipped,
+                COALESCE(SUM(CASE WHEN created_at >= datetime('now', ?) AND status='failed'  THEN 1 ELSE 0 END), 0) AS failed,
+                COALESCE(SUM(CASE WHEN created_at >= datetime('now', '+7 hours', 'start of day', '-7 hours')
+                    AND kind='reply' AND status='success' THEN 1 ELSE 0 END), 0) AS today_replies,
+                COALESCE(SUM(CASE WHEN created_at >= datetime('now', '-1 hour')
+                    AND kind='reply' AND status='success' THEN 1 ELSE 0 END), 0) AS hour_replies,
+                COUNT(DISTINCT CASE WHEN skip_reason='muted'
+                    AND created_at >= datetime('now', '-1 day') THEN account_id END) AS muted_24h
+            FROM engagement_logs
+            WHERE 1=1 {camp_sql}
+              AND created_at >= MIN(datetime('now', ?), datetime('now', '-1 day'))
+        """, (span, span, span, span, *camp_params, span))
+        agg = dict(await cur.fetchone())
 
-        # Today's replies
-        today_base = f"FROM engagement_logs WHERE 1=1 {camp_filter} AND created_at >= datetime('now', 'start of day')"
-        today_replies = (await (await db.execute(
-            f"SELECT COUNT(*) {today_base} AND kind='reply' AND status='success'"
-        )).fetchone())[0]
-
-        # Last hour
-        hour_base = f"FROM engagement_logs WHERE 1=1 {camp_filter} AND created_at >= datetime('now', '-1 hour')"
-        hour_replies = (await (await db.execute(
-            f"SELECT COUNT(*) {hour_base} AND kind='reply' AND status='success'"
-        )).fetchone())[0]
-
-        # Skip reasons
         cursor = await db.execute(
-            f"SELECT skip_reason, COUNT(*) as cnt {base} AND status='skipped' GROUP BY skip_reason"
+            f"SELECT skip_reason, COUNT(*) as cnt FROM engagement_logs "
+            f"WHERE status='skipped' AND created_at >= datetime('now', ?) {camp_sql} GROUP BY skip_reason",
+            (span, *camp_params),
         )
-        skip_reasons = {r[0]: r[1] for r in await cursor.fetchall() if r[0]}
-
-        # Muted accounts in last 24h
-        muted_24h = (await (await db.execute(
-            f"SELECT COUNT(DISTINCT account_id) FROM engagement_logs "
-            f"WHERE 1=1 {camp_filter} AND skip_reason='muted' AND created_at >= datetime('now', '-1 day')"
-        )).fetchone())[0]
+        skip_reasons = {r["skip_reason"]: r["cnt"] for r in await cursor.fetchall() if r["skip_reason"]}
 
         return {
-            "total": total,
-            "success": success,
-            "skipped": skipped,
-            "failed": failed,
-            "today_replies": today_replies,
-            "hour_replies": hour_replies,
+            "total": agg["total"],
+            "success": agg["success"],
+            "skipped": agg["skipped"],
+            "failed": agg["failed"],
+            "today_replies": agg["today_replies"],
+            "hour_replies": agg["hour_replies"],
             "skip_reasons": skip_reasons,
-            "muted_accounts_24h": muted_24h,
+            "muted_accounts_24h": agg["muted_24h"],
             "days": days,
         }
 
@@ -6326,6 +6364,15 @@ async def get_attributions_by_referrer(referrer_user_id: int) -> list[dict]:
         return [dict(r) for r in await cursor.fetchall()]
 
 
+async def get_all_referral_attributions() -> list[dict]:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM referral_attributions ORDER BY attributed_at DESC"
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+
 async def update_attribution_status(attribution_id: int, status: str, converted_at: str | None = None):
     async with get_db() as db:
         if converted_at:
@@ -6357,18 +6404,21 @@ async def create_referral_reward(
 async def get_referral_stats() -> dict:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        codes = await (await db.execute("SELECT COUNT(*) AS n FROM referral_codes WHERE is_active = 1")).fetchone()
-        total_attr = await (await db.execute("SELECT COUNT(*) AS n FROM referral_attributions")).fetchone()
-        conversions = await (await db.execute(
-            "SELECT COUNT(*) AS n FROM referral_attributions WHERE status = 'signed'"
-        )).fetchone()
+        row = await (await db.execute("""
+            SELECT
+                (SELECT COUNT(*) FROM referral_codes WHERE is_active = 1) AS active_codes,
+                COUNT(*) AS total_attributions,
+                COALESCE(SUM(CASE WHEN status = 'signed' THEN 1 ELSE 0 END), 0) AS conversions
+            FROM referral_attributions
+        """)).fetchone()
+        active_codes = row["active_codes"] if row else 0
+        total_attr = row["total_attributions"] if row else 0
+        conversions = row["conversions"] if row else 0
         return {
-            "active_codes": codes["n"] if codes else 0,
-            "total_attributions": total_attr["n"] if total_attr else 0,
-            "conversions": conversions["n"] if conversions else 0,
-            "conversion_rate": round(
-                (conversions["n"] / total_attr["n"] * 100) if total_attr and total_attr["n"] > 0 else 0, 1
-            ),
+            "active_codes": active_codes,
+            "total_attributions": total_attr,
+            "conversions": conversions,
+            "conversion_rate": round((conversions / total_attr * 100) if total_attr > 0 else 0, 1),
         }
 
 

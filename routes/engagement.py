@@ -313,7 +313,9 @@ async def get_logs(
         campaign_id=campaign_id, limit=limit, offset=offset,
         status=status, kind=kind,
     )
-    total = await db.get_engagement_log_count(campaign_id)
+    total = await db.get_engagement_log_count(
+        campaign_id=campaign_id, status=status, kind=kind,
+    )
     return {"logs": logs, "total": total}
 
 

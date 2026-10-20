@@ -302,38 +302,24 @@ async def action_logs_summary():
             LIMIT 50
         """)
         per_account = [dict(r) for r in await cur3.fetchall()]
-        # Total actions today
+        # Scalar summary stats in one query
         cur4 = await conn.execute("""
-            SELECT COUNT(*) AS cnt FROM warmup_action_log
-            WHERE created_at >= datetime('now', 'start of day')
+            SELECT
+                (SELECT COUNT(*) FROM warmup_action_log
+                 WHERE created_at >= datetime('now', '+7 hours', 'start of day', '-7 hours')) AS total_today,
+                (SELECT COUNT(*) FROM warmup_progress WHERE graduated_at IS NULL) AS accounts_active,
+                (SELECT COUNT(*) FROM warmup_progress WHERE graduated_at IS NOT NULL) AS accounts_graduated,
+                (SELECT COUNT(*) FROM warmup_action_log
+                 WHERE status = 'flood' AND created_at >= datetime('now', '-3 days')) AS flood_events_3d
         """)
-        total_today = (await cur4.fetchone())["cnt"]
-        # Accounts in warmup (not graduated)
-        cur5 = await conn.execute("""
-            SELECT COUNT(*) AS cnt FROM warmup_progress
-            WHERE graduated_at IS NULL
-        """)
-        accounts_active = (await cur5.fetchone())["cnt"]
-        # Graduated accounts
-        cur6 = await conn.execute("""
-            SELECT COUNT(*) AS cnt FROM warmup_progress
-            WHERE graduated_at IS NOT NULL
-        """)
-        accounts_graduated = (await cur6.fetchone())["cnt"]
-        # Flood events in last 3 days
-        cur7 = await conn.execute("""
-            SELECT COUNT(*) AS cnt FROM warmup_action_log
-            WHERE status = 'flood'
-            AND created_at >= datetime('now', '-3 days')
-        """)
-        flood_events_3d = (await cur7.fetchone())["cnt"]
+        scalar = dict(await cur4.fetchone())
     return {
         "by_type": by_type,
         "by_status": by_status,
         "per_account": per_account,
-        "total_today": total_today,
-        "accounts_active": accounts_active,
-        "accounts_graduated": accounts_graduated,
-        "flood_events_3d": flood_events_3d,
+        "total_today": scalar["total_today"],
+        "accounts_active": scalar["accounts_active"],
+        "accounts_graduated": scalar["accounts_graduated"],
+        "flood_events_3d": scalar["flood_events_3d"],
     }
 

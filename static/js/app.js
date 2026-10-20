@@ -497,11 +497,11 @@ if(page==='agent-evolution'){
       </div>
       <div class="card" style="padding:16px;margin-bottom:20px">
         <h3 style="margin:0 0 12px">📚 Tốc độ học (luật mới mỗi tuần)</h3>
-        <canvas id="evo-learn-chart" height="90"></canvas>
+        <div id="evo-learn-chart" style="min-height:90px"></div>
       </div>
       <div class="card" style="padding:16px;margin-bottom:20px">
         <h3 style="margin:0 0 12px">🛑 Tỷ lệ cần người can thiệp mỗi tuần <span style="font-weight:400;font-size:12px;color:#888">(càng thấp càng tốt)</span></h3>
-        <canvas id="evo-handover-chart" height="90"></canvas>
+        <div id="evo-handover-chart" style="min-height:90px"></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
         <div class="card" style="padding:16px">
@@ -1080,7 +1080,7 @@ async unpauseAccount(accId){if(!await customConfirm('Bỏ tạm dừng tài kho�
 
 async _populateLogAccountFilter(){const sel=document.getElementById('log-filter-account');if(!sel)return;const accs=this.accounts||App._accounts||[];if(!sel.options.length||sel.options.length===1){while(sel.options.length>1)sel.remove(1);accs.forEach(a=>{const opt=document.createElement('option');opt.value=a.id;opt.textContent=a.name||a.phone;sel.appendChild(opt);});} },
 
-async loadBlacklist(){try{const data=await fetch('/api/blacklist').then(r=>r.json());this._blacklistData=data;const badge=document.getElementById('blacklist-badge');if(badge){if(data.length>0){badge.textContent=data.length;badge.classList.remove('hidden')}else{badge.classList.add('hidden')}}this._blPage=1;this._renderBlacklistPage()}catch(e){this.toast(e.message,'error')}},
+async loadBlacklist(){try{const res=await fetch('/api/blacklist');const raw=res.ok?await res.json():[];const data=Array.isArray(raw)?raw:[];this._blacklistData=data;const badge=document.getElementById('blacklist-badge');if(badge){if(data.length>0){badge.textContent=data.length;badge.classList.remove('hidden')}else{badge.classList.add('hidden')}}this._blPage=1;this._renderBlacklistPage()}catch(e){this._blacklistData=[];this._blPage=1;this._renderBlacklistPage();this.toast(e.message,'error')}},
 
 _renderBlacklistPage(){const q=(document.getElementById('blacklist-search')?.value||'').toLowerCase().trim();const all=this._blacklistData||[];const showBots=document.getElementById('blacklist-show-bots')?.checked;const base=showBots?all:all.filter(b=>!(b.user_id&&b.user_id<0));const hiddenBots=all.length-base.length;const filtered=q?base.filter(b=>(String(b.user_id||'').includes(q))||(b.username||'').toLowerCase().includes(q)||(b.reason||'').toLowerCase().includes(q)):base;const pages=Math.max(1,Math.ceil(filtered.length/20));if(this._blPage>pages)this._blPage=pages;this._renderBlacklistTable(filtered.slice((this._blPage-1)*20,this._blPage*20),filtered.length===0,q);const countEl=document.getElementById('blacklist-count');if(countEl){const botNote=hiddenBots&&!showBots?` · ẩn ${hiddenBots} group/bot`:'';countEl.textContent=q?`Hiển thị: ${filtered.length}/${base.length}${botNote}`:(base.length?`Tổng: ${base.length} user bị chặn${botNote}`:'')};const pager=document.getElementById('blacklist-pager');if(pager)pager.innerHTML=pages>1?`<button class="btn btn-ghost btn-sm" onclick="App.blPage(${this._blPage-1})" ${this._blPage<=1?'disabled':''}>‹ Trước</button><span>Trang ${this._blPage}/${pages}</span><button class="btn btn-ghost btn-sm" onclick="App.blPage(${this._blPage+1})" ${this._blPage>=pages?'disabled':''}>Sau ›</button>`:'';},
 
@@ -1257,9 +1257,9 @@ async resetCount(id){try{await API.resetCount(id);this.toast('Đã reset','succe
 
 async openCreateModal(){(document.getElementById('modal-title') || me_dummy).textContent = 'Tạo lịch gửi';(document.getElementById('edit-schedule-id') || document.createElement("div")).value='';(document.getElementById('sch-name') || document.createElement("div")).value='';(document.getElementById('sch-type') || document.createElement("div")).value='daily';(document.getElementById('sch-time') || document.createElement("div")).value='08:00';(document.getElementById('sch-day-of-month') || document.createElement("div")).value='1';(document.getElementById('sch-once-date') || document.createElement("div")).value='';(document.getElementById('sch-max-sends') || document.createElement("div")).value='';document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('active'));(document.getElementById('messages-list') || document.createElement("div")).innerHTML='';
 
-this.onScheduleTypeChange();await this.loadAccountSelector();await this.loadChatList();
+this.onScheduleTypeChange();(document.getElementById('schedule-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');await this.loadAccountSelector();await this.loadChatList();
 
-document.querySelectorAll('#chat-list input[type="checkbox"]').forEach(c=>c.checked=false);(document.getElementById('schedule-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
+document.querySelectorAll('#chat-list input[type="checkbox"]').forEach(c=>c.checked=false);},
 
 async editSchedule(id){try{const s=await API.getSchedule(id);(document.getElementById('modal-title') || me_dummy).textContent = 'Sửa lịch gửi';(document.getElementById('edit-schedule-id') || document.createElement("div")).value=s.id;(document.getElementById('sch-name') || document.createElement("div")).value=s.name;(document.getElementById('sch-type') || document.createElement("div")).value=s.schedule_type;(document.getElementById('sch-time') || document.createElement("div")).value=s.time_of_day;(document.getElementById('sch-day-of-month') || document.createElement("div")).value=s.day_of_month||1;(document.getElementById('sch-once-date') || document.createElement("div")).value=s.once_date||'';(document.getElementById('sch-max-sends') || document.createElement("div")).value=s.max_sends||'';
 
@@ -1267,11 +1267,11 @@ document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('active'));i
 
 this.onScheduleTypeChange();(document.getElementById('messages-list') || me_dummy).innerHTML = '';(s.messages||[]).forEach(m=>this.addMessage(m.msg_type,m));
 
-await this.loadAccountSelector();(document.getElementById('sch-account') || me_dummy).value = s.account_id;await this.loadChatList();
+(document.getElementById('schedule-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');await this.loadAccountSelector();(document.getElementById('sch-account') || me_dummy).value = s.account_id;await this.loadChatList();
 
 const tids=new Set((s.targets||[]).map(t=>t.chat_id));document.querySelectorAll('#chat-list input[type="checkbox"]').forEach(cb=>cb.checked=tids.has(parseInt(cb.value)));
 
-(document.getElementById('schedule-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')}catch(e){this.toast(e.message,'error')}},
+}catch(e){this.toast(e.message,'error')}},
 
 closeModal(){(document.getElementById('schedule-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')},
 
@@ -1283,11 +1283,11 @@ async loadAccountSelector(){try{const d=await API.getAccounts();this.accounts=d.
 
 async loadChatList(){const sel=document.getElementById('sch-account');const accId=sel?sel.value:1;const el=document.getElementById('chat-list');if(el)el.innerHTML='<div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>';
 
-try{const d=await API.getChats(accId);this.chats=d.chats;this.renderChatList(this.chats)}catch(e){el.innerHTML=`<div style="padding:12px;color:var(--red)">Lỗi: ${e.message}</div>`}},
+try{const d=await API.getChats(accId);this.chats=Array.isArray(d?.chats)?d.chats:(d?.command_id&&typeof API.pollCommand==='function'?((await API.pollCommand(d.command_id))?.result?.chats||[]):[]);this.renderChatList(this.chats)}catch(e){if(el)el.innerHTML=`<div style="padding:12px;color:var(--red)">Lỗi: ${e.message}</div>`}},
 
-renderChatList(chats){const el=document.getElementById('chat-list');if(!chats.length){el.innerHTML='<div style="padding:12px;color:var(--text2)">Không tìm thấy nhóm/kênh</div>';return}
+renderChatList(chats){const el=document.getElementById('chat-list');if(!el)return;const list=Array.isArray(chats)?chats:[];if(!list.length){el.innerHTML='<div style="padding:12px;color:var(--text2)">Không tìm thấy nhóm/kênh</div>';return}
 
-el.innerHTML=chats.map(c=>{const icon=c.chat_type==='channel'?'📢':c.chat_type==='supergroup'?'👥':'💬';return`<label class="chat-item"><input type="checkbox" value="${c.chat_id}" data-title="${esc(c.chat_title)}" data-type="${c.chat_type}"><span class="chat-type-icon">${icon}</span><span class="chat-name">${esc(c.chat_title)}</span><span class="chat-type-badge">${c.chat_type}</span></label>`}).join('')},
+el.innerHTML=list.map(c=>{const icon=c.chat_type==='channel'?'📢':c.chat_type==='supergroup'?'👥':'💬';return`<label class="chat-item"><input type="checkbox" value="${c.chat_id}" data-title="${esc(c.chat_title)}" data-type="${c.chat_type}"><span class="chat-type-icon">${icon}</span><span class="chat-name">${esc(c.chat_title)}</span><span class="chat-type-badge">${c.chat_type}</span></label>`}).join('')},
 
 filterChats: debounce(function(){const q=document.getElementById('chat-search')?.value.toLowerCase();this.renderChatList(this.chats.filter(c=>c.chat_title.toLowerCase().includes(q)))}, 250),
 
@@ -1468,11 +1468,11 @@ async openWatcherModal(){
 
   this._renderWatcherKeywords();this._renderWatcherExcludes();
 
+  (document.getElementById('watcher-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
+
   await this._loadWatcherAccounts([]);await this._loadWatcherChatList([]);
 
-  this._renderWatcherObservers([]);
-
-  (document.getElementById('watcher-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
+  this._renderWatcherObservers([]);},
 
 async editWatcher(id){try{
 
@@ -1509,11 +1509,11 @@ async editWatcher(id){try{
 
   this._watcherObserverIds = [...(w.observer_account_ids||[])];
 
+  (document.getElementById('watcher-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
+
   await this._loadWatcherAccounts(w.sender_account_ids||[]);await this._loadWatcherChatList(w.group_ids||[]);
 
   this._renderWatcherObservers(this._watcherObserverIds);
-
-  (document.getElementById('watcher-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')
 
 }catch(e){this.toast(e.message,'error')}},
 
@@ -1577,7 +1577,7 @@ async selectWatcherAccount(accId){
 
     const d=await API.getChats(accId);
 
-    this._watcherChats=d.chats;
+    this._watcherChats=Array.isArray(d?.chats)?d.chats:(d?.command_id&&typeof API.pollCommand==='function'?((await API.pollCommand(d.command_id))?.result?.chats||[]):[]);
 
     this._renderWatcherChatList(this._watcherChats)
 
@@ -1623,11 +1623,11 @@ async _loadWatcherChatList(selectedIds=[]){const el=document.getElementById('w-c
 
     const accId=this._watcherActiveAccountId||(this.accounts[0]?.id||1);
 
-    const d=await API.getChats(accId);this._watcherChats=d.chats;
+    const d=await API.getChats(accId);this._watcherChats=Array.isArray(d?.chats)?d.chats:(d?.command_id&&typeof API.pollCommand==='function'?((await API.pollCommand(d.command_id))?.result?.chats||[]):[]);
 
     this._renderWatcherChatList(this._watcherChats,selSet)
 
-  }catch(e){el.innerHTML=`<div style="padding:12px;color:var(--red)">Lỗi: ${e.message}</div>`}},
+  }catch(e){if(el)el.innerHTML=`<div style="padding:12px;color:var(--red)">Lỗi: ${e.message}</div>`}},
 
 // Only real groups can ever produce a member-join / keyword message we can act on.
 // Channels (broadcast) have subscribers, not joinable members; bots have neither —
@@ -2901,7 +2901,11 @@ App.loadChannels = async function(force) {
 
   const accountId = parseInt(sel.value);
 
-  if (!accountId) return;
+  if (!accountId) {
+    (document.getElementById('ch-loading')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
+    (document.getElementById('ch-empty')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
+    return;
+  }
 
   App._chAccountId = accountId;
 
@@ -4552,7 +4556,7 @@ const Warmup = {
   _actionLogSummary: null,
 
   async init() {
-    await Promise.all([this.loadGroups(), this.loadJobs(), this.loadRecentLogs(), this.loadProgress(), this.loadActionLogs(), this.loadActionLogSummary()]);
+    await Promise.all([this.loadGroups(), this.loadJobs().then(() => this.loadRecentLogs()), this.loadProgress(), this.loadActionLogs(), this.loadActionLogSummary()]);
   },
 
   cleanup() {
@@ -5022,3 +5026,6 @@ const Warmup = {
 
   _esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 };
+window.Warmup = Warmup;
+window.Reactions = Reactions;
+window.App = App;

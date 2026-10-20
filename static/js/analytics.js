@@ -192,7 +192,11 @@ const Templates = {
     try {
       this._list = await TemplatesAPI.getAll();
       this.render();
-    } catch (e) { console.error('Templates load error:', e); }
+    } catch (e) {
+      console.error('Templates load error:', e);
+      this._list = [];
+      this.render();
+    }
   },
 
   render() {
@@ -294,10 +298,17 @@ const AutoReply = {
 
   async init() {
     try {
-      this._rules = await AutoReplyAPI.getRules();
-      await this._loadAccounts();
+      const [rules] = await Promise.all([
+        AutoReplyAPI.getRules(),
+        this._loadAccounts(),
+      ]);
+      this._rules = rules || [];
       this.render();
-    } catch (e) { console.error('AutoReply load error:', e); }
+    } catch (e) {
+      console.error('AutoReply load error:', e);
+      this._rules = [];
+      this.render();
+    }
   },
 
   async _loadAccounts() {
@@ -495,3 +506,9 @@ const AutoReply = {
     } catch (e) { App.toast(e.message, 'error'); }
   },
 };
+
+if (typeof window !== 'undefined') {
+  window.Analytics = Analytics;
+  window.Templates = Templates;
+  window.AutoReply = AutoReply;
+}

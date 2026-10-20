@@ -22,6 +22,8 @@ const Changelog = {
       this.render();
     } catch (e) {
       console.error('Changelog load error:', e);
+      this._data = [];
+      this.render();
     }
   },
 
@@ -34,6 +36,7 @@ const Changelog = {
     const container = document.getElementById('changelog-content');
     if (!container) return;
 
+    const latestVersion = (this._data && this._data[0] && this._data[0].version) ? ('v' + this._data[0].version) : 'v3.9.0';
     let html = `
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:24px">
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -43,7 +46,7 @@ const Changelog = {
           <button class="btn btn-sm ${this._activeFilter === 'fix' ? 'btn-primary' : 'btn-outline'}" onclick="window.Changelog.setFilter('fix')">🐞 Sửa lỗi</button>
         </div>
         <div style="font-size:13px;color:var(--text2)">
-          <span>Phiên bản hiện tại: <strong style="color:var(--primary)">v3.5.4</strong></span>
+          <span>Phiên bản hiện tại: <strong style="color:var(--primary)">${latestVersion}</strong></span>
         </div>
       </div>
 

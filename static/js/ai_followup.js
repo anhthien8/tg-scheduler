@@ -24,18 +24,19 @@ const AIFollowUp = {
   },
 
   async init(force = false) {
-    await Promise.all([this.loadSettings(), this.loadKolChannelSettings(), this.loadReferrals()]);
     this.switchTab('leads');
     // Cache: chỉ fetch lại 86KB chats nếu quá 30s hoặc bị yêu cầu (nút 🔄 / force).
     const fresh = this._chatsLoadedAt && (Date.now() - this._chatsLoadedAt) < 30000 && this._chats.length;
+    const tasks = [this.loadSettings(), this.loadKolChannelSettings(), this.loadReferrals()];
     if (force || !fresh) {
-      await this.loadChats();
+      tasks.push(this.loadChats());
     } else {
       // Dùng lại dữ liệu sẵn có — không fetch lại, render tức thì.
       this.renderStats();
       this.renderChips();
       this.renderPage();
     }
+    await Promise.all(tasks);
   },
 
   // ── Tabs ──────────────────────────────────────────────────────────
@@ -115,6 +116,7 @@ const AIFollowUp = {
 
   // ── C5: Referral / Viral Loop KOL ──────────────────────────────────
   async loadReferrals() {
+    const tb = document.getElementById('aifu-ref-codes-body');
     try {
       const [codesRes, statsRes] = await Promise.all([
         fetch('/api/referrals/codes'),
@@ -132,7 +134,6 @@ const AIFollowUp = {
       if (codesRes.ok) {
         const d = await codesRes.json();
         const codes = d.codes || [];
-        const tb = document.getElementById('aifu-ref-codes-body');
         if (!tb) return;
         if (!codes.length) {
           tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:12px">Chưa có mã giới thiệu nào</td></tr>';
@@ -145,8 +146,12 @@ const AIFollowUp = {
           <td>${c.is_active ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>'}</td>
           <td>${c.is_active ? `<button class="btn btn-ghost btn-sm" style="color:#f87171" onclick="AIFollowUp.deactivateReferralCode(${c.id})">Vô hiệu</button>` : '—'}</td>
         </tr>`).join('');
+      } else if (tb) {
+        tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:12px">Chưa có mã giới thiệu nào</td></tr>';
       }
-    } catch (_) {}
+    } catch (_) {
+      if (tb) tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:12px">Chưa có mã giới thiệu nào</td></tr>';
+    }
   },
 
   async createReferralCode() {
@@ -627,3 +632,7 @@ const AIFollowUp = {
     this._modalChat = null;
   }
 };
+
+if (typeof window !== 'undefined') {
+  window.AIFollowUp = AIFollowUp;
+}

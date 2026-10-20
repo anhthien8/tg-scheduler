@@ -7,13 +7,18 @@ const Engagement = {
     currentCampaignId: null,
     agents: [],
 
+    _lastStats: null,
+
     async init() {
-        await this.loadAgents();
-        await this.loadCampaigns();
+        await Promise.all([
+            this.loadAgents(),
+            this.loadCampaigns(),
+            this.loadLogs(),
+            this.loadStats(),
+        ]);
         this.renderCampaigns();
         this.renderForm();
-        this.loadLogs();
-        this.loadStats();
+        if (this._lastStats) this.renderHealth(this._lastStats);
     },
 
     async loadAgents() {
@@ -316,7 +321,7 @@ const Engagement = {
     async deleteCampaign(id) {
         if (!confirm('Xoá chiến dịch này?')) return;
         try {
-            await API.delete(`/api/engagement/campaigns/${id}`);
+            await API.del(`/api/engagement/campaigns/${id}`);
             App.toast('Đã xoá chiến dịch', 'success');
             await this.loadCampaigns();
             this.renderCampaigns();
@@ -331,6 +336,7 @@ const Engagement = {
             this.renderLogs(res.logs || [], res.total || 0);
         } catch (e) {
             console.error('Failed to load engagement logs:', e);
+            this.renderLogs([], 0);
         }
     },
 
@@ -390,9 +396,12 @@ const Engagement = {
     async loadStats() {
         try {
             const stats = await API.get('/api/engagement/stats?days=1');
-            this.renderHealth(stats);
+            this._lastStats = stats || {};
+            this.renderHealth(this._lastStats);
         } catch (e) {
             console.error('Failed to load engagement stats:', e);
+            this._lastStats = {};
+            this.renderHealth({});
         }
     },
 
@@ -449,11 +458,14 @@ const Engagement = {
     },
 };
 
+if (typeof window !== 'undefined') {
+    window.Engagement = Engagement;
+}
+
 // Auto-init when page navigated
 if (typeof App !== 'undefined') {
-    const _origNav = App._onPageLoad || (() => {});
     App._engagementInit = () => {
-        if (document.getElementById('engagement-page')) {
+        if (document.getElementById('view-engagement')) {
             Engagement.init();
         }
     };

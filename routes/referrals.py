@@ -82,12 +82,7 @@ async def process_referral(req: ProcessReferralRequest):
 @router.get("/attributions")
 async def list_attributions():
     """List all referral attributions."""
-    # Get all codes, then all attributions
-    codes = await db.get_all_referral_codes()
-    all_attrs = []
-    for code in codes:
-        attrs = await db.get_attributions_by_referrer(code["referrer_user_id"])
-        all_attrs.extend(attrs)
+    all_attrs = await db.get_all_referral_attributions()
     return {"ok": True, "attributions": all_attrs}
 
 
