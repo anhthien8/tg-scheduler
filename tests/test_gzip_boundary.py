@@ -101,12 +101,13 @@ def test_root_index_cache_control(local_client):
     response = local_client.get("/")
     assert response.status_code == 200
     
-    # BUG-01: Serve static files with Cache-Control headers (public, max-age>=3600).
-    # Since main.py serves "/" directly with FileResponse instead of CacheControlledStaticFiles,
-    # it lacks the Cache-Control header. We verify this.
+    # The SPA shell is served with "no-cache" (must-revalidate), NOT the 1h
+    # cache of the versioned assets under /static: the shell points at the
+    # current asset build, so a cached shell would pin the browser to an old
+    # bundle. Commit 531bbb0 made this deliberate ("instant dashboard paint").
     cache_control = response.headers.get("cache-control")
     print(f"\nRoot '/' Cache-Control header: {cache_control}")
-    assert cache_control == "public, max-age=3600", "Root index.html lacks Cache-Control header!"
+    assert cache_control == "no-cache", "Root index.html must be revalidated every load!"
 
 
 def test_static_files_cache_control(local_client):

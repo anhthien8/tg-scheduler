@@ -142,7 +142,12 @@ def test_tier_a_stage1_personalized():
 
 def test_tier_b_stage1_default():
     instr = _drip_instruction_for_stage(1, 3, "Tier B")
-    assert "competition" in instr or "prize pool" in instr
+    # v3.10.1 removed the hard-coded prize pool; the prompt now points at
+    # approved ladder data and a currently running campaign instead.
+    assert "currently running" in instr
+    assert "official ladder" in instr
+    assert "$50,000" not in instr
+    assert "prize pool" not in instr.lower()
 
 def test_tier_a_stage2_case_study():
     instr = _drip_instruction_for_stage(2, 4, "Tier A")

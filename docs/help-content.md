@@ -1,6 +1,6 @@
 # Hướng dẫn sử dụng TG Scheduler
 
-**Phiên bản:** v3.7.12 (05/10/2026) — LATEST
+**Phiên bản:** v3.10.1 (22/10/2026) — LATEST
 
 TG Scheduler là công cụ tự động hóa Telegram (userbot) giúp lên lịch gửi tin nhắn, DM tự động theo từ khóa, tăng tương tác, cào thành viên, KOL outreach, AI follow-up và quản lý nhiều tài khoản.
 
@@ -289,13 +289,64 @@ Tab **Cào & DM**.
 Tab **AI Agent** (ai-followup).
 
 - Cấu hình: system prompt, knowledge base, max replies, handover keywords, drip cadence (mặc định 24/72/168 giờ).
-- Lead: active / paused_admin / onboarded / needs_human.
+- Trạng thái AI (`status`): active / paused_admin / needs_human / bot_ignored. `onboarded` chỉ còn là alias cũ → chuyển bước **Gắn link** + tạm dừng AI.
 - Gửi tay → pause AI + ghi history.
-- Drip follow-up tự động (>48h im lặng).
-- KOL profile: affiliate_link, vip_code, distribution regions/campaigns.
+- Drip follow-up tự động (>48h im lặng) cho lead **chưa đồng ý deal**.
+- KOL profile: weex_uid, affiliate_link, vip_code, volume_claimed, selected_campaign, distribution regions/campaigns.
 - KOL channel auto-forward.
 
-**Nguồn:** `routes/ai_followup.py:21-314`, `static/js/ai_followup.js:78-...`.
+#### Bước onboarding KOL (kol_step) — spec `docs/spec-kol-starter-package.md`
+
+Mỗi lead có **1 bước** duy nhất, nhớ xuyên suốt AI / Forum Inbox / Command Bot / web:
+
+| Bước | Ý nghĩa | KOL còn thiếu | Team còn nợ |
+|---|---|---|---|
+| 0 prospect | chưa đồng ý | deal_agreement | — |
+| 1 deal_agreed | đã OK deal | weex_uid | — |
+| 2 uid_received | đã có UID | — | vip_code, affiliate_link |
+| 3 link_confirmed | đã gắn link | selected_campaign, first_post_link | — |
+| 4 first_post | đã có bài | — | volume_verified |
+| 5 active | đang chạy | — | — |
+
+Terminal: `declined` (KOL từ chối / AI trả `[STOP]`), `dormant`.
+
+- Tự động (AI, hệ thống) chỉ tiến **đúng 1 bước**; nhảy cóc bị từ chối. Admin override mọi hướng qua panel **Bước** trên web, mọi thay đổi ghi vào `kol_step_events`.
+- UID chỉ được nhận khi **2 nguồn khớp**: số xuất hiện trong tin KOL **và** LLM trích ra. Chỉ 1 nguồn → lưu `weex_uid_candidate`, không chuyển bước, `missing_items` vẫn có `weex_uid`.
+- Follow-up theo bước (`process_step_reminders`): chỉ lead ≥ deal_agreed, nhắc đúng item KOL đang nợ, ≥48h, tối đa 2 lần/bước (reset khi sang bước mới), tôn trọng giờ hoạt động account, bỏ qua needs_human/declined. Setting: `kol_step_reminder_gap_hours` (48), `kol_step_reminder_max_per_step` (2). Trigger tay: `POST /api/ai-followup/trigger-step-reminders`.
+- Từ deal_agreed trở đi AI **không** tự bật lại sau 12h; admin bật lại thủ công.
+- Migration v1 chạy 1 lần khi khởi động (có backup): stage=signed → deal_agreed, status=onboarded → link_confirmed, có UID → uid_received, còn lại prospect.
+
+#### Thang offer chính thức (kol_offer.py)
+
+- Mặc định v1 (hiệu lực 21/10/2026): 55% ngay → ≥10M 60% → ≥20M 65% → ≥50M 70% → ≥100M 80% (tổng volume/tháng dương lịch); bonus $100/1M taker (bậc 4 $50, bậc 5 $10). Lên bậc theo tháng, review hạ bậc theo quý; commission hàng ngày, bonus mùng 10; loại tự trade/wash, sub-affiliate được tính.
+- Chỉnh trong Tab AI Agent → **Thang offer** (preview đúng khối prompt). Lưu = version mới + ghi `kol_offer_ladder_history`.
+- **Guard số lạ**: reply AI có % / $ / USDT ngoài thang hoặc cụm cấm (B-book) → thay bằng câu an toàn, chat chuyển needs_human, thông báo nick chính + Forum Inbox. Kiểm tra tay: `POST /api/ai-followup/offer-ladder/check {"text": ...}`.
+- AI chỉ dự đoán bậc khi KOL đã nói volume (`volume_claimed`).
+
+**Nguồn:** `routes/ai_followup.py`, `kol_offer.py`, `dm_reply_tracker.py` (render_kol_step_prompt, apply_kol_step_tags, process_step_reminders), `database.py` (set_kol_step, migrate_kol_steps_v1), `static/js/ai_followup.js`.
+
+#### Guard AI — drip, nudge và self-learning (v3.10.1)
+
+Ba đường gửi tin AI (reply trực tiếp, **drip follow-up**, **outreach nudge**) nay dùng chung một bộ guard:
+
+- **Cả 3 đều nhận khối thang offer chính thức** trong system prompt (render từ `kol_offer`), không còn con số viết tay trong code.
+- **Drip** (lead chưa đồng ý deal, tier cadence 12/24/48/96h · 24/72/168h · 48/168h): nếu tin AI có % / $ ngoài thang → **không gửi**, log `[DripEngine] 🚫 Blocked off-ladder figures`.
+- **Nudge** (follow-up lần 2, >24h không reply): cùng quy tắc, và ghi vào bảng `nudges` với `error_message = "off_ladder:75%,$200"` để admin xem lại.
+- Prompt drip **không còn** hard-code "$50,000 prize pool" — câu dẫn chỉ nhắc "a currently running trading campaign or the daily commission payout" và yêu cầu AI không tự chế %.
+- **Self-learning**: rule học từ câu trả lời tay của admin mà chứa số ngoài thang được lưu `status = "pending"` (không nằm trong prompt approved-only) kèm WARNING log; rule đúng thang vẫn `approved`. Cần rà lại các rule `approved` cũ trong DB.
+
+#### Schema self-check (v3.10.1)
+
+Lúc khởi động, `init_db()` tự kiểm tra 7 bảng / 30+ cột mà phễu KOL phụ thuộc (`REQUIRED_SCHEMA`):
+
+- Cột thiếu → `repair_schema()` tự thêm lại; không sửa được → log ERROR `[Schema] SELF-CHECK FAILED` và **bỏ qua** migration (`[KOLStep] migration SKIPPED`) thay vì chạy trên schema hỏng.
+- Kiểm tra bằng tay: `python -c "import asyncio, database; print(asyncio.run(database.verify_schema()))"` — rỗng là sạch.
+
+#### An toàn DM campaign (v3.10.1)
+
+- **Reserve trước khi gửi**: bảng `dm_campaign_reservations` (khóa `campaign_id` + `target_user_id`). `sent` ⇒ không gửi lại; `pending` ⇒ giữ 24h rồi mới thử lại; `failed` ⇒ retry được. Crash giữa "Telegram đã nhận" và "ghi log success" không còn gửi trùng.
+- **Hạn mức ngày đếm chung cho cả account**: đọc `get_account_daily_dm_count_live()` = watcher + campaign + reservation đang bay (giờ VN). 2 campaign dùng chung một nick không còn cùng vượt hạn mức.
+- **account_busy**: mỗi lượt gửi giữ `account_busy(kind='dm', TTL 180s)` để không trùng với reaction / warmup / engagement trên cùng nick; nick đang bận thì bỏ qua và thử nick khác.
 
 ### AI Agents
 
@@ -305,6 +356,7 @@ Tab **Cấu hình AI Agents**.
 - Mặc định: Crypto Exchange BD Pro (WEEX).
 - Test agent, duplicate, reset chats, learned rules (tự học từ admin).
 - Fallback đa tầng provider.
+- System prompt thực tế gửi AI = prompt agent + format rules + KB + **thang offer chính thức** + **KOL ONBOARDING STATE** (bước hiện tại, đã có / còn thiếu / team còn nợ). Tag điều khiển bước AI có thể trả: `[DEAL_AGREED]`, `[FIRST_POST]`, `[STOP]` (bị strip trước khi gửi).
 
 **Nguồn:** `routes/ai_agents.py:20-363`, `static/index.html:1005-...`.
 
@@ -336,6 +388,7 @@ Tab **Cài đặt AI** → phần **Forum Inbox**.
 - Backfill (tạo topic cho hội thoại đã trả lời, 1–90 ngày).
 - Replay history (nạp lịch sử vào topic).
 - Command Bot hiển thị tên account; nếu chưa có tên thì dùng nhãn `Acc #id`.
+- Header topic và Command Bot `/status`, `/pipeline` hiển thị thanh bước KOL (`🪜 Bước: ●●○○○ 2/5 · Còn thiếu: ...`). Reply AI bị guard số lạ chặn cũng báo vào đây kèm lý do.
 - Cảnh báo **KOL CAMPAIGN PENDING** vẫn gửi tới Command Bot và Forum Inbox, nhưng mặc định không gửi vào Saved Messages. Admin bật lại bằng setting `kol_pending_saved_msg_enabled` = `1`.
 
 **Nguồn:** `routes/settings.py:504-702`, `static/index.html:729-805`, `command_bot.py`, `telegram_forum_inbox.py`, `README.md:61-75`.
@@ -474,6 +527,24 @@ Tab **Discord**.
 - Kiểm tra `DASHBOARD_SECRET_KEY` trong `.env`.
 - Header `X-API-Key` đúng (Settings → API Key).
 - `DISABLE_AUTH=1` chỉ dev.
+
+### Log "[Schema] SELF-CHECK FAILED" hoặc "[KOLStep] migration SKIPPED"
+
+- Schema DB thiếu cột mà phễu KOL cần (thường do DB cũ từ trước v3.10.0).
+- `init_db()` tự thử thêm lại (`repair_schema`). Nếu vẫn còn lỗi → kiểm tra quyền ghi file `data/scheduler.db` và file `scheduler.db-wal`.
+- Kiểm tra tay: `python -c "import asyncio, database; print(asyncio.run(database.verify_schema()))"`.
+- Đừng chạy migration trên schema hỏng — hệ thống cố tình bỏ qua để không đánh dấu "đã migrate" rồi bỏ rơi dữ liệu.
+
+### KOL bị DM trùng / nhận 2 tin cùng lúc
+
+- Reserve-before-send đã chặn ở bảng `dm_campaign_reservations`; nếu vẫn thấy trùng, kiểm tra 2 campaign có đang chạy song song trên cùng một nick (nên tách nick theo campaign).
+- Xem `dm_campaign_reservations` để biết target nào đang `pending` (đang bay) và target nào `failed` (sẽ retry).
+
+### AI trả lời số lạ (vd 75%) bị chặn
+
+- Đây là guard đang hoạt động: reply/drip/nudge đều quét số ngoài thang commission.
+- Nếu số đó **đúng** và bạn muốn cho phép: sửa thang ở Tab AI Agent → **Thang offer** (bản mới có version + lịch sử), hoặc thêm vào `extra_allowed_percents` / `extra_allowed_dollars` của thang.
+- Rule học từ admin có số lạ bị giữ ở `status='pending'` — duyệt lại trong tab AI Agent.
 
 ### Watcher không chạy
 

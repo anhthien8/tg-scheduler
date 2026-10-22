@@ -10,24 +10,54 @@ const AIFollowUp = {
   _chats: [],
   _chatsLoadedAt: 0,   // thời điểm fetch chats gần nhất (để cache 30s)
   _statusFilter: '',
+  _stepFilter: '',     // lọc theo kol_step ('' = tất cả, 'link_confirmed+' = từ bước 3 trở lên)
   _page: 1,
   _modalChat: null,
+  _modalStep: null,    // state 5 bước của lead đang mở (từ /step)
   _selected: new Set(),
+  _ladder: null,       // thang commission đang chỉnh trong form
   PAGE_SIZE: 20,
 
   STATUS_META: {
     needs_human:  { label: '⚠️ Cần người thật',  badge: 'badge badge-red' },
     active:       { label: '🤖 AI đang chat',    badge: 'badge badge-blue' },
-    onboarded:    { label: '✅ Onboarded',        badge: 'badge badge-green' },
+    onboarded:    { label: '✅ Onboarded (cũ)',   badge: 'badge badge-green' },
     paused_admin: { label: '⏸ Chat tay',          badge: 'badge badge-gray' },
     bot_ignored:  { label: '🚫 Ignored bot',      badge: 'badge badge-gray' }
+  },
+
+  // 5 bước onboarding KOL (kol_step) + 2 trạng thái kết thúc. Thứ tự = thứ tự funnel.
+  STEPS: ['prospect', 'deal_agreed', 'uid_received', 'link_confirmed', 'first_post', 'active'],
+  STEP_META: {
+    prospect:       { label: 'Chưa chốt',     emoji: '⚪', color: 'var(--text3)' },
+    deal_agreed:    { label: 'Đồng ý deal',   emoji: '🤝', color: 'var(--accent)' },
+    uid_received:   { label: 'Nhận UID',      emoji: '🆔', color: 'var(--accent)' },
+    link_confirmed: { label: 'Đã gắn link',   emoji: '🔗', color: 'var(--green)' },
+    first_post:     { label: 'Bài đầu tiên',  emoji: '📝', color: 'var(--green)' },
+    active:         { label: 'Hoạt động',     emoji: '🟢', color: 'var(--green)' },
+    declined:       { label: 'Từ chối',       emoji: '⛔', color: 'var(--red)' },
+    dormant:        { label: 'Ngủ đông',      emoji: '💤', color: 'var(--text3)' }
+  },
+  MISSING_LABELS: {
+    deal_agreement: 'KOL đồng ý thang', weex_uid: 'WEEX UID', vip_code: 'vipCode (ops)',
+    affiliate_link: 'Link affiliate (ops)', link_confirmation: 'Xác nhận đã gắn link (ops)',
+    selected_campaign: 'Chọn campaign', first_post_link: 'Link bài đầu tiên', volume_verified: 'Volume hợp lệ kỳ đầu (ops)'
+  },
+
+  stepOf(c) { return (c && c.kol_step) || 'prospect'; },
+  stepRank(s) { const i = this.STEPS.indexOf(s || 'prospect'); return i; },
+  stepLabel(s) { const m = this.STEP_META[s] || { label: s, emoji: '' }; return `${m.emoji} ${m.label}`.trim(); },
+  stepBar(s) {
+    const r = this.stepRank(s);
+    if (r < 0) return this.stepLabel(s);
+    return '●'.repeat(r) + '○'.repeat(5 - r) + ` ${r}/5`;
   },
 
   async init(force = false) {
     this.switchTab('leads');
     // Cache: chỉ fetch lại 86KB chats nếu quá 30s hoặc bị yêu cầu (nút 🔄 / force).
     const fresh = this._chatsLoadedAt && (Date.now() - this._chatsLoadedAt) < 30000 && this._chats.length;
-    const tasks = [this.loadSettings(), this.loadKolChannelSettings(), this.loadReferrals()];
+    const tasks = [this.loadSettings(), this.loadKolChannelSettings(), this.loadReferrals(), this.loadLadder()];
     if (force || !fresh) {
       tasks.push(this.loadChats());
     } else {
@@ -37,6 +67,142 @@ const AIFollowUp = {
       this.renderPage();
     }
     await Promise.all(tasks);
+  },
+
+  // ── Thang commission KOL (kol_offer_ladder) ─────────────────────────
+  async loadLadder() {
+    try {
+      const res = await fetch('/api/ai-followup/offer-ladder');
+      if (!res.ok) throw new Error('Không thể tải thang commission');
+      const d = await res.json();
+      this._ladder = d.ladder;
+      this._ladderPreview = d.prompt_preview || '';
+      this._ladderIsDefault = !!d.is_default;
+      this.renderLadder();
+    } catch (e) {
+      const tb = document.getElementById('aifu-ladder-tiers');
+      if (tb) tb.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red);padding:12px">${esc(e.message)}</td></tr>`;
+    }
+  },
+
+  renderLadder() {
+    const L = this._ladder;
+    if (!L) return;
+    const meta = document.getElementById('aifu-ladder-meta');
+    if (meta) meta.textContent = `v${L.version || 1} · hiệu lực ${L.effective_from || '—'}${this._ladderIsDefault ? ' · mặc định' : ''}`;
+    const tb = document.getElementById('aifu-ladder-tiers');
+    if (tb) {
+      const num = v => (v === null || v === undefined) ? '' : String(Number(v));
+      tb.innerHTML = (L.tiers || []).map((t, i) => `<tr>
+        <td style="text-align:center;font-weight:700">${i + 1}</td>
+        <td><input type="number" class="form-input" data-ladder-tier="${i}" data-field="min_volume_m" value="${num(t.min_volume_m)}" min="0" step="1" ${i === 0 ? 'readonly title="Bậc 1 luôn là khởi điểm (0)"' : ''}></td>
+        <td><input type="number" class="form-input" data-ladder-tier="${i}" data-field="revshare_pct" value="${num(t.revshare_pct)}" min="1" max="100" step="1"></td>
+        <td><input type="number" class="form-input" data-ladder-tier="${i}" data-field="bonus_per_1m_taker_usd" value="${num(t.bonus_per_1m_taker_usd)}" min="0" step="1"></td>
+        <td><input type="text" class="form-input" data-ladder-tier="${i}" data-field="label" value="${esc(t.label || '')}" placeholder="VD: khởi điểm, cao hơn affiliate thường 5%"></td>
+        <td style="text-align:center">${i > 0 ? `<button class="btn btn-ghost btn-sm" title="Xoá bậc" onclick="AIFollowUp.ladderRemoveTier(${i})">✕</button>` : ''}</td>
+      </tr>`).join('');
+    }
+    const el = id => document.getElementById(id);
+    if (el('ladder-headline')) el('ladder-headline').value = L.headline || '';
+    if (el('ladder-effective-from')) el('ladder-effective-from').value = L.effective_from || '';
+    const R = L.rules || {};
+    ['upgrade', 'downgrade', 'threshold_basis', 'bonus_basis', 'commission_payout', 'bonus_payout', 'exclusions', 'sub_affiliate', 'bonus_dip_explanation'].forEach(k => {
+      const f = el(`ladder-rule-${k}`); if (f) f.value = R[k] || '';
+    });
+    if (el('ladder-rule-why_us')) el('ladder-rule-why_us').value = (R.why_us || []).join('\n');
+    const pre = el('aifu-ladder-preview');
+    if (pre) pre.textContent = this._ladderPreview || '';
+  },
+
+  _collectLadder() {
+    const L = JSON.parse(JSON.stringify(this._ladder || { tiers: [], rules: {} }));
+    const tiers = [];
+    document.querySelectorAll('[data-ladder-tier]').forEach(inp => {
+      const i = Number(inp.dataset.ladderTier);
+      tiers[i] = tiers[i] || { tier: i + 1, label: '' };
+      const f = inp.dataset.field;
+      tiers[i][f] = f === 'label' ? inp.value.trim() : Number(inp.value);
+    });
+    L.tiers = tiers.filter(Boolean).map((t, i) => ({ ...t, tier: i + 1 }));
+    const el = id => document.getElementById(id);
+    L.headline = (el('ladder-headline')?.value || '').trim();
+    L.effective_from = (el('ladder-effective-from')?.value || '').trim();
+    L.rules = L.rules || {};
+    ['upgrade', 'downgrade', 'threshold_basis', 'bonus_basis', 'commission_payout', 'bonus_payout', 'exclusions', 'sub_affiliate', 'bonus_dip_explanation'].forEach(k => {
+      L.rules[k] = (el(`ladder-rule-${k}`)?.value || '').trim();
+    });
+    L.rules.why_us = (el('ladder-rule-why_us')?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+    return L;
+  },
+
+  ladderAddTier() {
+    const L = this._collectLadder();
+    const last = L.tiers[L.tiers.length - 1] || { min_volume_m: 0, revshare_pct: 50, bonus_per_1m_taker_usd: 0 };
+    L.tiers.push({ tier: L.tiers.length + 1, min_volume_m: Number(last.min_volume_m) * 2 || 10, revshare_pct: Math.min(100, Number(last.revshare_pct) + 5), bonus_per_1m_taker_usd: Number(last.bonus_per_1m_taker_usd), label: '' });
+    this._ladder = L; this.renderLadder();
+  },
+
+  ladderRemoveTier(i) {
+    const L = this._collectLadder();
+    if (i <= 0 || L.tiers.length <= 1) return;
+    L.tiers.splice(i, 1);
+    this._ladder = L; this.renderLadder();
+  },
+
+  ladderResetDefault() {
+    if (!window.confirm('Nạp lại thang mặc định (55/60/65/70/80%) vào form? Chưa lưu cho tới khi bấm Lưu.')) return;
+    this._ladder = {
+      ...(this._ladder || {}), headline: 'up to 80% revshare',
+      tiers: [
+        { tier: 1, min_volume_m: 0, revshare_pct: 55, bonus_per_1m_taker_usd: 100, label: 'Starting tier (5% above a standard affiliate)' },
+        { tier: 2, min_volume_m: 10, revshare_pct: 60, bonus_per_1m_taker_usd: 100, label: '' },
+        { tier: 3, min_volume_m: 20, revshare_pct: 65, bonus_per_1m_taker_usd: 100, label: '' },
+        { tier: 4, min_volume_m: 50, revshare_pct: 70, bonus_per_1m_taker_usd: 50, label: '' },
+        { tier: 5, min_volume_m: 100, revshare_pct: 80, bonus_per_1m_taker_usd: 10, label: '' }
+      ]
+    };
+    this.renderLadder();
+  },
+
+  async saveLadder() {
+    const ladder = this._collectLadder();
+    if (!window.confirm(`Lưu thang commission mới (v${(Number(this._ladder?.version) || 1) + 1})? AI sẽ dùng thang này ngay cho MỌI KOL.`)) return;
+    try {
+      const res = await fetch('/api/ai-followup/offer-ladder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ladder }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Lưu thang thất bại');
+      this._ladder = data.ladder; this._ladderPreview = data.prompt_preview || ''; this._ladderIsDefault = false;
+      this.renderLadder();
+      App.toast(data.message || 'Đã lưu thang', 'success');
+      const hist = document.getElementById('aifu-ladder-history');
+      if (hist && !hist.classList.contains('hidden')) this.loadLadderHistory(false);
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  toggleLadderPreview() {
+    const pre = document.getElementById('aifu-ladder-preview');
+    if (!pre) return;
+    pre.textContent = this._ladderPreview || '';
+    pre.classList.toggle('hidden');
+  },
+
+  async loadLadderHistory(toggle) {
+    const box = document.getElementById('aifu-ladder-history');
+    if (!box) return;
+    if (toggle && !box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    box.textContent = 'Đang tải...';
+    try {
+      const res = await fetch('/api/ai-followup/offer-ladder/history?limit=20');
+      const d = await res.json();
+      const rows = d.history || [];
+      if (!rows.length) { box.textContent = 'Chưa có phiên bản nào được lưu (đang dùng thang mặc định).'; return; }
+      box.innerHTML = '<div style="font-weight:600;margin-bottom:4px">Lịch sử phiên bản</div>' + rows.map(h => {
+        let tiers = '';
+        try { const j = h.ladder || JSON.parse(h.ladder_json || '{}'); tiers = (j.tiers || []).map(t => `${Number(t.revshare_pct)}%`).join('/'); } catch (_) {}
+        return `<div>• v${h.version} · ${esc(h.created_at || '')} · ${esc(h.actor || '')} · ${esc(tiers)}</div>`;
+      }).join('');
+    } catch (e) { box.textContent = 'Lỗi tải lịch sử: ' + e.message; }
   },
 
   // ── Tabs ──────────────────────────────────────────────────────────
@@ -270,7 +436,7 @@ const AIFollowUp = {
     } catch (e) {
       App.toast(e.message, 'error');
       const tb = document.getElementById('aifu-chats-table-body');
-      if (tb) tb.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--red)">${esc(e.message)}</td></tr>`;
+      if (tb) tb.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--red)">${esc(e.message)}</td></tr>`;
     }
   },
 
@@ -279,9 +445,27 @@ const AIFollowUp = {
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
     set('aifu-stat-human', count('needs_human'));
     set('aifu-stat-active', count('active'));
-    set('aifu-stat-onboarded', count('onboarded'));
+    set('aifu-stat-onboarded', this._chats.filter(c => this.stepRank(this.stepOf(c)) >= 3).length);
     set('aifu-stat-total', this._chats.length);
     set('aifu-stat-nudged', this._chats.filter(c => c.nudged).length);
+    this.renderStepCards();
+  },
+
+  renderStepCards() {
+    const el = document.getElementById('aifu-step-cards');
+    if (!el) return;
+    const counts = {};
+    this._chats.forEach(c => { const s = this.stepOf(c); counts[s] = (counts[s] || 0) + 1; });
+    const keys = [...this.STEPS, 'declined', 'dormant'].filter(k => this.STEPS.includes(k) || counts[k]);
+    el.innerHTML = keys.map((k, i) => {
+      const m = this.STEP_META[k];
+      const active = this._stepFilter === k;
+      const idx = this.STEPS.includes(k) ? `${i}.` : '';
+      return `<div class="stat-card" style="cursor:pointer;padding:10px 12px;${active ? 'border-color:var(--accent)' : ''}" onclick="AIFollowUp.filterByStep('${k}')" title="Bấm để lọc theo bước">
+        <div class="stat-label" style="font-size:11px">${idx} ${m.emoji} ${m.label}</div>
+        <div class="stat-value" style="font-size:20px;color:${m.color}">${counts[k] || 0}</div>
+      </div>`;
+    }).join('');
   },
 
   renderChips() {
@@ -292,24 +476,43 @@ const AIFollowUp = {
       ['needs_human', '⚠️ Cần người thật'],
       ['active', '🤖 AI đang chat'],
       ['paused_admin', '⏸ Chat tay'],
-      ['onboarded', '✅ Onboarded'],
       ['bot_ignored', '🚫 Ignored']
     ];
-    el.innerHTML = chips.map(([v, l]) =>
-      `<button class="btn btn-sm ${this._statusFilter === v ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.filterByStatus('${v}')">${l}</button>`
+    let html = chips.map(([v, l]) =>
+      `<button class="btn btn-sm ${this._statusFilter === v && !this._stepFilter ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.filterByStatus('${v}')">${l}</button>`
     ).join('');
+    if (this._stepFilter) {
+      const lbl = this._stepFilter === 'link_confirmed+' ? '🔗 Đã gắn link trở lên' : this.stepLabel(this._stepFilter);
+      html += `<button class="btn btn-sm btn-primary" onclick="AIFollowUp.filterByStep('')" title="Bỏ lọc bước">Bước: ${lbl} ✕</button>`;
+    }
+    el.innerHTML = html;
   },
 
   filterByStatus(s) {
     this._statusFilter = s;
+    this._stepFilter = '';
     this._page = 1;
     this.renderChips();
+    this.renderStepCards();
+    this.renderPage();
+  },
+
+  filterByStep(s) {
+    this._stepFilter = (this._stepFilter === s) ? '' : s;
+    this._statusFilter = '';
+    this._page = 1;
+    this.renderChips();
+    this.renderStepCards();
     this.renderPage();
   },
 
   _filtered() {
     const s = this._statusFilter;
-    return s ? this._chats.filter(c => c.status === s) : this._chats;
+    let rows = s ? this._chats.filter(c => c.status === s) : this._chats;
+    const st = this._stepFilter;
+    if (st === 'link_confirmed+') rows = rows.filter(c => this.stepRank(this.stepOf(c)) >= 3);
+    else if (st) rows = rows.filter(c => this.stepOf(c) === st);
+    return rows;
   },
 
   renderPage() {
@@ -337,7 +540,7 @@ const AIFollowUp = {
     const tb = document.getElementById('aifu-chats-table-body');
     if (!tb) return;
     if (isEmpty) {
-      tb.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px"><div style="font-size:2rem;margin-bottom:8px">📭</div><div style="color:var(--text);font-weight:600;margin-bottom:4px">Chưa có lead nào</div><div style="color:var(--text2);font-size:.85rem">Khi có người trả lời DM, AI Agent sẽ tự chat và lead xuất hiện tại đây.</div></td></tr>`;
+      tb.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:32px"><div style="font-size:2rem;margin-bottom:8px">📭</div><div style="color:var(--text);font-weight:600;margin-bottom:4px">Chưa có lead nào</div><div style="color:var(--text2);font-size:.85rem">Khi có người trả lời DM, AI Agent sẽ tự chat và lead xuất hiện tại đây.</div></td></tr>`;
       return;
     }
     tb.innerHTML = rows.map(c => {
@@ -355,11 +558,18 @@ const AIFollowUp = {
         : `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')" title="Bật AI chat tiếp" aria-label="Bật AI cho ${esc(uName)}">▶️ Bật AI</button>`;
       const blacklistBtn = `<button class="btn btn-danger btn-sm" data-acc="${c.account_id}" data-uid="${c.user_id}" data-username="${esc(c.username||'')}" onclick="AIFollowUp.addToBlacklistDirect(Number(this.dataset.acc),Number(this.dataset.uid),this.dataset.username)" title="Đưa vào Blacklist (Cấm AI 100%)">🚫 Blacklist</button>`;
       const accLabel = c.account_name || `Acc #${c.account_id}`;
+      const step = this.stepOf(c);
+      const sm = this.STEP_META[step] || { label: step, emoji: '', color: 'var(--text2)' };
+      const missing = Array.isArray(c.missing_items) ? c.missing_items : [];
+      const missingTxt = missing.length ? `Thiếu: ${missing.map(k => this.MISSING_LABELS[k] || k).join(', ')}` : '';
+      const remTxt = c.step_reminders_sent ? ` · 🔔${c.step_reminders_sent}` : '';
+      const stepCell = `<div style="font-size:12px;font-weight:600;color:${sm.color};white-space:nowrap" title="${esc(missingTxt)}">${sm.emoji} ${esc(sm.label)}</div><div style="font-size:10px;color:var(--text2);font-family:monospace">${this.stepBar(step)}${remTxt}</div>`;
       return `<tr>
         <td style="width:34px;text-align:center"><input type="checkbox" aria-label="Chọn ${esc(uName)}" ${this._selected.has(`${c.account_id}:${c.user_id}`) ? 'checked' : ''} onchange="AIFollowUp.toggleSelection('${c.account_id}:${c.user_id}',this.checked)"></td>
         <td><div style="font-weight:600">${esc(uName)}${nudgeBadge}</div><div style="font-size:11px;color:var(--text2);font-family:monospace">ID ${c.user_id} • 👤 ${esc(accLabel)}</div></td>
         <td><div style="display:flex;align-items:center;gap:6px">${tierBadge}<span style="font-size:11px;color:var(--text2)">${score}%</span></div><div style="width:70px;height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:${Math.min(100, Math.max(0, score))}%;height:100%;background:${score >= 80 ? 'var(--orange)' : score >= 50 ? 'var(--accent)' : 'var(--text3)'}"></div></div></td>
         <td>${c.reply_count || 0}</td>
+        <td>${stepCell}</td>
         <td><span class="${meta.badge}">${meta.label}</span></td>
         <td style="font-size:12px;color:var(--text2);white-space:nowrap">${updated}</td>
         <td><div style="display:flex;gap:4px">${toggleBtn}${blacklistBtn}<button class="btn btn-primary btn-sm" onclick="AIFollowUp.openChat(${c.account_id},${c.user_id})">💬 Chat</button></div></td>
@@ -474,14 +684,104 @@ const AIFollowUp = {
       const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/profile`);
       if (!res.ok) throw new Error('Không thể tải hồ sơ lead');
       const p = await res.json();
+      const uid = window.prompt('WEEX UID của KOL (để trống nếu chưa có):', p.weex_uid || ''); if (uid === null) return;
+      const volume = window.prompt('Volume KOL khai (M USD/tháng, VD 15 hoặc 15M; để trống = chưa biết):', p.volume_claimed || ''); if (volume === null) return;
       const vip = window.prompt('VIP code:', p.vip_code || ''); if (vip === null) return;
       const affiliate = window.prompt('Affiliate link:', p.affiliate_link || ''); if (affiliate === null) return;
-      const regions = window.prompt('Khu vực (phân cách dấu phẩy):', (p.distribution_regions || []).join(', ')); if (regions === null) return;
-      const campaigns = window.prompt('Campaign (phân cách dấu phẩy):', (p.distribution_campaigns || []).join(', ')); if (campaigns === null) return;
-      const save = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/profile`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ vip_code:vip.trim(), affiliate_link:affiliate.trim(), distribution_enabled:window.confirm('Bật phân phối lead này?'), distribution_regions:regions.split(',').map(v=>v.trim()).filter(Boolean), distribution_campaigns:campaigns.split(',').map(v=>v.trim()).filter(Boolean) }) });
+      const selCampaign = window.prompt('Campaign KOL đã chọn (1 campaign):', p.selected_campaign || ''); if (selCampaign === null) return;
+      const firstPost = window.prompt('Link bài đầu tiên (nếu đã có):', p.first_post_link || ''); if (firstPost === null) return;
+      const regions = window.prompt('Khu vực phân phối (phân cách dấu phẩy):', (p.distribution_regions || []).join(', ')); if (regions === null) return;
+      const campaigns = window.prompt('Campaign phân phối (phân cách dấu phẩy):', (p.distribution_campaigns || []).join(', ')); if (campaigns === null) return;
+      const save = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/profile`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ weex_uid:uid.trim(), volume_claimed:volume.trim(), vip_code:vip.trim(), affiliate_link:affiliate.trim(), selected_campaign:selCampaign.trim(), first_post_link:firstPost.trim(), distribution_enabled:window.confirm('Bật phân phối lead này?'), distribution_regions:regions.split(',').map(v=>v.trim()).filter(Boolean), distribution_campaigns:campaigns.split(',').map(v=>v.trim()).filter(Boolean) }) });
       if (!save.ok) throw new Error('Lưu hồ sơ thất bại');
       App.toast('Đã lưu hồ sơ và phân công lead', 'success');
+      if (this._modalChat && this._modalChat.account_id === accountId && this._modalChat.user_id === userId) this.loadStepPanel(accountId, userId);
+      this.loadChats();
     } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  // ── 5-step funnel: panel + actions ─────────────────────────────────
+  async loadStepPanel(accountId, userId) {
+    const panel = document.getElementById('aifu-modal-step-panel');
+    if (!panel) return;
+    try {
+      const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/step`);
+      if (!res.ok) throw new Error('Không tải được trạng thái bước');
+      const st = await res.json();
+      this._modalStep = st;
+      if (this._modalChat) { this._modalChat.kol_step = st.step; this._modalChat.missing_items = st.missing_items; }
+      this.renderStepPanel(st);
+      this._renderModalActions();
+    } catch (e) {
+      panel.innerHTML = `<div style="font-size:12px;color:var(--red)">${esc(e.message)}</div>`;
+    }
+  },
+
+  renderStepPanel(st) {
+    const panel = document.getElementById('aifu-modal-step-panel');
+    if (!panel || !st) return;
+    const cur = st.step || 'prospect';
+    const rank = this.stepRank(cur);
+    const bar = this.STEPS.slice(1).map((s, i) => {
+      const n = i + 1;
+      const done = rank >= n;
+      const here = rank === n;
+      const m = this.STEP_META[s];
+      return `<div style="flex:1;text-align:center;min-width:70px">
+        <div style="height:6px;border-radius:3px;background:${done ? 'var(--green)' : 'var(--border)'};${here ? 'box-shadow:0 0 0 2px var(--accent)' : ''}"></div>
+        <div style="font-size:10px;margin-top:4px;color:${done ? 'var(--text)' : 'var(--text2)'};font-weight:${here ? 700 : 400}">${n}. ${m.emoji} ${esc(m.label)}</div>
+      </div>`;
+    }).join('<div style="width:4px"></div>');
+    const missing = (st.missing_labels && st.missing_labels.length) ? st.missing_labels : (st.missing_items || []).map(k => this.MISSING_LABELS[k] || k);
+    const have = st.have || {};
+    const haveTxt = Object.entries(have).filter(([, v]) => v).map(([k, v]) => `${this.MISSING_LABELS[k] || k}: ${esc(String(v)).slice(0, 40)}`).join(' · ');
+    const pred = st.predicted_tier;
+    const predTxt = pred ? `Bậc dự kiến: Tier ${pred.tier} (${Number(pred.revshare_pct)}% + $${Number(pred.bonus_per_1m_taker_usd)}/1M taker) với ~${Number(pred.volume_m)}M/tháng khai` : 'Bậc dự kiến: chưa có volume khai → tháng đầu Tier 1';
+    const terminal = rank < 0 ? `<span class="badge badge-red" style="margin-left:6px">${this.stepLabel(cur)}</span>` : '';
+    const rem = st.step_reminders_sent ? ` · đã nhắc ${st.step_reminders_sent}/2 ở bước này` : '';
+    panel.innerHTML = `
+      <div style="background:var(--bg3);border:1px solid var(--border-hover);border-radius:var(--radius);padding:10px 12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:700;color:var(--accent-text)">🪜 BƯỚC ${Math.max(rank, 0)}/5 — ${this.stepLabel(cur)}${terminal}</div>
+          <div style="font-size:11px;color:var(--text2)">v${st.offer_version || 1}${rem}</div>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:0;margin-bottom:8px">${bar}</div>
+        <div style="font-size:12px;line-height:1.5">
+          <div><b>Còn thiếu:</b> ${missing.length ? missing.map(esc).join(', ') : '<span style="color:var(--green)">không — sẵn sàng sang bước tiếp</span>'}</div>
+          ${haveTxt ? `<div style="color:var(--text2)"><b>Đã có:</b> ${haveTxt}</div>` : ''}
+          <div style="color:var(--text2)">${predTxt}</div>
+        </div>
+      </div>`;
+  },
+
+  async setStep(accountId, userId, step, reason) {
+    if (!step) return;
+    const label = this.stepLabel(step);
+    if (reason === undefined) {
+      reason = window.prompt(`Chuyển lead sang bước "${label}". Lý do (tuỳ chọn):`, '');
+      if (reason === null) return;
+    }
+    try {
+      const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/step`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ step, reason: reason || '' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Đổi bước thất bại');
+      App.toast(data.changed ? `Đã chuyển sang ${label}` : `Lead đã ở bước ${label}`, 'success');
+      const c = this._chats.find(x => x.account_id === accountId && x.user_id === userId);
+      if (c && data.state) { c.kol_step = data.state.step; c.missing_items = data.state.missing_items; c.step_reminders_sent = data.state.step_reminders_sent; }
+      if (this._modalChat && this._modalChat.account_id === accountId && this._modalChat.user_id === userId) {
+        this._modalStep = data.state; this.renderStepPanel(data.state); this._renderModalActions();
+      }
+      this.renderStats(); this.renderPage();
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  stepSelectChanged(sel, accountId, userId) {
+    const v = sel.value;
+    sel.value = '';
+    if (v) this.setStep(accountId, userId, v);
   },
 
   // ── Status update ─────────────────────────────────────────────────
@@ -528,6 +828,10 @@ const AIFollowUp = {
       </div>`;
 
     box.innerHTML = summaryBanner + '<div style="text-align:center;color:var(--text2);padding:20px">⏳ Đang tải lịch sử chat...</div>';
+    const stepPanel = document.getElementById('aifu-modal-step-panel');
+    if (stepPanel) stepPanel.innerHTML = '<div style="font-size:12px;color:var(--text2)">⏳ Đang tải trạng thái bước...</div>';
+    this._modalStep = null;
+    this.loadStepPanel(accountId, userId);
     try {
       const histRes = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/history`);
       const histData = await histRes.json();
@@ -568,7 +872,16 @@ const AIFollowUp = {
     const vs = c.verification_status || 'none';
     const vsLabel = {none:'🔍 Chưa verify', requested:'📤 Đã yêu cầu', submitted:'📎 Đã nộp', verified:'✅ Verified', rejected:'❌ Từ chối'}[vs] || vs;
     const vsBtn = `<button class="btn btn-ghost" onclick="AIFollowUp.cycleVerification(${c.account_id},${c.user_id})" title="Click để đổi trạng thái verify">${vsLabel}</button>`;
-    el.innerHTML = `${toggle}${blkBtn}${vsBtn}<button class="btn btn-ghost" onclick="AIFollowUp.editProfile(${c.account_id},${c.user_id})">📍 Hồ sơ & phân công</button><button class="btn btn-green" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'onboarded')">✅ Đã onboard</button><button class="btn btn-primary" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>`;
+    const cur = this.stepOf(c);
+    const rank = this.stepRank(cur);
+    const next = rank >= 0 && rank < this.STEPS.length - 1 ? this.STEPS[rank + 1] : null;
+    const nextBtn = next
+      ? `<button class="btn btn-green" onclick="AIFollowUp.setStep(${c.account_id},${c.user_id},'${next}')" title="Chuyển sang bước tiếp theo (ghi vào kol_step_events)">➡️ ${this.stepLabel(next)}</button>`
+      : '';
+    const opts = [...this.STEPS, 'declined', 'dormant'].map((s, i) =>
+      `<option value="${s}" ${s === cur ? 'disabled' : ''}>${i < this.STEPS.length ? i + '. ' : ''}${this.stepLabel(s)}${s === cur ? ' (hiện tại)' : ''}</option>`).join('');
+    const stepSel = `<select class="form-input" style="width:auto;padding:6px 8px;font-size:12px" title="Admin đặt bước bất kỳ (tiến/lùi)" onchange="AIFollowUp.stepSelectChanged(this,${c.account_id},${c.user_id})"><option value="">🪜 Đặt bước…</option>${opts}</select>`;
+    el.innerHTML = `${toggle}${blkBtn}${vsBtn}<button class="btn btn-ghost" onclick="AIFollowUp.editProfile(${c.account_id},${c.user_id})">📍 Hồ sơ & phân công</button>${nextBtn}${stepSel}<button class="btn btn-primary" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>`;
   },
 
   async cycleVerification(accountId, userId) {
@@ -630,6 +943,7 @@ const AIFollowUp = {
   closeHistoryModal() {
     document.getElementById('aifu-history-modal')?.classList.remove('open');
     this._modalChat = null;
+    this._modalStep = null;
   }
 };
 

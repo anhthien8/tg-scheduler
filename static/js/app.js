@@ -184,8 +184,8 @@ if(page==='ai-followup'){
             <div class="stat-label">🤖 AI đang chat</div>
             <div class="stat-value accent" id="aifu-stat-active">–</div>
           </div>
-          <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.filterByStatus('onboarded')" title="Bấm để lọc">
-            <div class="stat-label">✅ Đã onboard</div>
+          <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.filterByStep('link_confirmed+')" title="KOL đã gắn link / có bài / đang hoạt động">
+            <div class="stat-label">✅ Đã gắn link trở lên</div>
             <div class="stat-value green" id="aifu-stat-onboarded">–</div>
           </div>
           <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.filterByStatus('')" title="Bấm để xem tất cả">
@@ -193,6 +193,8 @@ if(page==='ai-followup'){
             <div class="stat-value" id="aifu-stat-total">–</div>
           </div>
         </div>
+        <!-- 5-step KOL funnel cards (kol_step) — click to filter -->
+        <div id="aifu-step-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:var(--sp-4)"></div>
 
         <div id="aifu-status-chips" style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-3)"></div>
         <div id="aifu-selection-bar" class="card hidden" style="padding:10px 12px;margin-bottom:var(--sp-3);border:1px solid var(--accent);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -213,13 +215,14 @@ if(page==='ai-followup'){
                 <th>Lead</th>
                 <th>Tier / Intent</th>
                 <th>Số câu</th>
-                <th>Trạng thái</th>
+                <th>Bước KOL</th>
+                <th>Trạng thái AI</th>
                 <th>Cập nhật</th>
                 <th style="width:170px">Hành động</th>
               </tr>
             </thead>
             <tbody id="aifu-chats-table-body">
-              <tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text2)">Đang tải lead...</td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text2)">Đang tải lead...</td></tr>
             </tbody>
           </table>
         </div>
@@ -279,6 +282,57 @@ if(page==='ai-followup'){
           <div style="text-align:right;margin-top:16px">
             <button class="btn btn-primary" onclick="AIFollowUp.saveSettings()">💾 Lưu cấu hình</button>
           </div>
+        </div>
+        <!-- Pre-approved commission ladder (kol_offer_ladder) -->
+        <div class="card" style="padding:20px;margin-top:16px" id="aifu-ladder-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+            <div>
+              <h3 style="margin:0 0 4px;font-size:14px">💰 Thang commission KOL (gói starter duyệt sẵn)</h3>
+              <div style="font-size:12px;color:var(--text2)">Thang DUY NHẤT AI được trích số. Áp cho mọi KOL. Mỗi lần lưu tăng version, lưu lịch sử. Số % / $ ngoài thang trong reply AI sẽ bị chặn và chuyển người thật.</div>
+            </div>
+            <div id="aifu-ladder-meta" style="font-size:12px;color:var(--text2);white-space:nowrap">—</div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" style="font-size:13px">
+              <thead><tr><th style="width:50px">Bậc</th><th>Mốc tổng volume / tháng (M USD)</th><th>RevShare %</th><th>Bonus / 1M taker ($)</th><th>Ghi chú</th><th style="width:40px"></th></tr></thead>
+              <tbody id="aifu-ladder-tiers"><tr><td colspan="6" style="text-align:center;color:var(--text2);padding:12px">Đang tải...</td></tr></tbody>
+            </table>
+          </div>
+          <div style="display:flex;gap:8px;margin:8px 0 12px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.ladderAddTier()">+ Thêm bậc</button>
+            <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.ladderResetDefault()" title="Nạp lại thang mặc định founder chốt 21/10 vào form (chưa lưu)">↺ Nạp mặc định</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <label class="form-label" for="ladder-headline" style="font-weight:600">Câu mở (headline)</label>
+                <input type="text" id="ladder-headline" class="form-input" placeholder="up to 80% revshare">
+              </div>
+              <div>
+                <label class="form-label" for="ladder-effective-from" style="font-weight:600">Hiệu lực từ (YYYY-MM-DD)</label>
+                <input type="text" id="ladder-effective-from" class="form-input" placeholder="2026-10-21">
+              </div>
+            </div>
+            <div><label class="form-label" for="ladder-rule-upgrade" style="font-weight:600">Lên bậc</label><textarea id="ladder-rule-upgrade" class="form-input" rows="2"></textarea></div>
+            <div><label class="form-label" for="ladder-rule-downgrade" style="font-weight:600">Hạ bậc</label><textarea id="ladder-rule-downgrade" class="form-input" rows="2"></textarea></div>
+            <div><label class="form-label" for="ladder-rule-threshold_basis" style="font-weight:600">Cách tính mốc</label><textarea id="ladder-rule-threshold_basis" class="form-input" rows="2"></textarea></div>
+            <div><label class="form-label" for="ladder-rule-bonus_basis" style="font-weight:600">Cách tính bonus</label><textarea id="ladder-rule-bonus_basis" class="form-input" rows="2"></textarea></div>
+            <div><label class="form-label" for="ladder-rule-commission_payout" style="font-weight:600">Trả commission</label><textarea id="ladder-rule-commission_payout" class="form-input" rows="2"></textarea></div>
+            <div><label class="form-label" for="ladder-rule-bonus_payout" style="font-weight:600">Trả bonus</label><textarea id="ladder-rule-bonus_payout" class="form-input" rows="2"></textarea></div>
+            <div><label class="form-label" for="ladder-rule-exclusions" style="font-weight:600">Loại trừ</label><textarea id="ladder-rule-exclusions" class="form-input" rows="2"></textarea></div>
+            <div><label class="form-label" for="ladder-rule-sub_affiliate" style="font-weight:600">Sub-affiliate</label><textarea id="ladder-rule-sub_affiliate" class="form-input" rows="2"></textarea></div>
+            <div style="grid-column:1/-1"><label class="form-label" for="ladder-rule-bonus_dip_explanation" style="font-weight:600">Giải thích bonus giảm ở bậc 4–5</label><textarea id="ladder-rule-bonus_dip_explanation" class="form-input" rows="2"></textarea></div>
+            <div style="grid-column:1/-1"><label class="form-label" for="ladder-rule-why_us" style="font-weight:600">Lý do chọn WEEX khi KOL so sánh (mỗi dòng 1 ý; không nhắc tên sàn khác)</label><textarea id="ladder-rule-why_us" class="form-input" rows="3"></textarea></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.toggleLadderPreview()">👁 Xem khối prompt AI nhận</button>
+              <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.loadLadderHistory(true)">🕘 Lịch sử phiên bản</button>
+            </div>
+            <button class="btn btn-primary" onclick="AIFollowUp.saveLadder()">💾 Lưu thang (tăng version)</button>
+          </div>
+          <pre id="aifu-ladder-preview" class="hidden" style="margin-top:12px;max-height:260px;overflow:auto;font-size:11px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px;white-space:pre-wrap"></pre>
+          <div id="aifu-ladder-history" class="hidden" style="margin-top:12px;font-size:12px;color:var(--text2)"></div>
         </div>
         <div class="card" style="padding:20px;margin-top:16px">
           <h3 style="margin:0 0 4px;font-size:14px">📡 Auto-forward bài channel cho KOL</h3>
@@ -340,6 +394,7 @@ if(page==='ai-followup'){
             <h3 id="aifu-modal-title" style="margin:0;font-size:15px">Lịch sử trò chuyện</h3>
             <button class="modal-close" onclick="AIFollowUp.closeHistoryModal()" aria-label="Đóng">&times;</button>
           </div>
+          <div id="aifu-modal-step-panel" style="padding:10px 16px 0"></div>
           <div class="modal-body" style="max-height:400px;overflow-y:auto;padding:16px" id="aifu-modal-chat-box">
           </div>
           <div style="display:flex;gap:.5rem;padding:10px 16px;border-top:1px solid var(--border)">

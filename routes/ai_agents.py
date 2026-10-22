@@ -111,13 +111,10 @@ CRYPTO_BD_DEFAULT_KB = """--- WEEX EXCHANGE PARTNERSHIP PROGRAM ---
    - Maker Fee: 0.02%
    - Taker Fee: 0.06%
 
-2. Mô Hình Hoa Hồng Partnership & Performance Fund:
-   - Revenue Share: 50% - 75% tùy Volume hàng tháng.
-   - Quỹ Hỗ Trợ Marketing (Marketing Fund): $200 - $5,000/tháng.
-     * Quy tắc thưởng Marketing Fund: Thưởng $200 cho mỗi $10M Trading Volume hoàn thành (Ví dụ: 10M Vol -> $200, 50M Vol -> $1,000, max $5,000/tháng).
-   - Tier 1 (Vol > $10M/tháng): RevShare 70% - 75% + Marketing Fund ($200 sau mỗi 10M Vol) + Hỗ trợ Event riêng.
-   - Tier 2 (Vol $2M - $10M/tháng): RevShare 60% - 65%.
-   - Tier 3 (Vol < $2M/tháng): RevShare 50% - 55%.
+2. Mô Hình Hoa Hồng Partnership:
+   - KHÔNG ghi số % / $ ở đây. Thang commission chính thức (bậc, mốc volume,
+     revshare, bonus, quy tắc lên/hạ bậc, lịch trả) được app tự chèn vào prompt
+     từ cài đặt "Thang commission KOL" (tab Cấu hình AI). AI chỉ được trích số từ thang đó.
 
 3. Ưu Điểm Nổi Bật Của WEEX:
    - Zero Slippage (Không trượt giá lệnh Futures).

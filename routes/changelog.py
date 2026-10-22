@@ -8,11 +8,133 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.10.1",
+        "date": "22/10/2026",
+        "title": "🩺 Đo lại thật — phễu KOL 5 bước từng chỉ tồn tại trong code, chưa từng sống trong DB",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Kiểm toán toàn hệ thống phát hiện 3 lớp lỗi im lặng: (1) toàn bộ schema phễu 5 bước (kol_step, kol_profiles, kol_step_events) chỉ nằm trong database.py — DB thật chưa từng nhận ALTER nào, vì ~40 lệnh `except: pass` nuốt lỗi; /pipeline và web vẫn hiển thị như đã chạy. (2) AI vẫn có thể tự chế số ($50.000 prize pool hard-code trong prompt drip, thiếu ladder guard ở drip/nudge, learned rule auto-approve). (3) DM campaign không reserve trước khi gửi, đếm hạn mức riêng từng campaign và không khai báo account_busy. Bản này vá cả 3, thêm self-check schema tự sửa, và khoá lại bằng 30 test.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Schema drift: self-check + tự sửa thay vì nuốt lỗi",
+                "desc": "`except: pass` trong ALTER TABLE đã che giấu việc 5-step funnel không bao giờ được migrate vào data/scheduler.db. Nay dùng `_add_column` chỉ bỏ qua lỗi 'duplicate column' (mọi lỗi khác log ERROR + ném lại), thêm `REQUIRED_SCHEMA` + `verify_schema()` kiểm tra 7 bảng / 30+ cột lúc khởi động, `repair_schema()` tự thêm lại cột bị mất, và `migrate_kol_steps_v1()` chỉ chạy khi schema sạch (nếu không thì log '[KOLStep] migration SKIPPED'). Kết quả trên DB thật 22/10: 387 lead ở bước prospect, 11 ở uid_received, 398 dòng kol_step_events có thể audit.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "Guard AI: drip + nudge không còn đọc số ngoài thang",
+                "desc": "Drip follow-up và outreach nudge gửi thẳng bản sinh của AI ra Telegram, chỉ có guard 'AI disclosure' — không có guard số. Cả 2 giờ đã (a) chèn khối `render_offer_ladder_prompt()` (thang 55%→80% chính thức + version) vào prompt, (b) quét `find_off_ladder_figures()` trước khi gửi; gặp số lạ thì bỏ tin nhắn, log `[DripEngine] 🚫 Blocked off-ladder figures`, với nudge ghi vào bảng nudges (error_message='off_ladder:...') để admin xem lại.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "Guard AI: bỏ '$50,000 prize pool' hard-code trong prompt",
+                "desc": "Prompt drip từng hard-code 'the $50,000 prize pool' và 'VIP Maker fee discounts' — số không nằm trong thang commission nên guard không bao giờ bắt được, và AI có thể hứa một giải thưởng không tồn tại. Nay thay bằng câu trung tính: nhắc 'a currently running trading campaign or the daily commission payout' và yêu cầu 'Do NOT invent any percentage or dollar figure outside the official ladder'.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "Self-learning: rule có số lạ không còn tự động approved",
+                "desc": "Khi admin trả lời tay, rule được distill ra đã bị duyệt tự động — một lời hứa ad-hoc ('75% tháng này') biến thành chính sách prompt vĩnh viễn và lây sang mọi KOL. Nay rule có số ngoài thang được lưu status='pending' (không nằm trong prompt approved-only) kèm WARNING log; rule đúng thang vẫn approved như cũ. Cần rà lại 864 rule 'approved' sẵn có trong DB.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "DM campaign: reserve trước khi gửi (chống DM trùng)",
+                "desc": "Trước đây log 'success' chỉ được ghi SAU khi Telegram nhận tin. Crash (hoặc auto-resume lúc khởi động) giữa 2 thời điểm ⇒ gửi lại đúng lead đó. Nay có bảng `dm_campaign_reservations` (khóa chính campaign_id + target_user_id): reserve trước lời gọi mạng, 'sent' ⇒ không bao giờ gửi lại, 'pending' ⇒ giữ 24h rồi mới thử lại, 'failed' ⇒ retry được. Mọi nhánh thoát đều đóng reservation (kể cả crash) nên không còn row treo.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "DM campaign: hạn mức ngày đếm chung, không đếm riêng từng campaign",
+                "desc": "Bộ đếm `acc_daily_count_map` chỉ đếm trong campaign đang chạy ⇒ 2 campaign dùng chung một nick đều thấy '0/10' và cùng vượt hạn mức Telegram. Nay đọc trực tiếp `get_account_daily_dm_count_live()` (watcher + campaign + reservation đang bay) cho từng ứng viên, nên hạn mức là của cả account.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "DM campaign: khai báo account_busy (một nick, một việc)",
+                "desc": "Campaign bỏ qua registry account_busy mà engagement + warmup đang tôn trọng ⇒ cùng một nick có thể vừa DM vừa react cùng lúc, tăng rủi ro flood. Nay mỗi lượt gửi giữ account_busy(kind='dm', TTL 180s); nếu nick đang bận thì đóng reservation là 'failed/account_busy', dời nick qua 30s và thử member khác.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "improvement",
+                "title": "Test: 30 test khoá lại 3 lớp lỗi + vá 2 test cũ đang đỏ",
+                "desc": "tests/test_kol_hardening_v3101.py mới (30 test): self-check schema + repair, idempotency của reservation (sent/pending/failed/24h), hạn mức ngày tính cả reservation đang bay, drip/nudge chặn số lạ, learned rule 'pending', và drip prompt không còn '$50,000'. 2 test cũ đỏ từ trước (root Cache-Control, auth_status) đã sửa theo hành vi mới của commit 531bbb0 (shell SPA no-cache + fast path đọc cờ DB).",
+                "tag": "Chất lượng"
+            },
+        ],
+    },
+    {
+        "version": "v3.10.0",
+        "date": "21/10/2026",
+        "title": "🪜 KOL Starter Package — thang commission duyệt sẵn + bộ nhớ 5 bước onboarding",
+        "is_latest": False,
+        "badge": "",
+        "summary": "Giúp KOL bắt đầu chạy nhanh hơn: AI chỉ được chào đúng thang commission chính thức (55% → 80%, 5 bậc theo volume, bonus $/1M taker), mọi con số lạ bị chặn và chuyển người. Mỗi KOL có trạng thái 5 bước (Đồng ý deal → Nhận UID → Gắn link → Bài đầu → Hoạt động) nhớ xuyên suốt AI, Forum Inbox, Command Bot và web; follow-up chỉ nhắc đúng thứ còn thiếu, tối đa 2 lần/bước, dừng khi KOL từ chối. Spec: docs/spec-kol-starter-package.md.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "A1: Thang offer chính thức trong prompt AI (kol_offer.py)",
+                "desc": "Bậc 1 55% (ngay khi ký), ≥10M tổng volume/tháng 60%, ≥20M 65%, ≥50M 70%, ≥100M 80%; bonus $100/1M taker (bậc 4: $50, bậc 5: $10). Lên bậc theo tháng dương lịch, review hạ bậc theo quý; commission trả hàng ngày, bonus trả mùng 10; loại tự trade/wash, sub-affiliate được tính. Thang render tự động từ JSON vào system prompt, có version + ngày hiệu lực. Chỉ dự đoán bậc khi KOL đã nói volume.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "A2: Guard số lạ — AI không được tự chế commission",
+                "desc": "Trước khi gửi, reply AI được quét % / $ / USDT và cụm bị cấm (B-book). Có con số ngoài thang (vd 75%, $200 upfront) → thay bằng câu an toàn \"để mình check lại với team\", chat chuyển needs_human, thông báo tới nick chính + Forum Inbox kèm lý do. Reply đúng thang đi qua bình thường.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "Trình chỉnh thang offer trên web (Tab AI Agent)",
+                "desc": "Xem/sửa 5 bậc, headline, quy tắc; preview đúng khối prompt AI sẽ thấy; lưu tạo version mới và ghi lịch sử (kol_offer_ladder_history). Validate: bậc 1 từ 0M, volume và % tăng dần. API: GET/PUT /api/ai-followup/offer-ladder, /history, POST /check.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "B1–B2: Bộ nhớ trạng thái KOL 5 bước (kol_step)",
+                "desc": "prospect → deal_agreed → uid_received → link_confirmed → first_post → active (+ declined/dormant). Tự động chỉ được tiến đúng 1 bước (nhảy cóc bị từ chối), admin được override mọi hướng; mọi thay đổi ghi vào kol_step_events (từ/đến/ai/lý do). AI nhận khối KOL ONBOARDING STATE: đã có gì, KOL còn thiếu gì, team còn nợ gì — và được dạy chỉ hỏi đúng thứ thiếu, không hỏi lại UID đã có.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "B3: UID chỉ được nhận khi 2 nguồn khớp",
+                "desc": "UID phải vừa xuất hiện trong tin KOL (regex 5–12 số gần chữ UID, hoặc tin chỉ là dãy số) vừa được LLM trích ra. Khớp → lưu weex_uid, chuyển uid_received, thông báo team gắn link. Chỉ 1 nguồn → lưu weex_uid_candidate, giữ 'weex_uid' trong missing_items, không chuyển bước. Tag AI [DEAL_AGREED] / [FIRST_POST] / [STOP] điều khiển bước, bị strip trước khi gửi.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "B4: Follow-up theo bước — nhắc đúng thứ còn thiếu",
+                "desc": "Job mới process_step_reminders: chỉ chạy cho lead đã đồng ý deal (prospect vẫn theo drip tier cũ), nhắc đúng 1 item KOL đang nợ (UID / campaign / link bài), ≥48h giữa 2 lần, tối đa 2 lần/bước (reset khi sang bước mới), tôn trọng giờ hoạt động account, bỏ qua needs_human/declined. Text AI chỉ dùng khi không lộ AI và không có số lạ, ngược lại dùng template song ngữ. Setting: kol_step_reminder_gap_hours, kol_step_reminder_max_per_step.",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "feature",
+                "title": "B5: Hiển thị bước ở mọi nơi + migration",
+                "desc": "Thanh bước ●●○○○ 2/5 trong header topic Forum Inbox, Command Bot /status và /pipeline, cột + bộ lọc + panel chỉnh bước trên web (kèm timeline sự kiện, dự đoán bậc). Nút 'Onboarded' cũ = chuyển sang bước Gắn link + tạm dừng AI. Migration v1 (idempotent, có backup): stage=signed → deal_agreed, status=onboarded → link_confirmed, có UID → uid_received, còn lại prospect; mirror profile_json sang cột cấu trúc (weex_uid, vip_code, affiliate_link, volume...).",
+                "tag": "Tính năng"
+            },
+            {
+                "type": "improvement",
+                "title": "Auto-resume 12h không áp cho KOL đã đồng ý deal",
+                "desc": "Sau khi admin can thiệp, AI chỉ tự bật lại sau 12h với lead đang ở bước prospect; từ deal_agreed trở đi AI giữ im lặng cho tới khi admin bật lại — tránh AI chen vào lúc team đang gắn link/duyệt campaign.",
+                "tag": "Cải thiện"
+            },
+            {
+                "type": "improvement",
+                "title": "Test: 48 test mới cho thang offer, guard, bước, UID, follow-up, migration",
+                "desc": "tests/test_kol_offer_ladder.py, tests/test_kol_steps.py, tests/test_kol_step_followup.py khoá hợp đồng theo spec §C.",
+                "tag": "Chất lượng"
+            },
+        ],
+    },
+    {
         "version": "v3.9.0",
         "date": "19/10/2026",
         "title": "🚀 Track C: Advanced KOL Outreach Engine — 6 tính năng nâng cao",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Nâng cấp toàn diện hệ thống outreach KOL với 6 module mới: Tier-Differentiated Drip Cadence, Enhanced Lead Scoring (8+ signals + dynamic re-score), Online/Offline Cycle per account, Self-Learning FTS5, Referral/Viral Loop, và Warmup Engine v2 (6 hành vi + graduation 4 giai đoạn).",
         "changes": [
             {

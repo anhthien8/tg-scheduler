@@ -20,6 +20,168 @@ DB_PATH = os.path.join(DB_DIR, "scheduler.db")
 # Timezone: DB lưu UTC (datetime('now')). Mọi query "hôm nay"/ngày phải tính theo giờ VN.
 VN_TZ = "+7 hours"
 
+
+async def _add_column(db, table: str, col_name: str, col_def: str) -> None:
+    """ALTER TABLE ADD COLUMN that swallows ONLY 'duplicate column name'.
+
+    The old bare `except Exception: pass` hid every real failure (locked DB,
+    syntax error, read-only file) — the whole kol_step funnel schema silently
+    never landed in production. Any error other than the expected
+    duplicate-column is logged loudly and re-raised.
+    """
+    try:
+        await db.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
+    except Exception as exc:
+        if "duplicate column" in str(exc).lower():
+            return
+        logger.error("[Schema] ALTER %s ADD %s failed: %s", table, col_name, exc)
+        raise
+
+
+# Schema contract: (table, [required columns]). verify_schema() asserts these
+# against the live DB after init_db so drift can never be silent again.
+REQUIRED_SCHEMA: dict[str, tuple[str, ...]] = {
+    "ai_followup_chats": (
+        "status", "stage", "kol_step", "kol_step_updated_at",
+        "step_reminders_sent", "last_step_reminder_at",
+        "intent_score", "lead_tier", "last_user_message_at", "human_takeover_at",
+    ),
+    "kol_profiles": (
+        "profile_json", "channel_link", "platform", "followers", "weex_uid",
+        "volume_claimed", "volume_verified", "offer_version", "selected_campaign",
+        "vip_code", "affiliate_link", "missing_items",
+    ),
+    "kol_step_events": ("account_id", "user_id", "from_step", "to_step", "actor"),
+    "kol_offer_ladder_history": ("version", "ladder_json"),
+    "lead_score_history": ("total_score", "tier", "signals_json"),
+    "dm_campaign_logs": ("campaign_id", "target_user_id", "status"),
+}
+
+# Column definitions for every required column, so repair_schema() can re-add
+# a column that was dropped after startup. Kept in sync with the ALTER blocks
+# in init_db().
+SCHEMA_COLUMN_DEFS: dict[tuple[str, str], str] = {
+    ("ai_followup_chats", "status"): "TEXT DEFAULT 'active'",
+    ("ai_followup_chats", "stage"): "TEXT DEFAULT 'new'",
+    ("ai_followup_chats", "kol_step"): "TEXT",
+    ("ai_followup_chats", "kol_step_updated_at"): "TEXT",
+    ("ai_followup_chats", "step_reminders_sent"): "INTEGER DEFAULT 0",
+    ("ai_followup_chats", "last_step_reminder_at"): "TEXT",
+    ("ai_followup_chats", "intent_score"): "INTEGER DEFAULT 0",
+    ("ai_followup_chats", "lead_tier"): "TEXT DEFAULT 'Tier C'",
+    ("ai_followup_chats", "last_user_message_at"): "TEXT",
+    ("ai_followup_chats", "human_takeover_at"): "TEXT",
+    ("kol_profiles", "profile_json"): "TEXT DEFAULT '{}'",
+    ("kol_profiles", "channel_link"): "TEXT",
+    ("kol_profiles", "platform"): "TEXT",
+    ("kol_profiles", "followers"): "TEXT",
+    ("kol_profiles", "weex_uid"): "TEXT",
+    ("kol_profiles", "volume_claimed"): "TEXT",
+    ("kol_profiles", "volume_verified"): "TEXT",
+    ("kol_profiles", "offer_version"): "INTEGER",
+    ("kol_profiles", "selected_campaign"): "TEXT",
+    ("kol_profiles", "vip_code"): "TEXT",
+    ("kol_profiles", "affiliate_link"): "TEXT",
+    ("kol_profiles", "missing_items"): "TEXT",
+    ("kol_step_events", "account_id"): "INTEGER NOT NULL DEFAULT 0",
+    ("kol_step_events", "user_id"): "INTEGER NOT NULL DEFAULT 0",
+    ("kol_step_events", "from_step"): "TEXT",
+    ("kol_step_events", "to_step"): "TEXT NOT NULL DEFAULT 'prospect'",
+    ("kol_step_events", "actor"): "TEXT DEFAULT 'system'",
+    ("kol_offer_ladder_history", "version"): "INTEGER NOT NULL DEFAULT 1",
+    ("kol_offer_ladder_history", "ladder_json"): "TEXT NOT NULL DEFAULT '{}'",
+    ("lead_score_history", "total_score"): "INTEGER DEFAULT 0",
+    ("lead_score_history", "tier"): "TEXT DEFAULT 'Cold'",
+    ("lead_score_history", "signals_json"): "TEXT DEFAULT '{}'",
+    ("dm_campaign_logs", "campaign_id"): "INTEGER NOT NULL DEFAULT 0",
+    ("dm_campaign_logs", "target_user_id"): "INTEGER NOT NULL DEFAULT 0",
+    ("dm_campaign_logs", "status"): "TEXT NOT NULL DEFAULT 'failed'",
+}
+
+
+async def verify_schema() -> list[str]:
+    """Return a list of human-readable schema problems; empty list == healthy.
+
+    Called at the end of init_db. Problems are logged as ERROR so a missing
+    migration shows up in the startup log instead of degrading silently.
+    """
+    problems: list[str] = []
+    async with get_db() as db:
+        for table, columns in REQUIRED_SCHEMA.items():
+            cursor = await db.execute(f"PRAGMA table_info({table})")
+            have = {row[1] for row in await cursor.fetchall()}
+            if not have:
+                problems.append(f"missing table: {table}")
+                continue
+            for col in columns:
+                if col not in have:
+                    problems.append(f"missing column: {table}.{col}")
+    for p in problems:
+        logger.error("[Schema] SELF-CHECK FAILED — %s", p)
+    if not problems:
+        logger.info("[Schema] self-check OK (%d tables verified)", len(REQUIRED_SCHEMA))
+    return problems
+
+
+def _sqlite_utc_age_hours(value) -> float:
+    """Age in hours of a SQLite UTC timestamp ('YYYY-MM-DD HH:MM:SS').
+
+    Returns a huge number for unparsable input so an unknown age NEVER
+    releases a pending reservation early.
+    """
+    from datetime import timezone
+    if not value:
+        return 10 ** 6
+    s = str(value).strip()
+    ts = None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            ts = datetime.strptime(s, fmt)
+            break
+        except ValueError:
+            continue
+    if ts is None:
+        try:
+            ts = datetime.fromisoformat(s)
+        except ValueError:
+            return 10 ** 6
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - ts).total_seconds() / 3600)
+
+
+async def repair_schema() -> list[str]:
+    """Re-add any required column that verify_schema() reported as missing.
+
+    The self-check alone only ALARMS; without a repair step a database that
+    lost a column stays broken forever (the ALTERs in init_db run before the
+    check, so a column dropped after startup was never restored). The column
+    definitions live next to the ones init_db uses, so a repair is just one
+    more ALTER TABLE ADD COLUMN.
+    """
+    problems = await verify_schema()
+    if not problems:
+        return []
+    fixed: list[str] = []
+    async with get_db() as db:
+        for problem in problems:
+            if not problem.startswith("missing column: "):
+                continue
+            target = problem[len("missing column: "):]
+            table, _, col = target.partition(".")
+            col_def = SCHEMA_COLUMN_DEFS.get((table, col))
+            if not col_def:
+                continue
+            try:
+                await _add_column(db, table, col, col_def)
+                fixed.append(target)
+                logger.warning("[Schema] REPAIRED missing column %s", target)
+            except Exception as exc:
+                logger.error("[Schema] could not repair %s: %s", target, exc)
+    if fixed:
+        await db.commit()
+    return fixed
+
 class ConnectionPool:
     def __init__(self, db_path: str, max_connections: int = 10, timeout: float = 10.0):
         self.db_path = db_path
@@ -753,6 +915,26 @@ async def init_db():
             )
         """)
 
+        # ── DM Campaign Reservations (reserve-before-send idempotency) ─────
+        # A crash after Telegram accepts a message but before dm_campaign_logs
+        # writes success must not cause startup auto-resume to send it twice.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS dm_campaign_reservations (
+                campaign_id INTEGER NOT NULL,
+                target_user_id INTEGER NOT NULL,
+                account_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'pending',
+                error_message TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (campaign_id, target_user_id)
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_dm_reservations_status
+            ON dm_campaign_reservations(status, updated_at)
+        """)
+
         # ── DM Campaign Logs ──────────────────────────────────────────────
         await db.execute("""
             CREATE TABLE IF NOT EXISTS dm_campaign_logs (
@@ -885,11 +1067,16 @@ async def init_db():
             # Drives whether the AI may reply, so it is the single source of truth
             # instead of a per-topic on/off the operator has to remember.
             ("stage", "TEXT DEFAULT 'new'"),
+            # KOL 5-step funnel (spec docs/spec-kol-starter-package.md §B):
+            # prospect -> deal_agreed -> uid_received -> link_confirmed -> first_post -> active
+            # (+ declined / dormant). NULL = legacy row not yet migrated (treated as prospect).
+            ("kol_step", "TEXT"),
+            ("kol_step_updated_at", "TEXT"),
+            # Step-based reminders (max 2 per step, >= 48h apart).
+            ("step_reminders_sent", "INTEGER DEFAULT 0"),
+            ("last_step_reminder_at", "TEXT"),
         ]:
-            try:
-                await db.execute(f"ALTER TABLE ai_followup_chats ADD COLUMN {col_name} {col_def}")
-            except Exception:
-                pass
+            await _add_column(db, "ai_followup_chats", col_name, col_def)
 
         # Backfill stage from the legacy status so no chat is left without one.
         # NOTE: only bot_ignored maps to 'paused'. 'needs_human'/'paused_admin'
@@ -965,6 +1152,52 @@ async def init_db():
                 profile_json    TEXT DEFAULT '{}',
                 updated_at      TEXT DEFAULT (datetime('now')),
                 UNIQUE(account_id, user_id)
+            )
+        """)
+
+        # Structured KOL memory (spec §B2). profile_json keeps the free-form
+        # LLM-extracted facts; these columns mirror the fields the funnel needs
+        # so SQL (migration, distribution, missing-items) never has to parse JSON.
+        for col_name, col_def in [
+            ("channel_link", "TEXT"),
+            ("platform", "TEXT"),
+            ("followers", "TEXT"),
+            ("weex_uid", "TEXT"),
+            ("volume_claimed", "TEXT"),
+            ("volume_verified", "TEXT"),
+            ("offer_version", "INTEGER"),
+            ("selected_campaign", "TEXT"),
+            ("vip_code", "TEXT"),
+            ("affiliate_link", "TEXT"),
+            ("missing_items", "TEXT"),
+            ("last_kol_reply_at", "TEXT"),
+            ("last_our_reply_at", "TEXT"),
+        ]:
+            await _add_column(db, "kol_profiles", col_name, col_def)
+
+        # Every step transition of a lead (audit + time-per-step analytics).
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS kol_step_events (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id      INTEGER NOT NULL,
+                user_id         INTEGER NOT NULL,
+                from_step       TEXT,
+                to_step         TEXT NOT NULL,
+                actor           TEXT DEFAULT 'system',
+                reason          TEXT DEFAULT '',
+                created_at      TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_kol_step_events_lead ON kol_step_events(account_id, user_id, id)")
+
+        # Version history of the pre-approved commission ladder (spec §A1).
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS kol_offer_ladder_history (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                version         INTEGER NOT NULL,
+                ladder_json     TEXT NOT NULL,
+                actor           TEXT DEFAULT 'admin',
+                created_at      TEXT DEFAULT (datetime('now'))
             )
         """)
 
@@ -1553,6 +1786,31 @@ async def init_db():
 
     # Seed default templates after init
     await seed_default_templates()
+
+    # Schema self-check: assert every column the KOL funnel depends on actually
+    # exists in the live DB. A failure here is a BLOCKER logged as ERROR —
+    # previously the ALTERs failed silently and the whole 5-step funnel was inert.
+    schema_problems = await verify_schema()
+    if schema_problems:
+        # The ALTERs in init_db run BEFORE the check, so a column dropped after
+        # startup was never restored. Repair it, then re-check.
+        repaired = await repair_schema()
+        if repaired:
+            logger.warning("[Schema] repaired %d missing column(s): %s", len(repaired), ", ".join(repaired))
+            schema_problems = await verify_schema()
+
+    # One-shot, idempotent backfill of kol_step for legacy leads (spec §B5).
+    # Only run when the schema is healthy; migrating against a broken schema
+    # would silently mark the FLAG and never retry.
+    if schema_problems:
+        logger.error("[KOLStep] migration SKIPPED — fix %d schema problem(s) first", len(schema_problems))
+    else:
+        try:
+            result = await migrate_kol_steps_v1()
+            if not result.get("skipped"):
+                logger.info("[KOLStep] migration result: %s", result)
+        except Exception as exc:
+            logger.error(f"[KOLStep] migration failed: {exc}")
 
     # Prune reaction_logs >30 ngày (giữ DB gọn, query nhanh)
     try:
@@ -2640,6 +2898,28 @@ async def is_account_dm_limit_reached(account_id: int, limit_premium: int = None
         return (count >= limit, count, limit)
 
 
+async def get_account_daily_dm_count_live(account_id: int) -> int:
+    """Daily DM count read fresh from DB, including in-flight reservations.
+
+    Replaces the per-campaign in-memory counter (`acc_daily_count_map`) that let
+    two concurrently running campaigns sharing a sender each count only their
+    own sends and double-spend the account's daily cap. Pending reservations
+    created today count as in-flight sends.
+    """
+    async with get_db() as db:
+        row = await (await db.execute(
+            """SELECT (
+                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours'))
+                +
+                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours'))
+                +
+                (SELECT COUNT(*) FROM dm_campaign_reservations WHERE account_id=? AND status='pending' AND created_at >= datetime('now', '+7 hours', 'start of day', '-7 hours'))
+            ) as cnt""",
+            (account_id, account_id, account_id)
+        )).fetchone()
+        return row[0] if row else 0
+
+
 async def set_account_premium(account_id: int, is_premium: bool) -> bool:
     """Toggle premium status for an account."""
     async with get_db() as db:
@@ -3677,6 +3957,80 @@ async def delete_dm_campaign(campaign_id: int):
     async with get_db() as db:
         await db.execute("PRAGMA foreign_keys=ON")
         await db.execute("DELETE FROM dm_campaigns WHERE id = ?", (campaign_id,))
+        await db.commit()
+
+
+async def reserve_dm_campaign_target(campaign_id: int, target_user_id: int, account_id: int | None = None) -> bool:
+    """Atomically reserve one campaign target before the Telegram network call.
+
+    Returns True when the caller owns the send. A 'sent' or 'pending' row means
+    the target is already handled (or may have been — a crash between the
+    network call and the log write must never re-send). Only a 'failed' row may
+    be retried, and only after the 24h re-try window.
+    """
+    async with get_db() as db:
+        cur = await db.execute("""
+            INSERT OR IGNORE INTO dm_campaign_reservations
+                (campaign_id, target_user_id, account_id, status)
+            VALUES (?, ?, ?, 'pending')
+        """, (campaign_id, target_user_id, account_id))
+        await db.commit()
+        if cur.rowcount == 1:
+            return True
+        # Row exists — decide whether this target may be retried.
+        row = await (await db.execute(
+            "SELECT status, created_at FROM dm_campaign_reservations "
+            "WHERE campaign_id=? AND target_user_id=?",
+            (campaign_id, target_user_id)
+        )).fetchone()
+        if not row:
+            return True  # vanished concurrently; treat as ours
+        status, created_at = row[0], row[1]
+        if status == "sent":
+            return False
+        if status == "pending":
+            # Still in flight, or a crash left it pending. Only release it
+            # after a full day — a duplicate DM to a KOL costs far more than
+            # a delayed follow-up.
+            # created_at is SQLite UTC ('YYYY-MM-DD HH:MM:SS'); datetime.now()
+            # is local time — comparing them directly skewed the age by the
+            # UTC offset (and broke outright for the 'T'-separated format).
+            age_h = _sqlite_utc_age_hours(created_at)
+            if age_h < 24:
+                return False
+            await db.execute(
+                "UPDATE dm_campaign_reservations SET status='pending', account_id=?, "
+                "created_at=datetime('now'), updated_at=datetime('now') "
+                "WHERE campaign_id=? AND target_user_id=?",
+                (account_id, campaign_id, target_user_id))
+            await db.commit()
+            return True
+        # status == 'failed' → retryable
+        await db.execute(
+            "UPDATE dm_campaign_reservations SET status='pending', account_id=?, "
+            "error_message=NULL, created_at=datetime('now'), updated_at=datetime('now') "
+            "WHERE campaign_id=? AND target_user_id=?",
+            (account_id, campaign_id, target_user_id))
+        await db.commit()
+        return True
+
+
+async def finish_dm_campaign_reservation(campaign_id: int, target_user_id: int,
+                                         status: str, error_message: str | None = None) -> None:
+    """Resolve a pre-send reservation.
+
+    'sent'   → keep the row (permanent dedupe against auto-resume re-sends).
+    'failed' → mark failed; a later resume may retry the target
+               (dm_campaign_logs already keeps the failure audit trail).
+    """
+    if status not in {"sent", "failed"}:
+        raise ValueError(f"invalid reservation status: {status}")
+    async with get_db() as db:
+        await db.execute("""
+            UPDATE dm_campaign_reservations
+            SET status=?, error_message=?, updated_at=datetime('now')
+            WHERE campaign_id=? AND target_user_id=?
+        """, (status, error_message, campaign_id, target_user_id))
         await db.commit()
 
 
@@ -4849,11 +5203,12 @@ async def get_or_create_followup_chat(
                 res["campaign_id"] = campaign_id
             return res
 
-        # Create new
+        # Create new (kol_step starts at 'prospect' so the legacy migration never touches it)
         await db.execute("""
             INSERT INTO ai_followup_chats
-            (account_id, user_id, username, name, campaign_id, watcher_id, status, history_json, reply_count)
-            VALUES (?, ?, ?, ?, ?, ?, 'active', '[]', 0)
+            (account_id, user_id, username, name, campaign_id, watcher_id, status, history_json, reply_count,
+             kol_step, kol_step_updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', '[]', 0, 'prospect', datetime('now'))
         """, (account_id, user_id, username, name, campaign_id, watcher_id))
         await db.commit()
 
@@ -4940,8 +5295,8 @@ async def set_human_takeover(account_id: int, user_id: int) -> bool:
     """Mark chat as human-controlled. AI will NOT reply until 60m of admin inactivity."""
     async with get_db() as db:
         await db.execute("""
-            INSERT INTO ai_followup_chats (account_id, user_id, status, human_takeover_at)
-            VALUES (?, ?, 'needs_human', datetime('now'))
+            INSERT INTO ai_followup_chats (account_id, user_id, status, human_takeover_at, kol_step, kol_step_updated_at)
+            VALUES (?, ?, 'needs_human', datetime('now'), 'prospect', datetime('now'))
             ON CONFLICT(account_id, user_id) DO UPDATE SET
                 status = 'needs_human', human_takeover_at = datetime('now'),
                 updated_at = datetime('now')
@@ -5020,7 +5375,17 @@ async def set_followup_stage(account_id: int, user_id: int, stage: str) -> bool:
         """, (stage, new_status, 1 if stage in ("signed", "paused") else 0,
               account_id, user_id))
         await db.commit()
-        return cursor.rowcount > 0
+        ok = cursor.rowcount > 0
+    # Legacy '/stage signed' = the deal is done → make sure the 5-step funnel
+    # reflects at least deal_agreed (admin action, never moves a lead backwards).
+    if ok and stage == "signed":
+        try:
+            cur = await get_kol_step(account_id, user_id)
+            if kol_step_rank(cur) < kol_step_rank("deal_agreed"):
+                await set_kol_step(account_id, user_id, "deal_agreed", actor="admin", reason="/stage signed")
+        except Exception as exc:
+            logger.warning(f"[KOLStep] sync from stage=signed failed: {exc}")
+    return ok
 
 
 async def get_pipeline_counts() -> dict:
@@ -5184,6 +5549,9 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
             SELECT c.id, c.account_id, c.user_id, c.username, c.name, c.campaign_id, c.watcher_id,
                    c.status, c.reply_count, c.created_at, c.updated_at, c.intent_score,
                    c.lead_tier, c.summary, c.last_drip_stage, c.human_takeover_at, c.verification_status,
+                   COALESCE(c.kol_step, 'prospect') AS kol_step, c.kol_step_updated_at,
+                   COALESCE(c.step_reminders_sent, 0) AS step_reminders_sent,
+                   p.weex_uid, p.vip_code, p.volume_claimed, p.missing_items,
                    a.name AS account_name,
                    CASE WHEN n.status = 'sent' THEN 1 ELSE 0 END AS nudged,
                    COALESCE(n.nudge_count, 0) AS nudge_count
@@ -5191,6 +5559,7 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
             FROM ai_followup_chats c
             LEFT JOIN accounts a ON a.id = c.account_id
             LEFT JOIN nudges n ON n.account_id = c.account_id AND n.target_user_id = c.user_id
+            LEFT JOIN kol_profiles p ON p.account_id = c.account_id AND p.user_id = c.user_id
             {where_clause}
             ORDER BY c.updated_at DESC
             LIMIT ? OFFSET ?
@@ -5199,6 +5568,10 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
         for r in rows:
             r["nudged"] = bool(r.get("nudged", 0))
             r["nudge_count"] = r.get("nudge_count", 0)
+            try:
+                r["missing_items"] = json.loads(r.get("missing_items") or "[]")
+            except Exception:
+                r["missing_items"] = []
         if include_history:
             for r in rows:
                 r["history"] = json.loads(r.get("history_json", "[]"))
@@ -5361,27 +5734,59 @@ async def count_campaigns_by_agent_bulk(agent_ids) -> dict:
 
 
 # ── KOL Profiles & Learned Knowledge CRUD ─────────────────────────────────────
+# Structured columns mirrored from profile_json (spec §B2). Any key in this
+# tuple written through upsert_kol_profile lands in its own column as well.
+KOL_PROFILE_COLUMNS = (
+    "channel_link", "platform", "followers", "weex_uid", "volume_claimed",
+    "volume_verified", "offer_version", "selected_campaign", "vip_code",
+    "affiliate_link", "missing_items", "last_kol_reply_at", "last_our_reply_at",
+)
+
+
+def _merge_profile_row(row) -> dict:
+    """profile_json + structured columns (columns win when set)."""
+    try:
+        profile = json.loads(row["profile_json"] or "{}")
+    except Exception:
+        profile = {}
+    if not isinstance(profile, dict):
+        profile = {}
+    keys = row.keys()
+    for col in KOL_PROFILE_COLUMNS:
+        if col not in keys:
+            continue
+        val = row[col]
+        if val is None or (isinstance(val, str) and val.strip() == ""):
+            continue
+        if col == "missing_items":
+            try:
+                val = json.loads(val) if isinstance(val, str) else val
+            except Exception:
+                val = []
+        profile[col] = val
+    if not isinstance(profile.get("missing_items"), list):
+        profile.pop("missing_items", None)
+    return profile
+
+
 async def get_kol_profile(account_id: int, user_id: int) -> dict:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
-            "SELECT profile_json FROM kol_profiles WHERE account_id = ? AND user_id = ?",
+            "SELECT * FROM kol_profiles WHERE account_id = ? AND user_id = ?",
             (account_id, user_id)
         )
         row = await cursor.fetchone()
-        if row and row["profile_json"]:
-            try:
-                return json.loads(row["profile_json"])
-            except Exception:
-                return {}
-        return {}
+        if not row:
+            return {}
+        return _merge_profile_row(row)
 
 
 async def get_kol_profiles(user_ids: list[int] | None = None) -> list[dict]:
     """Return KOL profiles (account_id, user_id + merged profile fields)."""
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        query = "SELECT account_id, user_id, profile_json FROM kol_profiles"
+        query = "SELECT * FROM kol_profiles"
         params: list = []
         if user_ids:
             query += " WHERE user_id IN (" + ",".join("?" for _ in user_ids) + ")"
@@ -5390,52 +5795,83 @@ async def get_kol_profiles(user_ids: list[int] | None = None) -> list[dict]:
         rows = await cursor.fetchall()
     out = []
     for row in rows:
-        try:
-            profile = json.loads(row["profile_json"] or "{}")
-        except Exception:
-            profile = {}
+        profile = _merge_profile_row(row)
         out.append({"account_id": row["account_id"], "user_id": row["user_id"], **profile})
     return out
 
 
+def _profile_col_value(key: str, value):
+    """Serialise a structured profile field for its column."""
+    if value is None:
+        return None
+    if key == "missing_items":
+        return json.dumps(value if isinstance(value, list) else [], ensure_ascii=False)
+    if key == "offer_version":
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
 async def upsert_kol_profile(account_id: int, user_id: int, profile_data: dict) -> bool:
+    """Merge `profile_data` into the KOL profile (json + mirrored columns).
+
+    Empty/None values are dropped (existing behaviour: a field is never erased
+    by a blank LLM extraction). Structured keys are also written to their own
+    columns so SQL can read them without parsing JSON.
+    """
     if not profile_data:
         return False
+    current = await get_kol_profile(account_id, user_id)
+    current.update(profile_data)
+    # Filter out empty/null values
+    cleaned = {}
+    for k, v in current.items():
+        if v is None:
+            continue
+        if isinstance(v, (list, dict)):
+            if k != "missing_items" and not v:
+                continue
+        elif str(v).strip() == "":
+            continue
+        cleaned[k] = v
+    json_str = json.dumps(cleaned, ensure_ascii=False)
+    col_values = [_profile_col_value(c, cleaned.get(c)) for c in KOL_PROFILE_COLUMNS]
+    col_list = ", ".join(KOL_PROFILE_COLUMNS)
+    col_placeholders = ", ".join("?" for _ in KOL_PROFILE_COLUMNS)
+    col_updates = ", ".join(f"{c} = excluded.{c}" for c in KOL_PROFILE_COLUMNS)
     async with get_db() as db:
-        current = await get_kol_profile(account_id, user_id)
-        current.update(profile_data)
-        # Filter out empty/null values
-        cleaned = {k: v for k, v in current.items() if v is not None and str(v).strip() != ""}
-        json_str = json.dumps(cleaned, ensure_ascii=False)
-        await db.execute("""
-            INSERT INTO kol_profiles (account_id, user_id, profile_json, updated_at)
-            VALUES (?, ?, ?, datetime('now'))
+        await db.execute(f"""
+            INSERT INTO kol_profiles (account_id, user_id, profile_json, updated_at, {col_list})
+            VALUES (?, ?, ?, datetime('now'), {col_placeholders})
             ON CONFLICT(account_id, user_id) DO UPDATE SET
                 profile_json = excluded.profile_json,
-                updated_at = datetime('now')
-        """, (account_id, user_id, json_str))
+                updated_at = datetime('now'),
+                {col_updates}
+        """, (account_id, user_id, json_str, *col_values))
         await db.commit()
-        return True
+    return True
 
 
 async def get_kols_for_distribution() -> list[dict]:
-    """Return onboarded KOLs whose persistent distribution assignment is enabled."""
+    """KOLs whose affiliate link is confirmed (step >= link_confirmed) and who opted into distribution."""
     async with get_db() as conn:
         conn.row_factory = aiosqlite.Row
         cursor = await conn.execute("""
-            SELECT c.account_id, c.user_id, p.profile_json
+            SELECT p.*
             FROM ai_followup_chats c
             JOIN kol_profiles p
               ON p.account_id = c.account_id AND p.user_id = c.user_id
-            WHERE c.status = 'onboarded'
+            WHERE COALESCE(c.kol_step, 'prospect') IN ('link_confirmed', 'first_post', 'active')
+               OR c.status = 'onboarded'
         """)
         rows = await cursor.fetchall()
     result = []
     for row in rows:
-        try:
-            profile = json.loads(row["profile_json"] or "{}")
-        except Exception:
-            profile = {}
+        profile = _merge_profile_row(row)
         if profile.get("distribution_enabled") is True:
             result.append({
                 "account_id": row["account_id"],
@@ -6572,4 +7008,420 @@ async def get_recent_warmup_floods(account_id: int, days: int = 3) -> int:
         )
         row = await cursor.fetchone()
         return dict(row)["cnt"] if row else 0
+
+
+# ── KOL offer ladder history (spec §A1) ──────────────────────────────────────
+
+async def add_offer_ladder_history(version: int, ladder_json: str, actor: str = "admin") -> int:
+    async with get_db() as db:
+        cursor = await db.execute(
+            "INSERT INTO kol_offer_ladder_history (version, ladder_json, actor) VALUES (?, ?, ?)",
+            (int(version), ladder_json, actor),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_offer_ladder_history(limit: int = 20) -> list[dict]:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT id, version, ladder_json, actor, created_at FROM kol_offer_ladder_history ORDER BY id DESC LIMIT ?",
+            (int(limit),),
+        )
+        rows = [dict(r) for r in await cursor.fetchall()]
+    for r in rows:
+        try:
+            r["ladder"] = json.loads(r.pop("ladder_json") or "{}")
+        except Exception:
+            r["ladder"] = {}
+    return rows
+
+
+# ── KOL 5-step funnel (spec §B) ──────────────────────────────────────────────
+#
+# kol_step is the funnel's single source of truth. The legacy `stage`
+# (PIPELINE_STAGES) is kept only as the AI on/off switch for /aion /aioff.
+
+KOL_STEPS = ("prospect", "deal_agreed", "uid_received", "link_confirmed", "first_post", "active")
+KOL_STEP_TERMINAL = ("declined", "dormant")
+KOL_STEP_ALL = KOL_STEPS + KOL_STEP_TERMINAL
+
+KOL_STEP_LABELS = {
+    "prospect": "Chưa chốt",
+    "deal_agreed": "Đồng ý deal",
+    "uid_received": "Nhận UID",
+    "link_confirmed": "Đã gắn link",
+    "first_post": "Bài đầu tiên",
+    "active": "Hoạt động",
+    "declined": "Từ chối",
+    "dormant": "Ngủ đông",
+}
+KOL_STEP_EMOJI = {
+    "prospect": "⚪", "deal_agreed": "🤝", "uid_received": "🆔", "link_confirmed": "🔗",
+    "first_post": "📝", "active": "🟢", "declined": "⛔", "dormant": "💤",
+}
+
+# What is still needed at each step, and who has to supply it.
+#   owner 'kol' → the AI may remind the KOL about it (step reminders)
+#   owner 'ops' → an operator action in the web/Forum (never nagged to the KOL)
+MISSING_ITEM_META = {
+    "deal_agreement": {"owner": "kol", "label": "KOL đồng ý thang offer",
+                       "ask": "whether the KOL is happy to go ahead with the offer"},
+    "weex_uid": {"owner": "kol", "label": "WEEX UID",
+                 "ask": "their WEEX UID so commission can be bound to their account"},
+    "vip_code": {"owner": "ops", "label": "vipCode (admin gắn)", "ask": ""},
+    "affiliate_link": {"owner": "ops", "label": "Link affiliate (admin gắn)", "ask": ""},
+    "link_confirmation": {"owner": "ops", "label": "Admin xác nhận đã gắn link", "ask": ""},
+    "selected_campaign": {"owner": "kol", "label": "Chọn campaign",
+                          "ask": "which currently running campaign they want to start with"},
+    "first_post_link": {"owner": "kol", "label": "Link bài đăng đầu tiên",
+                        "ask": "the link to their first post / video so we can track it"},
+    "volume_verified": {"owner": "ops", "label": "Volume hợp lệ kỳ đầu (admin nhập)", "ask": ""},
+}
+
+
+def normalize_kol_step(step) -> str | None:
+    """Accept a step name or 0-5 index; return canonical name or None."""
+    if step is None:
+        return None
+    if isinstance(step, bool):
+        return None
+    if isinstance(step, int):
+        return KOL_STEPS[step] if 0 <= step < len(KOL_STEPS) else None
+    s = str(step).strip().lower().replace("-", "_").replace(" ", "_")
+    if s.isdigit():
+        i = int(s)
+        return KOL_STEPS[i] if 0 <= i < len(KOL_STEPS) else None
+    return s if s in KOL_STEP_ALL else None
+
+
+def kol_step_rank(step) -> int:
+    """0..5 for funnel steps, -1 for terminal/unknown (sorting + 'advance only' checks)."""
+    name = normalize_kol_step(step) or "prospect"
+    return KOL_STEPS.index(name) if name in KOL_STEPS else -1
+
+
+def kol_step_label(step) -> str:
+    name = normalize_kol_step(step) or "prospect"
+    return f"{KOL_STEP_EMOJI.get(name, '')} {KOL_STEP_LABELS.get(name, name)}".strip()
+
+
+def compute_missing_items(step, profile: dict | None) -> list[str]:
+    """Items still needed to leave `step`, given what the profile already holds."""
+    profile = profile or {}
+    name = normalize_kol_step(step) or "prospect"
+
+    def has(key: str) -> bool:
+        v = profile.get(key)
+        return v is not None and str(v).strip() != ""
+
+    if name == "prospect":
+        return ["deal_agreement"]
+    if name == "deal_agreed":
+        return [] if has("weex_uid") else ["weex_uid"]
+    if name == "uid_received":
+        missing = [k for k in ("vip_code", "affiliate_link") if not has(k)]
+        return missing or ["link_confirmation"]
+    if name == "link_confirmed":
+        missing = []
+        if not has("selected_campaign"):
+            missing.append("selected_campaign")
+        if not has("first_post_link"):
+            missing.append("first_post_link")
+        return missing
+    if name == "first_post":
+        return [] if has("volume_verified") else ["volume_verified"]
+    return []
+
+
+def kol_missing_items_for_kol(missing: list[str]) -> list[str]:
+    """Subset of missing items the KOL (not ops) has to provide."""
+    return [m for m in missing if MISSING_ITEM_META.get(m, {}).get("owner") == "kol"]
+
+
+async def get_kol_step(account_id: int, user_id: int) -> str:
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT kol_step FROM ai_followup_chats WHERE account_id = ? AND user_id = ?",
+            (account_id, user_id),
+        )
+        row = await cursor.fetchone()
+    return normalize_kol_step(row[0]) if row and row[0] else "prospect"
+
+
+async def refresh_missing_items(account_id: int, user_id: int, step: str | None = None) -> list[str]:
+    """Recompute missing_items from the current step + profile and persist it on the profile."""
+    if step is None:
+        step = await get_kol_step(account_id, user_id)
+    profile = await get_kol_profile(account_id, user_id)
+    missing = compute_missing_items(step, profile)
+    async with get_db() as db:
+        await db.execute("""
+            INSERT INTO kol_profiles (account_id, user_id, profile_json, missing_items, updated_at)
+            VALUES (?, ?, '{}', ?, datetime('now'))
+            ON CONFLICT(account_id, user_id) DO UPDATE SET
+                missing_items = excluded.missing_items
+        """, (account_id, user_id, json.dumps(missing, ensure_ascii=False)))
+        await db.commit()
+    return missing
+
+
+async def set_kol_step(
+    account_id: int,
+    user_id: int,
+    new_step,
+    actor: str = "system",
+    reason: str = "",
+) -> dict:
+    """Move a lead to a funnel step and log the transition.
+
+    Rules (spec §B1):
+      * admin (actor starting with 'admin') may set any step, forward or back;
+      * automation (AI / regex / cron) may advance at most ONE step, or move the
+        lead to a terminal step (declined / dormant); anything else is rejected.
+    Returns {"changed", "from", "to", "error"?}.
+    """
+    target = normalize_kol_step(new_step)
+    if target is None:
+        raise ValueError(f"Bước không hợp lệ: {new_step!r}")
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT kol_step FROM ai_followup_chats WHERE account_id = ? AND user_id = ?",
+            (account_id, user_id),
+        )
+        row = await cursor.fetchone()
+    if not row:
+        return {"changed": False, "from": None, "to": target, "error": "not_found"}
+    current = normalize_kol_step(row[0]) or "prospect"
+    if current == target:
+        return {"changed": False, "from": current, "to": target}
+
+    is_admin = str(actor or "").lower().startswith("admin")
+    if not is_admin:
+        if target in KOL_STEP_TERMINAL:
+            pass  # automation may close a lead out
+        elif current in KOL_STEP_TERMINAL:
+            return {"changed": False, "from": current, "to": target, "error": "terminal_requires_admin"}
+        elif kol_step_rank(target) != kol_step_rank(current) + 1:
+            return {"changed": False, "from": current, "to": target, "error": "skip_not_allowed"}
+
+    async with get_db() as db:
+        await db.execute("""
+            UPDATE ai_followup_chats
+            SET kol_step = ?, kol_step_updated_at = datetime('now'),
+                step_reminders_sent = 0, last_step_reminder_at = NULL,
+                updated_at = datetime('now')
+            WHERE account_id = ? AND user_id = ?
+        """, (target, account_id, user_id))
+        await db.execute(
+            "INSERT INTO kol_step_events (account_id, user_id, from_step, to_step, actor, reason) VALUES (?, ?, ?, ?, ?, ?)",
+            (account_id, user_id, current, target, actor or "system", (reason or "")[:500]),
+        )
+        await db.commit()
+    try:
+        await refresh_missing_items(account_id, user_id, target)
+    except Exception as exc:
+        logger.warning(f"[KOLStep] refresh_missing_items failed: {exc}")
+    logger.info(f"[KOLStep] {account_id}/{user_id}: {current} → {target} by {actor} ({reason})")
+    return {"changed": True, "from": current, "to": target}
+
+
+async def get_kol_step_events(account_id: int, user_id: int, limit: int = 50) -> list[dict]:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT id, from_step, to_step, actor, reason, created_at
+            FROM kol_step_events
+            WHERE account_id = ? AND user_id = ?
+            ORDER BY id DESC LIMIT ?
+        """, (account_id, user_id, int(limit)))
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def get_kol_step_counts() -> dict:
+    """Real leads per funnel step (NULL counts as prospect) — dashboard cards + /pipeline."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(f"""
+            SELECT COALESCE(NULLIF(kol_step, ''), 'prospect') AS step, COUNT(*) AS n
+            FROM ai_followup_chats
+            WHERE {_REAL_LEAD_SQL}
+            GROUP BY COALESCE(NULLIF(kol_step, ''), 'prospect')
+        """)
+        counts = {r["step"]: r["n"] for r in await cursor.fetchall()}
+    return {s: counts.get(s, 0) for s in KOL_STEP_ALL}
+
+
+async def get_leads_by_kol_step(step: str, limit: int = 20) -> list[dict]:
+    name = normalize_kol_step(step)
+    if name is None:
+        return []
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(f"""
+            SELECT account_id, user_id, username, name, kol_step, kol_step_updated_at,
+                   intent_score, lead_tier, reply_count, last_user_message_at, summary
+            FROM ai_followup_chats
+            WHERE COALESCE(NULLIF(kol_step, ''), 'prospect') = ?
+              AND {_REAL_LEAD_SQL}
+            ORDER BY COALESCE(kol_step_updated_at, updated_at) DESC
+            LIMIT ?
+        """, (name, int(limit)))
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def get_kol_state(account_id: int, user_id: int) -> dict:
+    """Everything the UI / Forum / prompt needs about one KOL's funnel position."""
+    chat = await get_followup_chat(account_id, user_id)
+    step = normalize_kol_step(chat.get("kol_step") if chat else None) or "prospect"
+    profile = await get_kol_profile(account_id, user_id)
+    missing = compute_missing_items(step, profile)
+    have = {k: profile.get(k) for k in ("channel_link", "platform", "followers", "weex_uid", "volume_claimed",
+                                        "volume_verified", "selected_campaign", "vip_code", "affiliate_link",
+                                        "first_post_link", "offer_version")
+            if profile.get(k) not in (None, "", [])}
+    return {
+        "account_id": account_id,
+        "user_id": user_id,
+        "step": step,
+        "step_rank": kol_step_rank(step),
+        "step_label": KOL_STEP_LABELS.get(step, step),
+        "steps": list(KOL_STEPS),
+        "step_labels": KOL_STEP_LABELS,
+        "missing_items": missing,
+        "missing_labels": [MISSING_ITEM_META.get(m, {}).get("label", m) for m in missing],
+        "have": have,
+        "status": chat.get("status") if chat else None,
+        "stage": chat.get("stage") if chat else None,
+        "step_reminders_sent": (chat or {}).get("step_reminders_sent") or 0,
+        "kol_step_updated_at": (chat or {}).get("kol_step_updated_at"),
+    }
+
+
+async def mark_step_reminder_sent(account_id: int, user_id: int) -> None:
+    async with get_db() as db:
+        await db.execute("""
+            UPDATE ai_followup_chats
+            SET step_reminders_sent = COALESCE(step_reminders_sent, 0) + 1,
+                last_step_reminder_at = datetime('now'), updated_at = datetime('now')
+            WHERE account_id = ? AND user_id = ?
+        """, (account_id, user_id))
+        await db.commit()
+
+
+async def get_step_reminder_candidates(min_gap_hours: int = 48, max_per_step: int = 2, limit: int = 30) -> list[dict]:
+    """Leads at step >= deal_agreed whose next KOL-owned item is overdue for a nudge.
+
+    Filters done in SQL: AI active, funnel step (not terminal / not prospect),
+    reminder cap, >= min_gap since the later of (last KOL message, last reminder,
+    step change). Owner filtering (kol vs ops) happens in Python via missing_items.
+    """
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(f"""
+            SELECT c.account_id, c.user_id, c.username, c.name, c.kol_step, c.step_reminders_sent,
+                   c.last_step_reminder_at, c.kol_step_updated_at, c.last_user_message_at,
+                   c.campaign_id, c.watcher_id, c.updated_at
+            FROM ai_followup_chats c
+            WHERE c.status = 'active'
+              AND COALESCE(c.kol_step, 'prospect') IN ('deal_agreed', 'uid_received', 'link_confirmed', 'first_post')
+              AND COALESCE(c.step_reminders_sent, 0) < ?
+              AND datetime(MAX(COALESCE(c.last_step_reminder_at, '1970-01-01'),
+                               COALESCE(c.kol_step_updated_at, '1970-01-01'),
+                               COALESCE(c.last_user_message_at, '1970-01-01'),
+                               COALESCE(c.updated_at, '1970-01-01'))) <= datetime('now', ?)
+              AND {_REAL_LEAD_SQL}
+            ORDER BY COALESCE(c.last_step_reminder_at, c.kol_step_updated_at) ASC
+            LIMIT ?
+        """, (int(max_per_step), f"-{int(min_gap_hours)} hours", int(limit)))
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def migrate_kol_steps_v1(force: bool = False) -> dict:
+    """Backfill kol_step for legacy leads (spec §B5). Idempotent.
+
+    Mapping: stage=signed → deal_agreed; status=onboarded → link_confirmed (+ AI
+    paused); profile has weex_uid → at least uid_received; everything else →
+    prospect. Only rows with kol_step IS NULL are touched, a DB backup is taken
+    first (alerts.run_backup) and a settings flag short-circuits later starts.
+    """
+    FLAG = "kol_steps_migrated_v1"
+    if not force and await get_setting(FLAG):
+        return {"skipped": True, "reason": "already_migrated"}
+
+    async with get_db() as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM ai_followup_chats WHERE kol_step IS NULL OR kol_step = ''")
+        pending = (await cursor.fetchone())[0]
+        cursor = await db.execute("SELECT COUNT(*) FROM kol_profiles")
+        profiles = (await cursor.fetchone())[0]
+
+    # Mirror legacy profile_json fields into the new structured columns first
+    # (needed for the weex_uid rule below and for every later SQL read).
+    mirrored = 0
+    if profiles:
+        async with get_db() as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT account_id, user_id, profile_json, weex_uid FROM kol_profiles")
+            rows = [dict(r) for r in await cursor.fetchall()]
+        for r in rows:
+            try:
+                pj = json.loads(r.get("profile_json") or "{}")
+            except Exception:
+                pj = {}
+            if not isinstance(pj, dict):
+                continue
+            fields = {c: pj.get(c) for c in KOL_PROFILE_COLUMNS if pj.get(c) not in (None, "")}
+            if not fields:
+                continue
+            await upsert_kol_profile(r["account_id"], r["user_id"], fields)
+            mirrored += 1
+
+    if pending == 0:
+        await set_setting(FLAG, datetime.now().isoformat(timespec="seconds"))
+        return {"skipped": True, "reason": "nothing_to_migrate", "mirrored_profiles": mirrored}
+
+    backup_path = None
+    try:
+        import alerts as _alerts  # lazy: alerts imports database
+        backup_path = _alerts.run_backup()
+    except Exception as exc:
+        logger.warning(f"[KOLStep] backup before migration failed: {exc}")
+
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT c.account_id, c.user_id, c.status, c.stage,
+                   COALESCE(NULLIF(p.weex_uid, ''), '') AS weex_uid
+            FROM ai_followup_chats c
+            LEFT JOIN kol_profiles p ON p.account_id = c.account_id AND p.user_id = c.user_id
+            WHERE c.kol_step IS NULL OR c.kol_step = ''
+        """)
+        rows = [dict(r) for r in await cursor.fetchall()]
+        counts: dict[str, int] = {}
+        for r in rows:
+            if (r.get("status") or "") == "onboarded":
+                step = "link_confirmed"
+            elif (r.get("stage") or "") == "signed":
+                step = "deal_agreed"
+            else:
+                step = "prospect"
+            if r.get("weex_uid") and kol_step_rank(step) < kol_step_rank("uid_received"):
+                step = "uid_received"
+            await db.execute("""
+                UPDATE ai_followup_chats
+                SET kol_step = ?, kol_step_updated_at = datetime('now'),
+                    status = CASE WHEN status = 'onboarded' THEN 'paused_admin' ELSE status END
+                WHERE account_id = ? AND user_id = ?
+            """, (step, r["account_id"], r["user_id"]))
+            await db.execute(
+                "INSERT INTO kol_step_events (account_id, user_id, from_step, to_step, actor, reason) VALUES (?, ?, NULL, ?, 'migration:v1', ?)",
+                (r["account_id"], r["user_id"], step, f"status={r.get('status')} stage={r.get('stage')} uid={'yes' if r.get('weex_uid') else 'no'}"),
+            )
+            counts[step] = counts.get(step, 0) + 1
+        await db.commit()
+
+    await set_setting(FLAG, datetime.now().isoformat(timespec="seconds"))
+    logger.info(f"[KOLStep] migrated {len(rows)} leads → {counts} (backup: {backup_path})")
+    return {"skipped": False, "migrated": len(rows), "by_step": counts, "backup": backup_path, "mirrored_profiles": mirrored}
 

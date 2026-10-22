@@ -1,7 +1,18 @@
 """Kiểm tra guard nội bộ, không kết nối Telegram thật."""
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 import dm_reply_tracker as tracker
+
+
+@pytest.fixture(autouse=True)
+async def _close_db_pool():
+    """generate_and_send_ai_reply_for_chat mở pool aiosqlite thật; mỗi
+    connection là một Thread non-daemon nên nếu không đóng, pytest in kết quả
+    xong vẫn treo mãi không thoát (run_tests.py không bao giờ kết thúc)."""
+    yield
+    await tracker.db.close_db()
 
 
 def _reset_cache():

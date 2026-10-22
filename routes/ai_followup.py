@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 import database as db
+import kol_offer
 import telegram_client as tg
 from dm_reply_tracker import contains_weex_link, personalize_weex_links
 
@@ -36,7 +37,7 @@ class AIFollowUpSettings(BaseModel):
 
 
 class UpdateChatStatusRequest(BaseModel):
-    status: str  # 'active', 'paused_admin', 'onboarded', 'needs_human'
+    status: str  # 'active', 'paused_admin', 'needs_human', 'bot_ignored' ('onboarded' = legacy alias)
 
 
 class KOLProfileRequest(BaseModel):
@@ -45,6 +46,24 @@ class KOLProfileRequest(BaseModel):
     distribution_enabled: Optional[bool] = None
     distribution_regions: Optional[list[str]] = None
     distribution_campaigns: Optional[list[str]] = None
+    # Structured KOL memory (spec §B2)
+    weex_uid: Optional[str] = None
+    volume_claimed: Optional[str] = None
+    volume_verified: Optional[str] = None
+    selected_campaign: Optional[str] = None
+    channel_link: Optional[str] = None
+    platform: Optional[str] = None
+    followers: Optional[str] = None
+    first_post_link: Optional[str] = None
+
+
+class KOLStepRequest(BaseModel):
+    step: str  # prospect | deal_agreed | uid_received | link_confirmed | first_post | active | declined | dormant
+    reason: Optional[str] = ""
+
+
+class OfferLadderRequest(BaseModel):
+    ladder: dict
 
 
 class KOLRecipient(BaseModel):
@@ -66,8 +85,103 @@ async def get_kol_profile(account_id: int, user_id: int):
 async def update_kol_profile(account_id: int, user_id: int, req: KOLProfileRequest):
     if not await db.get_account(account_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy account")
-    await db.upsert_kol_profile(account_id, user_id, req.dict(exclude_unset=True))
+    data = req.dict(exclude_unset=True)
+    await db.upsert_kol_profile(account_id, user_id, data)
+    try:
+        # Admin typed the UID by hand → that is a confirmed UID: advance deal_agreed → uid_received.
+        if (data.get("weex_uid") or "").strip():
+            cur = await db.get_kol_step(account_id, user_id)
+            if cur == "deal_agreed":
+                await db.set_kol_step(account_id, user_id, "uid_received", actor="admin:web",
+                                      reason="UID entered by admin in profile")
+        await db.refresh_missing_items(account_id, user_id)
+    except Exception:
+        pass
     return await db.get_kol_profile(account_id, user_id)
+
+
+# ── Pre-approved offer ladder (spec §A) ─────────────────────────────────────
+
+@router.get("/offer-ladder")
+async def get_offer_ladder():
+    """Current commission ladder (structured JSON) + the prompt block the AI receives."""
+    ladder = await kol_offer.get_ladder()
+    return {
+        "ladder": ladder,
+        "is_default": not await kol_offer.is_ladder_customized(),
+        "prompt_preview": kol_offer.render_offer_ladder_prompt(ladder),
+    }
+
+
+@router.put("/offer-ladder")
+async def save_offer_ladder(req: OfferLadderRequest):
+    """Validate + save a new ladder version (version auto-increments, history recorded)."""
+    try:
+        saved = await kol_offer.save_ladder(req.ladder, actor="admin:web")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "ok", "ladder": saved, "prompt_preview": kol_offer.render_offer_ladder_prompt(saved),
+            "message": f"Đã lưu thang offer v{saved['version']}"}
+
+
+@router.get("/offer-ladder/history")
+async def get_offer_ladder_history(limit: int = Query(20, ge=1, le=200)):
+    return {"history": await db.get_offer_ladder_history(limit=limit)}
+
+
+@router.post("/offer-ladder/check")
+async def check_offer_text(req: dict):
+    """Dry-run the off-ladder guard on a piece of text (debug / QA helper)."""
+    text = str(req.get("text", "") or "")
+    ladder = await kol_offer.get_ladder()
+    bad = kol_offer.find_off_ladder_figures(text, ladder)
+    return {"ok": not bad, "off_ladder": bad}
+
+
+# ── KOL 5-step funnel (spec §B) ─────────────────────────────────────────────
+
+@router.get("/chats/{account_id}/{user_id}/step")
+async def get_chat_step(account_id: int, user_id: int):
+    chat = await db.get_followup_chat(account_id, user_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    state = await db.get_kol_state(account_id, user_id)
+    ladder = await kol_offer.get_ladder()
+    state["predicted_tier"] = kol_offer.predicted_tier(ladder, state["have"].get("volume_claimed"))
+    state["offer_version"] = ladder.get("version")
+    state["events"] = await db.get_kol_step_events(account_id, user_id, limit=20)
+    return state
+
+
+@router.post("/chats/{account_id}/{user_id}/step")
+async def set_chat_step(account_id: int, user_id: int, req: KOLStepRequest):
+    """Admin moves a lead to any funnel step (forward or back). Logged in kol_step_events."""
+    if db.normalize_kol_step(req.step) is None:
+        raise HTTPException(status_code=400, detail=f"Bước không hợp lệ. Chọn 1 trong: {db.KOL_STEP_ALL}")
+    res = await db.set_kol_step(account_id, user_id, req.step, actor="admin:web", reason=req.reason or "")
+    if res.get("error") == "not_found":
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    state = await db.get_kol_state(account_id, user_id)
+    return {"status": "ok", "changed": res.get("changed"), "from": res.get("from"), "to": res.get("to"), "state": state}
+
+
+@router.get("/chats/{account_id}/{user_id}/step-events")
+async def get_chat_step_events(account_id: int, user_id: int, limit: int = Query(50, ge=1, le=500)):
+    return {"events": await db.get_kol_step_events(account_id, user_id, limit=limit)}
+
+
+@router.get("/step-counts")
+async def get_step_counts():
+    counts = await db.get_kol_step_counts()
+    return {"counts": counts, "labels": db.KOL_STEP_LABELS, "steps": list(db.KOL_STEPS)}
+
+
+@router.post("/trigger-step-reminders")
+async def trigger_step_reminders():
+    """Run the step-based reminder engine once (same as the scheduled job)."""
+    import dm_reply_tracker
+    res = await dm_reply_tracker.process_step_reminders()
+    return {"status": "ok", "result": res}
 
 
 @router.post("/kol-profiles/bulk-send")
@@ -270,7 +384,9 @@ async def get_stats():
     total = sum(counts.values())
     nudge_stats = await db.get_nudge_stats()
     nudged_total = sum(nudge_stats.values())
-    return {"counts": counts, "total": total, "nudge_stats": nudge_stats, "nudged_total": nudged_total}
+    step_counts = await db.get_kol_step_counts()
+    return {"counts": counts, "total": total, "nudge_stats": nudge_stats, "nudged_total": nudged_total,
+            "step_counts": step_counts}
 
 
 @router.get("/chats")
@@ -287,10 +403,22 @@ async def get_chats(
 
 @router.post("/chats/{account_id}/{user_id}/status")
 async def update_chat_status(account_id: int, user_id: int, req: UpdateChatStatusRequest):
-    """Update status of a specific follow-up chat (e.g. pause AI to take over manually)."""
-    valid_statuses = ("active", "paused_admin", "onboarded", "needs_human", "bot_ignored")
+    """Update AI control status of a chat (pause AI / take over manually).
+
+    `status` only controls the AI now; the KOL funnel lives in kol_step.
+    'onboarded' is accepted as a legacy alias: it moves the lead to the
+    link_confirmed step and pauses the AI (what the old button effectively did).
+    """
+    valid_statuses = ("active", "paused_admin", "needs_human", "bot_ignored", "onboarded")
     if req.status not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"Trạng thái không hợp lệ. Chọn 1 trong: {valid_statuses}")
+        raise HTTPException(status_code=400, detail=f"Trạng thái không hợp lệ. Chọn 1 trong: {valid_statuses[:-1]}")
+
+    if req.status == "onboarded":
+        if not await db.get_followup_chat(account_id, user_id):
+            raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+        await db.set_kol_step(account_id, user_id, "link_confirmed", actor="admin:web", reason="legacy status=onboarded")
+        await db.update_followup_chat_status(account_id, user_id, "paused_admin")
+        return {"status": "ok", "message": "Đã chuyển sang bước 'Đã gắn link' và tạm dừng AI"}
 
     ok = await db.update_followup_chat_status(account_id, user_id, req.status)
     if not ok:

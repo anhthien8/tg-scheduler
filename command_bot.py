@@ -1296,11 +1296,18 @@ async def _render_ai_status(event, acc_id: int, uid: int) -> None:
     acc_label = _acc_label(acc, acc_id)
     ai_state = "🔴 TẮT (vĩnh viễn — gõ /aion để bật)" if stage in ("paused", "signed") \
         else ("🟢 BẬT" if status == "active" else f"🟡 Tạm im ({status})")
+    step_line = ""
+    try:
+        import dm_reply_tracker as _drt
+        step_line = await _drt.render_kol_step_line(acc_id, uid)
+    except Exception as e:
+        logger.debug("[ForumInbox] step line skipped: %s", e)
     text = (
         f"🤖 **Điều khiển AI** — lead #{uid} (@{name})\n"
         f"Nick: {acc_label}\n"
         f"AI: {ai_state}\n"
-        f"Stage: `{stage}` · Status: `{status}`\n"
+        + (f"{step_line}\n" if step_line else "")
+        + f"Stage: `{stage}` · Status: `{status}`\n"
         f"Human takeover: {human}\n"
         f"Số lần lead phản hồi: {chat.get('reply_count', 0)}\n\n"
         f"_Bấm nút bên dưới để bật/tắt AI cho riêng lead này._"
@@ -1340,19 +1347,23 @@ def _lead_line(r: dict, acc_map: dict[int, str] | None = None) -> str:
 
 
 async def _handle_pipeline(event) -> None:
-    """Show the KOL funnel: how many leads sit in each stage."""
-    counts = await db.get_pipeline_counts()
+    """Show the KOL funnel: how many leads sit in each of the 5 onboarding steps (kol_step)."""
+    counts = await db.get_kol_step_counts()
     total = sum(counts.values())
     if not total:
         await event.respond("📊 Chưa có hội thoại nào trong pipeline.")
         return
-    lines = [f"📊 **Pipeline KOL** — {total} hội thoại\n"]
-    for st in db.PIPELINE_STAGES:
+    lines = [f"📊 **Pipeline KOL (5 bước)** — {total} hội thoại\n"]
+    for st in db.KOL_STEP_ALL:
         n = counts.get(st, 0)
+        if n == 0 and st in db.KOL_STEP_TERMINAL:
+            continue
         bar = "█" * min(n, 20) if n else ""
-        lines.append(f"{_stage_label(st):<14} **{n:>4}** {bar}")
+        label = f"{db.KOL_STEP_EMOJI.get(st, '')} {db.kol_step_label(st)}".strip()
+        lines.append(f"{label:<16} **{n:>4}** {bar}")
     lines.append("\nXem lead cần xử lý: /attention")
-    lines.append("Đổi giai đoạn: vào topic rồi gõ /stage <giai đoạn>")
+    lines.append("Đổi bước: mở lead trên web → modal → nút bước tiếp theo")
+    lines.append("Đổi giai đoạn AI cũ: vào topic rồi gõ /stage <giai đoạn>")
     await event.respond("\n".join(lines))
 
 

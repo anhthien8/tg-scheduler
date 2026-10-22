@@ -189,10 +189,17 @@ async def relay_history(db, bot, cfg: ForumConfig, *, account_id: int, user_id: 
             topic = {"topic_id": int(topic_id)}
         topic_id = int(topic["topic_id"])
 
+    step_line = ""
+    try:
+        import dm_reply_tracker as _drt
+        step_line = await _drt.render_kol_step_line(account_id, user_id)
+    except Exception as e:
+        logger.debug("[ForumInbox] step line skipped: %s", e)
     header = (f"🗂️ **Hội thoại {days} ngày qua**\n"
               f"Lead: {_lead_label(username, name, user_id)}\n"
               f"{await _account_label(db, account_id)}\n"
-              f"Tổng {len(entries)} tin nhắn (cũ → mới)\n"
+              + (f"{step_line}\n" if step_line else "")
+              + f"Tổng {len(entries)} tin nhắn (cũ → mới)\n"
               f"{'─' * 28}")
     await bot.send_topic_message(cfg.group_id, topic_id, header)
 

@@ -338,6 +338,23 @@ def setup_teardown_session():
         asyncio.run(db.close_db())
     except Exception:
         pass
+    # Mỗi aiosqlite.Connection là một Thread non-daemon; connection nào sót lại
+    # (pool bị thay giữa chừng, task nền bị huỷ...) sẽ giữ interpreter sống mãi
+    # → pytest in xong summary nhưng không bao giờ thoát, run_tests.py treo.
+    # ponytail: dừng cưỡng bức các thread sót thay vì truy từng chỗ rò —
+    # DB test là temp dir nên không mất dữ liệu thật.
+    try:
+        import threading
+
+        import aiosqlite
+        for _t in threading.enumerate():
+            if isinstance(_t, aiosqlite.Connection) and _t.is_alive():
+                try:
+                    _t._stop_running()
+                except Exception:
+                    pass
+    except Exception:
+        pass
     try:
         temp_dir.cleanup()
     except Exception:

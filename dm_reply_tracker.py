@@ -31,6 +31,7 @@ from telethon.tl.types import ReactionEmoji
 
 import ai_remix as ai_rmx
 import database as db
+import kol_offer
 import telegram_client as tg
 
 logger = logging.getLogger("tg-scheduler.inbox")
@@ -250,6 +251,13 @@ async def _notify_main_account_handover(
             alert_text += f"🎯 Campaign: {campaign}\n"
         if performance != "Chưa cung cấp":
             alert_text += f"📊 Performance 1M: {performance}\n"
+        # 5-step funnel line: where the KOL is + what is still missing (spec B4)
+        try:
+            step_line = await render_kol_step_line(account_id, sender_id)
+            if step_line:
+                alert_text += f"{step_line}\n"
+        except Exception as e:
+            logger.debug("[Handover] step line skipped: %s", e)
         alert_text += (
             f"📱 {acc_name} · {direct_link}\n"
             f"📝 {reason}"
@@ -304,14 +312,346 @@ async def _notify_main_account_handover(
 
 
 async def _async_update_kol_profile(account_id: int, user_id: int, history: list[dict], provider: str, api_keys: list[str], kwargs: dict):
-    """Background task to extract and update KOL profile facts in DB."""
+    """Background task to extract and update KOL profile facts in DB.
+
+    UID two-source rule (spec B1 step 2): the LLM-extracted `weex_uid` is only
+    stored as the confirmed UID when the same number also appears in the KOL's
+    own messages (regex). Otherwise it is kept as `weex_uid_candidate` so
+    `missing_items` still lists `weex_uid` and no step transition happens.
+    """
     try:
         extracted = await ai_rmx.extract_kol_profile(history, provider, api_keys, **kwargs)
+        if not extracted:
+            return
+        extracted = dict(extracted)
+        llm_uid = _normalize_uid(extracted.pop("weex_uid", None))
+        uid_confirmed = bool(llm_uid) and llm_uid in extract_uid_candidates_from_messages(history)
+        if llm_uid and uid_confirmed:
+            extracted["weex_uid"] = llm_uid
+        elif llm_uid:
+            extracted["weex_uid_candidate"] = llm_uid
+            logger.info("[KOL Memory] UID %s from LLM not found in KOL messages — kept as candidate (user %d)",
+                        llm_uid, user_id)
         if extracted:
             await db.upsert_kol_profile(account_id, user_id, extracted)
             logger.info("🧠 [KOL Memory] Updated profile for user %d (acc=%d): %s", user_id, account_id, extracted)
+        if uid_confirmed:
+            await maybe_advance_uid_received(account_id, user_id, llm_uid)
+        else:
+            await db.refresh_missing_items(account_id, user_id)
     except Exception as e:
         logger.debug("[KOL Memory] Error updating profile: %s", e)
+
+
+# ── KOL 5-step funnel helpers (spec B1 / B2 / B3) ─────────────────────────────
+_VN_CHARS_RE = re.compile(
+    r"[àáảãạăằắẳẵặâầấẩẫậđèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]", re.IGNORECASE)
+_UID_NEAR_RE = re.compile(
+    r"\b(?:uid|user\s*id|weex\s*id)\b[^0-9]{0,25}(\d{5,12})\b|\b(\d{5,12})\b[^0-9]{0,15}\b(?:uid|user\s*id)\b",
+    re.IGNORECASE)
+_UID_BARE_RE = re.compile(r"\d{6,12}")
+_STEP_TAG_RE = re.compile(r"\[\s*(DEAL_AGREED|FIRST_POST|STOP|DECLINED|ONBOARDED)\s*\]", re.IGNORECASE)
+
+_STEP_PROMPT_LABELS = {
+    "prospect": "Prospect — deal NOT agreed yet",
+    "deal_agreed": "Deal agreed",
+    "uid_received": "WEEX UID received",
+    "link_confirmed": "Affiliate link / vipCode confirmed by our team",
+    "first_post": "First post published",
+    "active": "Active KOL (valid volume recorded)",
+    "declined": "Declined",
+    "dormant": "Dormant",
+}
+
+_STEP_GUIDANCE = {
+    "prospect": (
+        "The KOL has NOT agreed to the offer yet. Keep building rapport; present the ladder when they ask. "
+        "When the KOL clearly says yes to the commission ladder / wants to proceed, append [DEAL_AGREED] on its own line."
+    ),
+    "deal_agreed": (
+        "The deal is agreed — do NOT re-pitch or re-explain the ladder unless asked. "
+        "The only thing we need from the KOL now is their WEEX UID (ask once, naturally; never invent one)."
+    ),
+    "uid_received": (
+        "Their UID is recorded and our team is binding the affiliate link/vipCode. Do NOT ask for the UID again. "
+        "If they ask about status, say the team is on it and will confirm shortly."
+    ),
+    "link_confirmed": (
+        "Their affiliate link is live. Help them pick one running campaign if not chosen, and when they share the link "
+        "to their first post/video, acknowledge it and append [FIRST_POST] on its own line."
+    ),
+    "first_post": (
+        "First post is in. Keep the relationship warm, answer questions, no new asks — the team verifies volume on our side."
+    ),
+    "active": "Active partner. Support them; answer questions; no onboarding asks.",
+    "declined": "The KOL declined the partnership. Be polite and brief; do NOT pitch again.",
+    "dormant": "The KOL went quiet after agreeing. Be light and friendly; one soft check-in at most, no pressure.",
+}
+
+_STEP_REMINDER_TEMPLATES = {
+    "weex_uid": {
+        "en": "Hey bro, whenever you get a sec — could you drop me your WEEX UID? Team's ready to bind the commission on our side 👍",
+        "vi": "Bro ơi, khi nào rảnh gửi mình UID WEEX nhé, team bên mình sẵn sàng gắn commission cho bạn rồi 👍",
+    },
+    "selected_campaign": {
+        "en": "Quick one bro — which campaign do you want to kick off with? I'll get it lined up on our side 👍",
+        "vi": "Hỏi nhanh bro, bạn muốn bắt đầu với campaign nào? Mình chuẩn bị sẵn bên này nhé 👍",
+    },
+    "first_post_link": {
+        "en": "Hey bro, when your first post is up just send me the link so we can track it on our side 👍",
+        "vi": "Bro ơi, bài đầu tiên lên thì gửi mình link nhé để bên mình theo dõi cho chuẩn 👍",
+    },
+}
+
+
+def _normalize_uid(value) -> str:
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def _detect_reply_lang(history: list[dict] | None) -> str:
+    """'vi' if the KOL's latest message contains Vietnamese diacritics, else 'en'."""
+    for m in reversed(history or []):
+        if m.get("role") == "user":
+            return "vi" if _VN_CHARS_RE.search(m.get("content") or "") else "en"
+    return "en"
+
+
+def extract_uid_candidates_from_messages(history: list[dict] | None) -> set[str]:
+    """Regex source of the UID two-source rule: numbers next to 'UID' in the
+    KOL's own messages, or a message that is just a 6-12 digit number."""
+    found: set[str] = set()
+    for m in history or []:
+        if m.get("role") != "user":
+            continue
+        text = m.get("content") or ""
+        for mt in _UID_NEAR_RE.finditer(text):
+            found.add(mt.group(1) or mt.group(2))
+        stripped = text.strip().rstrip(".!")
+        if _UID_BARE_RE.fullmatch(stripped):
+            found.add(stripped)
+    return found
+
+
+async def maybe_advance_uid_received(account_id: int, user_id: int, uid: str, actor: str = "system:uid") -> bool:
+    """Move the lead to `uid_received` once a UID is confirmed by both sources.
+
+    Automation may only advance one step at a time, so a lead still at
+    `prospect` first becomes `deal_agreed` (sending a UID implies consent),
+    then `uid_received` — both transitions are logged as separate events.
+    """
+    cur = await db.get_kol_step(account_id, user_id)
+    rank = db.kol_step_rank(cur)
+    if rank < 0 or rank >= db.kol_step_rank("uid_received"):
+        return False
+    if cur == "prospect":
+        res = await db.set_kol_step(account_id, user_id, "deal_agreed", actor=actor,
+                                    reason=f"UID {uid} received — implies deal accepted")
+        if not res.get("changed"):
+            return False
+    res = await db.set_kol_step(account_id, user_id, "uid_received", actor=actor,
+                                reason=f"UID {uid} confirmed by regex + LLM")
+    if res.get("changed"):
+        logger.info("[KOL Step] user %d (acc=%d) → uid_received (UID %s)", user_id, account_id, uid)
+    return bool(res.get("changed"))
+
+
+def render_kol_step_bar(step: str | None) -> str:
+    """Compact 5-step bar for Telegram/operator views, e.g. ●●○○○ 2/5 Nhận UID."""
+    name = db.normalize_kol_step(step) or "prospect"
+    rank = db.kol_step_rank(name)
+    if rank < 0:
+        return f"{db.KOL_STEP_EMOJI.get(name, '')} {db.kol_step_label(name)}".strip()
+    filled = "●" * rank + "○" * (5 - rank)
+    return f"{filled} {rank}/5 {db.kol_step_label(name)}"
+
+
+async def render_kol_step_line(account_id: int, user_id: int) -> str:
+    """One line for alerts/headers: step bar + missing items (shared by handover alert and Forum)."""
+    state = await db.get_kol_state(account_id, user_id)
+    if not state:
+        return ""
+    line = f"🪜 Bước: {render_kol_step_bar(state.get('step'))}"
+    missing = state.get("missing_labels") or []
+    if missing:
+        line += f" · Còn thiếu: {', '.join(missing[:3])}"
+    return line
+
+
+async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | None = None) -> str:
+    """'ĐÃ CÓ / CÒN THIẾU' block injected into every AI turn (spec B2)."""
+    state = await db.get_kol_state(account_id, user_id)
+    step = state["step"]
+    profile = profile if profile is not None else (await db.get_kol_profile(account_id, user_id) or {})
+    lines = [
+        "--- KOL ONBOARDING STATE (5-step funnel: deal agreed → UID → link confirmed → first post → active) ---",
+        f"CURRENT STEP: {max(state['step_rank'], 0)}/5 — {_STEP_PROMPT_LABELS.get(step, step)}",
+    ]
+    have = state.get("have") or {}
+    if have:
+        lines.append("ALREADY HAVE (never ask for these again): " + "; ".join(f"{k}={v}" for k, v in have.items()))
+    else:
+        lines.append("ALREADY HAVE: nothing recorded yet.")
+    missing = state.get("missing_items") or []
+    kol_missing = db.kol_missing_items_for_kol(missing)
+    ops_missing = [m for m in missing if m not in kol_missing]
+    if kol_missing:
+        lines.append("STILL MISSING FROM THE KOL — ask for ONLY the first item, naturally, when the moment fits:")
+        for m in kol_missing:
+            meta = db.MISSING_ITEM_META.get(m, {})
+            lines.append(f" - {m}: {meta.get('ask') or meta.get('label') or m}")
+    if ops_missing:
+        lines.append("WAITING ON OUR TEAM (do NOT ask the KOL for these; if they ask, say the team is on it): "
+                     + ", ".join(ops_missing))
+    if not missing and step in ("active", "declined", "dormant"):
+        lines.append("NOTHING MISSING.")
+    lines.append("GUIDANCE: " + _STEP_GUIDANCE.get(step, ""))
+    try:
+        pred = kol_offer.predicted_tier(await kol_offer.get_ladder(), profile.get("volume_claimed"))
+    except Exception:
+        pred = None
+    if pred:
+        lines.append(f"PREDICTED TIER (only because the KOL stated ~{kol_offer._fmt_num(pred.get('volume_m'))}M monthly volume): "
+                     f"tier {pred.get('tier')} = {kol_offer._fmt_num(pred.get('revshare_pct'))}% revshare from the month after hitting it.")
+    lines.append("If the KOL clearly declines the partnership or asks you to stop messaging, append [STOP] on its own line. "
+                 "All [TAGS] are invisible to the KOL.")
+    return "\n".join(lines)
+
+
+async def apply_kol_step_tags(account_id: int, user_id: int, text: str) -> tuple[str, dict]:
+    """Strip funnel tags from an AI reply and apply the (max +1) transition."""
+    result: dict = {"declined": False, "advanced": None, "tags": []}
+    tags = {t.upper() for t in _STEP_TAG_RE.findall(text or "")}
+    clean = _STEP_TAG_RE.sub("", text or "").strip()
+    if not tags:
+        return clean, result
+    result["tags"] = sorted(tags)
+    if "STOP" in tags or "DECLINED" in tags:
+        res = await db.set_kol_step(account_id, user_id, "declined", actor="ai", reason="AI tag [STOP]/[DECLINED]")
+        result["declined"] = True
+        result["advanced"] = "declined" if res.get("changed") else None
+        return clean, result
+    cur = await db.get_kol_step(account_id, user_id)
+    if "DEAL_AGREED" in tags and cur == "prospect":
+        res = await db.set_kol_step(account_id, user_id, "deal_agreed", actor="ai", reason="AI tag [DEAL_AGREED]")
+        if res.get("changed"):
+            result["advanced"] = "deal_agreed"
+            cur = "deal_agreed"
+    if "FIRST_POST" in tags:
+        if cur == "link_confirmed":
+            res = await db.set_kol_step(account_id, user_id, "first_post", actor="ai", reason="AI tag [FIRST_POST]")
+            if res.get("changed"):
+                result["advanced"] = "first_post"
+        else:
+            logger.info("[KOL Step] [FIRST_POST] tag ignored for user %d: step is %s (needs link_confirmed)", user_id, cur)
+    return clean, result
+
+
+def _step_holds_ai(step) -> bool:
+    """True once the KOL is past `prospect` (or terminal): needs_human must not auto-resume (spec B3)."""
+    name = db.normalize_kol_step(step) or "prospect"
+    return name != "prospect"
+
+
+def _step_reminder_template(item: str, lang: str) -> str:
+    t = _STEP_REMINDER_TEMPLATES.get(item) or _STEP_REMINDER_TEMPLATES["weex_uid"]
+    return t.get("vi" if (lang or "").startswith("vi") else "en", t["en"])
+
+
+async def process_step_reminders() -> dict:
+    """Step follow-ups (spec B3): for leads at deal_agreed+ whose next item is
+    owed by the KOL, send one nudge about exactly that item. Max N per step,
+    >= gap hours apart, only in the account's active hours, never for
+    declined / needs_human leads (SQL filter: status='active')."""
+    sent = 0
+    skipped = 0
+    errors: list[str] = []
+    try:
+        gap = int(await db.get_setting("kol_step_reminder_gap_hours", "48") or 48)
+        cap = int(await db.get_setting("kol_step_reminder_max_per_step", "2") or 2)
+    except Exception:
+        gap, cap = 48, 2
+    try:
+        candidates = await db.get_step_reminder_candidates(min_gap_hours=gap, max_per_step=cap)
+    except Exception as e:
+        logger.error("[StepReminder] candidate query failed: %s", e)
+        return {"sent": 0, "skipped": 0, "errors": [str(e)]}
+
+    for c in candidates:
+        account_id, user_id = c["account_id"], c["user_id"]
+        try:
+            account_obj = await db.get_account(account_id)
+            if not account_obj or not db.check_account_active_hours(account_obj):
+                skipped += 1
+                continue
+            profile = await db.get_kol_profile(account_id, user_id) or {}
+            missing = db.compute_missing_items(c.get("kol_step"), profile)
+            kol_missing = db.kol_missing_items_for_kol(missing)
+            if not kol_missing:
+                skipped += 1  # waiting on ops — nothing to ask the KOL
+                continue
+            item = kol_missing[0]
+            if await db.is_user_blacklisted(user_id=user_id, username=c.get("username") or ""):
+                skipped += 1
+                continue
+            client = tg.get_client(account_id)
+            if not client or not client.is_connected():
+                skipped += 1
+                continue
+
+            chat = await db.get_followup_chat(account_id, user_id) or {}
+            try:
+                history = json.loads(chat.get("history_json") or "[]")
+            except Exception:
+                history = []
+            lang = _detect_reply_lang(history)
+            msg = ""
+
+            agent_id = account_obj.get("ai_agent_id")
+            agent_config = await db.get_ai_agent(agent_id) if agent_id else None
+            if agent_config:
+                ai_keys = agent_config.get("api_keys_json", []) or []
+                if isinstance(ai_keys, str):
+                    try:
+                        ai_keys = json.loads(ai_keys)
+                    except Exception:
+                        ai_keys = []
+                if ai_keys:
+                    ai_provider = agent_config.get("provider", "gemini")
+                    kwargs = {}
+                    if ai_provider in ("openai_compatible", "chatgpt_oauth"):
+                        if agent_config.get("base_url"): kwargs["base_url"] = agent_config["base_url"]
+                        if agent_config.get("model"): kwargs["model"] = agent_config["model"]
+                    meta = db.MISSING_ITEM_META.get(item, {})
+                    combined = (
+                        (agent_config.get("system_prompt") or "")
+                        + "\n\n" + await render_kol_step_prompt(account_id, user_id, profile)
+                        + f"\n\n[STEP REMINDER INSTRUCTION]: The KOL has gone quiet. Write ONE short, warm, "
+                          f"natural message (1-2 sentences, same language as the KOL's last message) that asks "
+                          f"ONLY for: {meta.get('ask') or item}. No pitching, no other questions, no pressure, "
+                          f"no numbers, no tags."
+                    )
+                    try:
+                        msg = await ai_rmx.generate_chat_response(history[-6:], combined, ai_provider, ai_keys, **kwargs) or ""
+                    except Exception as e_gen:
+                        logger.debug("[StepReminder] AI generation failed for user %d: %s", user_id, e_gen)
+                        msg = ""
+            msg = _STEP_TAG_RE.sub("", msg).replace("[HANDOVER_REQUIRED]", "")
+            msg = re.sub(r'\[?METRICS\s*:.*$', '', msg, flags=re.DOTALL | re.IGNORECASE).strip()
+            msg = sanitize_telegram_html(msg) if msg else ""
+            if not msg or contains_ai_disclosure(msg) or kol_offer.find_off_ladder_figures(msg):
+                msg = _step_reminder_template(item, lang)
+
+            if await _send_ai_message(account_id, user_id, msg):
+                await db.mark_step_reminder_sent(account_id, user_id)
+                sent += 1
+                logger.info("[StepReminder] 📨 nudged user %d (acc=%d) for '%s' (step %s)",
+                            user_id, account_id, item, c.get("kol_step"))
+            else:
+                skipped += 1
+        except Exception as e:
+            logger.error("[StepReminder] Failed for user %d: %s", user_id, e)
+            errors.append(str(e))
+    return {"sent": sent, "skipped": skipped, "errors": errors}
 
 
 async def _async_distill_human_rule(account_id: int, user_id: int, message_text: str):
@@ -377,14 +717,29 @@ async def _async_distill_human_rule(account_id: int, user_id: int, message_text:
         if rule and rule.get("question") and rule.get("answer"):
             agent_id = agent_config.get("id") if agent_config else None
             if agent_id is not None:
+                # Ladder guard over distilled rules (spec A2): an admin's ad-hoc
+                # promise containing an off-ladder % / $ figure must NOT become
+                # permanent prompt policy. Such rules are stored as 'pending'
+                # (excluded from the approved-only prompt retrieval) for review.
+                rule_status = "approved"
+                try:
+                    bad_figures = kol_offer.find_off_ladder_figures(
+                        f"{rule['question']} {rule['answer']}")
+                except Exception:
+                    bad_figures = []
+                if bad_figures:
+                    rule_status = "pending"
+                    logger.warning("🎓 [Self-Learning] Rule held as PENDING (off-ladder figures %s): '%s'",
+                                   bad_figures, rule["question"])
                 await db.add_learned_knowledge(
                     ai_agent_id=agent_id,
                     source_user_id=user_id,
                     question=rule["question"],
-                    answer=rule["answer"]
+                    answer=rule["answer"],
+                    status=rule_status,
                 )
-                logger.info("🎓 [Self-Learning] Extracted new rule for agent %s: '%s' -> '%s'",
-                            agent_id, rule["question"], rule["answer"])
+                logger.info("🎓 [Self-Learning] Extracted new rule for agent %s (%s): '%s' -> '%s'",
+                            agent_id, rule_status, rule["question"], rule["answer"])
     except Exception as e:
         logger.debug("[Self-Learning] Distillation failed: %s", e)
 
@@ -684,14 +1039,12 @@ async def generate_and_send_ai_reply_for_chat(
         "4. TRUTHFULNESS MANDATE (FINTECH — ZERO TOLERANCE): You may be warm, casual and personable, but you must NEVER invent facts. STRICTLY FORBIDDEN to fabricate: a mutual friend or referral ('your friend referred you'), having watched/read their content when you have not, any UID, any campaign name, commission rates, trading volume, follower counts, earnings figures, payout status, or the claim that commission/binding is already configured. If the prospect asks how you found them, answer honestly: you found their public crypto profile/community and reached out directly. If you do not know something, say you will check with the team. A single fabricated fact destroys the partnership.\n"
         "5. WARM-UP BEFORE OFFER (RAPPORT PHASE): On the first 1-3 exchanges, prioritise a natural human conversation over pitching. Open with a genuine, verifiable reason for reaching out, ask about their community/market view, and react to what they actually say. Do NOT dump commission numbers, campaign lists or CTAs until the prospect shows interest or asks what you want. Small talk, market chat and light humour are encouraged; invented personal history is not. If the prospect challenges your opener or asks 'who are you / how did you find me', drop everything else, own the mistake plainly if the opener was wrong, state the real source, introduce yourself by name and role, and offer to let them verify before continuing.\n"
         "6. PROFESSIONAL REPLIES ONLY (NO NONSENSE): Every reply must be a meaningful, professional business message. STRICTLY FORBIDDEN: one-word jokes, religious phrases, memes, or throwaway replies ('Mô phật', 'lol', 'ok', a single emoji) — these destroy credibility. If someone sends a document/file with no text, acknowledge it professionally: 'Got the file, let me take a look 👍' (or same meaning in the user's language). If the counterparty appears to be another exchange's admin, support bot, or someone pitching THEIR product to you, stay brief and courteous, do NOT pitch WEEX, do NOT joke, and append [HANDOVER_REQUIRED] so a human decides.\n"
-        "7. KNOWLEDGE BASE & COMMISSION QUOTING MANDATE:\n"
-        "   - VIETNAMESE 🇻🇳, KOREAN 🇰🇷, CHINESE 🇨🇳 (or Verified Volume > 20M): Quote 70% - 80% commission.\n"
-        "   - GLOBAL / ENGLISH / HIGH-RISK / NIGERIA 🇳🇬 / INDIA 🇮🇳 / OTHER (< 20M volume): STRICTLY ONLY quote 50% - 60% base commission. NEVER mention 70% or 80%! Highlight daily USDT withdrawals, No KYC, No Tax, and ask for their community link & monthly volume.\n"
+        "7. COMMISSION QUOTING MANDATE: The ONLY commission figures you may quote are in the OFFICIAL WEEX KOL COMMISSION LADDER block below (same ladder for every KOL, every region). Lead with 'up to 80%' and explain the ladder only when the KOL asks for details. Never invent a tier, a % or a $ figure that is not in that block.\n"
         "8. STRICT CONTEXTUAL CONTINUATION, NATURAL HUMAN TONE & ANTI-NAGGING:\n"
         "   - NATURAL HUMAN TONE: Be friendly, open and approachable like a crypto industry peer (bro, mate, buddy). Do not use robotic, formal, or bureaucratic language.\n"
         "   - ANTI-NAGGING & NO FORCED CTA: NEVER push, pressure, or nag the KOL into taking action. BANNED phrases: 'Ready to post?', 'When will you publish?', 'Can you start now?'.\n"
         "   - CONCISE DIRECT ANSWERS: When the partner asks a simple question (KYC, deposit, ref link), give a short friendly answer and STOP. Do not stuff extra questions or CTAs at the end!\n"
-        "   - ANTI-CHECKLIST / ANTI-WIZARD: NEVER use form-like or step-by-step robot phrasing (BANNED: 'UID received. Setting up...', 'Next step: 1..., 2...'). Talk naturally like a BD friend (e.g. 'Got your UID bro! Will bind commission for you now. Feel free to check out the campaign when you have time 👍').\n"
+        "   - NATURAL, ONE NEXT STEP PER TURN: Talk like a BD friend, not a form. Do not list numbered multi-step checklists ('Next step: 1..., 2...'). You may guide the KOL forward, but mention at most ONE next thing per reply — the single item marked as missing in the KOL ONBOARDING STATE block (e.g. 'Got your UID bro! Team will bind it on our side 👍').\n"
         "   - VIDEO HANDLING (HUMAN BUFFER STRATEGY): When the partner sends a Video (or says 'video done', 'check video'):\n"
         "     * Use a natural human excuse about loading on mobile: English: 'Got the video bro! Loading it on mobile, let me check the volume details and get back to you shortly 👍' / Vietnamese: 'Đã nhận video nhé bro! Mạng bên mình đang load xíu, để mình soi kỹ số liệu rồi báo lại ngay nhé 👍'.\n"
         "     * Automatically append [HANDOVER_REQUIRED] so Will can review the video personally.\n"
@@ -723,13 +1076,30 @@ async def generate_and_send_ai_reply_for_chat(
     if kb and kb.strip():
         combined_prompt += "\n\n--- KNOWLEDGE BASE ---\n" + kb.strip()
 
-    kol_prof = await db.get_kol_profile(account_id, user_id)
+    kol_prof = await db.get_kol_profile(account_id, user_id) or {}
+    # Official commission ladder (spec A2): generated from the kol_offer_ladder
+    # setting, replaces the old per-language 50-60 / 70-80 rule.
+    offer_ladder = None
+    try:
+        offer_ladder = await kol_offer.get_ladder()
+        combined_prompt += "\n\n" + kol_offer.render_offer_ladder_prompt(
+            offer_ladder, kol_prof.get("volume_claimed"))
+    except Exception as _ladder_err:
+        logger.error("[AIFollowUp] Could not render offer ladder: %s", _ladder_err)
+
     if kol_prof:
-        prof_lines = [f" - {k}: {v}" for k, v in kol_prof.items() if v]
+        prof_lines = [f" - {k}: {v}" for k, v in kol_prof.items() if v and k != "missing_items"]
         if prof_lines:
             combined_prompt += "\n\n--- REMEMBERED KOL PROFILE (FACTS PREVIOUSLY STATED BY THIS USER) ---\n"
             combined_prompt += "\n".join(prof_lines)
             combined_prompt += "\nDO NOT ask the user for any of these facts again!"
+
+    # 5-step onboarding state (spec B2): "ĐÃ CÓ / CÒN THIẾU" block so the AI
+    # only asks for the single missing item and never re-asks known facts.
+    try:
+        combined_prompt += "\n\n" + await render_kol_step_prompt(account_id, user_id, kol_prof)
+    except Exception as _step_err:
+        logger.error("[AIFollowUp] Could not render KOL step block: %s", _step_err)
 
     if agent_config and agent_config.get("id"):
         # Relevance-ranked instead of blind newest-30 (v3.7.6): with 800+ rules
@@ -767,9 +1137,15 @@ async def generate_and_send_ai_reply_for_chat(
                 account_id, user_id, sender_username,
                 reason="AI triggered [HANDOVER_REQUIRED]"
             ))
-        elif "[ONBOARDED]" in ai_reply:
-            new_status = "onboarded"
-            ai_reply = ai_reply.replace("[ONBOARDED]", "").strip()
+
+        # 5-step funnel tags (spec B1): AI may advance exactly one step.
+        ai_reply, step_result = await apply_kol_step_tags(account_id, user_id, ai_reply)
+        if step_result.get("declined"):
+            new_status = "needs_human"
+            _spawn_background(_notify_main_account_handover(
+                account_id, user_id, sender_username,
+                reason="KOL declined / asked to stop — step reminders halted"
+            ))
 
         intent_score = 30
         lead_tier = "Tier C"
@@ -825,6 +1201,19 @@ async def generate_and_send_ai_reply_for_chat(
                 account_id, user_id, sender_username,
                 reason="AI reply blocked: attempted AI/bot self-disclosure"
             ))
+        else:
+            # Off-ladder guard (spec A2): any % / $ figure not in the official
+            # ladder is replaced by a safe fallback and escalated to a human.
+            off_ladder = kol_offer.find_off_ladder_figures(ai_reply, offer_ladder)
+            if off_ladder:
+                logger.warning("[AIFollowUp] 🚫 Blocked off-ladder figures %s for user %d — using safe fallback",
+                               off_ladder, user_id)
+                ai_reply = kol_offer.get_safe_offer_fallback_reply(_detect_reply_lang(full_history))
+                new_status = "needs_human"
+                _spawn_background(_notify_main_account_handover(
+                    account_id, user_id, sender_username,
+                    reason=f"AI reply blocked: off-ladder figures {', '.join(off_ladder)}"
+                ))
 
         delay = min(22.0, max(8.0, len(ai_reply) * 0.04 + random.uniform(5.0, 10.0)))
         logger.info("[AIFollowUp] Simulating human reading & typing for %.1fs before sending AI reply to user %d...", delay, user_id)
@@ -1146,7 +1535,10 @@ def _make_handler(account_id: int):
                 # 12h timeout check on incoming message — use human_takeover_at.
                 # Stage 'paused'/'signed' is an explicit operator hold (/aioff):
                 # NEVER auto-resume those, regardless of elapsed time.
-                _held_stage = (chat.get("stage") or "new") in ("paused", "signed")
+                # Spec B3: once the KOL is past `prospect` (deal agreed or later),
+                # needs_human is held until an admin re-enables the AI.
+                _held_stage = ((chat.get("stage") or "new") in ("paused", "signed")
+                               or _step_holds_ai(chat.get("kol_step")))
                 if current_status in ("needs_human", "paused_admin") and not _held_stage:
                     # Prefer human_takeover_at; fallback to updated_at for legacy rows.
                     # If BOTH are NULL the chat could otherwise stay locked forever,
@@ -1281,6 +1673,11 @@ async def _followup_periodic_loop():
                 await process_outreach_nudges()
             except Exception as e_nudge:
                 logger.error("[NudgeEngine] Error in nudge batch: %s", e_nudge)
+            # Step reminders — nhắc đúng 1 item còn thiếu cho KOL đã chốt deal (spec B3)
+            try:
+                await process_step_reminders()
+            except Exception as e_step:
+                logger.error("[StepReminder] Error in step reminder batch: %s", e_step)
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -1428,17 +1825,22 @@ def _silence_hours(updated_at: str | None) -> float:
 
 def _drip_instruction_for_stage(stage: int, total_stages: int, tier: str = "Tier B") -> str:
     """Prompt instruction for a given drip stage (1-indexed), adapted by tier."""
+    # NOTE (spec A2): NEVER put concrete % or $ figures in these instructions.
+    # Every number the AI may quote must come from the official ladder block
+    # (kol_offer.render_offer_ladder_prompt) — a hard-coded figure here used to
+    # leak "$50,000 prize pool" past the off-ladder guard.
     if stage == 1:
         if tier == "Tier A":
             return (
                 "The user (a high-value KOL) has not replied in about half a day. Send a friendly, "
                 "personalized follow-up (1-2 short sentences) referencing a specific benefit relevant "
-                "to their profile — e.g. exclusive fee tier, revenue share, or VIP trading event."
+                "to their profile — e.g. the official revshare ladder or a currently running campaign. "
+                "Do NOT invent any percentage or dollar figure outside the official ladder."
             )
         return (
             "The user has not replied in about 1 day. Send a friendly, non-pushy follow-up "
-            "(1-2 short sentences) mentioning our latest crypto trading competition with "
-            "$50,000 prize pool and VIP Maker fee discounts."
+            "(1-2 short sentences) mentioning a currently running trading campaign or the daily "
+            "commission payout. Do NOT invent any percentage or dollar figure outside the official ladder."
         )
     if stage == total_stages:
         return (
@@ -1486,6 +1888,7 @@ async def process_drip_followups() -> dict:
                 SELECT * FROM ai_followup_chats
                 WHERE status IN ('needs_human', 'paused_admin')
                   AND COALESCE(NULLIF(stage, ''), 'new') NOT IN ('paused', 'signed')
+                  AND COALESCE(NULLIF(kol_step, ''), 'prospect') = 'prospect'
                   AND (human_takeover_at IS NULL OR datetime(human_takeover_at) <= datetime('now', '-12 hours'))
                   AND datetime(updated_at) <= datetime('now', '-12 hours')
                 LIMIT 20
@@ -1559,9 +1962,12 @@ async def process_drip_followups() -> dict:
             # Anchor silence on COALESCE(last_user_message_at, updated_at):
             # last_user_message_at is only bumped by inbound user messages, so
             # our own follow-ups no longer reset the cadence clock.
+            # Leads past `prospect` are handled by process_step_reminders()
+            # (one missing item, capped) instead of the tier drip.
             cursor = await db_conn.execute("""
                 SELECT * FROM ai_followup_chats
                 WHERE status = 'active'
+                  AND COALESCE(NULLIF(kol_step, ''), 'prospect') = 'prospect'
                   AND last_user_message_at IS NOT NULL
                   AND datetime(COALESCE(last_user_message_at, updated_at)) <= datetime('now', ?)
                 ORDER BY COALESCE(last_user_message_at, updated_at) ASC
@@ -1607,7 +2013,17 @@ async def process_drip_followups() -> dict:
             drip_instruction = _drip_instruction_for_stage(stage, total_stages, tier)
 
             sys_p = agent_config.get("system_prompt", "") if agent_config else ""
-            combined = sys_p + f"\n\n[DRIP FOLLOWUP STAGE {stage}/{total_stages} — {tier} INSTRUCTION]: " + drip_instruction
+            try:
+                offer_block = kol_offer.render_offer_ladder_prompt(
+                    await kol_offer.get_ladder(),
+                    (await db.get_kol_profile(account_id, user_id) or {}).get("volume_claimed"),
+                )
+            except Exception as offer_exc:
+                logger.error("[DripEngine] Could not load offer ladder for user %d: %s", user_id, offer_exc)
+                continue
+            combined = (sys_p + "\n\n" + offer_block
+                        + f"\n\n[DRIP FOLLOWUP STAGE {stage}/{total_stages} — {tier} INSTRUCTION]: "
+                        + drip_instruction)
 
             try:
                 history = json.loads(chat.get("history_json", "[]"))
@@ -1628,6 +2044,13 @@ async def process_drip_followups() -> dict:
                     msg = sanitize_telegram_html(msg)
                     if contains_ai_disclosure(msg):
                         logger.warning("[DripEngine] 🚫 Blocked AI-disclosure drip for user %d", user_id)
+                        continue
+                    # Off-ladder guard (spec A2) — same policy as the interactive
+                    # reply path: a drip message may never quote unapproved figures.
+                    off_ladder = kol_offer.find_off_ladder_figures(msg)
+                    if off_ladder:
+                        logger.warning("[DripEngine] 🚫 Blocked off-ladder figures %s in drip for user %d",
+                                       off_ladder, user_id)
                         continue
                     if await _send_ai_message(account_id, user_id, msg, drip_stage=stage):
                         sent_count += 1
@@ -1761,7 +2184,13 @@ async def process_outreach_nudges() -> dict:
             agent_config = await db.get_ai_agent(agent_id) if agent_id else None
 
             sys_p = agent_config.get("system_prompt", "") if agent_config else ""
-            combined_prompt = sys_p + "\n\n[OUTREACH NUDGE INSTRUCTION]: " + _NUDGE_PROMPT_INSTRUCTION
+            try:
+                nudge_offer_block = kol_offer.render_offer_ladder_prompt(await kol_offer.get_ladder())
+            except Exception as offer_exc:
+                logger.error("[NudgeEngine] Could not load offer ladder for user %d: %s", user_id, offer_exc)
+                continue
+            combined_prompt = (sys_p + "\n\n" + nudge_offer_block
+                               + "\n\n[OUTREACH NUDGE INSTRUCTION]: " + _NUDGE_PROMPT_INSTRUCTION)
 
             ai_provider = agent_config.get("provider", "gemini") if agent_config else "gemini"
             ai_keys = agent_config.get("api_keys_json", []) if agent_config else []
@@ -1790,6 +2219,14 @@ async def process_outreach_nudges() -> dict:
                 await db.record_nudge(account_id, user_id, channel, "skipped",
                                       watcher_id=watcher_id, campaign_id=campaign_id,
                                       error_message="ai_disclosure")
+                skipped += 1
+                continue
+            off_ladder = kol_offer.find_off_ladder_figures(msg)
+            if off_ladder:
+                logger.warning("[NudgeEngine] 🚫 Blocked off-ladder figures %s for user %d", off_ladder, user_id)
+                await db.record_nudge(account_id, user_id, channel, "skipped",
+                                      watcher_id=watcher_id, campaign_id=campaign_id,
+                                      error_message="off_ladder:" + ",".join(off_ladder))
                 skipped += 1
                 continue
 

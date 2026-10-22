@@ -24,6 +24,7 @@ import telegram_client as tg
 import template_rotation as tmpl_rot
 from message_merger import merge_messages
 from personalization import apply_personalization
+from account_busy import AccountBusy, acquire as acquire_account_busy
 
 logger = logging.getLogger("tg-scheduler.members")
 router = APIRouter(prefix="/api/members", tags=["members"])
@@ -1990,10 +1991,6 @@ async def _run_campaign(campaign_id: int):
             limit_premium if acc_prem_map.get(sid, False) else limit_normal
             for sid in sender_ids
         )
-        acc_daily_count_map = {
-            sid: await db.get_account_daily_dm_count(sid)
-            for sid in sender_ids
-        }
 
 
         for member in members:
@@ -2099,7 +2096,10 @@ async def _run_campaign(campaign_id: int):
                 # Daily DM limit check per account
                 is_premium = acc_prem_map.get(acc_id, False)
                 dm_limit = limit_premium if is_premium else limit_normal
-                dm_count = acc_daily_count_map.get(acc_id, 0)
+                # Read the shared DB counter on every candidate. The old
+                # per-campaign snapshot let concurrent campaigns double-spend
+                # one sender's daily quota.
+                dm_count = await db.get_account_daily_dm_count_live(acc_id)
                 limit_reached = dm_count >= dm_limit
                 if limit_reached:
                     logger.warning(f"[Campaign {campaign_id}] Account {acc_id} daily limit ({dm_count}/{dm_limit})")
@@ -2116,6 +2116,32 @@ async def _run_campaign(campaign_id: int):
                 # Already paused & popped — exit and return to prevent overwriting status
                 return
 
+            # ── Reserve-before-send (idempotency) ──────────────────────────
+            # The reservation row is written BEFORE the Telegram network call.
+            # A crash between "message accepted" and "log success" therefore
+            # cannot cause startup auto-resume to DM the same lead twice.
+            reserved = await db.reserve_dm_campaign_target(campaign_id, user_id, acc_id)
+            if not reserved:
+                logger.info("[Campaign %d] Target %d already reserved — skipping (no duplicate DM)",
+                            campaign_id, user_id)
+                skipped += 1
+                continue
+            _reservation_done = False
+
+            # ── account_busy: never drive one account from two engines at once ──
+            # (campaigns previously bypassed the registry that engagement/warmup
+            # already respect — same nick could DM + react simultaneously).
+            _busy_cm = acquire_account_busy(acc_id, "dm", ttl_secs=180)
+            try:
+                await _busy_cm.__aenter__()
+            except AccountBusy as ab:
+                logger.info("[Campaign %d] Account %d busy with '%s' — retrying member later",
+                            campaign_id, acc_id, ab.current_kind)
+                await db.finish_dm_campaign_reservation(campaign_id, user_id, "failed", "account_busy")
+                flooded_accounts[acc_id] = time.time() + 30
+                await asyncio.sleep(5)
+                continue
+
             try:
                 # Resolve peer using get_entity (safe & uses session cache)
                 try:
@@ -2129,6 +2155,7 @@ async def _run_campaign(campaign_id: int):
                         peer = await client.get_entity(PeerUser(user_id))
                     except Exception as pe2:
                         skipped += 1
+                        await db.finish_dm_campaign_reservation(campaign_id, user_id, "failed", str(pe2)[:80])
                         await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username,
                                                     "skipped", f"Không resolve được: {str(pe2)[:80]}")
                         await asyncio.sleep(base_delay)  # Always respect delay to avoid FloodWait
@@ -2252,8 +2279,9 @@ async def _run_campaign(campaign_id: int):
 
                 sent += 1
                 daily_sent += 1
-                acc_daily_count_map[acc_id] = acc_daily_count_map.get(acc_id, 0) + 1
                 consecutive_errors = 0  # Reset on success
+                await db.finish_dm_campaign_reservation(campaign_id, user_id, "sent")
+                _reservation_done = True
                 await db.add_dm_campaign_log(
                     campaign_id, acc_id, user_id, username, "success",
                     template_variant_id=template_id,
@@ -2403,6 +2431,22 @@ async def _run_campaign(campaign_id: int):
                     failed += 1
                     consecutive_errors += 1
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed", err_str[:100])
+
+            finally:
+                # Always release the per-account busy slot…
+                try:
+                    await _busy_cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                # …and never leave a reservation dangling as 'pending': any path
+                # that did not record success is a failure (retryable next run).
+                if not _reservation_done:
+                    try:
+                        await db.finish_dm_campaign_reservation(
+                            campaign_id, user_id, "failed", "send_not_completed")
+                    except Exception:
+                        logger.warning("[Campaign %d] could not close reservation for %d",
+                                       campaign_id, user_id)
 
             # Update progress in DB real-time on every iteration
             await db.update_dm_campaign_status(campaign_id, "running",

@@ -64,7 +64,7 @@ async def test_02_list_accounts(client):
 # 3. Check status endpoint (authorized / unauthorized accounts).
 async def test_03_auth_status(client):
     # Register an account
-    await db.create_account({
+    acc_id = await db.create_account({
         "name": "Test Account Status",
         "phone": "+8488888888",
         "api_id": "2040",
@@ -75,8 +75,21 @@ async def test_03_auth_status(client):
     response = client.get("/api/auth/status")
     assert response.status_code == 200
     data = response.json()
-    assert data["authenticated"] is True
-    assert len(data["accounts"]) >= 1
+    # A brand-new account has no Telegram session yet → not authenticated.
+    # (The endpoint is a fast path: no Telegram RPC, it reads the DB flag the
+    # engine writes after the account connects.)
+    assert data["authenticated"] is False
+    assert data["has_accounts"] is True
+
+    # Once the engine reports the account as logged in, status flips.
+    await db.update_account_login_status(acc_id, True)
+    try:
+        data = client.get("/api/auth/status").json()
+        assert data["authenticated"] is True
+        assert len(data["accounts"]) >= 1
+        assert any(a["account_id"] == acc_id for a in data["accounts"])
+    finally:
+        await db.update_account_login_status(acc_id, False)
 
 # 4. Toggle premium for account (changes limit from 10 to 50).
 async def test_04_toggle_premium(client):
