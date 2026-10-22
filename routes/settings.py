@@ -536,12 +536,15 @@ async def save_forum_inbox_config(payload: ForumInboxConfig):
             raise HTTPException(status_code=400, detail="group_id phải là ID supergroup âm, ví dụ -1004352266125")
         if payload.general_topic_id <= 0:
             raise HTTPException(status_code=400, detail="general_topic_id phải là số dương (General = 1)")
+        import os
         cfg = await db.get_settings_bulk({
             "command_bot_admin_ids": "",
             "command_bot_token": "",
         })
-        if not cfg["command_bot_admin_ids"] or not cfg["command_bot_token"]:
-            raise HTTPException(status_code=400, detail="Cấu hình Command Bot token và Admin IDs trước")
+        admin_ids = (os.getenv("COMMAND_BOT_ADMIN_IDS") or cfg["command_bot_admin_ids"]).strip()
+        token = (os.getenv("COMMAND_BOT_TOKEN") or cfg["command_bot_token"]).strip()
+        if not admin_ids or not token:
+            raise HTTPException(status_code=400, detail="Cấu hình Command Bot token và Admin IDs trước (env COMMAND_BOT_TOKEN / COMMAND_BOT_ADMIN_IDS hoặc Settings)")
     await db.set_settings_bulk({
         "forum_inbox_enabled": "1" if payload.enabled else "0",
         "forum_inbox_group_id": str(payload.group_id),
@@ -608,15 +611,22 @@ async def resolve_forum_inbox_link(payload: ResolveForumLinkPayload):
 
 @router.get("/command-bot/config")
 async def get_command_bot_config():
+    import os
     s = await db.get_settings_bulk({
         "command_bot_enabled": "0",
         "command_bot_token": "",
         "command_bot_admin_ids": "",
     })
+    # v3.10.2: env vars take precedence over the settings table (plaintext token
+    # in the DB leaked once). UI shows which source is live.
+    env_token = (os.getenv("COMMAND_BOT_TOKEN") or "").strip()
+    env_ids = (os.getenv("COMMAND_BOT_ADMIN_IDS") or "").strip()
     return {
         "enabled": s["command_bot_enabled"] == "1",
-        "token": s["command_bot_token"],
-        "admin_ids": s["command_bot_admin_ids"],
+        "token": "(từ env COMMAND_BOT_TOKEN)" if env_token else s["command_bot_token"],
+        "admin_ids": env_ids or s["command_bot_admin_ids"],
+        "token_from_env": bool(env_token),
+        "admin_ids_from_env": bool(env_ids),
     }
 
 

@@ -8,11 +8,69 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.10.2",
+        "date": "23/10/2026",
+        "title": "🔧 Nối mạch 4 tính năng viết-mà-không-chạy + siết chính sách needs_human + token ra khỏi DB",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Bốn tính năng từng 'có code nhưng chết': (1) rescore_and_update gọi method không tồn tại trên raw connection — lead_score_history mãi 0 row; (2) distribution_enabled không ai set — kol_channel_watcher luôn broadcast tập rỗng; (3) offer_version chưa bao giờ được ghi khi KOL chốt deal; (4) verification_status có API ghi nhưng không ai đọc. Kèm theo: chốt chính sách needs_human (chỉ auto-resume cho lead prospect), chuyển token Command Bot sang env var, và tài liệu cố vấn serverless (docs/serverless-advisory.md).",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Lead scoring: rescore_and_update sống lại — lead_score_history bắt đầu có dữ liệu",
+                "desc": "rescore_and_update gọi `db_conn.get_followup_chat(...)` trên raw aiosqlite connection (method này không tồn tại ở đó) — AttributeError bị nuốt im lặng nên 398 lead chưa từng được re-score và lead_score_history có 0 row. Nay đọc trực tiếp bằng SQL qua pooled connection (mock test cũ vẫn chạy), INSERT lịch sử có commit, và lỗi insert được log WARNING thay vì nuốt.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "Phân phối kênh: distribution_enabled tự bật khi link_confirmed",
+                "desc": "get_kols_for_distribution yêu cầu profile.distribution_enabled=True nhưng không luồng nào set nó ⇒ kol_channel_watcher luôn gửi cho 0 KOL. Nay khi team xác nhận link (bước link_confirmed), distribution_enabled mặc định bật — trừ khi admin đã tắt tay trước đó (opt-out được tôn trọng tuyệt đối).",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "offer_version: chốt deal là ghim phiên bản thang commission",
+                "desc": "kol_profiles.offer_version sinh ra để audit 'KOL đồng ý thang nào' nhưng chưa từng được ghi. Nay set_kol_step(deal_agreed) tự ghim version thang hiện hành vào profile (không ghi đè nếu đã có) — đổi thang về sau vẫn truy được KOL cũ đã chốt ở version nào.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "fix",
+                "title": "verification_status: từ cột ghi-không-đọc thành tín hiệu cho AI + UI",
+                "desc": "API /verification ghi trạng thái (requested/submitted/verified/rejected) nhưng không nơi nào đọc. Nay get_kol_state trả về verification_status, và prompt AI chèn dòng 'VERIFICATION: ...' (ví dụ: rejected ⇒ dặn AI không re-ask, escalate lịch sự) — UI danh sách lead vốn đã hiển thị cột này từ trước.",
+                "tag": "Sửa lỗi"
+            },
+            {
+                "type": "improvement",
+                "title": "Chính sách needs_human chốt theo quyết định founder",
+                "desc": "Auto-resume sau 12h im lặng CHỈ áp dụng cho lead còn ở bước prospect; lead đã chốt deal trở lên (deal_agreed → active, declined, dormant) giữ nguyên needs_human đến khi admin mở lại. 15 lead needs_human hiện tại: lead prospect sẽ tự hồi khi KOL nhắn mới, phần còn lại chờ admin xử lý trong /pipeline.",
+                "tag": "Chính sách"
+            },
+            {
+                "type": "security",
+                "title": "Command Bot token ưu tiên env var — không còn bắt buộc nằm trong DB",
+                "desc": "command_bot_token từng lưu plaintext trong bảng settings và đã lộ qua một bản dump DB (token đó đã revoke). Nay COMMAND_BOT_TOKEN + COMMAND_BOT_ADMIN_IDS đọc từ env trước; settings cũ vẫn chạy (fallback) nhưng log cảnh báo nhắc chuyển. API /command-bot/config không echo token khi nguồn là env. Xem .env.example.",
+                "tag": "Bảo mật"
+            },
+            {
+                "type": "improvement",
+                "title": "Cố vấn serverless: docs/serverless-advisory.md",
+                "desc": "Kết luận: serverless thuần (Lambda/Vercel) không chạy được 19 session Telethon + SQLite; hướng đúng là split runtime web/worker đã viết sẵn (heartbeat 15s, lease 120s) → bước 1 chạy split ngay trên máy hiện tại, bước 2 một VPS ~$5-10/tháng với systemd. Kèm bảng 'những thứ không nên làm' và checklist trước khi bấm nút. Chưa deploy gì — chỉ cố vấn.",
+                "tag": "Tài liệu"
+            },
+            {
+                "type": "improvement",
+                "title": "Test: 16 test mới cho 4 fix + policy + env credentials",
+                "desc": "tests/test_kol_fixes_v3102.py chạy trên SQLite thật: rescore ghi history + intent_score, distribution default-on nhưng tôn trọng opt-out, offer_version ghim 1 lần, verification_status xuất hiện trong state + prompt AI, ma trận _step_holds_ai 8 bước, và env-first token/admin_ids.",
+                "tag": "Chất lượng"
+            },
+        ],
+    },
+    {
         "version": "v3.10.1",
         "date": "22/10/2026",
         "title": "🩺 Đo lại thật — phễu KOL 5 bước từng chỉ tồn tại trong code, chưa từng sống trong DB",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Kiểm toán toàn hệ thống phát hiện 3 lớp lỗi im lặng: (1) toàn bộ schema phễu 5 bước (kol_step, kol_profiles, kol_step_events) chỉ nằm trong database.py — DB thật chưa từng nhận ALTER nào, vì ~40 lệnh `except: pass` nuốt lỗi; /pipeline và web vẫn hiển thị như đã chạy. (2) AI vẫn có thể tự chế số ($50.000 prize pool hard-code trong prompt drip, thiếu ladder guard ở drip/nudge, learned rule auto-approve). (3) DM campaign không reserve trước khi gửi, đếm hạn mức riêng từng campaign và không khai báo account_busy. Bản này vá cả 3, thêm self-check schema tự sửa, và khoá lại bằng 30 test.",
         "changes": [
             {

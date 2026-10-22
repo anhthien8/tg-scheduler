@@ -491,6 +491,15 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
         lines.append("ALREADY HAVE (never ask for these again): " + "; ".join(f"{k}={v}" for k, v in have.items()))
     else:
         lines.append("ALREADY HAVE: nothing recorded yet.")
+    verification = state.get("verification_status") or "none"
+    if verification and verification != "none":
+        _verif_labels = {
+            "requested": "we asked the KOL for verification material",
+            "submitted": "the KOL submitted material; our team is reviewing",
+            "verified": "identity/volume VERIFIED by our team",
+            "rejected": "verification was REJECTED — escalate politely, do not re-ask",
+        }
+        lines.append(f"VERIFICATION: {verification} — {_verif_labels.get(verification, verification)}.")
     missing = state.get("missing_items") or []
     kol_missing = db.kol_missing_items_for_kol(missing)
     ops_missing = [m for m in missing if m not in kol_missing]

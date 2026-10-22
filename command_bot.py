@@ -9,6 +9,7 @@ ponytail: v1 — text send + inline keyboards. Thêm media, broadcast, /kol card
 """
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 
@@ -21,6 +22,32 @@ import telegram_client as tg
 import telegram_forum_inbox as fx
 
 logger = logging.getLogger("tg-scheduler.command_bot")
+
+# ── Credentials (env-first) ─────────────────────────────────────────────────
+# v3.10.2: the bot token used to live ONLY in the settings table (plaintext in
+# the DB — it leaked once via a DB dump and had to be revoked). Env vars are
+# now the preferred source; the settings row remains a fallback for existing
+# installs but logs a warning so the operator migrates.
+
+async def get_command_bot_token() -> str:
+    """COMMAND_BOT_TOKEN env var first; settings table as legacy fallback."""
+    env_token = (os.getenv("COMMAND_BOT_TOKEN") or "").strip()
+    if env_token:
+        return env_token
+    legacy = (await db.get_setting("command_bot_token", "") or "").strip()
+    if legacy:
+        logger.warning("[CommandBot] ⚠️ bot token read from settings table (plaintext in DB). "
+                       "Move it to the COMMAND_BOT_TOKEN env var and clear the setting.")
+    return legacy
+
+
+async def get_command_bot_admin_ids_str() -> str:
+    """COMMAND_BOT_ADMIN_IDS env var first; settings table as legacy fallback."""
+    env_ids = (os.getenv("COMMAND_BOT_ADMIN_IDS") or "").strip()
+    if env_ids:
+        return env_ids
+    return (await db.get_setting("command_bot_admin_ids", "") or "").strip()
+
 
 # ── Bot client & state ─────────────────────────────────────────────────────
 _bot: TelegramClient | None = None
@@ -1059,7 +1086,7 @@ async def _load_forum_config() -> "fx.ForumConfig":
         enabled = False
     return fx.ForumConfig(enabled=enabled, group_id=group_id,
                           general_topic_id=general_id or 1,
-                          admin_ids=fx.parse_int_set(await db.get_setting("command_bot_admin_ids", "")))
+                          admin_ids=fx.parse_int_set(await get_command_bot_admin_ids_str()))
 
 
 class _TelethonForumBot:
@@ -1631,12 +1658,13 @@ async def start_command_bot():
             logger.info("[CommandBot] Disabled (set command_bot_enabled=1 in settings)")
             return False
 
-        token = await db.get_setting("command_bot_token", "")
+        token = await get_command_bot_token()
         if not token:
-            logger.warning("[CommandBot] No bot token configured")
+            logger.warning("[CommandBot] No bot token configured "
+                           "(set COMMAND_BOT_TOKEN env var or the command_bot_token setting)")
             return False
 
-        admin_ids_str = await db.get_setting("command_bot_admin_ids", "")
+        admin_ids_str = await get_command_bot_admin_ids_str()
         if not admin_ids_str:
             logger.warning("[CommandBot] No admin user IDs configured")
             return False

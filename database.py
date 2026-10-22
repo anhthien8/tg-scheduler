@@ -7223,6 +7223,27 @@ async def set_kol_step(
         await refresh_missing_items(account_id, user_id, target)
     except Exception as exc:
         logger.warning(f"[KOLStep] refresh_missing_items failed: {exc}")
+    # v3.10.2: side-effects that used to be "documented but never written".
+    try:
+        if target == "deal_agreed":
+            # Pin the ladder version the KOL actually agreed to (audit trail for
+            # later ladder edits). Never overwrite an existing pin.
+            profile = await get_kol_profile(account_id, user_id)
+            if not profile.get("offer_version"):
+                import kol_offer  # local import: kol_offer imports database
+                ladder = await kol_offer.get_ladder()
+                if ladder.get("version"):
+                    await upsert_kol_profile(account_id, user_id,
+                                             {"offer_version": ladder["version"]})
+        elif target == "link_confirmed":
+            # Default opt-in: once our team confirmed the affiliate link, the KOL
+            # joins channel distribution unless someone explicitly turned it off.
+            profile = await get_kol_profile(account_id, user_id)
+            if profile.get("distribution_enabled") is None:
+                await upsert_kol_profile(account_id, user_id,
+                                         {"distribution_enabled": True})
+    except Exception as exc:
+        logger.warning(f"[KOLStep] step side-effect ({target}) failed: {exc}")
     logger.info(f"[KOLStep] {account_id}/{user_id}: {current} → {target} by {actor} ({reason})")
     return {"changed": True, "from": current, "to": target}
 
@@ -7294,6 +7315,9 @@ async def get_kol_state(account_id: int, user_id: int) -> dict:
         "have": have,
         "status": chat.get("status") if chat else None,
         "stage": chat.get("stage") if chat else None,
+        # v3.10.2: verification_status was write-only (API wrote it, nothing read
+        # it). Surface it here so the step bar, Forum card and AI prompt see it.
+        "verification_status": (chat or {}).get("verification_status") or "none",
         "step_reminders_sent": (chat or {}).get("step_reminders_sent") or 0,
         "kol_step_updated_at": (chat or {}).get("kol_step_updated_at"),
     }

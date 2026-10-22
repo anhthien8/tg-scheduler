@@ -26,6 +26,8 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+
+import aiosqlite
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger("tg-scheduler.lead_scoring")
@@ -197,6 +199,40 @@ def passes_icp(member: dict, min_score: int, now: datetime | None = None) -> tup
 
 # ── Phase 2: Dynamic Score (needs DB) ───────────────────────────────
 
+async def _fetch_followup_chat(db_conn, account_id: int, user_id: int) -> dict | None:
+    """Read the chat row through whatever `get_db()` yielded.
+
+    Live code yields a raw pooled aiosqlite.Connection (NO get_followup_chat
+    method — calling it raised AttributeError and silently killed every
+    rescore, which is why lead_score_history stayed at 0 rows). Tests hand in
+    mocks that DO expose get_followup_chat; keep honoring those.
+    """
+    helper = getattr(db_conn, "get_followup_chat", None)
+    if callable(helper):
+        return await helper(account_id, user_id)
+    db_conn.row_factory = aiosqlite.Row
+    cursor = await db_conn.execute(
+        "SELECT * FROM ai_followup_chats WHERE account_id = ? AND user_id = ?",
+        (account_id, user_id),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def _fetch_kol_profile(db_conn, account_id: int, user_id: int) -> dict | None:
+    """Same raw-connection fallback as _fetch_followup_chat, for kol_profiles."""
+    helper = getattr(db_conn, "get_kol_profile", None)
+    if callable(helper):
+        return await helper(account_id, user_id)
+    db_conn.row_factory = aiosqlite.Row
+    cursor = await db_conn.execute(
+        "SELECT * FROM kol_profiles WHERE account_id = ? AND user_id = ?",
+        (account_id, user_id),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
 async def score_lead_dynamic(user_id: int, account_id: int,
                              static_score: int = 0) -> LeadScore:
     """Post-conversation dynamic scoring — combines static + conversational signals.
@@ -212,7 +248,7 @@ async def score_lead_dynamic(user_id: int, account_id: int,
     try:
         async with get_db() as db_conn:
             # ── Reply signals from ai_followup_chats ──
-            chat = await db_conn.get_followup_chat(account_id, user_id)
+            chat = await _fetch_followup_chat(db_conn, account_id, user_id)
             if not chat:
                 tier = assign_tier(static_score)
                 return LeadScore(score=static_score, tier=tier,
@@ -257,7 +293,7 @@ async def score_lead_dynamic(user_id: int, account_id: int,
 
             # ── KOL profile signals ──
             try:
-                profile = await db_conn.get_kol_profile(account_id, user_id)
+                profile = await _fetch_kol_profile(db_conn, account_id, user_id)
             except Exception:
                 profile = None
             if profile:
@@ -324,12 +360,16 @@ async def rescore_and_update(user_id: int, account_id: int) -> LeadScore:
 
     # 1. Get current static score from existing chat data
     static_score = 30  # default
+    existing_summary = ""
     try:
         async with get_db() as db_conn:
-            chat = await db_conn.get_followup_chat(account_id, user_id)
+            chat = await _fetch_followup_chat(db_conn, account_id, user_id)
             if chat:
-                # Use existing intent_score as base if available
+                # Use existing intent_score as base if available. Preserve the
+                # LLM's human-readable summary; rescoring changes the numeric
+                # signal, not the operator-facing explanation.
                 static_score = chat.get("intent_score", 30) or 30
+                existing_summary = str(chat.get("summary") or "")
     except Exception:
         pass
 
@@ -351,13 +391,24 @@ async def rescore_and_update(user_id: int, account_id: int) -> LeadScore:
     # 4. Update DB
     try:
         async with get_db() as db_conn:
-            await db_conn.update_followup_lead_metrics(
-                account_id=account_id,
-                user_id=user_id,
-                intent_score=result.score,
-                lead_tier=result.tier,
-                summary="; ".join(result.reasons[:5]),
-            )
+            update_metrics = getattr(db_conn, "update_followup_lead_metrics", None)
+            summary = existing_summary or "; ".join(result.reasons[:5])
+            if callable(update_metrics):
+                await update_metrics(
+                    account_id=account_id,
+                    user_id=user_id,
+                    intent_score=result.score,
+                    lead_tier=result.tier,
+                    summary=summary,
+                )
+            else:
+                await db_conn.execute(
+                    """UPDATE ai_followup_chats
+                       SET intent_score = ?, lead_tier = ?, summary = ?, updated_at = datetime('now')
+                       WHERE account_id = ? AND user_id = ?""",
+                    (result.score, result.tier, summary, account_id, user_id),
+                )
+                await db_conn.commit()
             # Log to history
             try:
                 await db_conn.execute(
@@ -369,8 +420,11 @@ async def rescore_and_update(user_id: int, account_id: int) -> LeadScore:
                      result.dynamic_score, result.score, result.tier,
                      json.dumps(result.signals, ensure_ascii=False)),
                 )
-            except Exception:
-                pass  # history table may not exist yet — graceful
+                await db_conn.commit()
+            except Exception as hist_exc:
+                # Schema self-check (v3.10.1) guarantees the table; a failure
+                # here is a REAL bug — log it instead of silently dropping it.
+                logger.warning("[LeadScoring] history insert failed: %s", hist_exc)
     except Exception as exc:
         logger.warning("[LeadScoring] rescore_and_update DB error: %s", exc)
 

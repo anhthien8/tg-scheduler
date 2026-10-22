@@ -1,6 +1,6 @@
 # Hướng dẫn sử dụng TG Scheduler
 
-**Phiên bản:** v3.10.1 (22/10/2026) — LATEST
+**Phiên bản:** v3.10.2 (23/10/2026) — LATEST
 
 TG Scheduler là công cụ tự động hóa Telegram (userbot) giúp lên lịch gửi tin nhắn, DM tự động theo từ khóa, tăng tương tác, cào thành viên, KOL outreach, AI follow-up và quản lý nhiều tài khoản.
 
@@ -347,6 +347,22 @@ Lúc khởi động, `init_db()` tự kiểm tra 7 bảng / 30+ cột mà phễu
 - **Reserve trước khi gửi**: bảng `dm_campaign_reservations` (khóa `campaign_id` + `target_user_id`). `sent` ⇒ không gửi lại; `pending` ⇒ giữ 24h rồi mới thử lại; `failed` ⇒ retry được. Crash giữa "Telegram đã nhận" và "ghi log success" không còn gửi trùng.
 - **Hạn mức ngày đếm chung cho cả account**: đọc `get_account_daily_dm_count_live()` = watcher + campaign + reservation đang bay (giờ VN). 2 campaign dùng chung một nick không còn cùng vượt hạn mức.
 - **account_busy**: mỗi lượt gửi giữ `account_busy(kind='dm', TTL 180s)` để không trùng với reaction / warmup / engagement trên cùng nick; nick đang bận thì bỏ qua và thử nick khác.
+
+#### KOL conversion — nối 4 tính năng v3.10.2
+
+- **needs_human:** chỉ lead còn `kol_step = prospect` mới tự resume sau 12h khi nhắn lại. Từ `deal_agreed` trở đi (kể cả `uid_received`, `link_confirmed`, `first_post`, `active`, `declined`, `dormant`) cần admin mở lại.
+- **Lead scoring:** `rescore_and_update()` đọc đúng pooled SQLite connection và ghi `lead_score_history`; không còn lỗi do gọi method CRUD trên raw connection.
+- **Phân phối KOL:** khi admin/automation chuyển sang `link_confirmed`, `distribution_enabled` tự bật nếu chưa từng có opt-out. Nếu đã tắt tay thì giữ nguyên `False`.
+- **Offer audit:** khi chuyển sang `deal_agreed`, profile ghim `offer_version` của ladder hiện tại; không ghi đè phiên bản đã ghim.
+- **Verification:** trạng thái `requested/submitted/verified/rejected` nay xuất hiện trong `/step` state và system prompt AI. `rejected` không bị AI hỏi lại máy móc.
+
+#### Command Bot secrets (v3.10.2)
+
+`COMMAND_BOT_TOKEN` và `COMMAND_BOT_ADMIN_IDS` là nguồn ưu tiên. Nếu chưa có env, settings DB cũ vẫn là fallback và log cảnh báo (token plaintext trong DB nên được xoá sau khi chuyển). API config chỉ trả marker `(từ env COMMAND_BOT_TOKEN)`, không trả secret.
+
+#### Cố vấn serverless (v3.10.2)
+
+Không dùng Lambda/Vercel/Cloud Functions cho 19 session Telethon + SQLite + APScheduler. Hướng đúng: split runtime `web` + `telegram_worker.py` trên cùng máy/volume (heartbeat 15s, lease 120s), sau đó chuyển lên một VPS always-on. Đọc checklist và bảng trade-off tại `docs/serverless-advisory.md`; bản thân thay đổi này chưa deploy.
 
 ### AI Agents
 

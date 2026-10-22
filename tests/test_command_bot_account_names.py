@@ -113,12 +113,16 @@ def test_kol_pattern_accepts_supported_forms_and_bot_suffix():
 
 
 def test_admin_ids_are_loaded_from_command_bot_setting_source():
-    """Pin bằng chứng code-reading: quyền /kol lấy từ command_bot_admin_ids."""
+    """Pin bằng chứng code-reading: quyền /kol lấy từ nguồn env-first (v3.10.2)."""
     import inspect
 
     source = inspect.getsource(cb.start_command_bot)
-    assert 'get_setting("command_bot_admin_ids"' in source
+    assert "get_command_bot_admin_ids_str()" in source
     assert "_admin_ids = {int(" in source
+    # Helper phải env-first với fallback settings cũ
+    helper_src = inspect.getsource(cb.get_command_bot_admin_ids_str)
+    assert "COMMAND_BOT_ADMIN_IDS" in helper_src
+    assert 'get_setting("command_bot_admin_ids"' in helper_src
 
 
 @pytest.mark.asyncio
@@ -138,11 +142,13 @@ def test_command_bot_startup_has_explicit_disabled_and_missing_config_guards():
     import inspect
 
     source = inspect.getsource(cb.start_command_bot)
-    for setting in ("command_bot_enabled", "command_bot_token", "command_bot_admin_ids"):
-        assert f'get_setting("{setting}"' in source
+    assert 'get_setting("command_bot_enabled"' in source
+    assert "get_command_bot_token()" in source
+    assert "get_command_bot_admin_ids_str()" in source
     assert "[CommandBot] Disabled" in source
     assert "[CommandBot] No bot token configured" in source
     assert "[CommandBot] No admin user IDs configured" in source
+    assert "COMMAND_BOT_TOKEN" in inspect.getsource(cb.get_command_bot_token)
 
 
 @pytest.mark.asyncio
