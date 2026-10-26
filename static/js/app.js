@@ -25,7 +25,7 @@ if(document.readyState!=='complete'){await new Promise(r=>window.addEventListene
 if(hasCached){this.showDashboard(null);API.authStatus().then(s=>{if(s&&s.user)this._setUserInfo(s.user)}).catch(()=>{});return}
 try{const s=await API.authStatus();if(s.authenticated){this.showDashboard(s.user);return}}catch{}
 
-try{const a=await API.getAccounts();App._accounts=a.accounts||[];if(a.accounts&&a.accounts.length>0){this.showDashboard(null);return}}catch{}
+try{const a=await API.getAccounts();App._accounts=a.accounts||[];if(a.accounts&&a.accounts.length>0){this.showDashboard(null);return}}catch(e){if(e&&e.message==='Unauthorized'){/* Server requires X-API-Key (cloud deploy): ask for it instead of showing the add-account form */const k=prompt('Nhập API key (DASHBOARD_SECRET_KEY) để vào dashboard:');if(k&&k.trim()){localStorage.setItem('tgs_api_key',k.trim());location.reload();return}}}
 
 this.showLogin()},
 

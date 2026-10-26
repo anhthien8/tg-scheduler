@@ -16,6 +16,12 @@ CHANGELOG_DATA = [
         "summary": "Đo toàn bộ 98 API dashboard trên server thật: hầu hết < 100ms. Điểm nghẽn duy nhất là tab Cào & DM — tải ~7.000 lead bằng 69 request nối tiếp và vẽ lại cả bảng sau mỗi trang (3,3s). Nay tải song song, vẽ 1 lần, server cache số đếm: ~1,2s. Docker image không còn đóng gói DB/session Telegram; toàn bộ dữ liệu sống trên 1 volume /data.",
         "changes": [
             {
+                "type": "fix",
+                "title": "Dashboard trên cloud: hỏi API key thay vì hiện form thêm tài khoản",
+                "desc": "Khi server bật xác thực (Railway, tg.szonevn.com) mà trình duyệt chưa lưu key, /api/accounts trả 403 nên app tưởng chưa có tài khoản và hiện form thêm Telegram. Nay app hỏi DASHBOARD_SECRET_KEY, lưu lại và vào thẳng dashboard.",
+                "tag": "Bảo mật"
+            },
+            {
                 "type": "feature",
                 "title": "AI qua 9router ở nhà: hỗ trợ Cloudflare Access",
                 "desc": "Server cloud gọi 9router trên laptop ở nhà qua Cloudflare Tunnel. Đặt env CF_ACCESS_HOST / CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET; header Access chỉ gửi tới đúng host đó, không lộ sang OpenAI. Hướng dẫn: docs/serverless-advisory.md §8.",
