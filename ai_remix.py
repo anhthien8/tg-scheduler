@@ -8,9 +8,29 @@ import re
 import time
 import uuid
 
+import os
+from urllib.parse import urlsplit
+
 import httpx
 
 logger = logging.getLogger("tg-scheduler.ai_remix")
+
+
+def _cf_access_headers(url: str) -> dict:
+    """Cloudflare Access service-token headers for a self-hosted AI router
+    (e.g. 9router on a home laptop behind a Cloudflare Tunnel).
+
+    Sent ONLY when the request host equals CF_ACCESS_HOST, so the token never
+    leaks to OpenAI or any other provider. Secrets come from env, not the DB.
+    """
+    host = (os.getenv("CF_ACCESS_HOST") or "").strip().lower()
+    cid = os.getenv("CF_ACCESS_CLIENT_ID") or ""
+    secret = os.getenv("CF_ACCESS_CLIENT_SECRET") or ""
+    if not (host and cid and secret):
+        return {}
+    if (urlsplit(url).hostname or "").lower() != host:
+        return {}
+    return {"CF-Access-Client-Id": cid, "CF-Access-Client-Secret": secret}
 
 
 def _parse_openai_compatible_json(raw: str) -> dict:
@@ -229,7 +249,8 @@ async def _call_openai_compatible(api_key, prompt, base_url, model):
     url = base_url.rstrip('/') + '/chat/completions'
     headers = {
         "Authorization": "Bearer " + api_key,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        **_cf_access_headers(url),
     }
     payload = {
         "model": model,
@@ -629,7 +650,8 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
                 logger.warning("[ChatGPT Web Chat] Native call failed (%s), falling back to OpenAI compatible endpoint...", e)
 
         url = (base_url or "https://api.openai.com/v1").rstrip('/') + '/chat/completions'
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
+                   **_cf_access_headers(url)}
         payload = {
             "model": model,
             "messages": messages,
@@ -712,7 +734,8 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
         base_url = kwargs.get("base_url") or "https://api.openai.com/v1"
         model = kwargs.get("model") or "gpt-4o-mini"
         url = base_url.rstrip('/') + '/chat/completions'
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
+                   **_cf_access_headers(url)}
         payload = {
             "model": model,
             "messages": messages,

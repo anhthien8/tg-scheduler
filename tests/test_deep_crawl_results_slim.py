@@ -104,3 +104,38 @@ def test_slim_limit_is_bounded(client_with_leads):
     d = client.get("/api/members/deep-crawl/results?slim=1&page=0&limit=99999").json()
     assert d["limit"] == 200
     assert len(d["leads"]) <= 200
+
+
+def test_normalisation_runs_once_across_pages(monkeypatch, client_with_leads):
+    """Paging through the set must not re-scan every lead on each request."""
+    client, _ = client_with_leads
+    import routes.members as m
+    calls = {"n": 0}
+
+    def _spy(*a, **k):
+        calls["n"] += 1
+        return False
+
+    monkeypatch.setattr(m.tg, "is_bot_account", _spy, raising=False)
+    monkeypatch.setattr(m, "_results_cache_key", None, raising=False)
+    client.get("/api/members/deep-crawl/results?slim=1&page=0&limit=50")
+    first = calls["n"]
+    assert first > 0
+    for p in range(1, 5):
+        client.get(f"/api/members/deep-crawl/results?slim=1&page={p}&limit=50")
+    assert calls["n"] == first
+
+
+def test_counts_refresh_when_results_are_replaced(monkeypatch, client_with_leads):
+    """A new crawl swaps the list; cached tab counts must not leak across."""
+    client, _ = client_with_leads
+    import routes.members as m
+    monkeypatch.setattr(m, "_results_cache_key", None, raising=False)
+    d1 = client.get("/api/members/deep-crawl/results?slim=1&page=0&limit=50").json()
+    assert d1["counts"]["all"] == 250
+
+    m._deep_crawl_state["results"] = _fake_leads(40)
+    d2 = client.get("/api/members/deep-crawl/results?slim=1&page=0&limit=50").json()
+    assert d2["total"] == 40
+    assert d2["counts"]["all"] == 40
+    assert d2["counts"]["has_contacts"] == 20

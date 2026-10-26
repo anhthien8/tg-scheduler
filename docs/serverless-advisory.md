@@ -79,4 +79,53 @@ Lợi ích thực tế:
 
 **Nâng cấp tương lai:** chỉ tách Postgres + queue riêng (Redis/NATS) khi cần nhiều máy/nhiều worker — không làm sớm hơn.
 
-ponytail: giới hạn ở advisory + checklist; chưa viết Docker/systemd config vì founder chưa yêu cầu deploy.
+## 7. Cloud container trên Railway (founder chọn 27/10/2026)
+
+Chạy **combined mode, 1 service, 1 replica** — đúng như máy Windows hiện tại, chỉ là máy do Railway quản lý. Không phải serverless thuần (Telethon cần kết nối giữ liên tục), nhưng không còn phải tự trông máy.
+
+- [ ] Tạo service từ repo (Railway đọc `railway.json` → build `Dockerfile`).
+- [ ] Thêm **Volume** mount path `/data`. Dockerfile đã trỏ `DATA_DIR=/data/db`, `SESSION_DIR=/data/sessions`, `MEDIA_DIR=/data/media`. Image KHÔNG chứa DB/session/.env (`.dockerignore`).
+- [ ] Copy `data/scheduler.db` + toàn bộ `sessions/*.session` lên volume TRƯỚC lần start đầu — nếu không, mọi tài khoản phải đăng nhập lại. Tắt server ở máy nhà trước (2 nơi cùng dùng 1 session = Telegram có thể khóa phiên).
+- [ ] Env vars: `DASHBOARD_SECRET_KEY`, `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `COMMAND_BOT_TOKEN`, `COMMAND_BOT_ADMIN_IDS`. `HOST=0.0.0.0` đã có sẵn; Railway tự đặt `PORT`.
+- [ ] **AI provider:** setting `ai_oai_compat_base_url` đang là `http://127.0.0.1:20128/v1` (proxy trên máy nhà) — trên cloud địa chỉ này không tồn tại. Đổi sang endpoint công khai (API key provider trực tiếp) trước khi chuyển.
+- [ ] Replicas = 1. Không bật autoscale: 2 container cùng session Telegram sẽ đá nhau.
+- [ ] Dashboard ra Internet: Railway có HTTPS sẵn, nhưng cổng chặn duy nhất là `X-API-Key`. Trước khi public: `DASHBOARD_SECRET_KEY` dài ngẫu nhiên, và nếu bật `/api/login` (username/password) thì phải thêm giới hạn số lần thử (slowapi đã có trong requirements) — hiện chưa có.
+
+
+## 8. 9router trên laptop ở nhà → server cloud (Cloudflare Tunnel + Access)
+
+Laptop chạy 9router ở `127.0.0.1:20128`. Tunnel chỉ mở kết nối **ra ngoài**, không cần mở port modem.
+
+**Trên laptop (PowerShell, chạy 1 lần):**
+```powershell
+winget install --id Cloudflare.cloudflared
+cloudflared tunnel login
+cloudflared tunnel create 9router
+cloudflared tunnel route dns 9router ai.<domain-cua-ban>
+```
+Tạo `%USERPROFILE%\.cloudflared\config.yml`:
+```yaml
+tunnel: 9router
+credentials-file: C:\Users\<user>\.cloudflared\<TUNNEL-ID>.json
+ingress:
+  - hostname: ai.<domain-cua-ban>
+    service: http://127.0.0.1:20128
+  - service: http_status:404
+```
+Cài thành service (tự chạy khi bật máy): `cloudflared service install` (PowerShell Admin).
+Laptop: tắt Sleep khi cắm sạc, để 9router tự khởi động.
+
+**Trên Cloudflare Zero Trust dashboard:**
+1. Access → Service Auth → tạo Service Token → lưu Client ID + Secret (chỉ hiện 1 lần).
+2. Access → Applications → Self-hosted `ai.<domain>` → Policy action **Service Auth**, include token vừa tạo.
+
+**Trên Railway (env vars):**
+```
+CF_ACCESS_HOST=ai.<domain-cua-ban>
+CF_ACCESS_CLIENT_ID=<id>.access
+CF_ACCESS_CLIENT_SECRET=<secret>
+```
+Rồi trong app đổi base URL OpenAI-compatible thành `https://ai.<domain-cua-ban>/v1`.
+App chỉ gửi header Access khi host khớp `CF_ACCESS_HOST` → token không lộ sang OpenAI.
+
+**Kiểm tra:** `curl -H "CF-Access-Client-Id: ..." -H "CF-Access-Client-Secret: ..." https://ai.<domain>/v1/models` → 200; bỏ header → 403.

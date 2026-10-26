@@ -8,11 +8,39 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.10.3",
+        "date": "27/10/2026",
+        "title": "⚡ Tab Cào & DM nhanh gấp ~3 lần + Docker sẵn sàng chạy cloud (Railway)",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Đo toàn bộ 98 API dashboard trên server thật: hầu hết < 100ms. Điểm nghẽn duy nhất là tab Cào & DM — tải ~7.000 lead bằng 69 request nối tiếp và vẽ lại cả bảng sau mỗi trang (3,3s). Nay tải song song, vẽ 1 lần, server cache số đếm: ~1,2s. Docker image không còn đóng gói DB/session Telegram; toàn bộ dữ liệu sống trên 1 volume /data.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "AI qua 9router ở nhà: hỗ trợ Cloudflare Access",
+                "desc": "Server cloud gọi 9router trên laptop ở nhà qua Cloudflare Tunnel. Đặt env CF_ACCESS_HOST / CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET; header Access chỉ gửi tới đúng host đó, không lộ sang OpenAI. Hướng dẫn: docs/serverless-advisory.md §8.",
+                "tag": "AI"
+            },
+            {
+                "type": "performance",
+                "title": "Cào & DM: tải kết quả deep-crawl song song, vẽ bảng 1 lần",
+                "desc": "Trang đầu vẫn hiện ngay; phần còn lại tải 4 luồng song song ở trang 200 dòng rồi vẽ 1 lần, thay vì 69 request nối tiếp + 69 lần vẽ lại bảng ngày càng dài. Server chỉ lọc bot + đếm tab 1 lần cho mỗi bộ kết quả (cache theo đúng list object), không lặp lại ở mỗi trang. Đo trên dữ liệu thật 6.901 lead: 3,3s → 1,2s.",
+                "tag": "Hiệu suất"
+            },
+            {
+                "type": "security",
+                "title": "Docker: image không chứa DB, session Telegram, .env",
+                "desc": "`.dockerignore` loại `sessions/`, `*.session`, `data/`, `media/`, `.venv`, test. Dockerfile trỏ `DATA_DIR=/data/db`, `SESSION_DIR=/data/sessions`, `MEDIA_DIR=/data/media` — mount 1 volume `/data` là đủ. Checklist chuyển lên Railway ở docs/serverless-advisory.md §7.",
+                "tag": "Bảo mật"
+            }
+        ]
+    },
+    {
         "version": "v3.10.2",
         "date": "23/10/2026",
         "title": "🔧 Nối mạch 4 tính năng viết-mà-không-chạy + siết chính sách needs_human + token ra khỏi DB",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Bốn tính năng từng 'có code nhưng chết': (1) rescore_and_update gọi method không tồn tại trên raw connection — lead_score_history mãi 0 row; (2) distribution_enabled không ai set — kol_channel_watcher luôn broadcast tập rỗng; (3) offer_version chưa bao giờ được ghi khi KOL chốt deal; (4) verification_status có API ghi nhưng không ai đọc. Kèm theo: chốt chính sách needs_human (chỉ auto-resume cho lead prospect), chuyển token Command Bot sang env var, và tài liệu cố vấn serverless (docs/serverless-advisory.md).",
         "changes": [
             {

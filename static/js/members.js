@@ -2054,23 +2054,31 @@ const Members = {
       this._renderDeepCrawlResults(d0.leads || [], { counts: d0.counts, total });
 
       // 2) Remaining pages — hydrate the rest without blocking the UI.
-      const pages = Math.ceil(total / PAGE);
-      if (pages <= 1) return;
-      const rest = [];
-      for (let p = 1; p < pages; p++) {
-        try {
-          const res = await fetch(`/api/members/deep-crawl/results?slim=1&page=${p}&limit=${PAGE}`);
+      // Fetch them in parallel (bounded) at the server's max page size and
+      // render ONCE at the end: re-rendering the growing table after every
+      // page made the tab take ~3.6s for ~7k leads.
+      const BIG = 200;  // server caps slim pages at 200
+      const skip = (d0.leads || []).length;
+      const bigPages = Math.ceil(total / BIG);
+      const chunks = new Array(bigPages);
+      let next = 0;
+      const worker = async () => {
+        while (next < bigPages) {
+          const p = next++;
+          const res = await fetch(`/api/members/deep-crawl/results?slim=1&page=${p}&limit=${BIG}`);
           const d = await res.json();
-          if (d.leads && d.leads.length) rest.push(...d.leads);
-          // Merge progressively so filters/select-all see more over time.
-          if (rest.length) {
-            this._renderDeepCrawlResults([...(d0.leads || []), ...rest],
-                                         { counts: d0.counts, total, keepPage: true });
-          }
-        } catch (e) {
-          console.warn('[DeepCrawl] page load error', p, e);
-          break;
+          chunks[p] = d.leads || [];
         }
+      };
+      try {
+        await Promise.all(Array.from({ length: Math.min(4, bigPages) }, worker));
+      } catch (e) {
+        console.warn('[DeepCrawl] page load error', e);
+        return;  // keep the first page on screen
+      }
+      const all = chunks.flat();
+      if (all.length > skip) {
+        this._renderDeepCrawlResults(all, { counts: d0.counts, total, keepPage: true });
       }
     } catch (e) {
       App.toast('Lỗi tải kết quả deep crawl', 'error');

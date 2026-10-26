@@ -9,3 +9,16 @@ venv
 .env
 data/scheduler.db-journal
 scratch
+.venv
+media
+# Secrets & live state must never be baked into the image — they live on the
+# mounted volume (DATA_DIR / SESSION_DIR), see Dockerfile.
+sessions
+*.session
+*.session-journal
+data
+.env.*
+!.env.example
+tests
+standalone_tests
+backtest

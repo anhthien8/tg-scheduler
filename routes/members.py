@@ -1183,6 +1183,10 @@ async def get_deep_crawl_status():
     return state_copy
 
 
+_results_cache_key = None
+_results_counts: dict = {}
+
+
 @router.get("/deep-crawl/results")
 async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50):
     """Get the full results of the last deep crawl with up-to-date trading scores.
@@ -1197,7 +1201,16 @@ async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50):
     if not _deep_crawl_state.get("results"):
         await _load_deep_crawl_snapshot()
     leads = _deep_crawl_state.get("results", [])
-    for lead in leads:
+    # The browser pulls the set in ~35 parallel pages; normalising + counting
+    # all ~7k leads on every page request dominated the response time. The list
+    # is only ever replaced wholesale (crawl done / snapshot load / clear), so
+    # (same list object, same length) is a safe cache key. The cache holds the
+    # list itself, not its id(), so a freed list's id can never be reused.
+    global _results_cache_key, _results_counts
+    cache_key = (leads, len(leads))
+    fresh = (_results_cache_key is not None and _results_cache_key[0] is leads
+             and _results_cache_key[1] == len(leads))
+    for lead in ([] if fresh else leads):
         if "contacts" in lead and isinstance(lead["contacts"], list):
             lead["contacts"] = [c for c in lead["contacts"] if not tg.is_bot_account(None, c)]
         if "trading_score" not in lead or lead.get("trading_score") is None:
@@ -1222,7 +1235,7 @@ async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50):
     # carries the requested page — that is the whole point of this branch.
     counts = {"all": len(leads), "has_contacts": 0, "trading_vip": 0,
               "trading_all": 0, "potential_bd": 0, "news": 0, "no_contacts": 0}
-    for lead in leads:
+    for lead in ([] if fresh else leads):
         has_c = bool(lead.get("contacts"))
         if not has_c:
             counts["no_contacts"] += 1
@@ -1237,6 +1250,11 @@ async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50):
             counts["potential_bd"] += 1
         if lead.get("category") == "news_general":
             counts["news"] += 1
+
+    if fresh:
+        counts = dict(_results_counts)
+    else:
+        _results_cache_key, _results_counts = cache_key, dict(counts)
 
     limit = max(1, min(int(limit), 200))
     page = max(0, int(page))
