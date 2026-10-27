@@ -753,29 +753,14 @@ async def _async_distill_human_rule(account_id: int, user_id: int, message_text:
         logger.debug("[Self-Learning] Distillation failed: %s", e)
 
 
-def is_bot_account(username: str | None, name: str | None, message_text: str | None,
+def is_bot_account(username: str | None, name: str | None = None, message_text: str | None = None,
                    is_bot: bool = False) -> bool:
-    """Check if the sender is likely a bot/channel/system notification.
+    """A sender is a bot only if Telegram flags it or its username contains 'bot'.
 
-    Telegram's own bot flag is authoritative. The text heuristic only uses
-    spam/bot-only phrases: KOLs routinely share t.me links and mention their
-    channel, so those words used to silence real leads (LuffytradeverseHQ).
+    Name and message text are deliberately ignored: KOLs share t.me links and
+    mention their channel, and text heuristics silenced real leads.
     """
-    if is_bot:
-        return True
-    if username and username.lower().endswith("bot"):
-        return True
-    if name and re.search(r'\bbot\b', name.lower()):
-        return True
-    if message_text:
-        bot_signals = [
-            "/start", "tap to start", "bot launched", "official bot",
-            "airdrop bot", "automated message", "earn money", "casino"
-        ]
-        text_lower = message_text.lower()
-        if any(sig in text_lower for sig in bot_signals) and len(message_text) > 150:
-            return True
-    return False
+    return bool(is_bot) or "bot" in (username or "").lower()
 
 
 def sanitize_telegram_html(text: str) -> str:

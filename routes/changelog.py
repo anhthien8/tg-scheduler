@@ -18,7 +18,7 @@ CHANGELOG_DATA = [
             {
                 "type": "fix",
                 "title": "AI không còn bỏ qua KOL gửi link kênh Telegram",
-                "desc": "Bộ lọc bot từng coi mọi tin dài có t.me/, channel, subscribe là bot nên lead thật (vd LUFFY TRADES) bị gắn bot_ignored và AI im lặng. Nay dùng cờ bot chính thức của Telegram, chỉ giữ các dấu hiệu spam rõ ràng.",
+                "desc": "Bộ lọc bot từng coi mọi tin dài có t.me/, channel, subscribe là bot nên lead thật (vd LUFFY TRADES) bị gắn bot_ignored và AI im lặng. Nay chỉ coi là bot khi Telegram gắn cờ bot hoặc username có chữ \"bot\"; không xét tên hay nội dung tin.",
                 "tag": "AI Agent"
             },
             {
