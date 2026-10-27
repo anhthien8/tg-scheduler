@@ -2071,7 +2071,10 @@ async def _run_campaign(campaign_id: int):
                 continue
 
             # ── Lead scoring / ICP gate (opt-in; min_lead_score > 0) ──
-            if min_lead_score > 0:
+            # Contacts imported from Deep Crawl (synthetic negative user_id) carry
+            # only a username — no premium/last-seen/bio — so they'd all score 25.
+            # They were already vetted by channel trading score; don't gate them.
+            if min_lead_score > 0 and user_id >= 0:
                 qualified, _lead = lead_scoring.passes_icp(member, min_lead_score)
                 if not qualified:
                     skipped += 1
