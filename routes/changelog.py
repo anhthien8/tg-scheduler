@@ -16,6 +16,12 @@ CHANGELOG_DATA = [
         "summary": "Đo toàn bộ 98 API dashboard trên server thật: hầu hết < 100ms. Điểm nghẽn duy nhất là tab Cào & DM — tải ~7.000 lead bằng 69 request nối tiếp và vẽ lại cả bảng sau mỗi trang (3,3s). Nay tải song song, vẽ 1 lần, server cache số đếm: ~1,2s. Docker image không còn đóng gói DB/session Telegram; toàn bộ dữ liệu sống trên 1 volume /data.",
         "changes": [
             {
+                "type": "fix",
+                "title": "AI không còn bỏ qua KOL gửi link kênh Telegram",
+                "desc": "Bộ lọc bot từng coi mọi tin dài có t.me/, channel, subscribe là bot nên lead thật (vd LUFFY TRADES) bị gắn bot_ignored và AI im lặng. Nay dùng cờ bot chính thức của Telegram, chỉ giữ các dấu hiệu spam rõ ràng.",
+                "tag": "AI Agent"
+            },
+            {
                 "type": "performance",
                 "title": "Chuyển tab nhanh hơn: cache dữ liệu 20 giây",
                 "desc": "Mở lại một tab trong vòng 20 giây sẽ dùng dữ liệu vừa tải thay vì gọi lại server (~0,3s mỗi request trên cloud). Log, tiến độ, trạng thái luôn lấy mới; mọi thao tác lưu/xoá đều làm mới cache.",

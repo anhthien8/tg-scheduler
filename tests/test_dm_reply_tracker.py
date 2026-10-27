@@ -17,6 +17,12 @@ async def test_is_bot_account():
     long_msg = "Earn money now! Join the official bot at t.me/free_casino_bot to start. Casino free spins and giveaway!" + "a"*150
     assert tracker.is_bot_account("user", "Name", long_msg) is True
     assert tracker.is_bot_account("user_name", "User Name", "Hi, how are you?") is False
+    # Real KOL intro with a channel link must not be treated as a bot.
+    kol = ("I'm Dave, founder of Luffy trading community, a trading KOL. "
+           "https://t.me/tradeversehqs "
+           "I work with crypto exchanges to increase visibility in my channel. Are you open to partnerships?")
+    assert tracker.is_bot_account("LuffytradeverseHQ", "LUFFY TRADES", kol) is False
+    assert tracker.is_bot_account("plainname", "Name", "Hi", is_bot=True) is True
 
 async def test_sanitize_telegram_html():
     text = "Hello \\u0062\\u0072\\u006f!<br>Welcome **bold** and *italic*.<script>alert('xss')</script><b>open tag"

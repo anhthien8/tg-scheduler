@@ -753,17 +753,24 @@ async def _async_distill_human_rule(account_id: int, user_id: int, message_text:
         logger.debug("[Self-Learning] Distillation failed: %s", e)
 
 
-def is_bot_account(username: str | None, name: str | None, message_text: str | None) -> bool:
-    """Check if the sender is likely a bot/channel/system notification."""
+def is_bot_account(username: str | None, name: str | None, message_text: str | None,
+                   is_bot: bool = False) -> bool:
+    """Check if the sender is likely a bot/channel/system notification.
+
+    Telegram's own bot flag is authoritative. The text heuristic only uses
+    spam/bot-only phrases: KOLs routinely share t.me links and mention their
+    channel, so those words used to silence real leads (LuffytradeverseHQ).
+    """
+    if is_bot:
+        return True
     if username and username.lower().endswith("bot"):
         return True
     if name and re.search(r'\bbot\b', name.lower()):
         return True
     if message_text:
         bot_signals = [
-            "t.me/", "/start", "tap to start", "bot launched", "channel",
-            "subscribe", "official bot", "giveaway", "airdrop bot",
-            "automated message", "broadcast", "earn money", "casino"
+            "/start", "tap to start", "bot launched", "official bot",
+            "airdrop bot", "automated message", "earn money", "casino"
         ]
         text_lower = message_text.lower()
         if any(sig in text_lower for sig in bot_signals) and len(message_text) > 150:
@@ -1442,7 +1449,8 @@ def _make_handler(account_id: int):
         message_text = f"{raw_msg} {media_tag}".strip() if media_tag else raw_msg
 
         # Bot check
-        if is_bot_account(sender_username, sender_name, message_text):
+        if is_bot_account(sender_username, sender_name, message_text,
+                          is_bot=bool(getattr(sender, "bot", False))):
             logger.debug("[Inbox] Ignored bot message from @%s (%s)", sender_username, sender_name)
             await db.add_dm_reply({
                 "watcher_id": None,
