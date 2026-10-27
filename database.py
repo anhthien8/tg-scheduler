@@ -1111,13 +1111,13 @@ async def init_db():
         except Exception:
             pass
 
-        # Auto-mark any chat as 'bot_ignored' if username contains 'bot'
+        # Auto-mark any chat as 'bot_ignored' if username contains '_bot'
         try:
             await db.execute("""
                 UPDATE ai_followup_chats
                 SET status = 'bot_ignored'
                 WHERE status != 'bot_ignored'
-                  AND (LOWER(username) LIKE '%bot%' OR LOWER(username) LIKE 'bot%')
+                  AND LOWER(username) LIKE '%!_bot%' ESCAPE '!'
             """)
         except Exception:
             pass

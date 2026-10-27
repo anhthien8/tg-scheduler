@@ -755,12 +755,12 @@ async def _async_distill_human_rule(account_id: int, user_id: int, message_text:
 
 def is_bot_account(username: str | None, name: str | None = None, message_text: str | None = None,
                    is_bot: bool = False) -> bool:
-    """A sender is a bot only if Telegram flags it or its username contains 'bot'.
+    """A sender is a bot only if Telegram flags it or its username contains '_bot'.
 
     Name and message text are deliberately ignored: KOLs share t.me links and
     mention their channel, and text heuristics silenced real leads.
     """
-    return bool(is_bot) or "bot" in (username or "").lower()
+    return bool(is_bot) or "_bot" in (username or "").lower()
 
 
 def sanitize_telegram_html(text: str) -> str:

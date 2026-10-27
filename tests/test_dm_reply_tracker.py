@@ -13,8 +13,9 @@ pytestmark = pytest.mark.asyncio
 
 async def test_is_bot_account():
     assert tracker.is_bot_account("help_bot", "Helper", "Hi") is True
+    assert tracker.is_bot_account("robotics_trader", "Rob", "Hi") is False
     assert tracker.is_bot_account("helper", "Airdrop Bot Pro", "Hi") is False
-    assert tracker.is_bot_account("SpamBotHelper", "x", "Hi") is True
+    assert tracker.is_bot_account("SpamBotHelper", "x", "Hi") is False
     long_msg = "Earn money now! Join the official bot at t.me/free_casino_bot to start. Casino free spins and giveaway!" + "a"*150
     assert tracker.is_bot_account("user", "Name", long_msg) is False
     assert tracker.is_bot_account("user_name", "User Name", "Hi, how are you?") is False
