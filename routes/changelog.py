@@ -16,6 +16,12 @@ CHANGELOG_DATA = [
         "summary": "Đo toàn bộ 98 API dashboard trên server thật: hầu hết < 100ms. Điểm nghẽn duy nhất là tab Cào & DM — tải ~7.000 lead bằng 69 request nối tiếp và vẽ lại cả bảng sau mỗi trang (3,3s). Nay tải song song, vẽ 1 lần, server cache số đếm: ~1,2s. Docker image không còn đóng gói DB/session Telegram; toàn bộ dữ liệu sống trên 1 volume /data.",
         "changes": [
             {
+                "type": "performance",
+                "title": "Scroll mượt hơn ở bảng kênh tương tự",
+                "desc": "Bảng kết quả Deep Crawl hiện 20 kênh/trang thay vì 50, mô tả kênh gọn còn 4 dòng và bảng được cô lập khi vẽ lại, nên scroll và rê chuột nhẹ hơn nhiều.",
+                "tag": "Cào & DM"
+            },
+            {
                 "type": "fix",
                 "title": "Import Contact chỉ lấy contact của tab đang chọn",
                 "desc": "Chọn tab Trading & Scalping rồi bấm Import Contact Đã Chọn vẫn lưu cả ~4.700 contact của mọi tab. Nay chỉ import contact đã tick của các kênh đang hiện theo tab phân loại và lớp độ sâu.",

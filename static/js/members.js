@@ -2102,7 +2102,7 @@ const Members = {
   _depthFilter: 'all',
   _tradingFilter: 'has_contacts',
   _simPage: 0,
-  _simLimit: 50,
+  _simLimit: 20,
   _selectedContacts: new Set(),
 
   _isBotUsername(u) {

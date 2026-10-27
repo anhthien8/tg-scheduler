@@ -2043,3 +2043,7 @@ tr:hover td { background: rgba(255,255,255,0.025); }
   .help-search { max-width: 100%; width: 100%; }
 }
 
+
+/* Deep-crawl results: isolate the big table and keep rows short so scrolling stays cheap */
+#sim-results-container .table-wrap { contain: content; }
+#sim-results-table .sim-desc-cell > div:first-child { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
