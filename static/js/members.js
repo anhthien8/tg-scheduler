@@ -2275,23 +2275,7 @@ const Members = {
     }
 
     // Combined Filter leads (Depth + Contact-First Trading Classification)
-    let filtered = leads;
-    if (this._depthFilter !== 'all') {
-      filtered = filtered.filter(l => l.depth === this._depthFilter);
-    }
-    if (this._tradingFilter === 'has_contacts') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0);
-    } else if (this._tradingFilter === 'trading_vip') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 80);
-    } else if (this._tradingFilter === 'trading_all') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 60 && (l.trading_score || 0) < 80);
-    } else if (this._tradingFilter === 'potential_bd') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 45 && (l.trading_score || 0) < 60);
-    } else if (this._tradingFilter === 'news') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && l.category === 'news_general');
-    } else if (this._tradingFilter === 'no_contacts') {
-      filtered = filtered.filter(l => !l.contacts || l.contacts.length === 0);
-    }
+    const filtered = this._applySimFilters(leads);
 
     const total = filtered.length;
     const pages = Math.ceil(total / this._simLimit);
@@ -2522,6 +2506,28 @@ const Members = {
     this._renderDeepCrawlResults(this._similarLeads);
   },
 
+  // ── Leads matching the current depth + trading tabs ──
+  _applySimFilters(leads) {
+    let filtered = leads || [];
+    if (this._depthFilter !== 'all') {
+      filtered = filtered.filter(l => l.depth === this._depthFilter);
+    }
+    if (this._tradingFilter === 'has_contacts') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0);
+    } else if (this._tradingFilter === 'trading_vip') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 80);
+    } else if (this._tradingFilter === 'trading_all') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 60 && (l.trading_score || 0) < 80);
+    } else if (this._tradingFilter === 'potential_bd') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 45 && (l.trading_score || 0) < 60);
+    } else if (this._tradingFilter === 'news') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && l.category === 'news_general');
+    } else if (this._tradingFilter === 'no_contacts') {
+      filtered = filtered.filter(l => !l.contacts || l.contacts.length === 0);
+    }
+    return filtered;
+  },
+
   // ── Filter results by depth ──
   filterByDepth(depth) {
     this._depthFilter = depth;
@@ -2650,9 +2656,11 @@ const Members = {
       return;
     }
 
-    // Import ALL selected contacts directly — không re-filter theo tab/depth hiện tại.
-    // Selection đã được xác định bởi "Chọn nhanh" hoặc checkbox thủ công.
-    const cleanContacts = Array.from(this._selectedContacts).filter(c => !this._isBotUsername(c));
+    // Import only the selected contacts of leads in the current tab/depth filter,
+    // so picking "Trading & Scalping" doesn't also import every other tab's contacts.
+    const inView = new Set();
+    this._applySimFilters(this._similarLeads).forEach(l => (l.contacts || []).forEach(c => inView.add(c)));
+    const cleanContacts = Array.from(this._selectedContacts).filter(c => inView.has(c) && !this._isBotUsername(c));
     if (!cleanContacts.length) {
       App.toast('Chưa chọn contact hợp lệ nào trong tab hiện tại!', 'error');
       return;

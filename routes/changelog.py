@@ -16,6 +16,12 @@ CHANGELOG_DATA = [
         "summary": "Đo toàn bộ 98 API dashboard trên server thật: hầu hết < 100ms. Điểm nghẽn duy nhất là tab Cào & DM — tải ~7.000 lead bằng 69 request nối tiếp và vẽ lại cả bảng sau mỗi trang (3,3s). Nay tải song song, vẽ 1 lần, server cache số đếm: ~1,2s. Docker image không còn đóng gói DB/session Telegram; toàn bộ dữ liệu sống trên 1 volume /data.",
         "changes": [
             {
+                "type": "fix",
+                "title": "Import Contact chỉ lấy contact của tab đang chọn",
+                "desc": "Chọn tab Trading & Scalping rồi bấm Import Contact Đã Chọn vẫn lưu cả ~4.700 contact của mọi tab. Nay chỉ import contact đã tick của các kênh đang hiện theo tab phân loại và lớp độ sâu.",
+                "tag": "Cào & DM"
+            },
+            {
                 "type": "performance",
                 "title": "Hết đơ khi rê chuột trong dashboard",
                 "desc": "Các modal đang đóng vẫn là lớp phủ toàn màn hình có hiệu ứng blur, khiến mỗi lần hover nút trình duyệt phải vẽ lại cả trang. Nay modal đóng được ẩn hẳn và badge NEW chỉ nhấp nháy vài lần.",
