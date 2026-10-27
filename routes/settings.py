@@ -131,7 +131,8 @@ async def fetch_models(payload: FetchModelsPayload):
     else:
         models_url = base_url + "/v1/models"
 
-    headers = {"Content-Type": "application/json"}
+    from ai_remix import _cf_access_headers
+    headers = {"Content-Type": "application/json", **_cf_access_headers(models_url)}
     if payload.api_key:
         headers["Authorization"] = f"Bearer {payload.api_key}"
 

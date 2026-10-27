@@ -766,12 +766,17 @@ tr:hover td {
   z-index: 100;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--duration-slow) var(--ease);
+  /* closed overlays are still full-screen layers: without visibility:hidden the
+     blur is re-rendered on every hover repaint and the whole page stutters */
+  visibility: hidden;
+  transition: opacity var(--duration-slow) var(--ease), visibility 0s linear var(--duration-slow);
 }
 
 .modal-overlay.open {
   opacity: 1;
   pointer-events: all;
+  visibility: visible;
+  transition: opacity var(--duration-slow) var(--ease);
 }
 
 .modal {
@@ -1560,7 +1565,8 @@ tr:hover td {
   background: linear-gradient(135deg, var(--accent), #a855f7);
   padding: 3px 10px;
   border-radius: 20px;
-  animation: cl-pulse 2s ease-in-out infinite;
+  /* box-shadow animation repaints every frame; pulse a few times then stop */
+  animation: cl-pulse 2s ease-in-out 3;
 }
 
 @keyframes cl-pulse {

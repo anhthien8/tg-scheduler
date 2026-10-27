@@ -16,6 +16,18 @@ CHANGELOG_DATA = [
         "summary": "Đo toàn bộ 98 API dashboard trên server thật: hầu hết < 100ms. Điểm nghẽn duy nhất là tab Cào & DM — tải ~7.000 lead bằng 69 request nối tiếp và vẽ lại cả bảng sau mỗi trang (3,3s). Nay tải song song, vẽ 1 lần, server cache số đếm: ~1,2s. Docker image không còn đóng gói DB/session Telegram; toàn bộ dữ liệu sống trên 1 volume /data.",
         "changes": [
             {
+                "type": "performance",
+                "title": "Hết đơ khi rê chuột trong dashboard",
+                "desc": "Các modal đang đóng vẫn là lớp phủ toàn màn hình có hiệu ứng blur, khiến mỗi lần hover nút trình duyệt phải vẽ lại cả trang. Nay modal đóng được ẩn hẳn và badge NEW chỉ nhấp nháy vài lần.",
+                "tag": "Hiệu năng"
+            },
+            {
+                "type": "fix",
+                "title": "Nút Load model với 9router qua Cloudflare Access",
+                "desc": "Lấy danh sách model từ ai.szonevn.com bị 403 vì thiếu header Cloudflare Access. Nay gửi kèm như các lệnh gọi AI khác.",
+                "tag": "AI"
+            },
+            {
                 "type": "fix",
                 "title": "AI không còn bỏ qua KOL gửi link kênh Telegram",
                 "desc": "Bộ lọc bot từng coi mọi tin dài có t.me/, channel, subscribe là bot nên lead thật (vd LUFFY TRADES) bị gắn bot_ignored và AI im lặng. Nay chỉ coi là bot khi Telegram gắn cờ bot hoặc username có \"_bot\"; không xét tên hay nội dung tin.",

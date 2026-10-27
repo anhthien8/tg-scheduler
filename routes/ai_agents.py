@@ -166,7 +166,8 @@ async def test_router_models(base_url: str = "http://127.0.0.1:20128/v1", model:
     url = f"{base_url.rstrip('/')}/models"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(url)
+            from ai_remix import _cf_access_headers
+            resp = await client.get(url, headers=_cf_access_headers(url))
             models = []
             if resp.status_code == 200:
                 data = resp.json()
