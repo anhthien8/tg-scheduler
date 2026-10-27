@@ -49,7 +49,25 @@ const API = {
     return headers;
   },
 
-  async request(method, path, body = null) {
+  // Short-lived GET cache so switching tabs re-renders instantly instead of
+  // waiting ~0.3s per call on the cloud deploy. Live/polling endpoints are
+  // never cached, and any write clears the whole cache.
+  _getCache: new Map(),
+  _getTtlMs: 20000,
+  _noCachePath: /(commands|logs|progress|status|health|jobs|poll|inbox|stats)/,
+
+  request(method, path, body = null) {
+    if (method !== 'GET') { this._getCache.clear(); return this._send(method, path, body); }
+    if (this._noCachePath.test(path)) return this._send(method, path, body);
+    const hit = this._getCache.get(path);
+    if (hit && Date.now() - hit.t < this._getTtlMs) return hit.p;
+    const p = this._send(method, path, body);
+    this._getCache.set(path, { t: Date.now(), p });
+    p.catch(() => this._getCache.delete(path));
+    return p;
+  },
+
+  async _send(method, path, body = null) {
     const opts = {
       method,
       headers: this.getHeaders()
@@ -213,6 +231,7 @@ const API = {
   _accountsPromise: null,
   clearAccountsCache() {
     this._accountsPromise = null;
+    this._getCache.clear();
     sessionStorage.removeItem('tgs_accounts_cache');
   },
   authStatus() { return this.get('/api/auth/status'); },

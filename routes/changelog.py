@@ -16,6 +16,12 @@ CHANGELOG_DATA = [
         "summary": "Đo toàn bộ 98 API dashboard trên server thật: hầu hết < 100ms. Điểm nghẽn duy nhất là tab Cào & DM — tải ~7.000 lead bằng 69 request nối tiếp và vẽ lại cả bảng sau mỗi trang (3,3s). Nay tải song song, vẽ 1 lần, server cache số đếm: ~1,2s. Docker image không còn đóng gói DB/session Telegram; toàn bộ dữ liệu sống trên 1 volume /data.",
         "changes": [
             {
+                "type": "performance",
+                "title": "Chuyển tab nhanh hơn: cache dữ liệu 20 giây",
+                "desc": "Mở lại một tab trong vòng 20 giây sẽ dùng dữ liệu vừa tải thay vì gọi lại server (~0,3s mỗi request trên cloud). Log, tiến độ, trạng thái luôn lấy mới; mọi thao tác lưu/xoá đều làm mới cache.",
+                "tag": "Hiệu năng"
+            },
+            {
                 "type": "fix",
                 "title": "Dashboard trên cloud: hỏi API key thay vì hiện form thêm tài khoản",
                 "desc": "Khi server bật xác thực (Railway, tg.szonevn.com) mà trình duyệt chưa lưu key, /api/accounts trả 403 nên app tưởng chưa có tài khoản và hiện form thêm Telegram. Nay app hỏi DASHBOARD_SECRET_KEY, lưu lại và vào thẳng dashboard.",
