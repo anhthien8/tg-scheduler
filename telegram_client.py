@@ -5,6 +5,7 @@ Each account gets its own Telethon client instance.
 import asyncio
 import logging
 import os
+import time
 import random
 
 from dotenv import load_dotenv
@@ -668,6 +669,26 @@ async def _find_account(account_id: int) -> dict | None:
     return next((a for a in accounts if a["id"] == account_id), None)
 
 
+async def _fresh_session_client(account_id: int, old_client: TelegramClient) -> TelegramClient:
+    acc = await _find_account(account_id)
+    if not acc:
+        raise Exception("Account not found")
+    proxy_url = getattr(old_client, "_tg_proxy_url", None) or acc.get("proxy_url")
+    try:
+        await old_client.disconnect()
+    except Exception:
+        pass
+    base = os.path.join(SESSION_DIR, acc["session_name"])
+    path = base if base.endswith(".session") else base + ".session"
+    if os.path.exists(path):
+        os.replace(path, f"{path}.revoked-{int(time.time())}")
+    client = await create_client(account_id, int(acc["api_id"]), acc["api_hash"],
+                                 acc["session_name"], proxy_url=proxy_url)
+    await client.connect()
+    _session_errors.pop(account_id, None)
+    return client
+
+
 async def send_code(account_id: int, phone: str) -> str:
     """Send login code. Returns phone_code_hash."""
     client = _clients.get(account_id)
@@ -682,7 +703,16 @@ async def send_code(account_id: int, phone: str) -> str:
         raise
 
     try:
-        result = await client.send_code_request(phone)
+        try:
+            result = await client.send_code_request(phone)
+        except Exception as e:
+            if not any(n in type(e).__name__ for n in _REVOKED_ERRORS):
+                raise
+            # Session file bị Telegram huỷ → không thể gửi OTP bằng nó nữa.
+            # Đổi tên file cũ (giữ lại để tra cứu) và tạo session mới tinh rồi gửi lại.
+            logger.warning(f"Account {account_id}: revoked session ({type(e).__name__}), creating fresh session for OTP")
+            client = await _fresh_session_client(account_id, client)
+            result = await client.send_code_request(phone)
         _code_hashes[account_id] = result.phone_code_hash
         logger.info(f"Account {account_id}: code sent to {phone}")
         return result.phone_code_hash
