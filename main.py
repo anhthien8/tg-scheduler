@@ -4,6 +4,7 @@ Main entry point - starts FastAPI + multi-account Telethon + APScheduler.
 import asyncio
 import logging
 import os
+import re
 import secrets
 import sys
 import time
@@ -44,6 +45,7 @@ class CacheControlledStaticFiles(StaticFiles):
         return response
 
 import database as db
+import team_users
 
 TG_RUNTIME_MODE = os.getenv("TG_RUNTIME_MODE", "combined").strip().lower()
 if TG_RUNTIME_MODE not in ("combined", "web"):
@@ -93,7 +95,7 @@ async def verify_api_key(key: str = Security(api_key_header)):
     """
     if os.getenv("DISABLE_AUTH", "0") == "1":
         return
-    if not secrets.compare_digest(key or "", API_KEY):
+    if not secrets.compare_digest(key or "", API_KEY) and not team_users.token_user(key or ""):
         raise HTTPException(status_code=403, detail="Unauthorized")
 
 
@@ -292,11 +294,68 @@ async def dashboard_login(payload: DashboardLoginRequest, request: Request):
     user_ok = DASH_USER and secrets.compare_digest(payload.username, DASH_USER)
     pass_ok = DASH_PASS and secrets.compare_digest(payload.password, DASH_PASS)
     if not (user_ok and pass_ok):
+        token = team_users.login(payload.username.strip(), payload.password)
+        if token:
+            _login_fails.pop(ip, None)
+            return {"api_key": token, "role": "member", "username": payload.username.strip()}
         _login_fails[ip] = fails + [now]
         await asyncio.sleep(1)
         raise HTTPException(status_code=401, detail="Sai username hoặc mật khẩu")
     _login_fails.pop(ip, None)
-    return {"api_key": API_KEY}
+    return {"api_key": API_KEY, "role": "admin", "username": DASH_USER}
+
+
+@app.get("/api/whoami")
+async def whoami(key: str = Security(api_key_header)):
+    """Dashboard identity behind the current X-API-Key (shown in the sidebar)."""
+    if key and secrets.compare_digest(key, API_KEY):
+        return {"username": DASH_USER or "admin", "role": "admin"}
+    user = team_users.token_user(key or "")
+    if user:
+        return {"username": user, "role": "member"}
+    if os.getenv("DISABLE_AUTH", "0") == "1":
+        return {"username": DASH_USER or "admin", "role": "admin"}
+    raise HTTPException(status_code=403, detail="Unauthorized")
+
+
+# ── Team accounts (admin only = the master key from .env) ────────────────────
+class TeamUserRequest(BaseModel):
+    username: str
+    password: str
+
+
+def _require_admin(key: str = Security(api_key_header)):
+    if os.getenv("DISABLE_AUTH", "0") == "1":
+        return
+    if not secrets.compare_digest(key or "", API_KEY):
+        raise HTTPException(status_code=403, detail="Chỉ admin mới quản lý được tài khoản team")
+
+
+@app.get("/api/team-users", dependencies=[Depends(_require_admin)])
+async def team_users_list():
+    return {"users": team_users.list_users()}
+
+
+@app.post("/api/team-users", dependencies=[Depends(_require_admin)])
+async def team_users_set(payload: TeamUserRequest):
+    username = payload.username.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", username):
+        raise HTTPException(400, "Username 3–32 ký tự: chữ, số, _ . -")
+    if len(payload.password) < 8:
+        raise HTTPException(400, "Mật khẩu tối thiểu 8 ký tự")
+    if DASH_USER and username == DASH_USER:
+        raise HTTPException(400, "Trùng username admin")
+    team_users.set_user(username, payload.password)
+    team_users.invalidate_cache()
+    return {"success": True}
+
+
+@app.delete("/api/team-users/{username}", dependencies=[Depends(_require_admin)])
+async def team_users_delete(username: str):
+    if not team_users.delete_user(username):
+        raise HTTPException(404, "Không tìm thấy tài khoản")
+    team_users.invalidate_cache()
+    return {"success": True}
 
 
 # Include API routes (with API key auth dependency injected)
@@ -358,8 +417,8 @@ async def telegram_worker_health():
 
 _FAVICON_SVG = (
     b"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
-    b"<rect width='64' height='64' rx='14' fill='#6366f1'/>"
-    b"<path d='M49 16L13 30c-2 1-2 3 0 4l9 3 21-13c1-1 2 0 1 1L27 40v9c0 2 2 3 3 1l5-5 9 7c2 1 4 0 4-2l3-31c0-2-1-3-2-3z' fill='#fff'/>"
+    b"<rect width='64' height='64' rx='14' fill='#ff8800'/>"
+    b"<path d='M49 16L13 30c-2 1-2 3 0 4l9 3 21-13c1-1 2 0 1 1L27 40v9c0 2 2 3 3 1l5-5 9 7c2 1 4 0 4-2l3-31c0-2-1-3-2-3z' fill='#0a0a0a'/>"
     b"</svg>"
 )
 
@@ -367,6 +426,19 @@ _FAVICON_SVG = (
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return Response(content=_FAVICON_SVG, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
+
+
+# PWA: manifest + service worker must be served from the root scope "/"
+@app.get("/manifest.webmanifest", include_in_schema=False)
+async def pwa_manifest():
+    return FileResponse(os.path.join(static_dir, "manifest.webmanifest"), media_type="application/manifest+json",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def pwa_service_worker():
+    return FileResponse(os.path.join(static_dir, "sw.js"), media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
 
 
 @app.get("/")

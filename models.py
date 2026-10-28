@@ -47,6 +47,7 @@ class TargetSchema(BaseModel):
     chat_id: int
     chat_title: Optional[str] = None
     chat_type: Optional[str] = None
+    chat_link: Optional[str] = None
 
 
 class ScheduleCreate(BaseModel):
@@ -59,6 +60,8 @@ class ScheduleCreate(BaseModel):
     once_date: Optional[str] = None
     max_sends: Optional[int] = None  # null = unlimited
     is_active: bool = True
+    ai_remix: bool = False
+    ai_agent_id: Optional[int] = None
     messages: list[MessageSchema] = []
     targets: list[TargetSchema] = []
 

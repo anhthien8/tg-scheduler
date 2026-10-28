@@ -209,22 +209,22 @@ async def start_engines() -> asyncio.Task:
     from apscheduler.triggers.interval import IntervalTrigger
     sch.get_scheduler().add_job(
         alerts.check_lead_sla,
-        trigger=IntervalTrigger(minutes=30),
+        trigger=CronTrigger(hour=9, minute=0, timezone=sch.TZ),
         id="lead_sla_check",
         name="Lead SLA Check",
         replace_existing=True,
     )
-    logger.info("Lead SLA check scheduled every 30 min")
+    logger.info("Lead SLA check scheduled daily at 09:00")
 
     # Speed-to-reply SLA: ping when a hot lead has waited too long for OUR reply.
     sch.get_scheduler().add_job(
         alerts.check_reply_sla,
-        trigger=IntervalTrigger(minutes=10),
+        trigger=CronTrigger(hour=9, minute=1, timezone=sch.TZ),
         id="reply_sla_check",
         name="Speed-to-Reply SLA Check",
         replace_existing=True,
     )
-    logger.info("Speed-to-reply SLA check scheduled every 10 min")
+    logger.info("Speed-to-reply SLA check scheduled daily at 09:01")
 
     # Message queue worker
     mq.start_worker()

@@ -33,6 +33,45 @@ def _cf_access_headers(url: str) -> dict:
     return {"CF-Access-Client-Id": cid, "CF-Access-Client-Secret": secret}
 
 
+LOCAL_AI_ROUTER = os.getenv("AI_LOCAL_FALLBACK_URL", "http://127.0.0.1:20128")
+
+
+def _local_fallback_url(url: str) -> str | None:
+    """Same path on the local 9router, or None if url is already local."""
+    parts = urlsplit(url)
+    if (parts.hostname or "") in ("127.0.0.1", "localhost", "::1"):
+        return None
+    base = urlsplit(LOCAL_AI_ROUTER)
+    return parts._replace(scheme=base.scheme, netloc=base.netloc).geturl()
+
+
+def _should_fallback(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        r = exc.response
+        return r.status_code in (401, 403, 502, 503, 530) and (
+            "cloudflare" in r.text[:2000].lower() or r.status_code >= 502)
+    return False
+
+
+async def ai_request(client: httpx.AsyncClient, method: str, url: str, **kw) -> httpx.Response:
+    """HTTP call to an OpenAI-compatible router; if a remote router is blocked
+    (Cloudflare Access 403, tunnel down) retry the same path on localhost."""
+    try:
+        resp = await client.request(method, url, **kw)
+        resp.raise_for_status()
+        return resp
+    except Exception as e:
+        alt = _local_fallback_url(url) if _should_fallback(e) else None
+        if not alt:
+            raise
+        logger.warning("[AI] %s failed (%s) — falling back to %s", url, type(e).__name__, alt)
+        resp = await client.request(method, alt, **kw)
+        resp.raise_for_status()
+        return resp
+
+
 def _parse_openai_compatible_json(raw: str) -> dict:
     raw_str = (raw or "").strip()
     if not raw_str:
@@ -159,6 +198,17 @@ async def _call_openai(api_key, prompt):
         return data["choices"][0]["message"]["content"].strip()
 
 
+GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
+
+
+async def _groq_model() -> str:
+    try:
+        import database as db
+        return (await db.get_setting("ai_groq_model", "") or "").strip() or GROQ_DEFAULT_MODEL
+    except Exception:
+        return GROQ_DEFAULT_MODEL
+
+
 async def _call_groq(api_key, prompt):
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -166,7 +216,7 @@ async def _call_groq(api_key, prompt):
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "llama-3.3-70b-versatile",
+        "model": await _groq_model(),
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.85,
         "max_tokens": 1500
@@ -259,8 +309,7 @@ async def _call_openai_compatible(api_key, prompt, base_url, model):
         "max_tokens": 1500
     }
     async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
+        resp = await ai_request(client, "POST", url, headers=headers, json=payload)
         # Some local APIs (LM Studio, Ollama, vLLM) may return extra data after JSON
         # Use strict=False and handle partial JSON
         raw = resp.text
@@ -659,8 +708,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             "max_tokens": 1500
         }
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
+            resp = await ai_request(client, "POST", url, headers=headers, json=payload)
             raw = resp.text
             data = _parse_openai_compatible_json(raw)
             return data["choices"][0]["message"]["content"].strip()
@@ -683,7 +731,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
-            "model": "llama-3.3-70b-versatile",
+            "model": await _groq_model(),
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 1500
@@ -743,8 +791,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             "max_tokens": 1500
         }
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
+            resp = await ai_request(client, "POST", url, headers=headers, json=payload)
             raw = resp.text
             data = _parse_openai_compatible_json(raw)
             return data["choices"][0]["message"]["content"].strip()

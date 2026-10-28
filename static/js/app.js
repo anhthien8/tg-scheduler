@@ -1,3 +1,4 @@
+function shortName(s,n=20){s=String(s||'');return [...s].length>n?[...s].slice(0,n).join('').trimEnd()+'…':s}
 var me_dummy = me_dummy || {}; var me_dummy_style = me_dummy_style || {};
 function debounce(func, delay = 250) {
   let timeoutId;
@@ -29,7 +30,8 @@ try{const a=await API.getAccounts();App._accounts=a.accounts||[];if(a.accounts&&
 
 this.showLogin()},
 
-_setUserInfo(user){if(!user)return;const n=[user.first_name,user.last_name].filter(Boolean).join(' ');const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');(document.getElementById('user-info')||me_dummy).innerHTML=`<strong>${esc(n||'TG Scheduler')}</strong><span>@${esc(user.username||user.phone||'')}</span>`},
+_setUserInfo(){const el=document.getElementById('user-info');if(!el)return;const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');const draw=d=>{const u=d.username||'admin';el.innerHTML=`<span class="user-avatar">${esc(u[0].toUpperCase())}</span><span class="user-meta"><strong>${esc(u)}</strong><span>${d.role==='admin'?'Quản trị viên':'Thành viên'}</span></span>`};try{const c=JSON.parse(localStorage.getItem('tgs_whoami')||'null');if(c)draw(c)}catch(e){}
+if(this._whoamiReq)return;this._whoamiReq=fetch('/api/whoami').then(r=>r.ok?r.json():null).then(d=>{if(d){localStorage.setItem('tgs_whoami',JSON.stringify(d));draw(d)}}).catch(()=>{})},
 
 toast(m,t='info'){const e=document.createElement('div');e.className=`toast ${t}`;e.textContent=m;(document.getElementById('toasts') || document.createElement("div")).appendChild(e);setTimeout(()=>e.remove(),4000)},
 
@@ -43,11 +45,11 @@ const sub=document.getElementById('login-subtitle');if(sub)sub.textContent=hasKe
 
 async dashboardLogin(){const u=(document.getElementById('dashboard-username')?.value||'').trim();const p=document.getElementById('dashboard-password')?.value||'';if(!u||!p)return this.toast('Nhập username và mật khẩu','error');
 try{const res=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await res.json().catch(()=>({}));if(!res.ok)throw new Error(d.detail||'Đăng nhập thất bại');
-localStorage.setItem('tgs_api_key',d.api_key);this.toast('Đăng nhập thành công!','success');location.reload()}catch(e){this.toast(e.message,'error')}},
+localStorage.setItem('tgs_api_key',d.api_key);localStorage.setItem('tgs_whoami',JSON.stringify({username:d.username,role:d.role}));this.toast('Đăng nhập thành công!','success');location.reload()}catch(e){this.toast(e.message,'error')}},
 
 showDashboard(user){(document.getElementById('login-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('dashboard-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
 
-if(user){this._setUserInfo(user)}else if(App._accounts&&App._accounts.length){const firstUi=App._accounts.find(a=>a.user_info)?.user_info;if(firstUi)this._setUserInfo(firstUi)}
+this._setUserInfo();
 
 this.navigate('dashboard');document.querySelectorAll('.day-btn').forEach(b=>b.addEventListener('click',()=>b.classList.toggle('active')))},
 
@@ -266,23 +268,23 @@ if(page==='ai-followup'){
             <div style="grid-column:1/-1">
               <label class="form-label" for="aifu-drip-cadence" style="font-weight:600">⏰ Nhịp follow-up mặc định (giờ cách nhau, phân cách dấu phẩy)</label>
               <input type="text" id="aifu-drip-cadence" class="form-input" placeholder="24, 72, 168">
-              <small style="color:#9ca3af;font-size:0.72rem;">Số giờ im lặng trước mỗi lần nhắc. Mặc định 24, 72, 168 = Ngày 1 / 3 / 7. Tăng dần, tối đa tùy ý.</small>
+              <small style="color:var(--text2);font-size:0.72rem;">Số giờ im lặng trước mỗi lần nhắc. Mặc định 24, 72, 168 = Ngày 1 / 3 / 7. Tăng dần, tối đa tùy ý.</small>
             </div>
             <div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
               <div>
-                <label class="form-label" for="aifu-drip-tier-a" style="font-weight:600;color:#4ade80">🔥 Nhịp Tier A (Hot Lead)</label>
+                <label class="form-label" for="aifu-drip-tier-a" style="font-weight:600;color:var(--green)">🔥 Nhịp Tier A (Hot Lead)</label>
                 <input type="text" id="aifu-drip-tier-a" class="form-input" placeholder="12, 24, 48, 96">
-                <small style="color:#9ca3af;font-size:0.7rem;">Mặc định: 12, 24, 48, 96 (4 bước)</small>
+                <small style="color:var(--text2);font-size:0.7rem;">Mặc định: 12, 24, 48, 96 (4 bước)</small>
               </div>
               <div>
-                <label class="form-label" for="aifu-drip-tier-b" style="font-weight:600;color:#60a5fa">⚡ Nhịp Tier B (Warm Lead)</label>
+                <label class="form-label" for="aifu-drip-tier-b" style="font-weight:600;color:var(--purple)">⚡ Nhịp Tier B (Warm Lead)</label>
                 <input type="text" id="aifu-drip-tier-b" class="form-input" placeholder="24, 72, 168">
-                <small style="color:#9ca3af;font-size:0.7rem;">Mặc định: 24, 72, 168 (3 bước)</small>
+                <small style="color:var(--text2);font-size:0.7rem;">Mặc định: 24, 72, 168 (3 bước)</small>
               </div>
               <div>
-                <label class="form-label" for="aifu-drip-tier-c" style="font-weight:600;color:#facc15">🌱 Nhịp Tier C (Cold Lead)</label>
+                <label class="form-label" for="aifu-drip-tier-c" style="font-weight:600;color:var(--orange)">🌱 Nhịp Tier C (Cold Lead)</label>
                 <input type="text" id="aifu-drip-tier-c" class="form-input" placeholder="48, 168">
-                <small style="color:#9ca3af;font-size:0.7rem;">Mặc định: 48, 168 (2 bước)</small>
+                <small style="color:var(--text2);font-size:0.7rem;">Mặc định: 48, 168 (2 bước)</small>
               </div>
             </div>
           </div>
@@ -478,8 +480,8 @@ window.AgentEvolution = {
     set('evo-avg-replies', dis.avg_replies || 0);
     set('evo-engaged', (dis.engaged || 0) + '/' + (dis.chats || 0));
 
-    this._bar('evo-learn-chart', d.learning_per_week || [], 'n', 'rgba(99,102,241,0.85)');
-    this._bar('evo-handover-chart', hw, 'handover_pct', 'rgba(239,68,68,0.8)');
+    this._bar('evo-learn-chart', d.learning_per_week || [], 'n', 'color-mix(in srgb, var(--accent) 85%, transparent)');
+    this._bar('evo-handover-chart', hw, 'handover_pct', 'color-mix(in srgb, var(--red) 80%, transparent)');
     this._chips('evo-funnel', d.funnel || {});
     this._chips('evo-stages', d.stages || {});
 
@@ -665,11 +667,11 @@ if(page==='warmup'){
       <h2 class="page-title">Warmup Nhom</h2>
 
       <!-- Safety Warning Banner -->
-      <div class="card" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);padding:16px;margin-bottom:20px">
+      <div class="card" style="background:color-mix(in srgb, var(--orange) 10%, transparent);border:1px solid color-mix(in srgb, var(--orange) 40%, transparent);padding:16px;margin-bottom:20px">
         <div style="display:flex;align-items:center;gap:10px">
           <span style="font-size:1.5rem">⚠️</span>
           <div>
-            <strong style="color:#f59e0b">Lưu ý An toàn</strong>
+            <strong style="color:var(--orange)">Lưu ý An toàn</strong>
             <p style="margin:4px 0 0;font-size:.85rem;color:var(--text2)">Chỉ thêm nhóm PUBLIC dùng cho mục đích warmup. KHÔNG thêm nhóm private hoặc nhóm có khách hàng tiềm năng (KOL) để tránh lộ bot.</p>
           </div>
         </div>
@@ -707,7 +709,7 @@ if(page==='warmup'){
       <div style="margin-top:24px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
           <h3 style="margin:0">📊 Account Progress</h3>
-          <button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.3)" onclick="Warmup.loadProgress()">↻ Refresh</button>
+          <button class="btn btn-sm" style="background:color-mix(in srgb, var(--accent) 15%, transparent);color:var(--accent-text);border:1px solid color-mix(in srgb, var(--accent) 30%, transparent)" onclick="Warmup.loadProgress()">↻ Refresh</button>
         </div>
         <div id="warmup-progress-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px"></div>
       </div>
@@ -988,7 +990,7 @@ set('dash-kpi-replies',today.replies||0);set('dash-kpi-replies-sub',today.failed
 set('dash-kpi-accounts',stats.total_accounts);set('dash-kpi-accounts-sub',`${stats.active_schedules}/${stats.total_schedules} lịch hoạt động`);
 // Leads cần người thật — fetch riêng, không block dashboard
 fetch('/api/ai-followup/stats').then(r=>r.json()).then(d=>{const need=(d.counts&&d.counts.needs_human)||0;set('dash-kpi-leads',need);const sub=document.getElementById('dash-kpi-leads-sub');if(sub)sub.textContent=`${d.total||0} lead đang theo dõi`;const val=document.getElementById('dash-kpi-leads');if(val)val.className='stat-value '+(need>0?'red':'green')}).catch(()=>{set('dash-kpi-leads','—');const sub=document.getElementById('dash-kpi-leads-sub');if(sub)sub.textContent='Chưa bật AI Agent'});
-this._renderDashChart(Array.isArray(daily)?daily:[]);
+this._dashDaily=Array.isArray(daily)?daily:[];this._renderDashChart(Array.isArray(daily)?daily:[]);
 this._renderDashHealth(Array.isArray(health)?health:[]);
 this.loadDashboardTasks();
 const active=sd.schedules.filter(s=>s.next_run);const tbody=document.getElementById('upcoming-body');
@@ -998,14 +1000,14 @@ else{tbody.innerHTML=active.map(s=>{const sends=s.max_sends?`${s.current_sends||
 }catch(e){this.toast('Lỗi: '+e.message,'error')}},
 
 _renderDashChart(data){const canvas=document.getElementById('dash-chart');if(!canvas)return;const ctx=canvas.getContext('2d');const dpr=window.devicePixelRatio||1;const W=canvas.width=canvas.parentElement.clientWidth*dpr;const H=canvas.height=200*dpr;canvas.style.height='200px';ctx.clearRect(0,0,W,H);
-if(!data.length){ctx.fillStyle='rgba(255,255,255,0.35)';ctx.font=`${12*dpr}px Inter,sans-serif`;ctx.textAlign='center';ctx.fillText('Chưa có dữ liệu',W/2,H/2);return}
+if(!data.length){ctx.fillStyle=_cv('--text',.35);ctx.font=`${12*dpr}px sans-serif`;ctx.textAlign='center';ctx.fillText('Chưa có dữ liệu',W/2,H/2);return}
 const pad={top:16*dpr,right:12*dpr,bottom:28*dpr,left:44*dpr};const chartW=W-pad.left-pad.right;const chartH=H-pad.top-pad.bottom;
 const maxVal=Math.max(1,...data.map(x=>Math.max(x.sent||0,x.failed||0,x.replies||0)));const xStep=data.length>1?chartW/(data.length-1):chartW;
-ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=1;ctx.font=`${10*dpr}px Inter,sans-serif`;
-for(let i=0;i<=4;i++){const y=pad.top+chartH*i/4;ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();ctx.fillStyle='rgba(255,255,255,0.4)';ctx.textAlign='right';ctx.fillText(Math.round(maxVal*(4-i)/4),pad.left-8*dpr,y+4*dpr)}
-const drawLine=(key,color)=>{ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=2*dpr;data.forEach((x,i)=>{const px=pad.left+i*xStep;const py=pad.top+chartH-(x[key]||0)/maxVal*chartH;i===0?ctx.moveTo(px,py):ctx.lineTo(px,py)});ctx.stroke();ctx.lineTo(pad.left+(data.length-1)*xStep,pad.top+chartH);ctx.lineTo(pad.left,pad.top+chartH);ctx.closePath();ctx.fillStyle=color.replace('1)','0.08)');ctx.fill()};
-drawLine('sent','rgba(99,102,241,1)');drawLine('replies','rgba(34,197,94,1)');drawLine('failed','rgba(239,68,68,1)');
-ctx.fillStyle='rgba(255,255,255,0.4)';ctx.textAlign='center';const labelStep=Math.max(1,Math.floor(data.length/7));
+ctx.strokeStyle=_cv('--text',.08);ctx.lineWidth=1;ctx.font=`${10*dpr}px sans-serif`;
+for(let i=0;i<=4;i++){const y=pad.top+chartH*i/4;ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();ctx.fillStyle=_cv('--text',.45);ctx.textAlign='right';ctx.fillText(Math.round(maxVal*(4-i)/4),pad.left-8*dpr,y+4*dpr)}
+const drawLine=(key,color)=>{ctx.beginPath();ctx.strokeStyle=_cv(color,1);ctx.lineWidth=2*dpr;data.forEach((x,i)=>{const px=pad.left+i*xStep;const py=pad.top+chartH-(x[key]||0)/maxVal*chartH;i===0?ctx.moveTo(px,py):ctx.lineTo(px,py)});ctx.stroke();ctx.lineTo(pad.left+(data.length-1)*xStep,pad.top+chartH);ctx.lineTo(pad.left,pad.top+chartH);ctx.closePath();ctx.fillStyle=_cv(color,.08);ctx.fill()};
+drawLine('sent','--accent');drawLine('replies','--green');drawLine('failed','--red');
+ctx.fillStyle=_cv('--text',.45);ctx.textAlign='center';const labelStep=Math.max(1,Math.floor(data.length/7));
 data.forEach((x,i)=>{if(i%labelStep===0)ctx.fillText((x.date||'').slice(5),pad.left+i*xStep,H-8*dpr)})},
 
 _renderDashHealth(list){const el=document.getElementById('dash-health-list');if(!el)return;
@@ -1027,6 +1029,7 @@ async loadDashboardTasks(){
     const r=await fetch('/api/settings/dashboard_tasks');const d=await r.json();
     this._dashTasks=d.value?JSON.parse(d.value):[];
   }catch{this._dashTasks=[];}
+  try{const d=await API.getAccounts();this._accIssues=this._buildAccIssues(d.accounts||[]);}catch{this._accIssues=[];}
   this._renderDashboardTasks();
 },
 
@@ -1034,10 +1037,31 @@ async _saveDashTasks(){
   await fetch('/api/settings/dashboard_tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(this._dashTasks)})});
 },
 
+_accIssues: [],
+
+// Problems on accounts that need someone to fix them, newest-worst first.
+_buildAccIssues(accs){
+  const out=[];
+  for(const a of accs){
+    const nm=(a.user_info?[a.user_info.first_name,a.user_info.last_name].filter(Boolean).join(' '):a.name)||('#'+a.id);
+    if(a.session_error||!a.is_logged_in)out.push({lv:0,icon:'🔑',name:nm,text:a.session_error?`Session lỗi: ${a.session_error}`:'Chưa đăng nhập — cần OTP',fix:`App.loginAccount(${a.id},'${a.phone||''}')`,btn:'Đăng nhập'});
+    if(a.is_flagged)out.push({lv:1,icon:'🚩',name:nm,text:a.flag_reason||'Bị gắn cờ cảnh báo',fix:`App.unflagAccount(${a.id})`,btn:'Bỏ cờ'});
+    if(a.is_paused&&a.pause_reason)out.push({lv:2,icon:'⏸',name:nm,text:`Đang tạm dừng: ${a.pause_reason}`,fix:"App.navigate('accounts')",btn:'Xem'});
+  }
+  return out.sort((x,y)=>x.lv-y.lv);
+},
+
 _renderDashboardTasks(){
   const el=document.getElementById('dash-tasks-list');if(!el)return;
-  if(!this._dashTasks.length){el.innerHTML='<div style="text-align:center;color:var(--text2);padding:20px;font-size:13px">🎉 Không có việc cần làm</div>';return}
-  el.innerHTML=this._dashTasks.map((t,i)=>`
+  const esc=this._esc.bind(this);
+  const issues=(this._accIssues||[]).map(t=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+      <span style="flex-shrink:0">${t.icon}</span>
+      <div style="flex:1;min-width:0;font-size:12px;line-height:1.35"><b>${esc(t.name)}</b><div style="color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.text)}">${esc(t.text)}</div></div>
+      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;flex-shrink:0" onclick="${t.fix}">${t.btn}</button>
+    </div>`).join('');
+  if(!this._dashTasks.length&&!issues){el.innerHTML='<div style="text-align:center;color:var(--text2);padding:20px;font-size:13px">🎉 Không có việc cần làm</div>';return}
+  el.innerHTML=(issues?`<div style="font-size:11px;font-weight:600;color:var(--orange);margin-bottom:2px">⚠️ Tài khoản cần xử lý (${this._accIssues.length})</div>${issues}`:'')+this._dashTasks.map((t,i)=>`
     <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);${t.done?'opacity:.5':''}">
       <input type="checkbox" ${t.done?'checked':''} onchange="App.toggleDashTask(${i})" style="width:16px;height:16px;cursor:pointer;accent-color:var(--primary);flex-shrink:0">
       <span style="flex:1;font-size:13px;${t.done?'text-decoration:line-through;color:var(--text2)':''}">${esc(t.text)}</span>
@@ -1061,74 +1085,57 @@ async removeDashTask(i){
   await this._saveDashTasks();this._renderDashboardTasks();
 },
 
-async loadAccounts(){try{const[d,agentData]=await Promise.all([API.getAccounts(),API.get('/api/ai-agents').catch(()=>({agents:[]}))]);this.accounts=d.accounts||[];App._accounts=this.accounts;const grid=document.getElementById('accounts-grid');if(!grid)return;if(!this.accounts.length){grid.innerHTML='<div class="empty-state"><div class="empty-state-icon">👤</div><p class="empty-state-text">Chưa có tài khoản nào</p></div>';return}const aiAgents=agentData.agents||[];
+async loadAccounts(){try{const[d,agentData]=await Promise.all([API.getAccounts(),API.get('/api/ai-agents').catch(()=>({agents:[]}))]);this.accounts=d.accounts||[];App._accounts=this.accounts;this._aiAgents=agentData.agents||[];this.renderAccounts()}catch(e){this.toast(e.message,'error')}},
 
-grid.innerHTML = this.accounts.map(a => {
-  const logged = a.is_logged_in;
-  const sessErr = a.session_error || '';
-  const isOff = Boolean(a.is_paused);
-  const ui = a.user_info;
-  const name = ui ? [ui.first_name, ui.last_name].filter(Boolean).join(' ') : a.name;
-  const uname = ui?.username ? `@${ui.username}` : `ID tài khoản #${a.id} · SĐT ${a.phone || 'chưa có'}`;
-  const dmLimit = a.is_premium ? 50 : 10;
-  const initial = name ? name.trim().charAt(0).toUpperCase() : 'T';
+_accState(a){if(a.is_paused)return 'paused';if(a.session_error||!a.is_logged_in)return 'login';return 'active'},
 
-  const agentOptions = aiAgents.map(ag => 
-    `<option value="${ag.id}" ${a.ai_agent_id === ag.id ? 'selected' : ''}>${ag.avatar_emoji || '🤖'} ${esc(ag.name)}</option>`
-  ).join('');
+filterAccounts(q){this._accQuery=(q||'').trim().toLowerCase();this.renderAccounts()},
 
-  return `
-  <div class="account-card ${isOff ? 'account-card-disabled' : ''}" data-account-id="${a.id}" style="background:var(--bg-card);border:1px solid ${isOff ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.08)'};border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;position:relative;${isOff ? 'opacity:0.82;' : ''}">
+setAccFilter(f){this._accFilter=f;this.renderAccounts()},
 
-    <!-- Header: Checkbox + Avatar + Name + meta inline -->
-    <div style="display:flex;align-items:center;gap:10px">
-      <input type="checkbox" class="acc-select-cb" data-acc-id="${a.id}" onchange="App.onAccountSelectChange()" style="width:16px;height:16px;cursor:pointer;accent-color:var(--primary);flex-shrink:0" title="Chọn tài khoản">
-      <div style="position:relative;width:38px;height:38px;flex-shrink:0;border-radius:50%;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#818cf8" title="${isOff ? 'Đã tắt' : (sessErr ? esc(sessErr) : (logged ? 'Online' : 'Disconnected'))}">
-        ${esc(initial)}
-        <span style="position:absolute;bottom:-1px;right:-1px;width:11px;height:11px;border-radius:50%;background:${(isOff || sessErr) ? '#ef4444' : (logged ? '#10b981' : '#f59e0b')};border:2px solid var(--bg-card)"></span>
-      </div>
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="font-weight:700;font-size:14px;color:var(--text1);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(name)}</span>
-          ${isOff ? `<span style="font-size:11px;font-weight:600;color:#f87171;flex-shrink:0" title="${esc(a.pause_reason || 'Đã tắt thủ công')}">⚠️ ${esc((a.pause_reason || 'Đã tắt').substring(0, 20))}</span>` : ''}
-          ${a.is_flagged ? `<span style="cursor:pointer;font-size:12px;flex-shrink:0" onclick="App.unflagAccount(${a.id})" title="${esc(a.flag_reason || '')} — click để bỏ cảnh báo">🚩</span>` : ''}
-        </div>
-        <div style="font-size:11px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-          ${esc(uname)} · ID <span style="font-family:monospace">${a.api_id}</span> · <span style="color:${a.is_premium ? '#fbbf24' : 'var(--text2)'}">${dmLimit} DM/ngày</span>
-        </div>
-        ${sessErr ? `<div style="font-size:11px;font-weight:600;color:#f87171;margin-top:3px" title="Tài khoản không nhận/gửi được tin cho tới khi đăng nhập lại bằng OTP">🔒 ${esc(sessErr)} — cần đăng nhập lại</div>` : ''}
-      </div>
-      <span style="cursor:pointer;font-size:14px;flex-shrink:0;${a.is_premium ? '' : 'opacity:.4'}" onclick="App.togglePremium(${a.id}, ${!a.is_premium})" title="${a.is_premium ? 'Premium — click để chuyển Thường (50→10 DM/ngày)' : 'Thường — click để nâng Premium (10→50 DM/ngày)'}">${a.is_premium ? '⭐' : '☆'}</span>
-    </div>
+toggleAccMenu(ev){ev.stopPropagation();const m=document.getElementById('acc-menu-list');if(!m)return;const open=!m.classList.contains('open');m.classList.toggle('open',open);if(open){const close=()=>{m.classList.remove('open');document.removeEventListener('click',close)};setTimeout(()=>document.addEventListener('click',close),0)}},
 
-    <!-- AI Agent: one compact select -->
-    <select class="form-input" style="width:100%;height:30px;font-size:12px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:#f3f4f6;padding:0 8px" onchange="App.setAccountAiAgent(${a.id}, this.value)" title="AI Agent phụ trách">
-      <option value="">🚫 Tắt AI</option>
-      ${agentOptions}
-    </select>
+renderAccounts(){
+  const grid=document.getElementById('accounts-grid');if(!grid)return;
+  const all=this.accounts||[];const f=this._accFilter||'all';const q=this._accQuery||'';
+  const count={all:all.length,active:0,paused:0,login:0};all.forEach(a=>count[this._accState(a)]++);
+  const sum=document.getElementById('acc-summary');if(sum)sum.textContent=`${count.all} tài khoản · ${count.active} đang chạy`;
+  const tabs=document.getElementById('acc-tabs');
+  if(tabs)tabs.innerHTML=[['all','Tất cả'],['active','Hoạt động'],['login','Cần đăng nhập'],['paused','Tạm dừng']].map(([k,l])=>`<button role="tab" aria-selected="${f===k}" class="acc-tab${f===k?' is-on':''}" onclick="App.setAccFilter('${k}')">${l}<span class="acc-tab-n">${count[k]}</span></button>`).join('');
+  if(!all.length){grid.innerHTML='<div class="acc-empty">Chưa có tài khoản nào. Bấm “+ Thêm tài khoản” để bắt đầu.</div>';return}
+  const list=all.filter(a=>{if(f!=='all'&&this._accState(a)!==f)return false;if(!q)return true;const ui=a.user_info||{};return [a.name,ui.first_name,ui.last_name,ui.username,a.phone,String(a.id)].some(v=>v&&String(v).toLowerCase().includes(q))});
+  const sel=this._accSelected||new Set();
+  const head=`<div class="acc-row acc-row-head" role="row"><span></span><span>Tài khoản</span><span>Trạng thái</span><span>AI Agent</span><span>Giờ chạy</span><span class="acc-col-end">Thao tác</span></div>`;
+  if(!list.length){grid.innerHTML=head+'<div class="acc-empty">Không có tài khoản nào khớp bộ lọc.</div>';return}
+  const STATE={active:['Hoạt động','Đang online'],login:['Cần đăng nhập',''],paused:['Tạm dừng','']};
+  grid.innerHTML=head+list.map(a=>{
+    const st=this._accState(a);const ui=a.user_info;
+    const name=ui?[ui.first_name,ui.last_name].filter(Boolean).join(' '):a.name;
+    const sub=ui?.username?`@${ui.username}`:(a.phone||`#${a.id}`);
+    const tip=`#${a.id} · SĐT ${a.phone||'—'} · API ${a.api_id} · ${a.is_premium?50:10} DM/ngày`;
+    const why=st==='paused'?(a.pause_reason||'Đã tắt thủ công'):st==='login'?(a.session_error||'Chưa đăng nhập'):STATE.active[1];
+    const opts=(this._aiAgents||[]).map(ag=>`<option value="${ag.id}" ${a.ai_agent_id===ag.id?'selected':''}>${esc(ag.name)}</option>`).join('');
+    return `<div class="acc-row account-card is-${st}" role="row" data-account-id="${a.id}">
+  <span class="acc-cell-cb"><input type="checkbox" class="acc-select-cb" data-acc-id="${a.id}" ${sel.has(a.id)?'checked':''} onchange="App.onAccountSelectChange()" aria-label="Chọn ${esc(name)}"></span>
+  <span class="acc-who" title="${esc(tip)}">
+    <span class="acc-ava">${esc((name||'T').trim().charAt(0).toUpperCase())}</span>
+    <span class="acc-id">
+      <span class="acc-name"><b>${esc(name)}</b>${a.is_premium?'<span class="acc-tag" title="Premium · 50 DM/ngày">Premium</span>':''}${a.is_flagged?`<button class="acc-flag" onclick="App.showAccountWarnings(${a.id})" title="${esc(a.flag_reason||'')} — bấm để xem chi tiết">Cảnh báo</button>`:''}<span class="spam-badge-slot"></span></span>
+      <span class="acc-sub">${esc(sub)} <button class="acc-link" onclick="App.togglePremium(${a.id}, ${!a.is_premium})">${a.is_premium?'Hạ Thường':'Nâng Premium'}</button></span>
+    </span>
+  </span>
+  <span class="acc-status" title="${esc(why)}"><i></i>${STATE[st][0]}</span>
+  <span class="acc-cell" data-label="AI Agent"><select class="acc-input" onchange="App.setAccountAiAgent(${a.id}, this.value)" aria-label="AI Agent"><option value="">Tắt AI</option>${opts}</select></span>
+  <span class="acc-cell acc-hours" data-label="Giờ chạy"><input type="time" class="acc-input" id="acc-ah-start-${a.id}" value="${esc(a.active_hours_start||'08:00')}" onchange="App.setAccountActiveHours(${a.id})" aria-label="Giờ bắt đầu"><span>–</span><input type="time" class="acc-input" id="acc-ah-end-${a.id}" value="${esc(a.active_hours_end||'22:00')}" onchange="App.setAccountActiveHours(${a.id})" aria-label="Giờ dừng"></span>
+  <span class="acc-actions">
+    ${st==='login'?`<button class="btn btn-primary btn-sm" onclick="App.loginAccount(${a.id}, '${a.phone}')">Đăng nhập</button>`:''}
+    ${a.is_paused?`<button class="acc-ib" onclick="App.toggleAccountActive(${a.id}, true)" title="Bật lại" aria-label="Bật lại">▶</button>`:`<button class="acc-ib" onclick="App.toggleAccountActive(${a.id}, false)" title="Tạm dừng" aria-label="Tạm dừng">❚❚</button>`}
+    <button class="acc-ib is-danger" onclick="App.deleteAccount(${a.id})" title="Xóa tài khoản" aria-label="Xóa">✕</button>
+  </span>
+</div>`}).join('');
+},
 
-    <!-- C3: Active Hours (Online/Offline Cycle) -->
-    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)" title="Khung giờ hoạt động tự động (Online/Offline Cycle) để chống ban">
-      <span>🕒 Giờ chạy:</span>
-      <input type="time" id="acc-ah-start-${a.id}" value="${esc(a.active_hours_start || '08:00')}" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:4px;color:#f3f4f6;font-size:11px;padding:1px 4px" onchange="App.setAccountActiveHours(${a.id})">
-      <span>→</span>
-      <input type="time" id="acc-ah-end-${a.id}" value="${esc(a.active_hours_end || '22:00')}" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:4px;color:#f3f4f6;font-size:11px;padding:1px 4px" onchange="App.setAccountActiveHours(${a.id})">
-    </div>
-
-    <!-- Actions: compact row -->
-    <div style="display:flex;align-items:center;gap:6px;border-top:1px solid rgba(255,255,255,0.06);padding-top:8px">
-      ${isOff ?
-        `<button class="btn btn-success btn-sm" style="flex:1;padding:4px 8px" onclick="App.toggleAccountActive(${a.id}, true)" title="Bật lại tài khoản">▶ Bật</button>` :
-        `<button class="btn btn-ghost btn-sm" style="flex:1;padding:4px 8px;color:#f87171" onclick="App.toggleAccountActive(${a.id}, false)" title="Tắt tạm dừng">⏸ Tắt</button>`
-      }
-      ${!logged ? `<button class="btn btn-primary btn-sm" style="padding:4px 8px" onclick="App.loginAccount(${a.id}, '${a.phone}')" title="Đăng nhập lại">🔑</button>` : ''}
-      <button class="btn btn-ghost btn-sm" style="padding:4px 8px;color:#ef4444" onclick="App.deleteAccount(${a.id})" title="Xóa tài khoản">🗑</button>
-    </div>
-
-  </div>`;
-}).join('')}catch(e){this.toast(e.message,'error')}},
-
-openAddAccountModal(){this._bulkQueue=null;this._bulkDone=[];this._bulkFailed=[];(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-phone') || me_dummy).value = '';const proxyEl=document.getElementById('acc-proxy');if(proxyEl)proxyEl.value='';const bulk=document.getElementById('acc-bulk-input');if(bulk)bulk.value='';document.getElementById('acc-bulk-progress')?.classList.add('hidden');document.getElementById('acc-bulk-skip')?.classList.add('hidden');this.setAccountAddMode('single');(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
+openAddAccountModal(){this._bulkQueue=null;document.getElementById('acc-step-parallel')?.classList.add('hidden');document.getElementById('acc-step-relogin')?.classList.add('hidden');this._bulkDone=[];this._bulkFailed=[];(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-phone') || me_dummy).value = '';const proxyEl=document.getElementById('acc-proxy');if(proxyEl)proxyEl.value='';const bulk=document.getElementById('acc-bulk-input');if(bulk)bulk.value='';document.getElementById('acc-bulk-progress')?.classList.add('hidden');document.getElementById('acc-bulk-skip')?.classList.add('hidden');this.setAccountAddMode('single');(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
 
 closeAccountModal(){(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')},
 
@@ -1138,6 +1145,25 @@ async setAccountAiAgent(accId,agentId){try{const res=await API.setAccountAiAgent
 
 async setAccountActiveHours(accId){const start=document.getElementById(`acc-ah-start-${accId}`)?.value||'08:00';const end=document.getElementById(`acc-ah-end-${accId}`)?.value||'22:00';try{const res=await API.post(`/api/auth/accounts/${accId}/active-hours`,{active_hours_start:start,active_hours_end:end,active_timezone:'Asia/Ho_Chi_Minh'});API.clearAccountsCache();this.toast(res.message||`Đã lưu khung giờ ${start}-${end}`,'success');}catch(e){this.toast(e.message,'error')}},
 
+async showAccountWarnings(accId){
+  const a=(this.accounts||[]).find(x=>x.id===accId)||{};
+  let m=document.getElementById('acc-warn-modal');
+  if(!m){m=document.createElement('div');m.className='modal-overlay';m.id='acc-warn-modal';
+    m.innerHTML='<div class="modal" style="width:600px"><div class="modal-header"><span class="modal-title" id="aw-title"></span><button class="modal-close" onclick="document.getElementById(&quot;acc-warn-modal&quot;).classList.remove(&quot;open&quot;)">&times;</button></div><div class="modal-body" id="aw-body"></div></div>';
+    m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});document.body.appendChild(m)}
+  document.getElementById('aw-title').textContent='Cảnh báo: '+(a.name||('#'+accId));
+  const body=document.getElementById('aw-body');body.innerHTML='<div style="color:var(--text3);font-size:13px">Đang tải…</div>';m.classList.add('open');
+  try{const d=await API.get(`/api/auth/accounts/${accId}/warnings`);
+    const sec=(title,rows,hint)=>rows.length?`<div style="font-size:12px;color:var(--text3);margin:14px 0 6px">${title}</div>`+rows.map(r=>`<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)"><span class="badge badge-red" style="flex:none">${r.n}×</span><div style="font-size:13px;flex:1;min-width:0">${esc(r.error_message||'(không có mô tả)')}<div style="font-size:11px;color:var(--text3);margin-top:2px">${hint}: ${esc(r.sources||'—')}${r.chats?' · Nhóm: '+esc(r.chats):''} · Gần nhất ${formatDate(r.last_at)}</div></div></div>`).join(''):'';
+    let h=`<div style="padding:10px 12px;border:1px solid var(--red);border-radius:var(--radius-sm);background:var(--red-dim);font-size:13px">${esc(d.flag_reason||'Bị gắn cờ cảnh báo')}<div style="color:var(--text2);margin-top:4px">Tài khoản bị gắn cờ khi có từ 5 lần gửi lỗi trong 24h. Xem nguyên nhân bên dưới, sửa xong thì bấm "Bỏ cảnh báo".</div></div>`;
+    h+=sec('Lỗi gửi lịch gần nhất',d.schedule_errors,'Lịch')+sec('Lỗi Keyword DM gần nhất',d.keyword_errors,'Rule');
+    const lastAt=[...d.schedule_errors,...d.keyword_errors].map(r=>r.last_at).sort().pop();
+    const ageH=lastAt?(Date.now()-new Date(lastAt.replace(' ','T')+'Z'))/36e5:Infinity;
+    if(ageH>24)h+=`<div style="color:var(--green);font-size:13px;margin-top:12px">${lastAt?`Lỗi cuối cùng cách đây ${Math.floor(ageH/24)} ngày`:'Không còn lỗi nào'} — tài khoản đã ổn, có thể bỏ cảnh báo.</div>`;
+    h+=`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">${d.schedule_errors.length?`<button class="btn btn-ghost btn-sm" onclick="document.getElementById('acc-warn-modal').classList.remove('open');App.navigate('logs')">Xem log gửi</button>`:''}<button class="btn btn-primary btn-sm" onclick="document.getElementById('acc-warn-modal').classList.remove('open');App.unflagAccount(${accId})">Bỏ cảnh báo</button></div>`;
+    body.innerHTML=h;
+  }catch(e){body.innerHTML=`<div style="color:var(--red)">${esc(e.message)}</div>`}
+},
 async unflagAccount(accId){if(!await customConfirm('Bỏ cảnh báo tài khoản này?'))return;try{await fetch(`/api/auth/accounts/${accId}/unflag`,{method:'POST'});API.clearAccountsCache();this.toast('Đã bỏ cảnh báo','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
 
 async unpauseAccount(accId){if(!await customConfirm('Bỏ tạm dừng tài khoản này? Tài khoản sẽ hoạt động lại bình thường.'))return;try{await fetch(`/api/auth/accounts/${accId}/unpause`,{method:'POST'});API.clearAccountsCache();this.toast('Đã bỏ tạm dừng','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
@@ -1150,7 +1176,7 @@ _renderBlacklistPage(){const q=(document.getElementById('blacklist-search')?.val
 
 blPage(n){this._blPage=n;this._renderBlacklistPage()},
 
-_renderBlacklistTable(data,isEmpty,q){const tbody=document.getElementById('blacklist-body');if(isEmpty){tbody.innerHTML=q?`<tr><td colspan="4" style="text-align:center;color:var(--text2);padding:32px">Không tìm thấy user nào khớp "<strong>${esc(q)}</strong>"</td></tr>`:`<tr><td colspan="4" style="text-align:center;padding:32px"><div style="font-size:2rem;margin-bottom:8px">🎉</div><div style="color:var(--text);font-weight:600;margin-bottom:4px">Blacklist trống</div><div style="color:var(--text2);font-size:.85rem;margin-bottom:12px">Chưa có user nào bị chặn DM. Thêm user khi cần loại trừ khỏi mọi chiến dịch.</div><button class="btn btn-primary btn-sm" onclick="App.showAddBlacklist()">+ Thêm user đầu tiên</button></td></tr>`;return;}const colors=['#6366f1','#a855f7','#ec4899','#f59e0b','#22c55e','#06b6d4'];tbody.innerHTML=data.map(b=>{const name=b.username||`ID ${b.user_id}`;const letter=esc((name[0]||'?').toUpperCase());const color=colors[[...String(name)].reduce((s,c)=>s+c.charCodeAt(0),0)%colors.length];const uname=b.username?`@${esc(b.username)}`:'<span style="color:var(--text3)">(không có username)</span>';const uid=b.user_id?`<div style="font-size:.75rem;color:var(--text2);font-family:monospace">ID: ${b.user_id}</div>`:'';return `<tr><td><div style="display:flex;align-items:center;gap:10px"><span aria-hidden="true" style="width:32px;height:32px;border-radius:50%;background:${color}22;border:1px solid ${color}55;color:${color};display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;flex-shrink:0">${letter}</span><div><div style="font-weight:600;color:var(--accent-text)">${uname}</div>${uid}</div></div></td><td style="color:var(--text2);font-size:.85rem;max-width:280px">${esc(b.reason||'—')}</td><td style="font-size:.8rem;color:var(--text2);white-space:nowrap">${formatDate(b.created_at)}</td><td><button class="btn btn-danger btn-sm" onclick="App.removeBlacklist(${b.id})" aria-label="Xóa ${esc(name)} khỏi blacklist">🗑️ Xóa</button></td></tr>`}).join('');},
+_renderBlacklistTable(data,isEmpty,q){const tbody=document.getElementById('blacklist-body');if(isEmpty){tbody.innerHTML=q?`<tr><td colspan="4" style="text-align:center;color:var(--text2);padding:32px">Không tìm thấy user nào khớp "<strong>${esc(q)}</strong>"</td></tr>`:`<tr><td colspan="4" style="text-align:center;padding:32px"><div style="font-size:2rem;margin-bottom:8px">🎉</div><div style="color:var(--text);font-weight:600;margin-bottom:4px">Blacklist trống</div><div style="color:var(--text2);font-size:.85rem;margin-bottom:12px">Chưa có user nào bị chặn DM. Thêm user khi cần loại trừ khỏi mọi chiến dịch.</div><button class="btn btn-primary btn-sm" onclick="App.showAddBlacklist()">+ Thêm user đầu tiên</button></td></tr>`;return;}const colors=['var(--accent)','var(--purple)','var(--violet)','var(--orange)','var(--green)','var(--cyan)'];tbody.innerHTML=data.map(b=>{const name=b.username||`ID ${b.user_id}`;const letter=esc((name[0]||'?').toUpperCase());const color=colors[[...String(name)].reduce((s,c)=>s+c.charCodeAt(0),0)%colors.length];const uname=b.username?`@${esc(b.username)}`:'<span style="color:var(--text3)">(không có username)</span>';const uid=b.user_id?`<div style="font-size:.75rem;color:var(--text2);font-family:monospace">ID: ${b.user_id}</div>`:'';return `<tr><td><div style="display:flex;align-items:center;gap:10px"><span aria-hidden="true" style="width:32px;height:32px;border-radius:50%;background:${_mix(color,13)};border:1px solid ${_mix(color,33)};color:${color};display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;flex-shrink:0">${letter}</span><div><div style="font-weight:600;color:var(--accent-text)">${uname}</div>${uid}</div></div></td><td style="color:var(--text2);font-size:.85rem;max-width:280px">${esc(b.reason||'—')}</td><td style="font-size:.8rem;color:var(--text2);white-space:nowrap">${formatDate(b.created_at)}</td><td><button class="btn btn-danger btn-sm" onclick="App.removeBlacklist(${b.id})" aria-label="Xóa ${esc(name)} khỏi blacklist">🗑️ Xóa</button></td></tr>`}).join('');},
 
 filterBlacklist(){clearTimeout(this._blSearchTimer);this._blSearchTimer=setTimeout(()=>{if(!this._blacklistData)return;this._blPage=1;this._renderBlacklistPage()},250);},
 
@@ -1177,17 +1203,17 @@ setAccountAddMode(mode){this._accAddMode=mode;const single=mode==='single';docum
 async startBulkAccounts(){const raw=(document.getElementById('acc-bulk-input')?.value||'').trim();if(!raw)return this.toast('Nhập ít nhất 1 số điện thoại','error');
   this._bulkQueue=raw.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const[phone,proxy]=l.split('|').map(s=>(s||'').trim());return{phone,proxy:proxy||null}});
   if(!this._bulkQueue.length)return this.toast('Danh sách trống','error');
-  this._bulkDone=[];this._bulkFailed=[];
-  document.getElementById('acc-bulk-skip')?.classList.remove('hidden');
-  await this._bulkAdvance();
+  this._bulkDone=[];this._bulkFailed=[];this._bulk2fa=(document.getElementById('acc-bulk-2fa')?.value||'')||undefined;
+  await this._startParallelLogin();
 },
 
 async _bulkAdvance(){
   if(!this._bulkQueue.length){this.toast(`Xong: ${this._bulkDone.length} OK${this._bulkFailed.length?`, ${this._bulkFailed.length} lỗi`:''}`,'success');this.closeAccountModal();this.loadAccounts();return}
-  const{phone,proxy}=this._bulkQueue[0];
+  const{phone,proxy,id}=this._bulkQueue[0];
+  document.getElementById('acc-step-2fa')?.classList.add('hidden');
   const progEl=document.getElementById('acc-bulk-progress');if(progEl){progEl.classList.remove('hidden');progEl.textContent=`Đang xử lý ${this._bulkDone.length+this._bulkFailed.length+1}/${this._bulkDone.length+this._bulkFailed.length+this._bulkQueue.length}: ${phone}`}
   try{
-    const r=await API.addAccount({phone,proxy_url:proxy});
+    const r=id?{account_id:id}:await API.addAccount({phone,proxy_url:proxy});
     this.loginAccountId=r.account_id;this.loginPhone=phone;
     const c=await API.sendCode(phone,r.account_id);this.phoneCodeHash=c.phone_code_hash;
     (document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
@@ -1200,11 +1226,104 @@ async _bulkAdvance(){
   }
 },
 
+openBulkRelogin(ids){
+  const accs=(this.accounts||App._accounts||[]).filter(a=>ids?ids.includes(a.id):!a.is_logged_in);
+  if(!accs.length)return this.toast(ids?'Chưa chọn tài khoản':'Không có tài khoản nào cần đăng nhập lại','info');
+  this._reloginAccs=accs;
+  this.openAddAccountModal();
+  document.getElementById('acc-step-info')?.classList.add('hidden');
+  document.getElementById('acc-step-relogin')?.classList.remove('hidden');
+  const list=document.getElementById('acc-relogin-list');
+  if(list)list.innerHTML=accs.map(a=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12.5px"><input type="checkbox" class="acc-relogin-cb" value="${a.id}" checked onchange="App.updateReloginCount()" style="width:15px;height:15px;accent-color:var(--primary);flex-shrink:0"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.name||'')}</span><span style="font-family:monospace;color:var(--text2)">${esc(a.phone||'')}</span></label>`).join('');
+  const all=document.getElementById('acc-relogin-all');if(all)all.checked=true;
+  const cnt=document.getElementById('acc-relogin-count');if(cnt)cnt.textContent=accs.length;
+},
+
+toggleReloginAll(on){document.querySelectorAll('.acc-relogin-cb').forEach(cb=>cb.checked=on);this.updateReloginCount()},
+
+updateReloginCount(){const cbs=[...document.querySelectorAll('.acc-relogin-cb')];const n=cbs.filter(c=>c.checked).length;const cnt=document.getElementById('acc-relogin-count');if(cnt)cnt.textContent=n;const all=document.getElementById('acc-relogin-all');if(all){all.checked=n===cbs.length;all.indeterminate=n>0&&n<cbs.length}},
+
+async startBulkRelogin(){
+  const picked=new Set([...document.querySelectorAll('.acc-relogin-cb:checked')].map(c=>+c.value));
+  const accs=(this._reloginAccs||[]).filter(a=>picked.has(a.id));if(!accs.length)return this.toast('Chọn ít nhất 1 tài khoản','error');
+  this._bulkQueue=accs.map(a=>({phone:a.phone,proxy:null,id:a.id,name:a.name}));
+  this._bulkDone=[];this._bulkFailed=[];this._bulk2fa=(document.getElementById('acc-relogin-2fa')?.value||'')||undefined;
+  document.getElementById('acc-step-relogin')?.classList.add('hidden');
+  await this._startParallelLogin();
+},
+
+// ── Parallel bulk login: gửi OTP cho mọi số, nhập OTP từng dòng theo thứ tự tuỳ ý ──
+async _startParallelLogin(){
+  const items=this._bulkQueue||[];this._bulkQueue=null;
+  this._par=items.map((it,i)=>({...it,i,state:'sending',hash:null,err:''}));
+  document.getElementById('acc-step-info')?.classList.add('hidden');
+  document.getElementById('acc-step-relogin')?.classList.add('hidden');
+  document.getElementById('acc-step-parallel')?.classList.remove('hidden');
+  this._renderPar();
+  // Gửi OTP lần lượt (cách nhau 1.5s để tránh FloodWait) nhưng không chờ nhập OTP.
+  for(const r of this._par){
+    if(!document.getElementById('account-modal')?.classList.contains('open'))break;
+    try{
+      if(!r.id){const a=await API.addAccount({phone:r.phone,proxy_url:r.proxy});r.id=a.account_id}
+      const c=await API.sendCode(r.phone,r.id);r.hash=c.phone_code_hash;r.state='otp';
+    }catch(e){r.state='error';r.err=e.message||String(e)}
+    this._renderParRow(r);
+    await new Promise(res=>setTimeout(res,1500));
+  }
+},
+
+_parStatus(r){return{sending:['⏳','Đang gửi OTP…','var(--text2)'],otp:['📩','Nhập OTP','var(--accent-text)'],pw:['🔐','Cần 2FA','var(--orange)'],verifying:['⏳','Đang xác nhận…','var(--text2)'],done:['✅','Đã đăng nhập','var(--green)'],error:['⚠️','Lỗi','var(--red)'],skipped:['⏭','Đã bỏ qua','var(--text3)']}[r.state]},
+
+_renderPar(){
+  const box=document.getElementById('acc-par-list');if(!box)return;
+  box.innerHTML=this._par.map(r=>`<div id="acc-par-${r.i}"></div>`).join('');
+  this._par.forEach(r=>this._renderParRow(r));
+},
+
+_renderParRow(r){
+  const el=document.getElementById(`acc-par-${r.i}`);if(!el)return;
+  const[ic,label,color]=this._parStatus(r);
+  const input=r.state==='otp'?`<input class="form-input" id="acc-par-in-${r.i}" placeholder="OTP" inputmode="numeric" maxlength="6" style="width:90px;padding:6px 8px" onkeydown="if(event.key==='Enter')App.parVerify(${r.i})"><button class="btn btn-primary btn-sm" onclick="App.parVerify(${r.i})">OK</button>`
+    :r.state==='pw'?`<input class="form-input" type="password" id="acc-par-in-${r.i}" placeholder="2FA" style="width:90px;padding:6px 8px" onkeydown="if(event.key==='Enter')App.parVerify(${r.i})"><button class="btn btn-primary btn-sm" onclick="App.parVerify(${r.i})">OK</button>`:'';
+  const resend=r.state==='error'?`<button class="btn btn-ghost btn-sm" title="Gửi lại OTP" onclick="App.parResend(${r.i})">↻ Gửi lại</button>`:'';
+  const skip=['otp','pw','error'].includes(r.state)?`<button class="btn btn-ghost btn-sm" title="Bỏ qua" onclick="App.parSkip(${r.i})">✕</button>`:'';
+  el.style.cssText='display:flex;align-items:center;gap:8px;padding:7px 8px;border-bottom:1px solid var(--border);font-size:12.5px';
+  el.innerHTML=`<div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600">${esc(r.name||r.phone)}</div><div style="font-family:monospace;color:var(--text2);font-size:11.5px">${esc(r.name?r.phone:'')}${r.tgUser?' · @'+esc(r.tgUser):''}</div><div style="color:${color};font-size:11.5px" title="${esc(r.err)}">${ic} ${label}${r.err?': '+esc(r.err):''}</div></div>${input}${resend}${skip}`;
+  const done=this._par.filter(x=>x.state==='done').length;
+  const prog=document.getElementById('acc-par-progress');if(prog)prog.textContent=`Đã đăng nhập ${done}/${this._par.length}`;
+},
+
+async parVerify(i){
+  const r=this._par[i];const v=(document.getElementById(`acc-par-in-${i}`)?.value||'').trim();
+  if(!v)return;
+  const wasPw=r.state==='pw';if(!wasPw)r.code=v;
+  r.state='verifying';r.err='';this._renderParRow(r);
+  try{
+    const res=await API.verify(r.phone,r.code,r.hash,r.id,wasPw?v:this._bulk2fa);
+    if(res.needs_password){r.state='pw'}else{r.state='done';const tn=[res.first_name,res.last_name].filter(Boolean).join(' ').trim();if(tn)r.name=tn;if(res.username)r.tgUser=res.username}
+  }catch(e){
+    const m=e.message||String(e);
+    if(m.includes('2FA')){r.state='pw';r.err=m}
+    else if(m.includes('hết hạn')){this._renderParRow(r);await this.parResend(i);r.err='Mã cũ hết hạn, đã gửi OTP mới';this._renderParRow(r);return}
+    else{r.state='otp';r.err=m}
+  }
+  this._renderParRow(r);
+  if(r.state==='pw'||r.state==='otp')document.getElementById(`acc-par-in-${i}`)?.focus();
+  else{const next=this._par.find(x=>x.state==='otp'&&x.i>i)||this._par.find(x=>x.state==='otp');if(next)document.getElementById(`acc-par-in-${next.i}`)?.focus()}
+  if(this._par.every(x=>['done','skipped','error'].includes(x.state)))this.loadAccounts();
+},
+
+async parResend(i){const r=this._par[i];r.state='sending';r.err='';this._renderParRow(r);try{if(!r.id){const a=await API.addAccount({phone:r.phone,proxy_url:r.proxy});r.id=a.account_id}const c=await API.sendCode(r.phone,r.id);r.hash=c.phone_code_hash;r.state='otp'}catch(e){r.state='error';r.err=e.message||String(e)}this._renderParRow(r);document.getElementById(`acc-par-in-${i}`)?.focus()},
+
+parSkip(i){const r=this._par[i];r.state='skipped';r.err='';this._renderParRow(r)},
+
+finishParallelLogin(){const d=(this._par||[]).filter(x=>x.state==='done').length;this.toast(`Đã đăng nhập ${d}/${(this._par||[]).length} tài khoản`,'success');this.closeAccountModal();this.loadAccounts()},
+
 async skipBulkAccount(){if(!this._bulkQueue?.length)return;const{phone}=this._bulkQueue.shift();this._bulkFailed.push(phone);await this._bulkAdvance();},
 
 async verifyAccount(){const code=(document.getElementById('acc-code')?.value || "").trim();if(!code)return this.toast('Nhập OTP','error');
 
-try{const r=await API.verify(this.loginPhone,code,this.phoneCodeHash,this.loginAccountId);if(r.needs_password){(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');return}
+try{const r=await API.verify(this.loginPhone,code,this.phoneCodeHash,this.loginAccountId,this._bulkQueue?.length?this._bulk2fa:undefined);if(r.needs_password){if(this._bulkQueue?.length&&this._bulk2fa)this.toast(`2FA chung sai cho ${this.loginPhone}, nhập tay hoặc bỏ qua`,'error');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');return}
 
 this.toast('Đăng nhập thành công!','success');
 const otpInput=document.getElementById('acc-code');if(otpInput)otpInput.value='';
@@ -1213,7 +1332,7 @@ if(this._bulkQueue?.length){
   await this._bulkAdvance();
 }else{
   this.closeAccountModal();this.loadAccounts();
-}}catch(e){if(e.message.includes('2FA')){(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden')}else this.toast(e.message,'error')}},
+}}catch(e){if(e.message.includes('hết hạn')){try{const c=await API.sendCode(this.loginPhone,this.loginAccountId);this.phoneCodeHash=c.phone_code_hash;const ci=document.getElementById('acc-code');if(ci)ci.value='';this.toast('Mã OTP đã hết hạn — đã gửi mã mới, nhập lại nhé','info')}catch(e2){this.toast(e2.message,'error')}return}if(e.message.includes('2FA')){if(this._bulkQueue?.length)this.toast(`${this.loginPhone}: ${e.message} — nhập tay hoặc bỏ qua`,'error');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden')}else this.toast(e.message,'error')}},
 
 async verify2FAAccount(){const pw=document.getElementById('acc-password')?.value;try{await API.verify(this.loginPhone,(document.getElementById('acc-code')?.value || "").trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('OK!','success');
 const pwInput=document.getElementById('acc-password');if(pwInput)pwInput.value='';
@@ -1242,7 +1361,7 @@ if(!this.schedules.length){tbody.innerHTML='';empty.classList.remove('hidden');r
 
 empty.classList.add('hidden');tbody.innerHTML=this.schedules.map(s=>{const sends=s.max_sends?`${s.current_sends||0}/${s.max_sends}`:(s.current_sends||0);
 
-return`<tr><td><label class="toggle"><input type="checkbox" ${s.is_active?'checked':''} onchange="App.toggleSchedule(${s.id})"><span class="toggle-slider"></span></label></td><td><strong>${esc(s.name)}</strong>${s.blocked_count > 0 ? `<span title="Có ${s.blocked_count} target bị block do lỗi quá 3 lần" onclick="App.showBlockedTargets(${s.id})" style="cursor:pointer;margin-left:.4rem;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;border-radius:4px;padding:1px 6px;font-size:.7rem;font-weight:600;">⛔ ${s.blocked_count} blocked</span>` : ''}</td><td><small>${esc(s.account_name||'—')}</small></td><td><span class="badge badge-blue">${s.schedule_type}</span></td><td>${s.time_of_day}${s.schedule_type==='weekly'?'<br><small style="color:var(--text2)">'+formatDays(s.days_of_week)+'</small>':''}</td><td>${(s.messages||[]).length}</td><td>${(s.targets||[]).length}</td><td>${sends}</td><td style="font-size:12px;color:var(--text2)">${s.next_run?formatDate(s.next_run):'—'}</td><td><div class="btn-group"><button class="btn btn-ghost btn-sm" onclick="App.editSchedule(${s.id})" title="Sửa">✏️</button><button class="btn btn-green btn-sm" onclick="App.previewSchedule(${s.id})" title="Preview">👁</button><button class="btn btn-ghost btn-sm" onclick="App.sendNow(${s.id})" title="Gửi ngay">🚀</button><button class="btn btn-ghost btn-sm" onclick="App.resetCount(${s.id})" title="Reset count">🔄</button><button class="btn btn-danger btn-sm" onclick="App.deleteSchedule(${s.id})" title="Xóa">🗑</button></div></td></tr>`}).join('')}catch(e){this.toast('Lỗi: '+e.message,'error')}},
+return`<tr><td><label class="toggle"><input type="checkbox" ${s.is_active?'checked':''} onchange="App.toggleSchedule(${s.id})"><span class="toggle-slider"></span></label></td><td><strong>${esc(s.name)}</strong>${s.blocked_count > 0 ? `<span title="Có ${s.blocked_count} target bị block do lỗi quá 3 lần" onclick="App.showBlockedTargets(${s.id})" style="cursor:pointer;margin-left:.4rem;background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:4px;padding:1px 6px;font-size:.7rem;font-weight:600;">⛔ ${s.blocked_count} blocked</span>` : ''}</td><td><small>${esc(s.account_name||'—')}</small></td><td><span class="badge badge-blue">${s.schedule_type}</span></td><td>${s.time_of_day}${s.schedule_type==='weekly'?'<br><small style="color:var(--text2)">'+formatDays(s.days_of_week)+'</small>':''}</td><td>${(s.messages||[]).length}</td><td>${(s.targets||[]).length}</td><td>${sends}</td><td style="font-size:12px;color:var(--text2)">${s.next_run?formatDate(s.next_run):'—'}</td><td><div class="btn-group"><button class="btn btn-ghost btn-sm" onclick="App.editSchedule(${s.id})" title="Sửa">✏️</button><button class="btn btn-green btn-sm" onclick="App.previewSchedule(${s.id})" title="Preview">👁</button><button class="btn btn-ghost btn-sm" onclick="App.sendNow(${s.id})" title="Gửi ngay">🚀</button><button class="btn btn-ghost btn-sm" onclick="App.resetCount(${s.id})" title="Reset count">🔄</button><button class="btn btn-danger btn-sm" onclick="App.deleteSchedule(${s.id})" title="Xóa">🗑</button></div></td></tr>`}).join('')}catch(e){this.toast('Lỗi: '+e.message,'error')}},
 
 async toggleSchedule(id){try{const r=await API.toggleSchedule(id);this.toast(r.is_active?'Đã bật':'Đã tắt','success');this.loadSchedules()}catch(e){this.toast(e.message,'error')}},
 
@@ -1251,26 +1370,26 @@ async showBlockedTargets(scheduleId) {
     const res = await API.getBlockedTargets(scheduleId);
     if (!res.count) { this.toast('Không có target nào bị block', 'info'); return; }
     const blocks = res.blocked;
-    let html = `<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:1.2rem;margin-bottom:1rem;">
+    let html = `<div style="background:color-mix(in srgb, var(--red) 8%, transparent);border:1px solid color-mix(in srgb, var(--red) 30%, transparent);border-radius:12px;padding:1.2rem;margin-bottom:1rem;">
       <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.8rem;">
         <span style="font-size:1.3rem;">⛔</span>
-        <strong style="color:#f87171;font-size:.95rem;">Targets bị tắt do lỗi quá 3 lần (${blocks.length})</strong>
+        <strong style="color:var(--red);font-size:.95rem;">Targets bị tắt do lỗi quá 3 lần (${blocks.length})</strong>
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:.83rem;">
-        <thead><tr style="border-bottom:1px solid rgba(255,255,255,.1)">
+        <thead><tr style="border-bottom:1px solid color-mix(in srgb, var(--text) 10%, transparent)">
           <th style="text-align:left;padding:.4rem .6rem;color:var(--text-secondary)">Tài khoản</th>
           <th style="text-align:left;padding:.4rem .6rem;color:var(--text-secondary)">Nhóm/Kênh</th>
           <th style="text-align:center;padding:.4rem .6rem;color:var(--text-secondary)">Số lỗi</th>
           <th style="text-align:right;padding:.4rem .6rem;color:var(--text-secondary)">Hành động</th>
         </tr></thead><tbody>`;
     blocks.forEach(b => {
-      html += `<tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+      html += `<tr style="border-bottom:1px solid color-mix(in srgb, var(--text) 6%, transparent)">
         <td style="padding:.5rem .6rem">${this._esc(b.account_name || 'Acc ' + b.account_id)}</td>
-        <td style="padding:.5rem .6rem;color:#fbbf24">${this._esc(b.chat_title || 'Chat ' + b.chat_id)}</td>
-        <td style="padding:.5rem .6rem;text-align:center;color:#f87171;font-weight:700">${b.fail_count}</td>
+        <td style="padding:.5rem .6rem;color:var(--orange)">${this._esc(b.chat_title || 'Chat ' + b.chat_id)}</td>
+        <td style="padding:.5rem .6rem;text-align:center;color:var(--red);font-weight:700">${b.fail_count}</td>
         <td style="padding:.5rem .6rem;text-align:right">
           <button onclick="App._unblockTarget(${scheduleId},${b.account_id},${b.chat_id},this)" 
-                  style="background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.4);color:#4ade80;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">
+                  style="background:color-mix(in srgb, var(--green) 15%, transparent);border:1px solid color-mix(in srgb, var(--green) 40%, transparent);color:var(--green);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">
             🔓 Mở khóa
           </button>
         </td>
@@ -1319,13 +1438,16 @@ async previewSchedule(id){try{const r=await API.previewSchedule(id);this.toast(r
 
 async resetCount(id){try{await API.resetCount(id);this.toast('Đã reset','success');this.loadSchedules()}catch(e){this.toast(e.message,'error')}},
 
-async openCreateModal(){(document.getElementById('modal-title') || me_dummy).textContent = 'Tạo lịch gửi';(document.getElementById('edit-schedule-id') || document.createElement("div")).value='';(document.getElementById('sch-name') || document.createElement("div")).value='';(document.getElementById('sch-type') || document.createElement("div")).value='daily';(document.getElementById('sch-time') || document.createElement("div")).value='08:00';(document.getElementById('sch-day-of-month') || document.createElement("div")).value='1';(document.getElementById('sch-once-date') || document.createElement("div")).value='';(document.getElementById('sch-max-sends') || document.createElement("div")).value='';document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('active'));(document.getElementById('messages-list') || document.createElement("div")).innerHTML='';
+async _setWatcherRemix(on,agentId){const cb=document.getElementById('w-ai-remix'),sel=document.getElementById('w-ai-agent');if(!cb||!sel)return;cb.checked=!!on;document.getElementById('w-ai-agent-row').style.display=on?'flex':'none';try{const res=await AIAgentsAPI.getAll();sel.innerHTML='<option value="">— Mặc định (cấu hình AI chung) —</option>'+(res.agents||[]).map(a=>`<option value="${a.id}">${esc((a.avatar_emoji||'🤖')+' '+a.name)}</option>`).join('')}catch(e){}sel.value=agentId?String(agentId):''},
+async _setSchRemix(on,agentId){const cb=document.getElementById('sch-ai-remix'),sel=document.getElementById('sch-ai-agent');if(!cb||!sel)return;cb.checked=!!on;document.getElementById('sch-ai-agent-row').style.display=on?'flex':'none';try{const res=await AIAgentsAPI.getAll();sel.innerHTML='<option value="">— Mặc định (không dùng Knowledge) —</option>'+(res.agents||[]).map(a=>`<option value="${a.id}">${esc((a.avatar_emoji||'🤖')+' '+a.name)}</option>`).join('')}catch(e){}sel.value=agentId?String(agentId):''},
+
+async openCreateModal(){this._setSchRemix(false,null);(document.getElementById('modal-title') || me_dummy).textContent = 'Tạo lịch gửi';(document.getElementById('edit-schedule-id') || document.createElement("div")).value='';(document.getElementById('sch-name') || document.createElement("div")).value='';(document.getElementById('sch-type') || document.createElement("div")).value='daily';(document.getElementById('sch-time') || document.createElement("div")).value='08:00';(document.getElementById('sch-day-of-month') || document.createElement("div")).value='1';(document.getElementById('sch-once-date') || document.createElement("div")).value='';(document.getElementById('sch-max-sends') || document.createElement("div")).value='';document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('active'));(document.getElementById('messages-list') || document.createElement("div")).innerHTML='';
 
 this.onScheduleTypeChange();(document.getElementById('schedule-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');await this.loadAccountSelector();await this.loadChatList();
 
-document.querySelectorAll('#chat-list input[type="checkbox"]').forEach(c=>c.checked=false);},
+this._chatSel=new Map();document.querySelectorAll('#chat-list input[type="checkbox"]').forEach(c=>c.checked=false);},
 
-async editSchedule(id){try{const s=await API.getSchedule(id);(document.getElementById('modal-title') || me_dummy).textContent = 'Sửa lịch gửi';(document.getElementById('edit-schedule-id') || document.createElement("div")).value=s.id;(document.getElementById('sch-name') || document.createElement("div")).value=s.name;(document.getElementById('sch-type') || document.createElement("div")).value=s.schedule_type;(document.getElementById('sch-time') || document.createElement("div")).value=s.time_of_day;(document.getElementById('sch-day-of-month') || document.createElement("div")).value=s.day_of_month||1;(document.getElementById('sch-once-date') || document.createElement("div")).value=s.once_date||'';(document.getElementById('sch-max-sends') || document.createElement("div")).value=s.max_sends||'';
+async editSchedule(id){try{const s=await API.getSchedule(id);this._setSchRemix(s.ai_remix,s.ai_agent_id);(document.getElementById('modal-title') || me_dummy).textContent = 'Sửa lịch gửi';(document.getElementById('edit-schedule-id') || document.createElement("div")).value=s.id;(document.getElementById('sch-name') || document.createElement("div")).value=s.name;(document.getElementById('sch-type') || document.createElement("div")).value=s.schedule_type;(document.getElementById('sch-time') || document.createElement("div")).value=s.time_of_day;(document.getElementById('sch-day-of-month') || document.createElement("div")).value=s.day_of_month||1;(document.getElementById('sch-once-date') || document.createElement("div")).value=s.once_date||'';(document.getElementById('sch-max-sends') || document.createElement("div")).value=s.max_sends||'';
 
 document.querySelectorAll('.day-btn').forEach(b=>b.classList.remove('active'));if(s.days_of_week)s.days_of_week.split(',').forEach(d=>{const btn=document.querySelector(`.day-btn[data-day="${d.trim()}"]`);if(btn)btn.classList.add('active')});
 
@@ -1333,7 +1455,7 @@ this.onScheduleTypeChange();(document.getElementById('messages-list') || me_dumm
 
 (document.getElementById('schedule-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');await this.loadAccountSelector();(document.getElementById('sch-account') || me_dummy).value = s.account_id;await this.loadChatList();
 
-const tids=new Set((s.targets||[]).map(t=>t.chat_id));document.querySelectorAll('#chat-list input[type="checkbox"]').forEach(cb=>cb.checked=tids.has(parseInt(cb.value)));
+this._chatSel=new Map((s.targets||[]).map(t=>[String(t.chat_id),{chat_id:t.chat_id,chat_title:t.chat_title||String(t.chat_id),chat_type:t.chat_type||'group',chat_link:t.chat_link||null}]));this.renderChatList(this.chats);
 
 }catch(e){this.toast(e.message,'error')}},
 
@@ -1349,9 +1471,17 @@ async loadChatList(){const sel=document.getElementById('sch-account');const accI
 
 try{const d=await API.getChats(accId);this.chats=Array.isArray(d?.chats)?d.chats:(d?.command_id&&typeof API.pollCommand==='function'?((await API.pollCommand(d.command_id))?.result?.chats||[]):[]);this.renderChatList(this.chats)}catch(e){if(el)el.innerHTML=`<div style="padding:12px;color:var(--red)">Lỗi: ${e.message}</div>`}},
 
-renderChatList(chats){const el=document.getElementById('chat-list');if(!el)return;const list=Array.isArray(chats)?chats:[];if(!list.length){el.innerHTML='<div style="padding:12px;color:var(--text2)">Không tìm thấy nhóm/kênh</div>';return}
+// Selected targets live in _chatSel so they survive search re-renders and still show
+// (pinned on top) when the account's dialog list no longer contains them.
+renderChatList(chats){const el=document.getElementById('chat-list');if(!el)return;const sel=this._chatSel||(this._chatSel=new Map());const q=(document.getElementById('chat-search')?.value||'').toLowerCase();const all=Array.isArray(this.chats)?this.chats:[];const known=new Set(all.map(c=>String(c.chat_id)));for(const c of all){const t=sel.get(String(c.chat_id));if(t&&!t.chat_link&&c.username)t.chat_link='@'+c.username;}const base=(Array.isArray(chats)?chats:[]).filter(c=>c.chat_type==='group'||c.chat_type==='supergroup');const missing=[...sel.values()].filter(t=>!known.has(String(t.chat_id))&&(!q||String(t.chat_title).toLowerCase().includes(q))).map(t=>({...t,_missing:true}));const list=[...missing,...base].sort((a,b)=>sel.has(String(b.chat_id))-sel.has(String(a.chat_id)));
+if(!list.length){el.innerHTML='<div style="padding:12px;color:var(--text2)">Không tìm thấy nhóm/kênh</div>';return}
+el.innerHTML=list.map(c=>{const icon=c.chat_type==='channel'?'📢':c.chat_type==='supergroup'?'👥':'💬';const on=sel.has(String(c.chat_id));return`<label class="chat-item"${on?' style="background:color-mix(in srgb, var(--accent) 8%, transparent)"':''}><input type="checkbox" value="${c.chat_id}" data-title="${esc(c.chat_title)}" data-type="${c.chat_type}" data-link="${esc(c.chat_link||(c.username?'@'+c.username:''))}" ${on?'checked':''} onchange="App._toggleChatSel(this)"><span class="chat-type-icon">${icon}</span><span class="chat-name">${esc(c.chat_title)}</span>${c._missing?'<span class="chat-type-badge" style="color:var(--orange)" title="Tài khoản này không còn thấy nhóm/kênh trong danh sách — có thể đã rời nhóm, gửi sẽ lỗi">⚠ không tìm thấy</span>':`<span class="chat-type-badge">${c.chat_type}</span>`}</label>`}).join('')},
 
-el.innerHTML=list.map(c=>{const icon=c.chat_type==='channel'?'📢':c.chat_type==='supergroup'?'👥':'💬';return`<label class="chat-item"><input type="checkbox" value="${c.chat_id}" data-title="${esc(c.chat_title)}" data-type="${c.chat_type}"><span class="chat-type-icon">${icon}</span><span class="chat-name">${esc(c.chat_title)}</span><span class="chat-type-badge">${c.chat_type}</span></label>`}).join('')},
+_toggleChatSel(cb){const sel=this._chatSel||(this._chatSel=new Map());if(cb.checked)sel.set(String(cb.value),{chat_id:cb.value,chat_title:cb.dataset.title,chat_type:cb.dataset.type,chat_link:cb.dataset.link||null});else sel.delete(String(cb.value));},
+
+// Join a group by link with the schedule's account, then add it as a target.
+async joinGroupByLink(){const inp=document.getElementById('chat-join-link');const link=(inp?.value||'').trim();if(!link)return;const accId=parseInt(document.getElementById('sch-account')?.value||'0');if(!accId){this.toast('Chọn tài khoản trước','error');return}const btn=document.getElementById('chat-join-btn');if(btn){btn.disabled=true;btn.textContent='⏳ Đang join...'}
+try{const g=await API.post('/api/chats/join-group',{account_id:accId,link});const sel=this._chatSel||(this._chatSel=new Map());sel.set(String(g.chat_id),g);if(Array.isArray(this.chats)&&!this.chats.some(c=>String(c.chat_id)===String(g.chat_id)))this.chats.unshift(g);inp.value='';this.renderChatList(this.chats);this.toast(`Đã join & thêm: ${g.chat_title}`,'success')}catch(e){this.toast(e.message,'error')}finally{if(btn){btn.disabled=false;btn.textContent='➕ Join & thêm'}}},
 
 filterChats: debounce(function(){const q=document.getElementById('chat-search')?.value.toLowerCase();this.renderChatList(this.chats.filter(c=>c.chat_title.toLowerCase().includes(q)))}, 250),
 
@@ -1361,7 +1491,7 @@ let inner=`<div class="msg-item-header"><span class="msg-item-type">${type.toUpp
 
 if(type==='text')inner+=`<textarea class="form-textarea msg-content" placeholder="Nội dung (hỗ trợ HTML)">${data?.content||''}</textarea>`;
 
-else if(['photo','video','document'].includes(type))inner+=`<div class="form-group" style="margin-bottom:8px"><input type="file" class="form-input msg-file" onchange="App.handleFileUpload(this)"><input type="hidden" class="msg-media-path" value="${data?.media_path||''}">${data?.media_path?`<small style="color:var(--green)">✓ ${data.media_path.split('/').pop()}</small>`:''}</div><textarea class="form-textarea msg-content" placeholder="Caption" rows="2">${data?.content||''}</textarea>`;
+else if(['photo','video','document'].includes(type))inner+=`<div class="form-group" style="margin-bottom:8px"><input type="file" class="form-input msg-file" onchange="App.handleFileUpload(this)"><input type="hidden" class="msg-media-path" value="${data?.media_path||''}">${App.mediaPreview(data?.media_path,type)}</div><textarea class="form-textarea msg-content" placeholder="Caption" rows="2">${data?.content||''}</textarea>`;
 
 else if(type==='poll'){const opts=data?.poll_options?JSON.parse(data.poll_options):['',''];inner+=`<div class="form-group" style="margin-bottom:8px"><input type="text" class="form-input msg-poll-question" placeholder="Câu hỏi" value="${data?.poll_question||''}"></div><div class="poll-options">${opts.map((o,i)=>`<div class="poll-option-row"><input type="text" class="form-input poll-opt" placeholder="Lựa chọn ${i+1}" value="${o}">${i>=2?'<button class="poll-option-remove" onclick="this.parentElement.remove()">✕</button>':''}</div>`).join('')}</div><button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="App.addPollOption(this)">+ Thêm</button><div style="margin-top:8px"><label style="font-size:12px;color:var(--text2);cursor:pointer"><input type="checkbox" class="msg-poll-multiple" ${data?.poll_multiple?'checked':''}> Cho phép chọn nhiều</label></div>`}
 
@@ -1369,7 +1499,8 @@ div.innerHTML=inner;list.appendChild(div)},
 
 addPollOption(btn){const c=btn.previousElementSibling;const n=c.children.length;const r=document.createElement('div');r.className='poll-option-row';r.innerHTML=`<input type="text" class="form-input poll-opt" placeholder="Lựa chọn ${n+1}"><button class="poll-option-remove" onclick="this.parentElement.remove()">✕</button>`;c.appendChild(r)},
 
-async handleFileUpload(input){const file=input.files[0];if(!file)return;try{const r=await API.upload(file);input.parentElement.querySelector('.msg-media-path').value=r.path;const ex=input.parentElement.querySelector('small');if(ex)ex.remove();const s=document.createElement('small');s.style.color='var(--green)';s.textContent=`✓ ${r.original_name}`;input.parentElement.appendChild(s);this.toast('Uploaded','success')}catch(e){this.toast('Upload lỗi: '+e.message,'error')}},
+mediaPreview(path,type,label){if(!path)return'';const f=String(path).split(/[\\/]/).pop();const url='/api/media/'+encodeURIComponent(f);const name=String(label||f).replace(/[<>&"]/g,'');if(type==='photo')return`<a class="media-prev" href="${url}" target="_blank" title="${name}"><img src="${url}" alt="" loading="lazy" onerror="this.parentElement.classList.add('is-missing')"><span>${name}</span></a>`;if(type==='video')return`<div class="media-prev"><video src="${url}" preload="metadata" muted controls></video><span>${name}</span></div>`;return`<a class="media-prev is-file" href="${url}" target="_blank"><span>📎 ${name}</span></a>`},
+async handleFileUpload(input){const file=input.files[0];if(!file)return;try{const r=await API.upload(file);input.parentElement.querySelector('.msg-media-path').value=r.path;input.parentElement.querySelectorAll('small,.media-prev').forEach(e=>e.remove());const typ=(input.closest('.msg-item')?.querySelector('.msg-item-type')?.textContent||'').toLowerCase();input.parentElement.insertAdjacentHTML('beforeend',App.mediaPreview(r.path,typ,r.original_name));this.toast('Uploaded','success')}catch(e){this.toast('Upload lỗi: '+e.message,'error')}},
 
 async saveSchedule(){const editId=document.getElementById('edit-schedule-id')?.value;const name=(document.getElementById('sch-name')?.value || "").trim();const type=document.getElementById('sch-type')?.value;const time=document.getElementById('sch-time')?.value;const accountId=parseInt(document.getElementById('sch-account')?.value);const maxSendsVal=(document.getElementById('sch-max-sends')?.value || "").trim();const maxSends=maxSendsVal?parseInt(maxSendsVal):null;
 
@@ -1381,7 +1512,7 @@ let day_of_month=null;if(type==='monthly')day_of_month=parseInt(document.getElem
 
 let once_date=null;if(type==='once'){once_date=document.getElementById('sch-once-date')?.value;if(!once_date)return this.toast('Chọn ngày','error')}
 
-const targets=[];document.querySelectorAll('#chat-list input[type="checkbox"]:checked').forEach(cb=>targets.push({chat_id:parseInt(cb.value),chat_title:cb.dataset.title,chat_type:cb.dataset.type}));
+const targets=[...(this._chatSel||new Map()).values()].map(t=>({chat_id:parseInt(t.chat_id),chat_title:t.chat_title,chat_type:t.chat_type,chat_link:t.chat_link||null}));
 
 if(!targets.length)return this.toast('Chọn ít nhất 1 đích','error');
 
@@ -1397,7 +1528,7 @@ messages.push(msg)});
 
 if(!messages.length)return this.toast('Thêm ít nhất 1 tin nhắn','error');
 
-const payload={account_id:accountId,name,schedule_type:type,time_of_day:time,days_of_week,day_of_month,once_date,max_sends:maxSends,is_active:true,messages,targets};
+const payload={account_id:accountId,name,schedule_type:type,time_of_day:time,days_of_week,day_of_month,once_date,max_sends:maxSends,is_active:true,ai_remix:!!document.getElementById('sch-ai-remix')?.checked,ai_agent_id:parseInt(document.getElementById('sch-ai-agent')?.value)||null,messages,targets};
 
 const btn=document.getElementById('btn-save-schedule');if(btn){btn.disabled=true;btn.textContent='Đang lưu...';}
 
@@ -1409,7 +1540,7 @@ async loadLogs(){const status=document.getElementById('log-filter-status')?.valu
 
 if(!d.logs.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:24px">Chưa có log</td></tr>';return}
 
-tbody.innerHTML=d.logs.map(l=>`<tr><td style="font-size:12px">${formatDate(l.sent_at)}</td><td>${l.schedule_id}</td><td style="color:#a78bfa;font-weight:600">${esc(l.account_name||('Acc '+l.account_id))}</td><td>${esc(l.chat_title||String(l.chat_id))}</td><td><span class="badge ${l.status==='success'?'badge-green':'badge-red'}">${l.status}</span></td><td style="font-size:12px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(l.error_message||'—')}</td></tr>`).join('');
+tbody.innerHTML=d.logs.map(l=>`<tr><td style="font-size:12px">${formatDate(l.sent_at)}</td><td>${l.schedule_id}</td><td style="color:var(--accent-text);font-weight:600">${esc(l.account_name||('Acc '+l.account_id))}</td><td>${esc(l.chat_title||String(l.chat_id))}</td><td><span class="badge ${l.status==='success'?'badge-green':'badge-red'}">${l.status}</span></td><td style="font-size:12px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(l.error_message||'—')}</td></tr>`).join('');
 
 const pagEl=document.getElementById('logs-pagination');const pages=Math.ceil(d.total/this.logLimit);const cur=Math.floor(this.logOffset/this.logLimit);
 
@@ -1453,14 +1584,15 @@ _renderWatcherObservers(selectedIds=null){
     const chk=sel.includes(a.id)?'checked':'';
     return `<div style="display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px">
       <input type="checkbox" value="${a.id}" ${chk} style="accent-color:var(--accent)" onchange="App.toggleWatcherObserver(${a.id}, this)">
-      <span>${esc(accDisplayName(a))}</span>
+      <span title="${esc(accDisplayName(a))}">${esc(shortName(accDisplayName(a)))}</span>
       <small style="color:var(--text2);margin-left:4px">${a.phone}</small>
     </div>`;
   }).join('')},
 
 async loadWatchers(){try{
 
-  const[ws,stats]=await Promise.all([API.getWatchers(),API.getWatcherStats()]);
+  const[ws,stats,errs]=await Promise.all([API.getWatchers(),API.getWatcherStats(),API.get('/api/watchers/error-summary').catch(()=>({rules:{}}))]);
+  this._wErrors=errs.rules||{};this._watchersList=ws;
 
   (document.getElementById('ws-active') || me_dummy).textContent = stats.active_watchers||0;
 
@@ -1485,18 +1617,16 @@ async loadWatchers(){try{
   tbody.innerHTML=ws.map(w=>{
 
     const isJoin=w.watch_type==='join';
-
-    const typeBadge=isJoin?'<span class="badge badge-purple" style="font-size:10px">👋 Join</span>':'<span class="badge badge-blue" style="font-size:10px">🔑 Keyword</span>';
-
-    const kws=isJoin?`<span class="badge badge-purple" style="font-size:11px">Delay ${w.join_dm_delay_min??3}–${w.join_dm_delay_max??15}p</span>`:w.keywords.map(k=>`<span class="badge badge-blue" style="font-size:11px">${esc(k)}</span>`).join(' ');
-
-    const grpCount=w.group_ids.length;
-
-    const accNames=(w.sender_account_ids||[]).map(id=>accMap[id]?esc(accDisplayName(accMap[id])):'?').join(', ');
-
-    const dmOnceBadge=w.dm_once?'<span class="badge badge-red" style="font-size:10px;margin-left:4px">🔒 1 lần</span>':'';
-
-    return`<tr><td><label class="toggle"><input type="checkbox" ${w.is_active?'checked':''} onchange="App.toggleWatcher(${w.id})"><span class="toggle-slider"></span></label></td><td><strong>${esc(w.name)}</strong> ${typeBadge}${dmOnceBadge}</td><td style="max-width:200px">${kws}</td><td>${grpCount} nhóm</td><td style="font-size:12px">${accNames}</td><td>${w.dm_once?'∞ (1 lần)':w.cooldown_hours+'h'}</td><td><div class="btn-group"><button class="btn btn-ghost btn-sm" onclick="App.openTestDM(${w.id})" title="Test DM">🧪</button><button class="btn btn-ghost btn-sm" onclick="App.editWatcher(${w.id})" title="Sửa">✏️</button><button class="btn btn-danger btn-sm" onclick="App.deleteWatcher(${w.id})" title="Xóa">🗑</button></div></td></tr>`}).join('')
+    const er=this._wErrors[w.id]||{};
+    const meta=[isJoin?'Join DM':'Keyword',`${w.group_ids.length} nhóm`,w.dm_once?'DM 1 lần':`Cooldown ${w.cooldown_hours}h`].join(' · ');
+    const kws=isJoin?[`Delay ${w.join_dm_delay_min??3}–${w.join_dm_delay_max??15}p`]:w.keywords;
+    const kwHtml=kws.slice(0,3).map(k=>`<span class="wt-chip">${esc(k)}</span>`).join('')+(kws.length>3?`<span class="wt-chip wt-more" title="${esc(kws.slice(3).join(', '))}">+${kws.length-3}</span>`:'');
+    const accs=(w.sender_account_ids||[]).map(id=>accMap[id]?accDisplayName(accMap[id]):'?');
+    const ava=n=>`<span class="wt-ava" title="${esc(n)}">${esc((n.trim()[0]||'?').toUpperCase())}</span>`;
+    const accHtml=accs.length?`<div class="wt-accs" title="${esc(accs.join('\n'))}"><div class="wt-stack">${accs.slice(0,3).map(ava).join('')}${accs.length>3?`<span class="wt-ava wt-more">+${accs.length-3}</span>`:''}</div><span class="wt-acc-name">${esc(accs[0])}${accs.length>1?` <em>+${accs.length-1}</em>`:''}</span></div>`:'<span class="wt-muted">—</span>';
+    const paused=er.paused_reason?`<span class="wt-paused" title="${esc(er.paused_reason)}" onclick="App.showWatcherErrors(${w.id})">Tự dừng do lỗi</span>`:'';
+    const errCell=er.failed?`<button class="wt-err" onclick="App.showWatcherErrors(${w.id})" title="Xem lỗi chi tiết"><i></i>${er.failed.toLocaleString('vi-VN')}${er.failed_24h?`<small>${er.failed_24h}/24h</small>`:''}</button>`:'<span class="wt-muted">—</span>';
+    return`<tr class="${w.is_active?'':'wt-off'}"><td><label class="toggle"><input type="checkbox" ${w.is_active?'checked':''} onchange="App.toggleWatcher(${w.id})"><span class="toggle-slider"></span></label></td><td><div class="wt-name">${esc(w.name)}${paused}</div><div class="wt-meta">${meta}</div></td><td><div class="wt-chips">${kwHtml}</div></td><td>${accHtml}</td><td>${errCell}</td><td><div class="wt-actions"><button class="acc-ib" onclick="App.openTestDM(${w.id})" title="Test DM">🧪</button><button class="acc-ib" onclick="App.editWatcher(${w.id})" title="Sửa">✏️</button><button class="acc-ib is-danger" onclick="App.deleteWatcher(${w.id})" title="Xóa">🗑</button></div></td></tr>`}).join('')
 
 }catch(e){this.toast('Lỗi: '+e.message,'error')}},
 
@@ -1511,6 +1641,7 @@ async openWatcherModal(){
   (document.getElementById('w-cooldown') || me_dummy).value = '24';
 
   (document.getElementById('w-dm-once') || me_dummy).checked = false;
+  this._setWatcherRemix(true,null);
   (document.getElementById('w-reply-in-group') || me_dummy).checked = false;
   (document.getElementById('w-group-reply-text') || me_dummy).value = 'Check my DM 😊';
   ((document.getElementById('w-group-reply-section') && document.getElementById('w-group-reply-section')?.style) || me_dummy_style).display = 'none';
@@ -1551,6 +1682,7 @@ async editWatcher(id){try{
   (document.getElementById('w-cooldown') || me_dummy).value = w.cooldown_hours||24;
 
   (document.getElementById('w-dm-once') || me_dummy).checked = !!w.dm_once;
+  this._setWatcherRemix(w.ai_remix!==0,w.ai_agent_id);
   (document.getElementById('w-reply-in-group') || me_dummy).checked = !!w.reply_in_group;
   (document.getElementById('w-group-reply-text') || me_dummy).value = w.group_reply_text||'Check my DM 😊';
   ((document.getElementById('w-group-reply-section') && document.getElementById('w-group-reply-section')?.style) || me_dummy_style).display = w.reply_in_group?'block':'none';
@@ -1609,7 +1741,7 @@ _renderWatcherAccounts(selectedIds){
 
     const borderStyle = isActive ? '1px solid var(--accent)' : '1px solid var(--border)';
 
-    const bgStyle = isActive ? 'rgba(91, 141, 239, 0.12)' : 'var(--bg)';
+    const bgStyle = isActive ? 'color-mix(in srgb, var(--purple) 12%, transparent)' : 'var(--bg)';
 
     return `<div onclick="App.selectWatcherAccount(${a.id})" style="display:flex;align-items:center;gap:6px;background:${bgStyle};border:${borderStyle};border-radius:8px;padding:6px 10px;cursor:pointer;font-size:13px;transition:all 0.15s">
 
@@ -1769,11 +1901,11 @@ addWatcherMessage(type,data=null){
 
   const _esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-  let inner=`<div class="msg-item-header"><span class="msg-item-type">${type.toUpperCase()}</span><label class="msg-variant-label" title="Biến thể (variant): các tin cùng số sẽ tạo thành 1 biến thể để xoay vòng A/B">Variant <input type="number" min="0" step="1" class="msg-variant" value="${_variant}" style="width:52px"></label><button class="msg-remove" onclick="this.closest('.msg-item').remove()">✕</button></div>`;
+  let inner=`<div class="msg-item-header"><span class="msg-item-type">${type.toUpperCase()}</span><label class="msg-variant-label">Phiên bản <span class="info-i" tabindex="0" data-tip="Muốn thử nhiều kịch bản khác nhau? Đánh số cho từng kịch bản (0, 1, 2…). Các tin cùng số gửi chung với nhau. Hệ thống tự xoay vòng các phiên bản và ưu tiên bản có nhiều người trả lời hơn. Chỉ có 1 kịch bản thì để hết là 0.">i</span> <input type="number" min="0" step="1" class="msg-variant" value="${_variant}" style="width:52px"></label><button class="msg-remove" onclick="this.closest('.msg-item').remove()">✕</button></div>`;
 
   if(type==='text')inner+=`<textarea class="form-textarea msg-content" placeholder="Nội dung DM">${_esc(data?.content)}</textarea>`;
 
-  else if(['photo','video','document'].includes(type))inner+=`<div class="form-group" style="margin-bottom:8px"><input type="file" class="form-input msg-file" onchange="App.handleFileUpload(this)"><input type="hidden" class="msg-media-path" value="${_esc(data?.media_path)}">${data?.media_path?`<small style="color:var(--green)">✓ ${_esc(String(data.media_path).split('/').pop())}</small>`:''}</div><textarea class="form-textarea msg-content" placeholder="Caption" rows="2">${_esc(data?.content)}</textarea>`;
+  else if(['photo','video','document'].includes(type))inner+=`<div class="form-group" style="margin-bottom:8px"><input type="file" class="form-input msg-file" onchange="App.handleFileUpload(this)"><input type="hidden" class="msg-media-path" value="${_esc(data?.media_path)}">${App.mediaPreview(data?.media_path,type)}</div><textarea class="form-textarea msg-content" placeholder="Caption" rows="2">${_esc(data?.content)}</textarea>`;
 
   div.innerHTML=inner;list.appendChild(div)},
 
@@ -1823,7 +1955,7 @@ async saveWatcher(){
   const replyInGroup=document.getElementById('w-reply-in-group')?.checked;
   const groupReplyText=(document.getElementById('w-group-reply-text')?.value || "").trim()||'Check my DM 😊';
 
-  const payload={name,sender_account_ids:accIds,observer_account_ids:watchType==='join'?observerIds:[],keywords:watchType==='join'?[]:this._watcherKeywords,excluded_usernames:this._watcherExcludes,group_ids:[...this._watcherSelectedGroups],cooldown_hours:cooldown,dm_once:dmOnce,reply_in_group:replyInGroup,group_reply_text:groupReplyText,is_active:1,messages,watch_type:watchType,join_dm_delay_min:joinDelayMin,join_dm_delay_max:joinDelayMax};
+  const payload={name,sender_account_ids:accIds,observer_account_ids:watchType==='join'?observerIds:[],keywords:watchType==='join'?[]:this._watcherKeywords,excluded_usernames:this._watcherExcludes,group_ids:[...this._watcherSelectedGroups],cooldown_hours:cooldown,dm_once:dmOnce,reply_in_group:replyInGroup,group_reply_text:groupReplyText,is_active:1,messages,watch_type:watchType,join_dm_delay_min:joinDelayMin,join_dm_delay_max:joinDelayMax,ai_remix:!!document.getElementById('w-ai-remix')?.checked,ai_agent_id:parseInt(document.getElementById('w-ai-agent')?.value)||null};
 
   try{
     const savedId = editId ? parseInt(editId) : null;
@@ -1842,10 +1974,10 @@ async saveWatcher(){
 
 _showMembershipWarning(warnings, ruleName) {
   // Build the warning modal content
-  let html = `<div style="background:rgba(251,146,60,.08);border:1px solid rgba(251,146,60,.4);border-radius:12px;padding:1.2rem;margin-bottom:1rem;">
+  let html = `<div style="background:color-mix(in srgb, var(--orange) 8%, transparent);border:1px solid color-mix(in srgb, var(--orange) 40%, transparent);border-radius:12px;padding:1.2rem;margin-bottom:1rem;">
     <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.8rem;">
       <span style="font-size:1.4rem;">⚠️</span>
-      <strong style="color:#fb923c;font-size:1rem;">Cảnh báo: Tài khoản chưa join nhóm</strong>
+      <strong style="color:var(--orange);font-size:1rem;">Cảnh báo: Tài khoản chưa join nhóm</strong>
     </div>
     <p style="color:var(--text-secondary);font-size:.88rem;margin-bottom:.8rem;">
       Rule <strong style="color:var(--text)">"${this._esc(ruleName)}"</strong> có tài khoản chưa tham gia nhóm đang theo dõi.
@@ -1853,13 +1985,13 @@ _showMembershipWarning(warnings, ruleName) {
     </p>`;
   warnings.forEach(w => {
     html += `<div style="background:rgba(0,0,0,.2);border-radius:8px;padding:.7rem .9rem;margin-bottom:.5rem;">
-      <div style="font-weight:600;color:#fbbf24;margin-bottom:.3rem;">📱 ${this._esc(w.account_name)} (ID: ${w.account_id})</div>`;
+      <div style="font-weight:600;color:var(--orange);margin-bottom:.3rem;">📱 ${this._esc(w.account_name)} (ID: ${w.account_id})</div>`;
     w.missing_groups.forEach(g => {
       const btnId = `join-btn-${w.account_id}-${g.group_id}`;
       html += `<div style="display:flex;align-items:center;gap:.5rem;padding-left:.5rem;margin-bottom:2px;">
-        <span style="color:var(--text-secondary);font-size:.83rem;flex:1;">• Chưa join: <span style="color:#f87171">${this._esc(g.group_title)}</span></span>
+        <span style="color:var(--text-secondary);font-size:.83rem;flex:1;">• Chưa join: <span style="color:var(--red)">${this._esc(g.group_title)}</span></span>
         <button id="${btnId}" onclick="App._joinFromWarning(this,${w.account_id},'${g.group_id}')"
-          style="background:#6d28d9;color:#fff;border:none;border-radius:6px;padding:2px 10px;font-size:.75rem;cursor:pointer;white-space:nowrap;font-weight:600;">
+          style="background:var(--violet);color:#fff;border:none;border-radius:6px;padding:2px 10px;font-size:.75rem;cursor:pointer;white-space:nowrap;font-weight:600;">
           Join
         </button>
       </div>`;
@@ -1869,7 +2001,7 @@ _showMembershipWarning(warnings, ruleName) {
   // "Join tất cả" bulk button
   html += `<div style="margin-top:.8rem;display:flex;align-items:center;gap:.6rem;">
     <button id="join-all-missing-btn" onclick="App._joinAllMissing()" 
-      style="background:#6d28d9;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:.85rem;cursor:pointer;font-weight:600;">
+      style="background:var(--violet);color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:.85rem;cursor:pointer;font-weight:600;">
       🚀 Join tất cả
     </button>
     <span style="color:var(--text-secondary);font-size:.82rem;">Tự động join tất cả nhóm còn thiếu</span>
@@ -1908,12 +2040,12 @@ async _joinFromWarning(btn, accountId, groupId) {
   try {
     await API.joinChannel(accountId, groupId);
     btn.textContent = '✅ Joined';
-    btn.style.background = '#16a34a';
+    btn.style.background = 'var(--green)';
   } catch(e) {
     btn.textContent = '❌ Lỗi';
-    btn.style.background = '#dc2626';
+    btn.style.background = 'var(--red)';
     btn.title = e.message || 'Join failed';
-    setTimeout(() => { btn.disabled = false; btn.textContent = 'Join'; btn.style.background = '#6d28d9'; }, 3000);
+    setTimeout(() => { btn.disabled = false; btn.textContent = 'Join'; btn.style.background = 'var(--violet)'; }, 3000);
   }
 },
 
@@ -1932,16 +2064,16 @@ async _joinAllMissing() {
       try {
         await API.joinChannel(w.account_id, String(g.group_id));
         ok++;
-        if(itemBtn) { itemBtn.textContent = '✅ Joined'; itemBtn.style.background = '#16a34a'; }
+        if(itemBtn) { itemBtn.textContent = '✅ Joined'; itemBtn.style.background = 'var(--green)'; }
       } catch(e) {
         fail++;
-        if(itemBtn) { itemBtn.textContent = '❌ Lỗi'; itemBtn.style.background = '#dc2626'; itemBtn.title = e.message || ''; }
+        if(itemBtn) { itemBtn.textContent = '❌ Lỗi'; itemBtn.style.background = 'var(--red)'; itemBtn.title = e.message || ''; }
       }
       await new Promise(r => setTimeout(r, 2000)); // Delay between joins
     }
   }
   btn.textContent = `✅ Xong (${ok} joined, ${fail} lỗi)`;
-  btn.style.background = ok > 0 ? '#16a34a' : '#dc2626';
+  btn.style.background = ok > 0 ? 'var(--green)' : 'var(--red)';
   if(ok > 0) this.toast(`Đã join ${ok} nhóm thành công${fail ? `, ${fail} lỗi` : ''}`, 'success');
 },
 
@@ -2199,9 +2331,35 @@ async testAiRemix(){
 
 },
 
+showWatcherErrors(id){
+  const w=(this._watchersList||[]).find(x=>x.id===id)||{name:'#'+id};
+  const er=(this._wErrors||{})[id]||{top_errors:[]};
+  document.getElementById('we-title').textContent='Lỗi của rule: '+w.name;
+  const rate=(er.failed+er.success)?Math.round(er.failed*100/(er.failed+er.success)):0;
+  let h='';
+  if(er.paused_reason)h+=`<div style="padding:10px 12px;border:1px solid var(--red);border-radius:var(--radius-sm);background:var(--red-dim);margin-bottom:12px;font-size:13px">${esc(er.paused_reason)}<div style="color:var(--text2);margin-top:4px">Sửa nguyên nhân rồi bật lại rule để chạy tiếp.</div></div>`;
+  h+=`<div style="display:flex;gap:16px;font-size:13px;color:var(--text2);margin-bottom:12px"><span><b style="color:var(--red)">${er.failed||0}</b> lỗi</span><span><b>${er.failed_24h||0}</b> trong 24h</span><span><b style="color:var(--green)">${er.success||0}</b> thành công</span><span>Tỉ lệ lỗi <b>${rate}%</b></span></div>`;
+  h+='<div style="font-size:12px;color:var(--text3);margin-bottom:6px">Nguyên nhân phổ biến</div>';
+  h+=(er.top_errors||[]).map(e=>`<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)"><span class="badge badge-red" style="flex:none">${e.count}×</span><div style="font-size:13px;flex:1">${esc(e.error)}<div style="font-size:11px;color:var(--text3)">Gần nhất: ${formatDate(e.last_at)}</div></div></div>`).join('')||'<div style="color:var(--text3);font-size:13px">Không có lỗi.</div>';
+  h+=`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn btn-ghost btn-sm" onclick="App.editWatcher(${id});document.getElementById('watcher-errors-modal').classList.remove('open')">✏️ Sửa rule</button><button class="btn btn-primary btn-sm" onclick="App.openWatcherLogsFor(${id})">Xem log chi tiết →</button></div>`;
+  document.getElementById('we-body').innerHTML=h;
+  document.getElementById('watcher-errors-modal').classList.add('open');
+},
+openWatcherLogsFor(id){
+  document.getElementById('watcher-errors-modal').classList.remove('open');
+  this._wlRule=String(id);this._wlOffset=0;
+  const st=document.getElementById('wl-filter-status');if(st)st.value='failed';
+  this.navigate('watcher-logs');
+},
 async loadWatcherLogs(){const status=document.getElementById('wl-filter-status')?.value||'';
+  const ruleSel=document.getElementById('wl-filter-rule');
+  if(!this._watchersList)this._watchersList=await API.getWatchers().catch(()=>[]);
+  const ruleNames=Object.fromEntries((this._watchersList||[]).map(w=>[w.id,w.name]));
+  if(ruleSel){const want=this._wlRule!=null?this._wlRule:ruleSel.value;this._wlRule=null;
+    ruleSel.innerHTML='<option value="">Tất cả rule</option>'+(this._watchersList||[]).map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('');ruleSel.value=want}
+  const rule=ruleSel?.value||'';
 
-  try{const d=await API.getWatcherLogs({limit:this._wlLimit,offset:this._wlOffset,...(status?{status}:{})});
+  try{const d=await API.getWatcherLogs({limit:this._wlLimit,offset:this._wlOffset,...(status?{status}:{}),...(rule?{watcher_id:rule}:{})});
 
     const tbody=document.getElementById('watcher-logs-body');
 
@@ -2217,7 +2375,7 @@ async loadWatcherLogs(){const status=document.getElementById('wl-filter-status')
 
       const accName=l.account_id&&accMap[l.account_id]?esc(accMap[l.account_id].name):(l.account_id||'—');
 
-      return`<tr><td style="font-size:12px">${formatDate(l.sent_at)}</td><td>${l.watcher_id}</td><td>@${esc(l.target_username||String(l.target_user_id))}</td><td style="font-size:12px">${esc(l.group_title||String(l.group_id||''))}</td><td><span class="badge ${l.matched_keyword==='[JOIN]'?'badge-purple':'badge-blue'}" style="font-size:11px">${l.matched_keyword==='[JOIN]'?'👋 Join':esc(l.matched_keyword||'')}</span></td><td style="font-size:12px">${accName}</td><td><span class="badge ${statusCls}">${l.status}</span></td><td style="font-size:12px;color:var(--text2)">${esc(l.error_message||'—')}</td></tr>`}).join('');
+      return`<tr><td style="font-size:12px">${formatDate(l.sent_at)}</td><td style="font-size:12px">${ruleNames[l.watcher_id]?esc(ruleNames[l.watcher_id]):'#'+l.watcher_id}</td><td>@${esc(l.target_username||String(l.target_user_id))}</td><td style="font-size:12px">${esc(l.group_title||String(l.group_id||''))}</td><td><span class="badge ${l.matched_keyword==='[JOIN]'?'badge-purple':'badge-blue'}" style="font-size:11px">${l.matched_keyword==='[JOIN]'?'👋 Join':esc(l.matched_keyword||'')}</span></td><td style="font-size:12px">${accName}</td><td><span class="badge ${statusCls}">${l.status}</span></td><td style="font-size:12px;color:var(--text2)">${esc(l.error_message||'—')}</td></tr>`}).join('');
 
     const pag=document.getElementById('watcher-logs-pagination');const pages=Math.ceil(d.total/this._wlLimit);const cur=Math.floor(this._wlOffset/this._wlLimit);
 
@@ -2393,14 +2551,14 @@ App.fetchOaiModels = async function() {
 
     if (!data.success) {
       statusEl.textContent = '❌ ' + (data.error || 'Lỗi không xác định');
-      statusEl.style.color = '#ef4444';
+      statusEl.style.color = 'var(--red)';
       return;
     }
 
     const models = data.models || [];
     if (models.length === 0) {
       statusEl.textContent = '⚠️ API trả về 0 models. Nhập tên model thủ công.';
-      statusEl.style.color = '#f59e0b';
+      statusEl.style.color = 'var(--orange)';
       return;
     }
 
@@ -2431,13 +2589,13 @@ App.fetchOaiModels = async function() {
     }
 
     statusEl.textContent = '✅ Đã tải ' + models.length + ' models';
-    statusEl.style.color = '#22c55e';
+    statusEl.style.color = 'var(--green)';
 
     // Auto-clear status after 5s
     setTimeout(() => { statusEl.textContent = ''; }, 5000);
   } catch (e) {
     statusEl.textContent = '❌ Lỗi kết nối: ' + e.message;
-    statusEl.style.color = '#ef4444';
+    statusEl.style.color = 'var(--red)';
   } finally {
     btn.disabled = false;
     btn.textContent = '🔄 Load';
@@ -2543,7 +2701,7 @@ App._applyChatgptOAuthToken = async function(token) {
   await App.loadChatgptModels(token);
 
   if (status) {
-    status.innerHTML = '<span style="color:#22c55e">✅ Đăng nhập ChatGPT Subscription thành công! Models đã được tải.</span>';
+    status.innerHTML = '<span style="color:var(--green)">✅ Đăng nhập ChatGPT Subscription thành công! Models đã được tải.</span>';
   }
   App.toast('✅ Đã đăng nhập & tự động cấu hình ChatGPT Subscription thành công!', 'success');
 
@@ -2675,7 +2833,7 @@ App.processChatgptOAuthLogin = async function() {
 
     if (!data.success) {
       if (status) {
-        status.innerHTML = '<span style="color:#ef4444">❌ ' + (data.error || 'Xác thực thất bại') + '</span>';
+        status.innerHTML = '<span style="color:var(--red)">❌ ' + (data.error || 'Xác thực thất bại') + '</span>';
       }
       App.toast(data.error || 'Token không hợp lệ', 'error');
       return;
@@ -2686,7 +2844,7 @@ App.processChatgptOAuthLogin = async function() {
 
   } catch(e) {
     if (status) {
-      status.innerHTML = '<span style="color:#ef4444">❌ Lỗi kết nối: ' + e.message + '</span>';
+      status.innerHTML = '<span style="color:var(--red)">❌ Lỗi kết nối: ' + e.message + '</span>';
     }
     App.toast('Lỗi kết nối: ' + e.message, 'error');
   } finally {
@@ -2860,6 +3018,8 @@ App.testAiRemix = async function() {
 
 
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function _mix(c,p){return `color-mix(in srgb, ${c} ${p}%, transparent)`}
+function _cv(v,a){let c=getComputedStyle(document.documentElement).getPropertyValue(v).trim()||'#888';if(c[0]==='#'){if(c.length===4)c='#'+[...c.slice(1)].map(x=>x+x).join('');const n=parseInt(c.slice(1,7),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`}return c}
 
 function formatDate(s){if(!s)return'—';try{return new Date(s).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'})}catch{return s}}
 
@@ -3153,7 +3313,7 @@ App._renderChannelTable = function(channels) {
 
   const typeLabel = {channel: '📢 Kênh', supergroup: '👥 Siêu nhóm', group: '💬 Nhóm', bot: '🤖 Bot'};
 
-  const typeColor = {channel: '#f59e0b', supergroup: '#6366f1', group: '#22c55e', bot: '#ec4899'};
+  const typeColor = {channel: 'var(--orange)', supergroup: 'var(--accent)', group: 'var(--green)', bot: 'var(--violet)'};
 
 
 
@@ -3165,7 +3325,7 @@ App._renderChannelTable = function(channels) {
 
     <tr style="border-bottom:1px solid var(--border);transition:background .15s;"
 
-        onmouseover="this.style.background='rgba(255,255,255,.04)'"
+        onmouseover="this.style.background='color-mix(in srgb, var(--text) 4%, transparent)'"
 
         onmouseout="this.style.background=''"
 
@@ -3379,6 +3539,7 @@ App.leaveSelected = async function() {
 
 
   let successCount = 0, failCount = 0;
+  const failReasons = [];
 
   for (const chatId of selected) {
 
@@ -3407,9 +3568,14 @@ App.leaveSelected = async function() {
 
         successCount++;
 
-      } else { failCount++; if (row) row.style.opacity = '1'; }
+      } else {
+        failCount++; if (row) row.style.opacity = '1';
+        const d = await res.json().catch(() => ({}));
+        const t = (App._chChannels.find(c => c.chat_id === chatId) || {}).chat_title || chatId;
+        failReasons.push(`${t}: ${d.detail || ('HTTP ' + res.status)}`);
+      }
 
-    } catch(e) { failCount++; if (row) row.style.opacity = '1'; }
+    } catch(e) { failCount++; if (row) row.style.opacity = '1'; failReasons.push(String(e.message || e)); }
 
     // Small delay to avoid flood
 
@@ -3425,7 +3591,7 @@ App.leaveSelected = async function() {
 
   App._showChBanner(
 
-    `\u2705 Ho\u00E0n t\u1EA5t: r\u1EDDi ${successCount}/${selected.length} k\u00EAnh` + (failCount > 0 ? `, ${failCount} th\u1EA5t b\u1EA1i` : ''),
+    `\u2705 Ho\u00E0n t\u1EA5t: r\u1EDDi ${successCount}/${selected.length} k\u00EAnh` + (failCount > 0 ? `, ${failCount} th\u1EA5t b\u1EA1i \u2014 ${App._esc ? App._esc(failReasons.slice(0, 3).join(' \u00B7 ')) : failReasons.slice(0, 3).join(' \u00B7 ')}` : ''),
 
     failCount === 0 ? 'success' : 'warning'
 
@@ -3451,9 +3617,9 @@ App._showChBanner = function(msg, type) {
 
   const el = document.getElementById('ch-status-banner');
 
-  const colors = { success: 'rgba(34,197,94,.15)', error: 'rgba(239,68,68,.15)', warning: 'rgba(251,191,36,.15)', info: 'rgba(99,102,241,.15)' };
+  const colors = { success: 'color-mix(in srgb, var(--green) 15%, transparent)', error: 'color-mix(in srgb, var(--red) 15%, transparent)', warning: 'color-mix(in srgb, var(--orange) 15%, transparent)', info: 'color-mix(in srgb, var(--accent) 15%, transparent)' };
 
-  const borders = { success: '#22c55e', error: '#ef4444', warning: '#fbbf24', info: '#6366f1' };
+  const borders = { success: 'var(--green)', error: 'var(--red)', warning: 'var(--orange)', info: 'var(--accent)' };
 
   el.style.background = colors[type] || colors.info;
 
@@ -3526,6 +3692,7 @@ App.loadSettings = async function() {
   App.loadDailySummary();
   App.loadCommandBotConfig();
   App.loadForumInboxConfig();
+  App.loadTeamUsers();
 };
 
 // ══════════════════════════════════════════════════════════
@@ -3996,7 +4163,7 @@ const Reactions = (() => {
       label.appendChild(cb);
       const statusDot = document.createElement('span');
       statusDot.title = isOnline ? 'Online' : 'Offline';
-      statusDot.style.cssText = `display:inline-block;width:7px;height:7px;border-radius:50%;background:${isOnline ? '#22c55e' : '#6b7280'};flex-shrink:0;`;
+      statusDot.style.cssText = `display:inline-block;width:7px;height:7px;border-radius:50%;background:${isOnline ? 'var(--green)' : 'var(--text3)'};flex-shrink:0;`;
       label.appendChild(statusDot);
       label.appendChild(document.createTextNode(' ' + (acc.name || `acc#${acc.id}`)));
       container.appendChild(label);
@@ -4344,7 +4511,7 @@ Object.assign(App, {
         : `<span style="color:var(--text2);font-size:.8rem">—</span>`;
       const acc = rep.account_name || `acc#${rep.account_id}`;
       const dt  = rep.received_at ? rep.received_at.replace('T',' ').slice(0,16) : '';
-      const rowStyle = isUnread ? 'background:rgba(var(--accent-rgb,99,102,241),.07)' : '';
+      const rowStyle = isUnread ? 'background:rgba(var(--accent-rgb,255,136,0),.07)' : '';
 
       const tr = document.createElement('tr');
       tr.id = `inbox-row-${rep.id}`;
@@ -4521,7 +4688,7 @@ App._renderProxyTestResults = function(data) {
       const icon = r.ok ? '✅' : '❌';
       const latency = r.latency_ms ? r.latency_ms + 'ms' : '';
       const err = r.error ? ' — ' + r.error.substring(0, 40) : '';
-      const color = r.ok ? '#22c55e' : '#ef4444';
+      const color = r.ok ? 'var(--green)' : 'var(--red)';
       return '<div style="padding:3px 0;color:' + color + '">' + icon + ' ' + masked + ' ' + latency + err + '</div>';
     }).join('');
   }
@@ -4550,7 +4717,7 @@ App.loadProxyStatus = async function() {
         listEl.innerHTML = data.accounts.map(function(a) {
           const masked = a.proxy_url ? a.proxy_url.replace(/:([^:@]{3})[^@]*@/, ':$1***@') : '';
           const statusIcon = a.has_proxy ? '🔒' : '⚠️';
-          const statusColor = a.has_proxy ? '#a78bfa' : '#f59e0b';
+          const statusColor = a.has_proxy ? 'var(--accent-text)' : 'var(--orange)';
           const removeBtn = a.has_proxy
             ? '<button class="btn btn-ghost btn-sm" onclick="App.removeAccountProxy(' + a.account_id + ')" style="font-size:.7rem;padding:1px 6px" title="Xóa proxy">✕</button>'
             : '';
@@ -4648,7 +4815,7 @@ const Warmup = {
               <span style="color:var(--text2);font-size:.85rem;margin-left:8px">${this._esc(g.chat_title || '')} ${g.chat_username ? '@' + g.chat_username : ''}</span>
               <span style="color:var(--text2);font-size:.78rem;margin-left:8px">ID: ${g.chat_id}</span>
             </div>
-            <button onclick="event.stopPropagation();Warmup.deleteGroup(${g.id})" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoa</button>
+            <button onclick="event.stopPropagation();Warmup.deleteGroup(${g.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoa</button>
           </div>
         </div>`;
       }).join('');
@@ -4722,7 +4889,7 @@ const Warmup = {
               <div style="font-size:.85rem;white-space:pre-wrap">${this._esc(short)}</div>
               <div style="margin-top:4px"><span class="badge ${s.use_ai_remix ? 'badge-green' : 'badge-red'}">${s.use_ai_remix ? 'AI Remix' : 'Nguyen ban'}</span></div>
             </div>
-            <button onclick="Warmup.deleteScript(${s.id})" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem;margin-left:8px">Xoa</button>
+            <button onclick="Warmup.deleteScript(${s.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem;margin-left:8px">Xoa</button>
           </div>
         </div>`;
       }).join('');
@@ -4803,8 +4970,8 @@ const Warmup = {
               ${isRunning
                 ? '<button class="btn btn-danger btn-sm" onclick="Warmup.stopJob(' + j.id + ')">Dung</button>'
                 : '<button class="btn btn-primary btn-sm" onclick="Warmup.startJob(' + j.id + ')">Chay</button>'}
-              <button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.3)" onclick="Warmup.viewJobLogs(${j.id})">Logs</button>
-              <button onclick="Warmup.deleteJob(${j.id})" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoa</button>
+              <button class="btn btn-sm" style="background:color-mix(in srgb, var(--accent) 15%, transparent);color:var(--accent-text);border:1px solid color-mix(in srgb, var(--accent) 30%, transparent)" onclick="Warmup.viewJobLogs(${j.id})">Logs</button>
+              <button onclick="Warmup.deleteJob(${j.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoa</button>
             </div>
           </div>
         </div>`;
@@ -4829,7 +4996,7 @@ const Warmup = {
         </label>`;
       }).join('');
     } catch(e) {
-      accEl.innerHTML = '<span style="color:#f87171">Loi tai tai khoan</span>';
+      accEl.innerHTML = '<span style="color:var(--red)">Loi tai tai khoan</span>';
     }
 
     (document.getElementById('wj-interval-min') || me_dummy).value = '30';
@@ -4897,7 +5064,7 @@ const Warmup = {
         tbody.innerHTML = logs.map(l => {
           const time = l.posted_at ? l.posted_at.replace('T', ' ').slice(0, 16) : '';
           const msg = (l.message_sent || '').substring(0, 80);
-          const statusColor = l.status === 'success' ? '#4ade80' : '#f87171';
+          const statusColor = l.status === 'success' ? 'var(--green)' : 'var(--red)';
           return `<tr>
             <td style="font-size:.82rem">${time}</td>
             <td>Acc #${l.account_id}</td>
@@ -4933,7 +5100,7 @@ const Warmup = {
       tbody.innerHTML = logs.map(l => {
         const time = l.posted_at ? l.posted_at.replace('T', ' ').slice(0, 16) : '';
         const msg = (l.message_sent || '').substring(0, 60);
-        const statusColor = l.status === 'success' ? '#4ade80' : '#f87171';
+        const statusColor = l.status === 'success' ? 'var(--green)' : 'var(--red)';
         return `<tr>
           <td style="font-size:.82rem">${time}</td>
           <td>Job #${l.job_id}</td>
@@ -4956,9 +5123,9 @@ const Warmup = {
       <div class="stat-card"><div class="stat-label">Jobs</div><div class="stat-value">${jobCount}</div></div>
       <div class="stat-card"><div class="stat-label">Dang chay</div><div class="stat-value green">${runningCount}</div></div>
       <div class="stat-card"><div class="stat-label">Actions (hom nay)</div><div class="stat-value">${s.total_today || 0}</div></div>
-      <div class="stat-card"><div class="stat-label">Dang warmup</div><div class="stat-value" style="color:#60a5fa">${s.accounts_active || 0}</div></div>
+      <div class="stat-card"><div class="stat-label">Dang warmup</div><div class="stat-value" style="color:var(--purple)">${s.accounts_active || 0}</div></div>
       <div class="stat-card"><div class="stat-label">🎓 Graduated</div><div class="stat-value green">${s.accounts_graduated || 0}</div></div>
-      <div class="stat-card"><div class="stat-label">⚠️ Flood (3 ngay)</div><div class="stat-value" style="color:#f59e0b">${s.flood_events_3d || 0}</div></div>
+      <div class="stat-card"><div class="stat-label">⚠️ Flood (3 ngay)</div><div class="stat-value" style="color:var(--orange)">${s.flood_events_3d || 0}</div></div>
     `;
   },
 
@@ -4987,13 +5154,13 @@ const Warmup = {
 
       el.innerHTML = progress.map(p => {
         const stageNames = {1: 'PASSIVE', 2: 'WARMING', 3: 'ACTIVE', 4: 'READY'};
-        const stageColors = {1: '#60a5fa', 2: '#facc15', 3: '#fb923c', 4: '#4ade80'};
+        const stageColors = {1: 'var(--purple)', 2: 'var(--orange)', 3: 'var(--orange)', 4: 'var(--green)'};
         const stage = p.graduated_at ? 5 : (p.stage || 1);
-        const stageColor = stage === 5 ? '#4ade80' : (stageColors[stage] || '#60a5fa');
+        const stageColor = stage === 5 ? 'var(--green)' : (stageColors[stage] || 'var(--purple)');
         const stageName = stage === 5 ? 'GRADUATED' : (stageNames[stage] || 'PASSIVE');
         const statusBadge = stage === 5
-          ? '<span style="background:rgba(74,222,128,.15);color:#4ade80;padding:2px 8px;border-radius:12px;font-size:.78rem">🎓 Graduated</span>'
-          : `<span style="background:${stageColor}22;color:${stageColor};padding:2px 8px;border-radius:12px;font-size:.78rem">Stage ${p.stage || 1} - ${stageName}</span>`;
+          ? '<span style="background:color-mix(in srgb, var(--green) 15%, transparent);color:var(--green);padding:2px 8px;border-radius:12px;font-size:.78rem">🎓 Graduated</span>'
+          : `<span style="background:${_mix(stageColor,13)};color:${stageColor};padding:2px 8px;border-radius:12px;font-size:.78rem">Stage ${p.stage || 1} - ${stageName}</span>`;
 
         const msgPct = Math.min(100, ((p.messages_sent || 0) / 10) * 100);
         const reactPct = Math.min(100, ((p.reactions_sent || 0) / 15) * 100);
@@ -5007,19 +5174,19 @@ const Warmup = {
             ${statusBadge}
           </div>
           <div style="font-size:.82rem;color:var(--text2);margin-bottom:8px">
-            Bat dau: ${started} | ${p.days_in_warmup || 0} ngay${p.flood_count_3d ? ' | <span style="color:#f59e0b">⚠️ ' + p.flood_count_3d + ' flood</span>' : ''}
+            Bat dau: ${started} | ${p.days_in_warmup || 0} ngay${p.flood_count_3d ? ' | <span style="color:var(--orange)">⚠️ ' + p.flood_count_3d + ' flood</span>' : ''}
           </div>
           <div style="margin-bottom:4px">
             <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--text2)"><span>💬 Messages</span><span>${p.messages_sent || 0}/10</span></div>
-            <div style="background:var(--bg3);border-radius:4px;height:6px;margin-top:2px"><div style="background:#60a5fa;height:100%;border-radius:4px;width:${msgPct}%;transition:width .3s"></div></div>
+            <div style="background:var(--bg3);border-radius:4px;height:6px;margin-top:2px"><div style="background:var(--purple);height:100%;border-radius:4px;width:${msgPct}%;transition:width .3s"></div></div>
           </div>
           <div style="margin-bottom:4px">
             <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--text2)"><span>😀 Reactions</span><span>${p.reactions_sent || 0}/15</span></div>
-            <div style="background:var(--bg3);border-radius:4px;height:6px;margin-top:2px"><div style="background:#facc15;height:100%;border-radius:4px;width:${reactPct}%;transition:width .3s"></div></div>
+            <div style="background:var(--bg3);border-radius:4px;height:6px;margin-top:2px"><div style="background:var(--orange);height:100%;border-radius:4px;width:${reactPct}%;transition:width .3s"></div></div>
           </div>
           <div>
             <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--text2)"><span>📢 Channels</span><span>${p.channels_joined || 0}/3</span></div>
-            <div style="background:var(--bg3);border-radius:4px;height:6px;margin-top:2px"><div style="background:#4ade80;height:100%;border-radius:4px;width:${chanPct}%;transition:width .3s"></div></div>
+            <div style="background:var(--bg3);border-radius:4px;height:6px;margin-top:2px"><div style="background:var(--green);height:100%;border-radius:4px;width:${chanPct}%;transition:width .3s"></div></div>
           </div>
         </div>`;
       }).join('');
@@ -5043,7 +5210,7 @@ const Warmup = {
         return;
       }
       const actionIcons = {read_history:'📖',react_emoji:'😀',view_profile:'👤',post_message:'💬',forward_message:'↗️',join_channel:'📢'};
-      const statusColors = {success:'#4ade80',error:'#f87171',flood:'#f59e0b'};
+      const statusColors = {success:'var(--green)',error:'var(--red)',flood:'var(--orange)'};
       tbody.innerHTML = logs.map(l => {
         const time = l.created_at ? l.created_at.replace('T', ' ').slice(0, 19) : '';
         const icon = actionIcons[l.action_type] || '🔹';
@@ -5093,3 +5260,139 @@ const Warmup = {
 window.Warmup = Warmup;
 window.Reactions = Reactions;
 window.App = App;
+
+
+// ══════════════════════════════════════════════════════════
+//  TEAM ACCOUNTS (admin only)
+// ══════════════════════════════════════════════════════════
+App.loadTeamUsers = async function() {
+  const card = document.getElementById('team-users-card');
+  const box = document.getElementById('team-users-list');
+  if (!card || !box) return;
+  let data;
+  try { data = await API.get('/api/team-users'); }
+  catch (e) { card.style.display = 'none'; return; }  // không phải admin
+  card.style.display = '';
+  const fmt = t => t ? new Date(t * 1000).toLocaleString('vi-VN') : '—';
+  const users = data.users || [];
+  box.innerHTML = users.length ? `<table class="data-table" style="width:100%"><thead><tr><th>Username</th><th>Tạo lúc</th><th>Đăng nhập gần nhất</th><th></th></tr></thead><tbody>` +
+    users.map(u => `<tr><td><b>${App._esc(u.username)}</b></td><td>${fmt(u.created_at)}</td><td>${fmt(u.last_login)}</td>` +
+      `<td style="text-align:right"><button class="btn btn-danger btn-sm" data-u="${App._esc(u.username)}" onclick="App.deleteTeamUser(this.dataset.u)">🗑 Xoá</button></td></tr>`).join('') +
+    `</tbody></table>` : '<p style="font-size:13px;color:var(--text2)">Chưa có tài khoản team nào.</p>';
+};
+
+App.saveTeamUser = async function() {
+  const u = document.getElementById('team-user-name');
+  const p = document.getElementById('team-user-pass');
+  if (!u.value.trim() || !p.value) return this.toast('Nhập username và mật khẩu', 'error');
+  try {
+    await API.post('/api/team-users', { username: u.value.trim(), password: p.value });
+    this.toast('Đã lưu tài khoản ' + u.value.trim(), 'success');
+    u.value = ''; p.value = '';
+    this.loadTeamUsers();
+  } catch (e) { this.toast(e.message, 'error'); }
+};
+
+App.deleteTeamUser = async function(username) {
+  if (!confirm('Xoá tài khoản team "' + username + '"? Người này sẽ bị đăng xuất ngay.')) return;
+  try {
+    await API.del('/api/team-users/' + encodeURIComponent(username));
+    this.toast('Đã xoá ' + username, 'success');
+    this.loadTeamUsers();
+  } catch (e) { this.toast(e.message, 'error'); }
+};
+
+
+// ── Bulk active hours (giờ chạy AI) ─────────────────────────
+App.openBulkActiveHours = function(ids) {
+  const all = App._accounts || [];
+  const targets = ids && ids.length ? all.filter(a => ids.includes(a.id)) : all;
+  if (!targets.length) return App.toast('Không có tài khoản nào', 'info');
+  document.getElementById('bulk-ah-modal')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'bulk-ah-modal';
+  ov.className = 'modal-overlay open';
+  ov.innerHTML = `<div class="modal" style="max-width:420px">
+    <div class="modal-header"><h3 class="modal-title">🕘 Đặt giờ chạy AI</h3><button class="modal-close" onclick="document.getElementById('bulk-ah-modal').remove()">×</button></div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Áp dụng cho <b>${targets.length}</b> tài khoản${ids && ids.length ? ' đã chọn' : ' (tất cả)'} · giờ Việt Nam</p>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+      <input type="time" class="form-input" id="bulk-ah-start" value="08:00" style="flex:1">
+      <span>→</span>
+      <input type="time" class="form-input" id="bulk-ah-end" value="22:00" style="flex:1">
+    </div>
+    <button class="btn btn-primary" style="width:100%" id="bulk-ah-apply">Áp dụng</button>
+  </div>`;
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  document.getElementById('bulk-ah-apply').onclick = () => App.applyBulkActiveHours(targets.map(a => a.id));
+};
+
+App.applyBulkActiveHours = async function(ids) {
+  const start = document.getElementById('bulk-ah-start').value;
+  const end = document.getElementById('bulk-ah-end').value;
+  if (!start || !end) return App.toast('Chọn đủ giờ bắt đầu và kết thúc', 'error');
+  const btn = document.getElementById('bulk-ah-apply');
+  btn.disabled = true; btn.textContent = 'Đang lưu...';
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    try {
+      await API.post(`/api/auth/accounts/${id}/active-hours`, { active_hours_start: start, active_hours_end: end, active_timezone: 'Asia/Ho_Chi_Minh' });
+      ok++;
+    } catch { fail++; }
+  }
+  document.getElementById('bulk-ah-modal')?.remove();
+  API.clearAccountsCache();
+  App.toast(`Đã đặt giờ ${start}–${end} cho ${ok}/${ids.length} tài khoản${fail ? ` (${fail} lỗi)` : ''}`, fail ? 'warning' : 'success');
+  App.clearAccountSelection();
+  App.loadAccounts();
+};
+
+document.addEventListener('themechange',()=>{try{if(App._dashDaily)App._renderDashChart(App._dashDaily)}catch(e){}});
+
+// ── Fallback provider chips (order mirrors ai_remix._auto_fallback_remix) ──
+App.renderFallbackChips = function() {
+  const box = document.getElementById('ai-fallback-chips'); if (!box) return;
+  const cur = document.getElementById('ai-provider-select')?.value;
+  const names = {chatgpt_oauth:'ChatGPT', gemini:'Gemini', groq:'Groq', openai_compatible:'9Router', openai:'OpenAI', deepseek:'DeepSeek'};
+  const list = Object.keys(names).filter(p => p !== cur).map(p => [p, App._collectKeys(p).length]).filter(([, n]) => n);
+  box.innerHTML = list.length
+    ? list.map(([p, n]) => `<button type="button" class="fb-chip" onclick="App.pickProvider('${p}')">${names[p]} <b>${n}</b></button>`).join('<span class="fb-arrow">→</span>')
+    : '<span class="fb-none">Chưa có dự phòng</span>';
+};
+App.pickProvider = function(p) {
+  const sel = document.getElementById('ai-provider-select'); if (!sel) return;
+  sel.value = p; App.onProviderChange();
+};
+(function(){
+  const orig = App.onProviderChange;
+  App.onProviderChange = function() { orig.apply(this, arguments); App.renderFallbackChips(); };
+  document.addEventListener('input', e => { if (e.target.classList?.contains('ai-key-input')) App.renderFallbackChips(); });
+})();
+
+// Groq model select: list the chat models this key can use (Groq free tier)
+App.loadGroqModels = async function() {
+  const el = document.getElementById('groq-model'); if (!el) return;
+  const saved = (await API.getSetting('ai_groq_model').catch(() => ({})))?.value || el.value || 'openai/gpt-oss-120b';
+  const key = App._collectKeys('groq')[0];
+  let ids = [];
+  if (key) {
+    try {
+      const r = await API.post('/api/settings/fetch-models', {base_url: 'https://api.groq.com/openai/v1', api_key: key});
+      if (r.success) ids = r.models.map(m => m.id).filter(id => !/whisper|orpheus|guard|tts|playai|allam/i.test(id));
+    } catch (e) {}
+  }
+  if (ids.length) {
+    if (!ids.includes(saved)) ids.unshift(saved);
+    el.innerHTML = ids.map(id => `<option value="${esc(id)}">${esc(id)}${id === 'openai/gpt-oss-120b' ? ' ⭐' : ''}</option>`).join('');
+  }
+  el.value = saved;
+};
+(function(){
+  const orig = App.onProviderChange;
+  let loaded = false;
+  App.onProviderChange = function() {
+    orig.apply(this, arguments);
+    if (loaded || document.getElementById('ai-provider-select')?.value !== 'groq') return;
+    loaded = true; App.loadGroqModels();
+  };
+})();

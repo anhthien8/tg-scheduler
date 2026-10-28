@@ -637,7 +637,7 @@ const Members = {
       }
       if (c.status === 'paused_auto') {
         metaParts.push(autoResume
-          ? `<span style="color:#10b981" title="Hệ thống tự kiểm tra mỗi 15 phút và chạy tiếp khi account hết bị khóa">🔄 Auto-resume BẬT</span>`
+          ? `<span style="color:var(--green)" title="Hệ thống tự kiểm tra mỗi 15 phút và chạy tiếp khi account hết bị khóa">🔄 Auto-resume BẬT</span>`
           : `<span style="color:var(--text2)" title="Campaign sẽ không tự chạy tiếp — cần bấm ▶ thủ công">⏹ Auto-resume TẮT</span>`);
         metaParts.push(`<a href="javascript:void(0)" onclick="Members.toggleAutoResume(${c.id}, ${autoResume ? 0 : 1})" style="color:var(--primary);text-decoration:underline">${autoResume ? 'Tắt' : 'Bật'}</a>`);
       }
@@ -654,12 +654,12 @@ const Members = {
         <td style="min-width:190px" title="${statsTitle}">
           <div style="display:flex;align-items:center;gap:8px">
             <div style="flex:1;background:var(--bg2);border-radius:4px;height:6px;overflow:hidden">
-              <div style="width:${progress}%;height:100%;background:linear-gradient(90deg, #8b5cf6, #6366f1);border-radius:4px;transition:width .3s"></div>
+              <div style="width:${progress}%;height:100%;background:linear-gradient(90deg, var(--accent), var(--accent));border-radius:4px;transition:width .3s"></div>
             </div>
             <span style="font-size:12px;font-weight:600;color:var(--text1);white-space:nowrap">${processed}/${total}</span>
           </div>
           <div style="font-size:11px;color:var(--text2);margin-top:3px;white-space:nowrap">
-            <span style="color:#10b981">${sent}</span> · <span style="color:#ef4444">${failed}</span> · <span style="color:var(--text2)">${skipped}</span>
+            <span style="color:var(--green)">${sent}</span> · <span style="color:var(--red)">${failed}</span> · <span style="color:var(--text2)">${skipped}</span>
           </div>
         </td>
         <td style="white-space:nowrap"><div class="btn-group">${actions}</div></td>
@@ -710,11 +710,11 @@ const Members = {
     const map = {
       draft: `<span class="badge" style="background:var(--text2);${st}">📝 Nháp</span>`,
       running: `<span class="badge badge-blue" style="${st}">🔄 Đang chạy</span>`,
-      paused: `<span class="badge" style="background:#f59e0b;${st}" title="Tạm dừng thủ công">⏸ Tạm dừng</span>`,
-      paused_auto: `<span class="badge" style="background:#0ea5e9;${st}" title="Dừng do SpamBot/limit — sẽ tự chạy tiếp khi account sẵn sàng">🔒 Chờ mở khóa</span>`,
+      paused: `<span class="badge" style="background:var(--orange);${st}" title="Tạm dừng thủ công">⏸ Tạm dừng</span>`,
+      paused_auto: `<span class="badge" style="background:var(--purple);${st}" title="Dừng do SpamBot/limit — sẽ tự chạy tiếp khi account sẵn sàng">🔒 Chờ mở khóa</span>`,
       completed: `<span class="badge badge-green" style="${st}">✅ Hoàn tất</span>`,
       error: `<span class="badge badge-red" style="${st}">❌ Lỗi</span>`,
-      scheduled: `<span class="badge" style="background:#8b5cf6;${st}">⏰ Hẹn giờ</span>`,
+      scheduled: `<span class="badge" style="background:var(--accent);${st}">⏰ Hẹn giờ</span>`,
     };
     return map[status] || `<span class="badge" style="${st}">${status}</span>`;
   },
@@ -918,10 +918,10 @@ const Members = {
           <button type="button" class="btn btn-ghost btn-sm cmp-acc-filter" data-filter="premium" onclick="Members.filterCampaignAccounts('premium')" style="font-size:12px">⭐ Premium (${sortedAccounts.filter(a=>a.is_premium).length})</button>
           <span style="flex:1"></span>
           <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(true)" style="font-size:11px;color:var(--accent);padding:2px 8px" title="Chọn tất cả">☑ Chọn hết</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="Members.selectPremiumOnly()" style="font-size:11px;color:#f59e0b;padding:2px 8px" title="Chỉ chọn Premium">⭐ Chọn Premium</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="Members.selectPremiumOnly()" style="font-size:11px;color:var(--orange);padding:2px 8px" title="Chỉ chọn Premium">⭐ Chọn Premium</button>
           <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(false)" style="font-size:11px;color:var(--danger);padding:2px 8px" title="Bỏ chọn tất cả">☐ Bỏ hết</button>
         </div>
-        <div id="cmp-accounts-chips" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+        <div id="cmp-accounts-chips" style="display:flex;flex-wrap:wrap;gap:6px"></div>
       `;
       this._sortedCampaignAccounts = sortedAccounts;
 
@@ -934,11 +934,11 @@ const Members = {
           : a.name;
         const phone = a.phone || '';
         const premiumBadge = a.is_premium ? '⭐ ' : '';
-        const premiumStyle = a.is_premium ? 'border-color:#f59e0b;' : '';
+        const premiumStyle = a.is_premium ? 'border-color:var(--orange);' : '';
         const checked = senderIds.includes(a.id) ? 'checked' : '';
-        return `<label style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg2);border-radius:8px;cursor:pointer;border:1px solid var(--border);font-size:13px;${premiumStyle}" data-premium="${a.is_premium ? 1 : 0}">
+        return `<label class="cmp-acc-chip" style="${premiumStyle}" data-premium="${a.is_premium ? 1 : 0}">
           <input type="checkbox" class="cmp-acc-checkbox" value="${a.id}" ${checked}>
-          <span>${premiumBadge}${esc(name || phone)}</span>
+          <span title="${esc(name || phone)}">${premiumBadge}${esc(shortName(name || phone))}</span>
         </label>`;
       }).join('');
 
@@ -1095,7 +1095,7 @@ const Members = {
       const statusBadge = l.status === 'success'
         ? '<span class="badge badge-green">✅</span>'
         : l.status === 'skipped'
-          ? '<span class="badge" style="background:#f59e0b">⏭</span>'
+          ? '<span class="badge" style="background:var(--orange)">⏭</span>'
           : '<span class="badge badge-red">❌</span>';
       const time = l.sent_at ? new Date(l.sent_at + 'Z').toLocaleString('vi-VN') : '—';
       return `<tr>
@@ -1174,10 +1174,10 @@ const Members = {
         <button type="button" class="btn btn-ghost btn-sm cmp-acc-filter" data-filter="premium" onclick="Members.filterCampaignAccounts('premium')" style="font-size:12px">⭐ Premium (${sortedAccounts.filter(a=>a.is_premium).length})</button>
         <span style="flex:1"></span>
         <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(true)" style="font-size:11px;color:var(--accent);padding:2px 8px" title="Chọn tất cả">☑ Chọn hết</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.selectPremiumOnly()" style="font-size:11px;color:#f59e0b;padding:2px 8px" title="Chỉ chọn Premium">⭐ Chọn Premium</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.selectPremiumOnly()" style="font-size:11px;color:var(--orange);padding:2px 8px" title="Chỉ chọn Premium">⭐ Chọn Premium</button>
         <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(false)" style="font-size:11px;color:var(--danger);padding:2px 8px" title="Bỏ chọn tất cả">☐ Bỏ hết</button>
       </div>
-      <div id="cmp-accounts-chips" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+      <div id="cmp-accounts-chips" style="display:flex;flex-wrap:wrap;gap:6px"></div>
     `;
     this._sortedCampaignAccounts = sortedAccounts;
     this._renderCampaignAccountChips(sortedAccounts);
@@ -1221,10 +1221,10 @@ const Members = {
         : a.name;
       const phone = a.phone || '';
       const premiumBadge = a.is_premium ? '⭐ ' : '';
-      const premiumStyle = a.is_premium ? 'border-color:#f59e0b;' : '';
-      return `<label style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg2);border-radius:8px;cursor:pointer;border:1px solid var(--border);font-size:13px;${premiumStyle}" data-premium="${a.is_premium ? 1 : 0}">
+      const premiumStyle = a.is_premium ? 'border-color:var(--orange);' : '';
+      return `<label class="cmp-acc-chip" style="${premiumStyle}" data-premium="${a.is_premium ? 1 : 0}">
         <input type="checkbox" class="cmp-acc-checkbox" value="${a.id}" checked>
-        <span>${premiumBadge}${esc(name || phone)}</span>
+        <span title="${esc(name || phone)}">${premiumBadge}${esc(shortName(name || phone))}</span>
       </label>`;
     }).join('');
   },
@@ -1288,19 +1288,19 @@ const Members = {
     const idx = list.children.length;
     const div = document.createElement('div');
     div.className = 'cmp-msg-item';
-    div.style.cssText = 'display:flex;gap:10px;align-items:flex-start;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;';
+    div.style.cssText = 'display:flex;gap:10px;align-items:flex-start;background:rgba(0,0,0,0.25);border:1px solid color-mix(in srgb, var(--text) 8%, transparent);border-radius:10px;padding:12px;';
     div.innerHTML = `
-      <span style="color:#a78bfa;font-size:12px;font-weight:700;margin-top:8px">#${idx + 1}</span>
+      <span style="color:var(--accent-text);font-size:12px;font-weight:700;margin-top:8px">#${idx + 1}</span>
       <div style="flex:1;display:flex;flex-direction:column;gap:6px">
-        <textarea class="form-input cmp-msg-content" rows="4" style="width:100%;min-height:100px;resize:vertical;font-size:13px;line-height:1.5;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px;color:#e5e7eb" placeholder="Nội dung tin nhắn...&#10;Biến cá nhân hóa: {name}, {first_name}, {last_name}, {full_name}, {username}" oninput="Members.updateMsgCharCounter(this)"></textarea>
-        <div class="cmp-msg-char-counter" style="display:flex;align-items:center;gap:8px;font-size:11px;color:#9ca3af">
+        <textarea class="form-input cmp-msg-content" rows="4" style="width:100%;min-height:100px;resize:vertical;font-size:13px;line-height:1.5;background:rgba(0,0,0,0.3);border:1px solid color-mix(in srgb, var(--text) 12%, transparent);border-radius:8px;padding:10px;color:#e5e7eb" placeholder="Nội dung tin nhắn...&#10;Biến cá nhân hóa: {name}, {first_name}, {last_name}, {full_name}, {username}" oninput="Members.updateMsgCharCounter(this)"></textarea>
+        <div class="cmp-msg-char-counter" style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text2)">
           <span class="cmp-char-count">0 ký tự</span>
-          <span class="cmp-caption-warn" style="display:none;color:#f59e0b;font-weight:600">⚠️ Caption ảnh/video tối đa 1024 ký tự!</span>
+          <span class="cmp-caption-warn" style="display:none;color:var(--orange);font-weight:600">⚠️ Caption ảnh/video tối đa 1024 ký tự!</span>
         </div>
         <!-- Image attachment row -->
         <div class="cmp-msg-media-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px">
           <input type="file" class="cmp-msg-file-input" accept="image/*,video/*,.pdf,.doc,.docx" style="display:none" onchange="Members.handleMsgFileUpload(this)">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="this.parentElement.querySelector('.cmp-msg-file-input').click()" style="font-size:12px;padding:4px 10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:#d1d5db">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="this.parentElement.querySelector('.cmp-msg-file-input').click()" style="font-size:12px;padding:4px 10px;border:1px solid color-mix(in srgb, var(--text) 12%, transparent);background:color-mix(in srgb, var(--text) 4%, transparent);color:var(--text2)">
             📎 Đính kèm ảnh/file
           </button>
           <div class="cmp-msg-media-preview" style="display:none;align-items:center;gap:6px;padding:4px 8px;background:var(--bg2);border-radius:6px;border:1px solid var(--border)"></div>
@@ -1419,10 +1419,10 @@ const Members = {
     if (countEl) {
       countEl.textContent = len + ' ký tự';
       if (hasMedia && len > 1024) {
-        countEl.style.color = '#ef4444';
+        countEl.style.color = 'var(--red)';
         countEl.style.fontWeight = '600';
       } else if (hasMedia && len > 900) {
-        countEl.style.color = '#f59e0b';
+        countEl.style.color = 'var(--orange)';
         countEl.style.fontWeight = '600';
       } else {
         countEl.style.color = 'var(--text2)';
@@ -1434,10 +1434,10 @@ const Members = {
         warnEl.style.display = 'inline';
         if (len > 1024) {
           warnEl.textContent = `🚫 Vượt ${len - 1024} ký tự! Caption ảnh/video tối đa 1024.`;
-          warnEl.style.color = '#ef4444';
+          warnEl.style.color = 'var(--red)';
         } else if (len > 900) {
           warnEl.textContent = `⚠️ Còn ${1024 - len} ký tự. Caption ảnh/video tối đa 1024.`;
-          warnEl.style.color = '#f59e0b';
+          warnEl.style.color = 'var(--orange)';
         } else {
           warnEl.textContent = `📝 Caption ảnh/video tối đa 1024 ký tự (còn ${1024 - len})`;
           warnEl.style.color = 'var(--text2)';
@@ -1897,7 +1897,7 @@ const Members = {
       panel = document.createElement('div');
       panel.id = 'deep-crawl-queue-panel';
       panel.className = 'card';
-      panel.style.cssText = 'margin-top:12px; margin-bottom:16px; padding:12px 16px; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,0.03);';
+      panel.style.cssText = 'margin-top:12px; margin-bottom:16px; padding:12px 16px; border:1px solid var(--border); border-radius:10px; background:color-mix(in srgb, var(--text) 3%, transparent);';
       if (progressPanel && progressPanel.parentNode) {
         progressPanel.parentNode.insertBefore(panel, progressPanel.nextSibling);
       } else if (containerCard) {
@@ -1917,7 +1917,7 @@ const Members = {
       html += `<div style="display:flex; flex-direction:column; gap:6px;">`;
       queue.forEach((q, i) => {
         const link = q.channel_link.length > 35 ? q.channel_link.substring(0, 35) + '...' : q.channel_link;
-        html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:rgba(255,255,255,0.04); border-radius:6px; font-size:13px;">`;
+        html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:color-mix(in srgb, var(--text) 4%, transparent); border-radius:6px; font-size:13px;">`;
         html += `<span><span style="color:var(--accent); font-weight:600;">#${i + 1}</span> ${link} <span style="color:var(--text2);">(depth ${q.max_depth})</span></span>`;
         html += `<button onclick="Members._removeQueueItem(${i})" style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:14px; padding:2px 6px;" title="Xóa">❌</button>`;
         html += `</div>`;
@@ -2157,19 +2157,19 @@ const Members = {
     if (lead.trading_score >= 80) {
       lead.category = "trading_signals";
       lead.category_label = "🔥 VIP Signals / KOL";
-      lead.badge_color = "#10b981";
+      lead.badge_color = "var(--green)";
     } else if (lead.trading_score >= 60) {
       lead.category = "crypto_trading";
       lead.category_label = "📈 Trading & Scalping";
-      lead.badge_color = "#3b82f6";
+      lead.badge_color = "var(--purple)";
     } else if (lead.trading_score >= 45) {
       lead.category = "potential_bd";
       lead.category_label = "💎 Tiềm năng BD";
-      lead.badge_color = "#8b5cf6";
+      lead.badge_color = "var(--accent)";
     } else {
       lead.category = "low_relevance";
       lead.category_label = "⚠️ Ít liên quan";
-      lead.badge_color = "#6b7280";
+      lead.badge_color = "var(--text3)";
     }
     return lead.trading_score;
   },
@@ -2263,12 +2263,12 @@ const Members = {
     // Build Contact-First Trading Filter Tabs
     if (tradingTabs) {
       tradingTabs.innerHTML = `
-        <button class="tab-btn btn-sm ${this._tradingFilter === 'has_contacts' ? 'active' : ''}" onclick="Members.filterByTrading('has_contacts')" style="border-left:3px solid #6366f1;font-weight:600">🎯 Tất cả có Contact (${contactCount})</button>
-        <button class="tab-btn btn-sm ${this._tradingFilter === 'trading_vip' ? 'active' : ''}" onclick="Members.filterByTrading('trading_vip')" style="border-left:3px solid #10b981">🔥 VIP Signals (${vipCount})</button>
-        <button class="tab-btn btn-sm ${this._tradingFilter === 'trading_all' ? 'active' : ''}" onclick="Members.filterByTrading('trading_all')" style="border-left:3px solid #3b82f6">📈 Trading & Scalping (${tradeCount})</button>
-        <button class="tab-btn btn-sm ${this._tradingFilter === 'potential_bd' ? 'active' : ''}" onclick="Members.filterByTrading('potential_bd')" style="border-left:3px solid #8b5cf6">💎 Tiềm năng BD (${potentialCount})</button>
-        <button class="tab-btn btn-sm ${this._tradingFilter === 'news' ? 'active' : ''}" onclick="Members.filterByTrading('news')" style="border-left:3px solid #f59e0b">📰 Tin tức (${newsCount})</button>
-        <button class="tab-btn btn-sm ${this._tradingFilter === 'no_contacts' ? 'active' : ''}" onclick="Members.filterByTrading('no_contacts')" style="border-left:3px solid #6b7280;opacity:0.75">❌ Chưa có Contact (${noContactCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'has_contacts' ? 'active' : ''}" onclick="Members.filterByTrading('has_contacts')" style="border-left:3px solid var(--accent);font-weight:600">🎯 Tất cả có Contact (${contactCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'trading_vip' ? 'active' : ''}" onclick="Members.filterByTrading('trading_vip')" style="border-left:3px solid var(--green)">🔥 VIP Signals (${vipCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'trading_all' ? 'active' : ''}" onclick="Members.filterByTrading('trading_all')" style="border-left:3px solid var(--purple)">📈 Trading & Scalping (${tradeCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'potential_bd' ? 'active' : ''}" onclick="Members.filterByTrading('potential_bd')" style="border-left:3px solid var(--accent)">💎 Tiềm năng BD (${potentialCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'news' ? 'active' : ''}" onclick="Members.filterByTrading('news')" style="border-left:3px solid var(--orange)">📰 Tin tức (${newsCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'no_contacts' ? 'active' : ''}" onclick="Members.filterByTrading('no_contacts')" style="border-left:3px solid var(--text3);opacity:0.75">❌ Chưa có Contact (${noContactCount})</button>
         <button class="tab-btn btn-sm ${this._tradingFilter === 'all' ? 'active' : ''}" onclick="Members.filterByTrading('all')" style="opacity:0.65">🌐 Xem tất cả (${allCount})</button>
       `;
     }
@@ -2281,8 +2281,8 @@ const Members = {
         depths.map(d => {
           const count = depthCounts[d] || 0;
           const active = this._depthFilter === d ? 'active' : '';
-          const colors = ['', '#6366f1', '#a855f7', '#ec4899', '#f59e0b'];
-          return `<button class="tab-btn btn-sm ${active}" onclick="Members.filterByDepth(${d})" style="border-left:3px solid ${colors[d] || '#6366f1'}">Lớp ${d} (${count})</button>`;
+          const colors = ['', 'var(--accent)', 'var(--purple)', 'var(--violet)', 'var(--orange)'];
+          return `<button class="tab-btn btn-sm ${active}" onclick="Members.filterByDepth(${d})" style="border-left:3px solid ${colors[d] || 'var(--accent)'}">Lớp ${d} (${count})</button>`;
         }).join('');
     }
 
@@ -2322,7 +2322,7 @@ const Members = {
         const trans = this._descTranslationCache.get(rawDesc);
         const isDiff = trans.trim().toLowerCase() !== rawDesc.trim().toLowerCase();
         descHtml = `
-          <div style="font-size:12px;line-height:1.45;color:#f3f4f6;font-weight:500">
+          <div style="font-size:12px;line-height:1.45;color:var(--text);font-weight:500">
             ${esc(trans)}
           </div>
           ${isDiff ? `<div style="font-size:10.5px;color:var(--text-muted);margin-top:3px;font-style:italic;line-height:1.3" title="Gốc: ${esc(rawDesc)}">
@@ -2349,21 +2349,21 @@ const Members = {
       // Trading Score & Category Badge
       const score = lead.trading_score !== undefined ? lead.trading_score : 50;
       const categoryLabel = lead.category_label || (score >= 80 ? '🔥 Trading VIP' : (score >= 60 ? '📈 Crypto Trading' : (score >= 35 ? '📰 Tin tức' : '⚠️ Khác')));
-      const badgeColor = lead.badge_color || (score >= 80 ? '#10b981' : (score >= 60 ? '#3b82f6' : (score >= 35 ? '#f59e0b' : '#6b7280')));
+      const badgeColor = lead.badge_color || (score >= 80 ? 'var(--green)' : (score >= 60 ? 'var(--purple)' : (score >= 35 ? 'var(--orange)' : 'var(--text3)')));
 
       const keywordsHtml = (lead.matched_keywords && lead.matched_keywords.length)
         ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;">` +
-          lead.matched_keywords.slice(0, 3).map(k => `<span style="font-size:9.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:4px;color:#d1d5db;">${esc(k)}</span>`).join('') +
+          lead.matched_keywords.slice(0, 3).map(k => `<span style="font-size:9.5px;background:color-mix(in srgb, var(--text) 6%, transparent);padding:1px 4px;border-radius:4px;color:var(--text2);">${esc(k)}</span>`).join('') +
           `</div>`
         : '';
 
       const scoreHtml = `
         <div style="display:flex;flex-direction:column;gap:3px;min-width:135px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">
-            <span style="font-weight:700;font-size:12.5px;color:${badgeColor}">${score} <span style="font-size:9.5px;color:#9ca3af">/ 100</span></span>
+            <span style="font-weight:700;font-size:12.5px;color:${badgeColor}">${score} <span style="font-size:9.5px;color:var(--text2)">/ 100</span></span>
             <span style="display:inline-block;padding:2px 6px;border-radius:6px;font-size:10px;font-weight:600;color:white;background:${badgeColor}">${esc(categoryLabel)}</span>
           </div>
-          <div style="background:rgba(255,255,255,0.1);height:4px;border-radius:2px;overflow:hidden;width:100%">
+          <div style="background:color-mix(in srgb, var(--text) 10%, transparent);height:4px;border-radius:2px;overflow:hidden;width:100%">
             <div style="background:${badgeColor};height:100%;width:${score}%"></div>
           </div>
           ${keywordsHtml}
@@ -2386,8 +2386,8 @@ const Members = {
       }
 
       // Depth badge colors
-      const depthColors = { 1: '#6366f1', 2: '#a855f7', 3: '#ec4899', 4: '#f59e0b' };
-      const depthColor = depthColors[lead.depth] || '#6366f1';
+      const depthColors = { 1: 'var(--accent)', 2: 'var(--purple)', 3: 'var(--violet)', 4: 'var(--orange)' };
+      const depthColor = depthColors[lead.depth] || 'var(--accent)';
 
       return `
         <tr>
@@ -2499,11 +2499,11 @@ const Members = {
           const isDiff = trans.trim().toLowerCase() !== orig.trim().toLowerCase();
           const shortOrig = orig.length > 60 ? orig.substring(0, 60) + '…' : orig;
           cell.innerHTML = isDiff
-            ? `<div style="font-size:12px;line-height:1.45;color:#f3f4f6;font-weight:500">${esc(trans)}</div>
+            ? `<div style="font-size:12px;line-height:1.45;color:var(--text);font-weight:500">${esc(trans)}</div>
                <div style="font-size:10.5px;color:var(--text-muted);margin-top:3px;font-style:italic;line-height:1.3">
                  <span style="opacity:0.6">Gốc:</span> ${esc(shortOrig)}
                </div>`
-            : `<div style="font-size:12px;line-height:1.45;color:#f3f4f6">${esc(trans)}</div>`;
+            : `<div style="font-size:12px;line-height:1.45;color:var(--text)">${esc(trans)}</div>`;
         });
       }
     } catch (e) {
@@ -2840,7 +2840,7 @@ const Members = {
       const processed = sent + failed + skipped;
       const progress = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
       const modeBadge = c.invite_mode === 'dm_link'
-        ? '<span class="badge" style="background:#8b5cf6">💬 DM Link</span>'
+        ? '<span class="badge" style="background:var(--accent)">💬 DM Link</span>'
         : '<span class="badge badge-blue">👥 Direct</span>';
 
       let actions = '';
@@ -2866,7 +2866,7 @@ const Members = {
         <td>
           <div style="display:flex;align-items:center;gap:8px">
             <div style="flex:1;background:var(--bg2);border-radius:4px;height:8px;overflow:hidden">
-              <div style="width:${progress}%;height:100%;background:linear-gradient(90deg, #8b5cf6, #6366f1);border-radius:4px;transition:width .3s"></div>
+              <div style="width:${progress}%;height:100%;background:linear-gradient(90deg, var(--accent), var(--accent));border-radius:4px;transition:width .3s"></div>
             </div>
             <span style="font-size:12px;font-weight:600;color:var(--text1)">${processed}/${total} (${progress}%)</span>
           </div>
@@ -2985,7 +2985,7 @@ const Members = {
         const statusBadge = l.status === 'success'
           ? '<span class="badge badge-green">✅</span>'
           : l.status === 'skipped'
-            ? '<span class="badge" style="background:#f59e0b">⏭</span>'
+            ? '<span class="badge" style="background:var(--orange)">⏭</span>'
             : '<span class="badge badge-red">❌</span>';
         const time = l.sent_at ? new Date(l.sent_at + 'Z').toLocaleString('vi-VN') : '—';
         return `<tr>
@@ -3118,7 +3118,7 @@ const Members = {
         <button type="button" class="btn btn-ghost btn-sm inv-acc-filter" data-filter="premium" onclick="Members.filterInviteAccounts('premium')" style="font-size:12px">⭐ Premium (${sortedAccounts.filter(a=>a.is_premium).length})</button>
         <span style="flex:1"></span>
         <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllInviteAccounts(true)" style="font-size:11px;color:var(--accent);padding:2px 8px" title="Chọn tất cả">☑ Chọn hết</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.selectInvitePremiumOnly()" style="font-size:11px;color:#f59e0b;padding:2px 8px" title="Chỉ chọn Premium">⭐ Chọn Premium</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.selectInvitePremiumOnly()" style="font-size:11px;color:var(--orange);padding:2px 8px" title="Chỉ chọn Premium">⭐ Chọn Premium</button>
         <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllInviteAccounts(false)" style="font-size:11px;color:var(--danger);padding:2px 8px" title="Bỏ chọn tất cả">☐ Bỏ hết</button>
       </div>
       <div id="inv-accounts-chips" style="display:flex;flex-wrap:wrap;gap:8px"></div>
@@ -3136,11 +3136,11 @@ const Members = {
         : a.name;
       const phone = a.phone || '';
       const premiumBadge = a.is_premium ? '⭐ ' : '';
-      const premiumStyle = a.is_premium ? 'border-color:#f59e0b;' : '';
+      const premiumStyle = a.is_premium ? 'border-color:var(--orange);' : '';
       const checked = selectedIds ? (selectedIds.includes(a.id) ? 'checked' : '') : 'checked';
-      return `<label style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg2);border-radius:8px;cursor:pointer;border:1px solid var(--border);font-size:13px;${premiumStyle}" data-premium="${a.is_premium ? 1 : 0}">
+      return `<label class="cmp-acc-chip" style="${premiumStyle}" data-premium="${a.is_premium ? 1 : 0}">
         <input type="checkbox" class="inv-acc-checkbox" value="${a.id}" ${checked}>
-        <span>${premiumBadge}${esc(name || phone)}</span>
+        <span title="${esc(name || phone)}">${premiumBadge}${esc(shortName(name || phone))}</span>
       </label>`;
     }).join('');
   },
@@ -3351,9 +3351,9 @@ const Members = {
 
   _spamBadgeHtml(status, message) {
     const map = {
-      free: { text: '✅ Sạch', bg: 'rgba(34,197,94,.18)', border: 'rgba(34,197,94,.5)', color: '#4ade80' },
-      limited: { text: '🚫 Bị giới hạn', bg: 'rgba(239,68,68,.18)', border: 'rgba(239,68,68,.5)', color: '#f87171' },
-      unknown: { text: '⚠️ Không rõ', bg: 'rgba(245,158,11,.18)', border: 'rgba(245,158,11,.5)', color: '#fbbf24' },
+      free: { text: '✅ Sạch', bg: 'color-mix(in srgb, var(--green) 18%, transparent)', border: 'color-mix(in srgb, var(--green) 50%, transparent)', color: 'var(--green)' },
+      limited: { text: '🚫 Bị giới hạn', bg: 'color-mix(in srgb, var(--red) 18%, transparent)', border: 'color-mix(in srgb, var(--red) 50%, transparent)', color: 'var(--red)' },
+      unknown: { text: '⚠️ Không rõ', bg: 'color-mix(in srgb, var(--orange) 18%, transparent)', border: 'color-mix(in srgb, var(--orange) 50%, transparent)', color: 'var(--orange)' },
     };
     const info = map[status] || map.unknown;
     return `<span style="background:${info.bg};border:1px solid ${info.border};border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:${info.color}" title="${esc(message || '')}">${info.text}</span>`;

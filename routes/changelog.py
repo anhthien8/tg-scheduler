@@ -8,11 +8,30 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.11.0",
+        "date": "29/10/2026",
+        "title": "📱 PWA + đăng nhập theo team, giao diện gọn cho mobile, AI dự phòng thông minh hơn",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Cài dashboard như app trên điện thoại (PWA), mỗi thành viên team có tài khoản riêng, chọn theme. Keyword DM, form rule và cửa sổ chiến dịch được thiết kế lại gọn, có icon ⓘ giải thích. AI tự chuyển sang 9Router local khi Cloudflare chặn; Groq dùng model mới lấy trực tiếp theo API key.",
+        "changes": [
+            {"type": "feature", "title": "PWA, tài khoản team và theme", "desc": "Cài dashboard lên màn hình chính điện thoại; mỗi thành viên đăng nhập bằng tài khoản riêng, tên hiện ở sidebar; chọn theme sáng/tối/màu.", "tag": "UI"},
+            {"type": "feature", "title": "AI Remix + AI Agent riêng cho từng rule Keyword DM", "desc": "Mỗi rule tự bật/tắt AI Remix và chọn Agent (API key, phong cách viết, kiến thức sản phẩm). Ảnh đính kèm hiện thumbnail ngay trong form.", "tag": "Keyword DM"},
+            {"type": "feature", "title": "Rule tự tạm dừng sau 5 lỗi liên tiếp", "desc": "Bảng Keyword DM hiện số lỗi từng rule, bấm để xem chi tiết. Rule lỗi liên tục được tạm dừng để tránh ban.", "tag": "Keyword DM"},
+            {"type": "feature", "title": "Popup chi tiết cảnh báo tài khoản", "desc": "Bấm badge Cảnh báo ở trang Tài khoản để xem các lỗi gần nhất.", "tag": "Tài khoản"},
+            {"type": "improvement", "title": "Giao diện gọn, có icon ⓘ, tối ưu mobile", "desc": "Bảng Keyword DM 6 cột, form rule gộp dòng, cài đặt AI của chiến dịch dạng danh sách, tên tài khoản rút gọn 20 ký tự. Thư viện Template và Changelog không còn bị cắt trên điện thoại.", "tag": "UI"},
+            {"type": "improvement", "title": "Hiện rõ nhà cung cấp AI dự phòng", "desc": "Dòng 'Dự phòng: ChatGPT → Gemini → Groq' cho biết key nào đang sẵn sàng; bấm để mở cấu hình.", "tag": "AI"},
+            {"type": "fix", "title": "Fallback sang 9Router local khi Cloudflare chặn", "desc": "Khi ai.szonevn.com trả 403 Cloudflare Access hoặc tunnel sập, request tự chạy lại qua 127.0.0.1:20128.", "tag": "AI"},
+            {"type": "fix", "title": "Groq dùng lại được: model chọn từ API", "desc": "llama-3.3-70b-versatile đã bị gỡ nên Groq dự phòng luôn lỗi. Nay mặc định openai/gpt-oss-120b và danh sách model lấy trực tiếp theo API key.", "tag": "AI"},
+            {"type": "fix", "title": "Dừng bot kênh không còn lỗi", "desc": "Nút dừng bot trong Quản lý kênh hoạt động bình thường.", "tag": "Kênh"},
+        ],
+    },
+    {
         "version": "v3.10.3",
         "date": "27/10/2026",
         "title": "⚡ Tab Cào & DM nhanh gấp ~3 lần + Docker sẵn sàng chạy cloud (Railway)",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Đo toàn bộ 98 API dashboard trên server thật: hầu hết < 100ms. Điểm nghẽn duy nhất là tab Cào & DM — tải ~7.000 lead bằng 69 request nối tiếp và vẽ lại cả bảng sau mỗi trang (3,3s). Nay tải song song, vẽ 1 lần, server cache số đếm: ~1,2s. Docker image không còn đóng gói DB/session Telegram; toàn bộ dữ liệu sống trên 1 volume /data.",
         "changes": [
             {"type": "feature", "title": "Đăng nhập dashboard bằng username/mật khẩu", "desc": "Truy cập từ xa qua form đăng nhập thay vì nhập API key (khoá IP 15 phút sau 5 lần sai). Thẻ tài khoản báo rõ khi session bị Telegram huỷ; campaign dừng với lỗi rõ ràng khi không còn tài khoản gửi được.", "tag": "auth"},

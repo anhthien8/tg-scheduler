@@ -37,6 +37,8 @@ class WatcherPayload(BaseModel):
     watch_type: str = "keyword"
     join_dm_delay_min: int = 3
     join_dm_delay_max: int = 15
+    ai_remix: bool = True
+    ai_agent_id: int | None = None
 
 
 def _validate_watcher_payload(payload: "WatcherPayload"):
@@ -87,6 +89,12 @@ async def get_watcher_logs(
 ):
     return await db.get_watcher_dm_logs(limit=limit, offset=offset,
                                         watcher_id=watcher_id, status=status)
+
+
+@router.get("/error-summary")
+async def get_watcher_error_summary():
+    """Per-rule failure counts plus the most common error reasons."""
+    return {"rules": await db.get_watcher_error_summary()}
 
 
 @router.get("/stats")

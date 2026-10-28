@@ -65,3 +65,44 @@ async def leave_all_channels(payload: LeaveAllPayload):
         "failed": fail_count,
         "details": results,
     }
+
+
+class JoinGroupPayload(BaseModel):
+    account_id: int
+    link: str
+
+
+@router.post("/join-group")
+async def join_group(payload: JoinGroupPayload):
+    """Join a group by @username / t.me link / invite link and return it as a schedule target."""
+    from telethon.tl.types import Channel, Chat
+    from reaction_watcher import _join_or_get_entity
+
+    link = payload.link.strip()
+    if not link:
+        raise HTTPException(status_code=400, detail="Thiếu link nhóm")
+    client = tg._clients.get(payload.account_id)
+    if not client or not client.is_connected():
+        raise HTTPException(status_code=400, detail="Tài khoản chưa kết nối")
+    try:
+        entity = await asyncio.wait_for(_join_or_get_entity(client, link), timeout=30.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Telegram phản hồi quá lâu")
+    except Exception as e:
+        msg = str(e)
+        if "INVITE_REQUEST_SENT" in msg:
+            raise HTTPException(status_code=400, detail="Nhóm cần admin duyệt — đã gửi yêu cầu tham gia")
+        raise HTTPException(status_code=400, detail=f"Không join được: {msg}")
+    if entity is None:
+        raise HTTPException(status_code=400, detail="Không xác định được nhóm từ link")
+    if isinstance(entity, Channel) and entity.broadcast:
+        raise HTTPException(status_code=400, detail="Đây là kênh (channel), không phải nhóm")
+    if not isinstance(entity, (Channel, Chat)):
+        raise HTTPException(status_code=400, detail="Link không phải nhóm")
+    tg._dialogs_cache.pop(payload.account_id, None)
+    return {
+        "chat_id": entity.id,
+        "chat_title": entity.title,
+        "chat_type": "supergroup" if isinstance(entity, Channel) else "group",
+        "chat_link": link,
+    }

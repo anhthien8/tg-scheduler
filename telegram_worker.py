@@ -15,6 +15,33 @@ _runtime_error: BaseException | None = None
 _owns_runtime = False
 
 CONSUMER_POLL_SECONDS = 2.0
+
+
+def _log_background_db_close(task: asyncio.Task) -> None:
+    """Consume deferred close errors so fatal worker errors remain primary."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("Could not close worker database after runtime failure")
+
+
+_deferred_close_task: asyncio.Task | None = None  # strong ref: keep deferred close alive until done
+
+
+async def _close_db_after_runtime_error() -> None:
+    """Close DB without delaying propagation of the original runtime error.
+
+    aiosqlite's close() enqueues close_and_stop on its worker thread before
+    awaiting, so even if the loop shuts down and cancels this task, the
+    sqlite thread still closes the file and exits — no leaked handle.
+    """
+    global _deferred_close_task
+    _deferred_close_task = asyncio.create_task(db.close_db())
+    _deferred_close_task.add_done_callback(_log_background_db_close)
+
+
 CONSUMER_LEASE_SECONDS = 120.0
 
 
@@ -123,11 +150,20 @@ async def stop_runtime() -> None:
         if _runtime_error is None:
             await lifecycle.write_status("stopped")
     finally:
-        try:
-            await db.close_db()
-        finally:
+        if _runtime_error is not None:
+            # Fatal-path shutdown must not delay propagation of the original
+            # worker error on slow WAL/file close operations.
+            # ponytail: release the lock before deferred close; fatal process
+            # exits immediately, and close errors remain logger-visible.
+            await _close_db_after_runtime_error()
             lifecycle.release_data_lock()
             _owns_runtime = False
+        else:
+            try:
+                await db.close_db()
+            finally:
+                lifecycle.release_data_lock()
+                _owns_runtime = False
 
 
 def _install_signal_handlers(loop: asyncio.AbstractEventLoop) -> None:

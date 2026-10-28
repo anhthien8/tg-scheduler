@@ -52,7 +52,9 @@ async def list_accounts():
             return
         # Cache cold: connected clients are authorized by definition (the engine
         # only keeps live ones); do NOT pay a Telegram round-trip here.
-        acc["is_logged_in"] = acc["id"] in tg._clients and tg._clients[acc["id"]].is_connected()
+        # Chỉ tin "đã kết nối" khi DB cũng ghi nhận đã đăng nhập: client tạo mới
+        # để gửi OTP vẫn connected nhưng CHƯA authorized.
+        acc["is_logged_in"] = bool(acc.get("is_logged_in")) and acc["id"] in tg._clients and tg._clients[acc["id"]].is_connected()
         acc.setdefault("user_info", None)
 
     for acc in accounts:
@@ -153,9 +155,12 @@ async def verify_code(req: VerifyCodeRequest):
             logger.debug(f"Could not auto-name account {req.account_id}: {_e}")
 
         await db.update_account_login_status(req.account_id, True)
+        tg._session_errors.pop(req.account_id, None)  # xoá cờ "chưa đăng nhập" cũ
         # Load scheduler jobs for this account
         await sch.load_all_jobs()
         return result
+    if result.get("needs_password") and req.password:
+        raise HTTPException(status_code=400, detail=result.get("error", "Mật khẩu 2FA không đúng"))
     if result.get("needs_password"):
         return {"success": False, "needs_password": True, "message": "2FA password required"}
     raise HTTPException(status_code=400, detail=result.get("error", "Login failed"))
@@ -224,6 +229,12 @@ async def get_dm_stats(account_id: int):
         "limit_reached": limit_reached,
         "remaining": max(0, limit - count)
     }
+
+@router.get("/accounts/{account_id}/warnings")
+async def account_warnings_route(account_id: int):
+    """What caused the warning flag, grouped by error."""
+    return await db.get_account_warnings(account_id)
+
 
 @router.post("/accounts/{account_id}/unflag")
 async def unflag_account_route(account_id: int):

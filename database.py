@@ -466,6 +466,8 @@ async def init_db():
             # BUG-01: rename account_ids → sender_account_ids (SQLite workaround via copy)
             "ALTER TABLE keyword_watchers ADD COLUMN sender_account_ids TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE keyword_watchers ADD COLUMN watch_type TEXT DEFAULT 'keyword'",
+            "ALTER TABLE keyword_watchers ADD COLUMN ai_remix INTEGER DEFAULT 1",
+            "ALTER TABLE keyword_watchers ADD COLUMN ai_agent_id INTEGER DEFAULT NULL",
             "ALTER TABLE keyword_watchers ADD COLUMN join_dm_delay_min INTEGER DEFAULT 3",
             "ALTER TABLE keyword_watchers ADD COLUMN join_dm_delay_max INTEGER DEFAULT 15",
             # Observer accounts: the nick(s) that sit IN the group and listen for
@@ -473,6 +475,8 @@ async def init_db():
             # watcher can observe from one nick (e.g. a secondary account that is a
             # member) while DMing from another nick that need not be in the group.
             "ALTER TABLE keyword_watchers ADD COLUMN observer_account_ids TEXT NOT NULL DEFAULT '[]'",
+            # Set when the rule pauses itself after repeated failures; cleared on toggle.
+            "ALTER TABLE keyword_watchers ADD COLUMN paused_reason TEXT DEFAULT NULL",
         ]:
             try:
                 await db.execute(col_sql)
@@ -1077,6 +1081,10 @@ async def init_db():
             ("last_step_reminder_at", "TEXT"),
         ]:
             await _add_column(db, "ai_followup_chats", col_name, col_def)
+        # @username / invite link so a schedule can auto-join a group before posting.
+        await _add_column(db, "schedule_targets", "chat_link", "TEXT")
+        await _add_column(db, "schedules", "ai_remix", "INTEGER DEFAULT 0")
+        await _add_column(db, "schedules", "ai_agent_id", "INTEGER")
 
         # Backfill stage from the legacy status so no chat is left without one.
         # NOTE: only bot_ignored maps to 'paused'. 'needs_human'/'paused_admin'
@@ -1934,12 +1942,12 @@ async def create_schedule(data: dict) -> int:
         await db.execute("PRAGMA foreign_keys=ON")
         cursor = await db.execute(
             """INSERT INTO schedules (account_id, name, schedule_type, time_of_day, days_of_week,
-               day_of_month, once_date, max_sends, is_active)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               day_of_month, once_date, max_sends, is_active, ai_remix, ai_agent_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (data.get("account_id", 1), data["name"], data["schedule_type"], data["time_of_day"],
              data.get("days_of_week"), data.get("day_of_month"),
              data.get("once_date"), data.get("max_sends"),
-             data.get("is_active", 1))
+             data.get("is_active", 1), 1 if data.get("ai_remix") else 0, data.get("ai_agent_id"))
         )
         schedule_id = cursor.lastrowid
 
@@ -1956,9 +1964,9 @@ async def create_schedule(data: dict) -> int:
 
         for target in data.get("targets", []):
             await db.execute(
-                """INSERT INTO schedule_targets (schedule_id, chat_id, chat_title, chat_type)
-                   VALUES (?, ?, ?, ?)""",
-                (schedule_id, target["chat_id"], target.get("chat_title"), target.get("chat_type"))
+                """INSERT INTO schedule_targets (schedule_id, chat_id, chat_title, chat_type, chat_link)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (schedule_id, target["chat_id"], target.get("chat_title"), target.get("chat_type"), target.get("chat_link"))
             )
 
         await db.commit()
@@ -2068,12 +2076,13 @@ async def update_schedule(schedule_id: int, data: dict) -> bool:
         await db.execute("PRAGMA foreign_keys=ON")
         await db.execute(
             """UPDATE schedules SET account_id=?, name=?, schedule_type=?, time_of_day=?, days_of_week=?,
-               day_of_month=?, once_date=?, max_sends=?, is_active=?, updated_at=datetime('now')
+               day_of_month=?, once_date=?, max_sends=?, is_active=?, ai_remix=?, ai_agent_id=?, updated_at=datetime('now')
                WHERE id=?""",
             (data.get("account_id", 1), data["name"], data["schedule_type"], data["time_of_day"],
              data.get("days_of_week"), data.get("day_of_month"),
              data.get("once_date"), data.get("max_sends"),
-             data.get("is_active", 1), schedule_id)
+             data.get("is_active", 1), 1 if data.get("ai_remix") else 0, data.get("ai_agent_id"),
+             schedule_id)
         )
 
         await db.execute("DELETE FROM schedule_messages WHERE schedule_id=?", (schedule_id,))
@@ -2091,9 +2100,9 @@ async def update_schedule(schedule_id: int, data: dict) -> bool:
         await db.execute("DELETE FROM schedule_targets WHERE schedule_id=?", (schedule_id,))
         for target in data.get("targets", []):
             await db.execute(
-                """INSERT INTO schedule_targets (schedule_id, chat_id, chat_title, chat_type)
-                   VALUES (?, ?, ?, ?)""",
-                (schedule_id, target["chat_id"], target.get("chat_title"), target.get("chat_type"))
+                """INSERT INTO schedule_targets (schedule_id, chat_id, chat_title, chat_type, chat_link)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (schedule_id, target["chat_id"], target.get("chat_title"), target.get("chat_type"), target.get("chat_link"))
             )
 
         await db.commit()
@@ -2295,8 +2304,8 @@ async def create_watcher(data: dict) -> int:
         import json as _json
         cursor = await db.execute(
             """INSERT INTO keyword_watchers
-               (name, sender_account_ids, observer_account_ids, keywords, group_ids, cooldown_hours, dm_once, excluded_usernames, is_active, platform, watch_type, join_dm_delay_min, join_dm_delay_max)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (name, sender_account_ids, observer_account_ids, keywords, group_ids, cooldown_hours, dm_once, excluded_usernames, is_active, platform, watch_type, join_dm_delay_min, join_dm_delay_max, ai_remix, ai_agent_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data["name"],
                 _json.dumps(data.get("sender_account_ids", [])),
@@ -2311,6 +2320,8 @@ async def create_watcher(data: dict) -> int:
                 data.get("watch_type", "keyword"),
                 data.get("join_dm_delay_min", 3),
                 data.get("join_dm_delay_max", 15),
+                0 if data.get("ai_remix") is False else 1,
+                data.get("ai_agent_id"),
             )
         )
         watcher_id = cursor.lastrowid
@@ -2449,6 +2460,7 @@ async def update_watcher(watcher_id: int, data: dict) -> bool:
                    cooldown_hours=?, dm_once=?, excluded_usernames=?,
                    reply_in_group=?, group_reply_text=?, group_reply_account_id=?,
                    watch_type=?, join_dm_delay_min=?, join_dm_delay_max=?,
+                   ai_remix=?, ai_agent_id=?,
                    is_active=?, updated_at=datetime('now')
                WHERE id=?""",
             (
@@ -2466,6 +2478,8 @@ async def update_watcher(watcher_id: int, data: dict) -> bool:
                 data.get("watch_type", "keyword"),
                 data.get("join_dm_delay_min", 3),
                 data.get("join_dm_delay_max", 15),
+                0 if data.get("ai_remix") is False else 1,
+                data.get("ai_agent_id"),
                 data.get("is_active", 1),
                 watcher_id,
             )
@@ -2501,7 +2515,7 @@ async def toggle_watcher(watcher_id: int) -> dict | None:
             return None
         new_state = 0 if row["is_active"] else 1
         await db.execute(
-            "UPDATE keyword_watchers SET is_active=?, updated_at=datetime('now') WHERE id=?",
+            "UPDATE keyword_watchers SET is_active=?, paused_reason=NULL, updated_at=datetime('now') WHERE id=?",
             (new_state, watcher_id))
         await db.commit()
         return {"id": watcher_id, "is_active": new_state}
@@ -2530,6 +2544,14 @@ async def was_user_dmed_recently(watcher_id: int, user_id: int,
         b) attempted (any status) within 2 hours — prevents repeated retry on fail
     """
     async with get_db() as db:
+        # Give up on a target for good once it has failed MAX_TARGET_FAILURES times.
+        cursor = await db.execute(
+            """SELECT COUNT(*) FROM watcher_dm_logs
+               WHERE watcher_id=? AND target_user_id=? AND status='failed'""",
+            (watcher_id, user_id)
+        )
+        if (await cursor.fetchone())[0] >= MAX_TARGET_FAILURES:
+            return True
         if dm_once:
             # Permanent: skip if EVER successfully DM'd
             cursor = await db.execute(
@@ -2571,6 +2593,10 @@ async def was_user_dmed_recently(watcher_id: int, user_id: int,
         return row2[0] > 0  # Skip if attempted (any status) within cooldown window
 
 
+MAX_TARGET_FAILURES = 5      # per target user, then never retried
+MAX_CONSECUTIVE_FAILURES = 5 # per rule, then the rule pauses itself
+
+
 async def add_watcher_dm_log(
     watcher_id: int, account_id: int | None,
     target_user_id: int, target_username: str | None,
@@ -2592,6 +2618,33 @@ async def add_watcher_dm_log(
              platform, template_variant_index)
         )
         await db.commit()
+        if status != "failed":
+            return False
+        # Auto-pause: the last N attempts since the rule was (re)enabled all failed.
+        cursor = await db.execute(
+            """SELECT l.status, l.error_message FROM watcher_dm_logs l
+               JOIN keyword_watchers w ON w.id = l.watcher_id
+               WHERE l.watcher_id=? AND w.is_active=1 AND l.status != 'skipped'
+                 AND l.sent_at >= w.updated_at
+               ORDER BY l.id DESC LIMIT ?""",
+            (watcher_id, MAX_CONSECUTIVE_FAILURES)
+        )
+        recent = await cursor.fetchall()
+        if len(recent) < MAX_CONSECUTIVE_FAILURES or any(r[0] != "failed" for r in recent):
+            return False
+        reason = f"Tự dừng sau {MAX_CONSECUTIVE_FAILURES} lỗi liên tiếp. Lỗi cuối: {(recent[0][1] or '')[:200]}"
+        await db.execute(
+            "UPDATE keyword_watchers SET is_active=0, paused_reason=?, updated_at=datetime('now') WHERE id=?",
+            (reason, watcher_id))
+        await db.commit()
+    logger.warning(f"[Watcher {watcher_id}] auto-paused: {reason}")
+    for mod in ("keyword_watcher", "discord_watcher"):
+        try:
+            import importlib
+            importlib.import_module(mod).remove_watcher(watcher_id)
+        except Exception:
+            pass
+    return True
 
 
 async def get_watcher_dm_logs(
@@ -2617,6 +2670,34 @@ async def get_watcher_dm_logs(
             params + [limit, offset])
         logs = [dict(r) for r in await cursor.fetchall()]
         return {"total": total, "logs": logs, "limit": limit, "offset": offset}
+
+
+async def get_watcher_error_summary() -> dict:
+    """{watcher_id: {failed, failed_24h, success, last_error, last_failed_at, paused_reason, top_errors}}."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        out = {}
+        c = await db.execute("""
+            SELECT w.id, w.paused_reason,
+                   COALESCE(SUM(l.status='failed'), 0) AS failed,
+                   COALESCE(SUM(l.status='success'), 0) AS success,
+                   COALESCE(SUM(l.status='failed' AND l.sent_at >= datetime('now','-24 hours')), 0) AS failed_24h,
+                   MAX(CASE WHEN l.status='failed' THEN l.sent_at END) AS last_failed_at
+            FROM keyword_watchers w LEFT JOIN watcher_dm_logs l ON l.watcher_id = w.id
+            GROUP BY w.id
+        """)
+        for r in await c.fetchall():
+            out[r["id"]] = {**dict(r), "top_errors": []}
+        c = await db.execute("""
+            SELECT watcher_id, error_message, COUNT(*) AS n, MAX(sent_at) AS last_at
+            FROM watcher_dm_logs WHERE status='failed'
+            GROUP BY watcher_id, error_message ORDER BY n DESC
+        """)
+        for r in await c.fetchall():
+            e = out.get(r["watcher_id"])
+            if e is not None and len(e["top_errors"]) < 5:
+                e["top_errors"].append({"error": r["error_message"] or "(không có mô tả)", "count": r["n"], "last_at": r["last_at"]})
+        return out
 
 
 async def get_watcher_log_stats() -> dict:
@@ -3108,6 +3189,35 @@ async def check_and_flag_account(account_id: int) -> bool:
             await db.commit()
             return not already
         return False
+
+
+async def get_account_warnings(account_id: int) -> dict:
+    """Failures behind an account's warning flag: schedule sends + keyword DMs, most recent first."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        acc = await (await db.execute(
+            "SELECT is_flagged, flag_reason FROM accounts WHERE id=?", (account_id,))).fetchone()
+        sched = await (await db.execute("""
+            SELECT l.error_message, COUNT(*) AS n, MAX(l.sent_at) AS last_at,
+                   GROUP_CONCAT(DISTINCT COALESCE(s.name, '#' || l.schedule_id)) AS sources,
+                   GROUP_CONCAT(DISTINCT l.chat_title) AS chats
+            FROM send_logs l LEFT JOIN schedules s ON s.id = l.schedule_id
+            WHERE l.account_id=? AND l.status='failed'
+            GROUP BY l.error_message ORDER BY last_at DESC LIMIT 8
+        """, (account_id,))).fetchall()
+        kw = await (await db.execute("""
+            SELECT l.error_message, COUNT(*) AS n, MAX(l.sent_at) AS last_at,
+                   GROUP_CONCAT(DISTINCT COALESCE(w.name, '#' || l.watcher_id)) AS sources
+            FROM watcher_dm_logs l LEFT JOIN keyword_watchers w ON w.id = l.watcher_id
+            WHERE l.account_id=? AND l.status='failed'
+            GROUP BY l.error_message ORDER BY last_at DESC LIMIT 8
+        """, (account_id,))).fetchall()
+        return {
+            "is_flagged": bool(acc and acc["is_flagged"]),
+            "flag_reason": acc["flag_reason"] if acc else None,
+            "schedule_errors": [dict(r) for r in sched],
+            "keyword_errors": [dict(r) for r in kw],
+        }
 
 
 async def unflag_account(account_id: int):

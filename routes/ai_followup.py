@@ -85,7 +85,7 @@ async def get_kol_profile(account_id: int, user_id: int):
 async def update_kol_profile(account_id: int, user_id: int, req: KOLProfileRequest):
     if not await db.get_account(account_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy account")
-    data = req.dict(exclude_unset=True)
+    data = req.model_dump(exclude_unset=True)
     await db.upsert_kol_profile(account_id, user_id, data)
     try:
         # Admin typed the UID by hand → that is a confirmed UID: advance deal_agreed → uid_received.

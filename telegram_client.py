@@ -746,7 +746,10 @@ async def sign_in(account_id: int, phone: str, code: str, phone_code_hash: str,
         }
     except errors.SessionPasswordNeededError:
         if password:
-            user = await client.sign_in(password=password)
+            try:
+                user = await client.sign_in(password=password)
+            except errors.PasswordHashInvalidError:
+                return {"success": False, "error": "Mật khẩu 2FA không đúng", "needs_password": True}
             return {
                 "success": True,
                 "user_id": user.id,
@@ -757,6 +760,8 @@ async def sign_in(account_id: int, phone: str, code: str, phone_code_hash: str,
         return {"success": False, "error": "2FA password required", "needs_password": True}
     except errors.PhoneCodeInvalidError:
         return {"success": False, "error": "Mã OTP không đúng"}
+    except errors.PhoneCodeExpiredError:
+        return {"success": False, "error": "Mã OTP đã hết hạn", "code_expired": True}
     except Exception as e:
         logger.error(f"Account {account_id}: sign in error: {e}")
         return {"success": False, "error": str(e)}
@@ -936,14 +941,24 @@ async def check_accounts_in_groups(account_ids: list[int], group_ids: list[int])
 async def leave_channel(account_id: int, chat_id: int) -> dict:
     """Leave (and optionally delete history of) a group, channel, or stop/delete a bot."""
     client = _clients.get(account_id)
-    if not client:
-        return {"success": False, "error": "Account not found"}
+    if not client or not client.is_connected():
+        return {"success": False, "error": "Tài khoản chưa kết nối — thử lại sau vài giây"}
     try:
         from telethon.tl.functions.channels import LeaveChannelRequest
         from telethon.tl.functions.messages import DeleteHistoryRequest
         from telethon.tl.types import Channel, User
 
-        entity = await client.get_entity(chat_id)
+        try:
+            entity = await client.get_entity(chat_id)
+        except ValueError:
+            # Not in the session cache yet — resolve it from the dialog list.
+            entity = None
+            async for d in client.iter_dialogs(limit=300):
+                if d.entity.id == chat_id:
+                    entity = d.entity
+                    break
+            if entity is None:
+                return {"success": False, "error": "Không tìm thấy cuộc trò chuyện (có thể đã rời trước đó)"}
 
         if isinstance(entity, Channel):
             await client(LeaveChannelRequest(entity))
@@ -956,13 +971,20 @@ async def leave_channel(account_id: int, chat_id: int) -> dict:
                 logger.warning(f"Failed to block bot {chat_id}: {e}")
             
             # Delete bot history
-            await client(DeleteHistoryRequest(peer=entity, max_id=0, revoke=True))
+            try:
+                await client(DeleteHistoryRequest(peer=entity, max_id=0, revoke=True))
+            except Exception:
+                await client(DeleteHistoryRequest(peer=entity, max_id=0, just_clear=False))
         else:
             # Regular group
             from telethon.tl.functions.messages import DeleteChatUserRequest
             me = await client.get_me()
             await client(DeleteChatUserRequest(chat_id=chat_id, user_id=me))
 
+        # Drop the cached dialog so a reload doesn't bring the chat back.
+        cached = _dialogs_cache.get(account_id)
+        if cached:
+            _dialogs_cache[account_id] = (cached[0], [c for c in cached[1] if c["chat_id"] != chat_id])
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}

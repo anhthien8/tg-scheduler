@@ -293,8 +293,8 @@ const AIFollowUp = {
         const stEl = document.getElementById('aifu-ref-stats');
         if (stEl) {
           stEl.innerHTML = `<span>Mã đang hoạt động: <strong style="color:var(--text)">${st.active_codes || 0}</strong></span>`
-            + `<span>Lượt giới thiệu: <strong style="color:#60a5fa">${st.total_attributions || 0}</strong></span>`
-            + `<span>Đã chốt (Signed): <strong style="color:#4ade80">${st.conversions || 0}</strong> (${st.conversion_rate || 0}%)</span>`;
+            + `<span>Lượt giới thiệu: <strong style="color:var(--purple)">${st.total_attributions || 0}</strong></span>`
+            + `<span>Đã chốt (Signed): <strong style="color:var(--green)">${st.conversions || 0}</strong> (${st.conversion_rate || 0}%)</span>`;
         }
       }
       if (codesRes.ok) {
@@ -306,11 +306,11 @@ const AIFollowUp = {
           return;
         }
         tb.innerHTML = codes.map(c => `<tr>
-          <td><code style="color:#a5b4fc;font-weight:700">${esc(c.code)}</code></td>
+          <td><code style="color:var(--accent-text);font-weight:700">${esc(c.code)}</code></td>
           <td>${c.referrer_user_id} <small style="color:var(--text2)">(Acc #${c.account_id})</small></td>
           <td>${c.uses_count || 0} / ${c.max_uses || 10}</td>
           <td>${c.is_active ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>'}</td>
-          <td>${c.is_active ? `<button class="btn btn-ghost btn-sm" style="color:#f87171" onclick="AIFollowUp.deactivateReferralCode(${c.id})">Vô hiệu</button>` : '—'}</td>
+          <td>${c.is_active ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="AIFollowUp.deactivateReferralCode(${c.id})">Vô hiệu</button>` : '—'}</td>
         </tr>`).join('');
       } else if (tb) {
         tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:12px">Chưa có mã giới thiệu nào</td></tr>';
@@ -567,7 +567,7 @@ const AIFollowUp = {
       return `<tr>
         <td style="width:34px;text-align:center"><input type="checkbox" aria-label="Chọn ${esc(uName)}" ${this._selected.has(`${c.account_id}:${c.user_id}`) ? 'checked' : ''} onchange="AIFollowUp.toggleSelection('${c.account_id}:${c.user_id}',this.checked)"></td>
         <td><div style="font-weight:600">${esc(uName)}${nudgeBadge}</div><div style="font-size:11px;color:var(--text2);font-family:monospace">ID ${c.user_id} • 👤 ${esc(accLabel)}</div></td>
-        <td><div style="display:flex;align-items:center;gap:6px">${tierBadge}<span style="font-size:11px;color:var(--text2)">${score}%</span></div><div style="width:70px;height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:${Math.min(100, Math.max(0, score))}%;height:100%;background:${score >= 80 ? 'var(--orange)' : score >= 50 ? 'var(--accent)' : 'var(--text3)'}"></div></div></td>
+        <td><div style="display:flex;align-items:center;gap:6px">${tierBadge}<span style="font-size:11px;color:var(--text2)">${score}%</span></div><div style="width:70px;height:4px;background:color-mix(in srgb, var(--text) 8%, transparent);border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:${Math.min(100, Math.max(0, score))}%;height:100%;background:${score >= 80 ? 'var(--orange)' : score >= 50 ? 'var(--accent)' : 'var(--text3)'}"></div></div></td>
         <td>${c.reply_count || 0}</td>
         <td>${stepCell}</td>
         <td><span class="${meta.badge}">${meta.label}</span></td>

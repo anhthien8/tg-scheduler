@@ -2,11 +2,20 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>TG Scheduler</title>
   <meta name="description" content="Telegram Userbot Multi-Account Message Scheduler">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%236366f1'/%3E%3Cpath d='M49 16L13 30c-2 1-2 3 0 4l9 3 21-13c1-1 2 0 1 1L27 40v9c0 2 2 3 3 1l5-5 9 7c2 1 4 0 4-2l3-31c0-2-1-3-2-3z' fill='%23fff'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/static/css/style.css?v=446">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TG Scheduler">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/static/css/style.css?v=482">
+  <link rel="stylesheet" href="/static/css/themes.css?v=482">
+  <script src="/static/js/theme.js?v=482"></script>
   <!-- Boot splash: paints instantly (CSS-only, no JS) so the user never sees a
        blank white screen while the app bundle parses/executes. Hidden as soon
        as app.js runs (body.app-ready). -->
@@ -36,6 +45,7 @@
   <div class="mobile-header">
     <button class="hamburger" onclick="App.toggleSidebar()" aria-label="Menu">☰</button>
     <span class="mobile-title">📨 TG Scheduler</span>
+    <button class="theme-btn" onclick="Theme.openPicker()" aria-label="Giao diện" title="Giao diện">🎨</button>
   </div>
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="App.toggleSidebar()"></div>
 
@@ -191,7 +201,7 @@
           ⚙️ Cài đặt AI
         </button>
         <button type="button" class="nav-item" data-page="changelog" onclick="App.navigate('changelog')">
-          🚀 Cập Nhật <span class="badge" style="background:linear-gradient(135deg, #8b5cf6, #ec4899);color:#fff;font-size:10px;padding:2px 6px;border-radius:10px;margin-left:6px;font-weight:700">NEW</span>
+          🚀 Cập Nhật <span class="badge" style="background:linear-gradient(135deg, var(--violet), var(--violet));color:#fff;font-size:10px;padding:2px 6px;border-radius:10px;margin-left:6px;font-weight:700">NEW</span>
         </button>
         <button type="button" class="nav-item" data-page="help" onclick="App.navigate('help')">
           📖 Hướng dẫn
@@ -202,6 +212,7 @@
           <strong>TG Scheduler</strong>
           <span>Multi-Account</span>
         </div>
+        <button class="theme-btn" onclick="Theme.openPicker()">🎨 Giao diện</button>
       </div>
     </aside>
 
@@ -243,9 +254,9 @@
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
             <h3 style="font-size:14px;font-weight:600">Hoạt động 14 ngày qua</h3>
             <span style="display:flex;gap:14px;font-size:11px;color:var(--text2)">
-              <span><span style="color:#6366f1">●</span> Đã gửi</span>
-              <span><span style="color:#22c55e">●</span> Trả lời</span>
-              <span><span style="color:#ef4444">●</span> Thất bại</span>
+              <span><span style="color:var(--violet)">●</span> Đã gửi</span>
+              <span><span style="color:var(--green)">●</span> Trả lời</span>
+              <span><span style="color:var(--red)">●</span> Thất bại</span>
             </span>
           </div>
           <canvas id="dash-chart" style="width:100%;height:200px;display:block" aria-label="Biểu đồ hoạt động 14 ngày"></canvas>
@@ -297,31 +308,44 @@
 
       <!-- Accounts View -->
       <div id="view-accounts" class="hidden">
-        <div class="toolbar" style="flex-wrap:wrap;gap:8px">
-          <div style="display:flex;align-items:center;gap:12px">
-            <h2 class="page-title" style="margin-bottom:0">Tài khoản Telegram</h2>
-            <div style="display:flex;gap:6px">
-              <button class="btn btn-ghost btn-sm" onclick="App.toggleSelectAllAccounts()" id="btn-select-all-acc">☑️ Chọn tất cả</button>
-              <button class="btn btn-success btn-sm" onclick="App.bulkToggleAccounts(true)" title="Bật tất cả tài khoản đang tắt">▶️ Bật tất cả</button>
-              <button class="btn btn-ghost btn-sm" style="color:#f87171" onclick="App.bulkToggleAccounts(false)" title="Tắt tất cả tài khoản">⏸️ Tắt tất cả</button>
-            </div>
+        <div class="acc-head">
+          <div class="acc-head-title">
+            <h2 class="page-title">Tài khoản Telegram</h2>
+            <span class="acc-head-sub" id="acc-summary"></span>
           </div>
-          <button class="btn btn-primary" onclick="App.openAddAccountModal()">+ Thêm tài khoản</button>
+          <div class="acc-head-actions">
+            <div class="acc-menu">
+              <button class="btn btn-ghost btn-sm" onclick="App.toggleAccMenu(event)" aria-haspopup="true">Thao tác hàng loạt ▾</button>
+              <div class="acc-menu-list" id="acc-menu-list" role="menu">
+                <button role="menuitem" onclick="App.openBulkRelogin()">Đăng nhập lại tài khoản mất session</button>
+                <button role="menuitem" onclick="App.openBulkActiveHours()">Đặt giờ chạy cho tất cả</button>
+                <button role="menuitem" onclick="App.bulkToggleAccounts(true)">Bật tất cả</button>
+                <button role="menuitem" class="is-danger" onclick="App.bulkToggleAccounts(false)">Tắt tất cả</button>
+              </div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="App.openAddAccountModal()">+ Thêm tài khoản</button>
+          </div>
+        </div>
+        <div class="acc-filters">
+          <div class="acc-tabs" id="acc-tabs" role="tablist"></div>
+          <input type="search" class="form-input acc-search" id="acc-search" placeholder="Tìm tên, @username, SĐT…" oninput="App.filterAccounts(this.value)">
         </div>
 
         <!-- Bulk Selection Action Bar -->
-        <div id="acc-selection-bar" class="card hidden" style="margin-bottom:14px;padding:10px 14px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div id="acc-selection-bar" class="acc-selbar hidden">
           <div style="font-size:13px;font-weight:600;color:var(--text1)">
             <span id="acc-selected-count">0</span> tài khoản được chọn
           </div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-success btn-sm" onclick="App.bulkToggleSelectedAccounts(true)">▶️ Bật đã chọn</button>
-            <button class="btn btn-ghost btn-sm" style="color:#f87171" onclick="App.bulkToggleSelectedAccounts(false)">⏸️ Tắt đã chọn</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="App.bulkToggleSelectedAccounts(false)">⏸️ Tắt đã chọn</button>
+            <button class="btn btn-primary btn-sm" onclick="App.openBulkRelogin([...App._accSelected])">🔑 Đăng nhập lại đã chọn</button>
+            <button class="btn btn-ghost btn-sm" onclick="App.openBulkActiveHours([...App._accSelected])">🕘 Đặt giờ chạy</button>
             <button class="btn btn-ghost btn-sm" onclick="App.clearAccountSelection()">Bỏ chọn</button>
           </div>
         </div>
 
-        <div class="accounts-grid" id="accounts-grid">
+        <div class="acc-list" id="accounts-grid">
           <!-- accounts rendered here -->
         </div>
       </div>
@@ -391,7 +415,7 @@
       </div>
 
       <!-- Action bar for selected -->
-      <div id="ch-action-bar" class="card hidden" style="margin-bottom:1rem;border:1px solid var(--accent);background:rgba(99,102,241,.08);">
+      <div id="ch-action-bar" class="card hidden" style="margin-bottom:1rem;border:1px solid var(--accent);background:color-mix(in srgb, var(--violet) 8%, transparent);">
         <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
           <span id="ch-selected-count" style="font-weight:600;color:var(--accent);"></span>
           <button class="btn btn-danger" onclick="App.leaveSelected()">🗑 Rời các kênh đã chọn</button>
@@ -472,16 +496,15 @@
           <div class="stat-card"><div class="stat-label">Thất bại</div><div class="stat-value red" id="ws-failed">0</div></div>
         </div>
         <div class="table-wrap">
-          <table>
+          <table class="wt-table">
             <thead>
               <tr>
-                <th>Bật/Tắt</th>
-                <th>Tên Rule</th>
+                <th style="width:64px"></th>
+                <th>Rule</th>
                 <th>Từ khóa</th>
-                <th>Nhóm theo dõi</th>
-                <th>Tài khoản</th>
-                <th>Cooldown</th>
-                <th>Hành động</th>
+                <th>Tài khoản gửi</th>
+                <th style="width:110px">Lỗi</th>
+                <th style="width:120px"></th>
               </tr>
             </thead>
             <tbody id="watchers-body"></tbody>
@@ -499,7 +522,10 @@
         <div class="toolbar">
           <h2 class="page-title" style="margin-bottom:0">📋 Lịch sử Keyword DM</h2>
           <div style="display:flex;gap:8px;align-items:center">
-            <select class="form-select" style="width:150px" id="wl-filter-status" onchange="App.loadWatcherLogs()">
+            <select class="form-select" style="width:200px" id="wl-filter-rule" onchange="App._wlOffset=0;App.loadWatcherLogs()">
+              <option value="">Tất cả rule</option>
+            </select>
+            <select class="form-select" style="width:150px" id="wl-filter-status" onchange="App._wlOffset=0;App.loadWatcherLogs()">
               <option value="">Tất cả</option>
               <option value="success">Thành công</option>
               <option value="failed">Thất bại</option>
@@ -546,12 +572,10 @@
                 <option value="deepseek">🔵 DeepSeek</option>
                 <option value="openai">🟢 OpenAI (ChatGPT API Key)</option>
                 <option value="chatgpt_oauth">🔑 ChatGPT Subscription (OAuth / Access Token)</option>
-                <option value="groq">⚡ Groq (Llama 3.3 70B)</option>
+                <option value="groq">⚡ Groq</option>
                 <option value="openai_compatible">🔌 9Router / OpenAI Compatible</option>
               </select>
-              <div style="margin-top:12px;padding:10px 14px;background:rgba(59,130,246,0.1);border-left:3px solid #3b82f6;border-radius:6px;font-size:12px;color:var(--text1)">
-                💡 <b>Tự động Fallback đa tầng:</b> Nếu bạn lưu API Key ở nhiều nhà cung cấp (ChatGPT Subscription, Gemini, Groq, 9Router, DeepSeek...), khi nhà cung cấp chính bị quá tải hoặc hết credits, hệ thống sẽ <b>tự động nhảy sang các API còn lại</b> làm dự phòng để AI không bao giờ bị gián đoạn.
-              </div>
+              <div class="fb-row" id="ai-fallback-row"><span class="fb-label">Dự phòng <span class="info-i" tabindex="0" data-tip="Khi nhà cung cấp chính lỗi hoặc hết credits, hệ thống tự thử lần lượt các nhà cung cấp dưới đây (những cái đã lưu key). Bấm vào tên để xem/sửa key của nó.">i</span></span><span id="ai-fallback-chips" class="fb-chips"></span></div>
             </div>
           </div>
 
@@ -638,10 +662,15 @@
           <!-- Groq Keys -->
           <div id="ai-groq-section" class="card hidden" style="margin-bottom:20px;padding:20px">
             <div class="form-group">
-              <label class="form-label" style="font-size:15px;font-weight:600">⚡ Groq API Keys (Llama 3.3 70B)</label>
+              <label class="form-label" style="font-size:15px;font-weight:600">⚡ Groq API Keys</label>
+              <div class="set-row" style="padding:0;min-height:0;margin-bottom:10px"><span class="set-name">Model <button type="button" class="wf-add" style="width:30px;height:30px;font-size:14px;margin-left:4px" title="Tải lại danh sách model" onclick="App.loadGroqModels()">↻</button> <span class="info-i" tabindex="0" data-tip="Danh sách lấy trực tiếp từ Groq theo API key (đã lọc model không dùng để chat). gpt-oss-120b: viết tự nhiên, dịch đa ngôn ngữ tốt — khuyên dùng. qwen3.8-27b: mạnh tiếng Trung/châu Á. gpt-oss-20b: nhanh hơn, văn kém hơn.">i</span></span>
+                <select id="groq-model" class="form-input set-ctrl" onchange="API.setSetting('ai_groq_model',this.value).then(()=>App.toast('Đã lưu model Groq','success'))">
+                  <option value="openai/gpt-oss-120b">openai/gpt-oss-120b ⭐</option>
+                  <option value="qwen/qwen3.8-27b">qwen/qwen3.8-27b</option>
+                  <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
+                </select></div>
               <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
-                Thêm nhiều key để hệ thống luân phiên (round-robin). Model: <strong>llama-3.3-70b-versatile</strong>. Groq miễn phí và cực nhanh.
-                Lấy key tại <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent)">console.groq.com/keys</a>.
+                Thêm nhiều key để luân phiên (round-robin). Lấy key tại <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent)">console.groq.com/keys</a>.
               </p>
               <div id="groq-keys-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
               <button class="btn btn-ghost btn-sm" onclick="App.addAiKeyRow('groq')">+ Thêm Groq API Key</button>
@@ -764,7 +793,7 @@
             </div>
 
             <div id="forum-inbox-fields">
-              <div style="margin-bottom:12px;padding:12px;background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.25);border-radius:8px">
+              <div style="margin-bottom:12px;padding:12px;background:color-mix(in srgb, var(--green) 6%, transparent);border:1px solid color-mix(in srgb, var(--green) 25%, transparent);border-radius:8px">
                 <label class="form-label" style="font-size:13px">🔗 Dán link nhóm — tự lấy ID</label>
                 <div style="display:flex;gap:8px">
                   <input type="text" class="form-input" id="forum-inbox-link"
@@ -793,7 +822,7 @@
                 <button class="btn btn-primary btn-sm" onclick="App.saveForumInboxConfig()">💾 Lưu cấu hình</button>
                 <span id="forum-inbox-status-msg" style="font-size:12px;color:var(--text2)"></span>
               </div>
-              <div style="margin-top:16px;padding:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.25);border-radius:8px">
+              <div style="margin-top:16px;padding:12px;background:color-mix(in srgb, var(--purple) 6%, transparent);border:1px solid color-mix(in srgb, var(--purple) 25%, transparent);border-radius:8px">
                 <label class="form-label" style="font-size:13px">🔄 Tạo topic cho hội thoại đã có phản hồi</label>
                 <p class="form-hint" style="margin:4px 0 8px">
                   Các cuộc hội thoại lead <strong>đã trả lời</strong> trước khi Forum Inbox bật sẽ không tự có topic.
@@ -841,6 +870,20 @@
           </div>
         </div>
 
+        <!-- Team accounts -->
+        <div class="card" id="team-users-card" style="margin-top:28px;padding:20px">
+          <label class="form-label" style="font-size:15px;font-weight:600">👥 Tài khoản team</label>
+          <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+            Tạo username/mật khẩu cho thành viên team đăng nhập dashboard. Xoá hoặc đổi mật khẩu sẽ đăng xuất người đó ngay. Chỉ tài khoản admin mới thấy và quản lý mục này.
+          </p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input type="text" class="form-input" id="team-user-name" placeholder="Username" autocomplete="off" style="flex:1;min-width:140px">
+            <input type="password" class="form-input" id="team-user-pass" placeholder="Mật khẩu (≥ 8 ký tự)" autocomplete="new-password" style="flex:1;min-width:160px">
+            <button class="btn btn-primary btn-sm" onclick="App.saveTeamUser()">＋ Thêm / đổi mật khẩu</button>
+          </div>
+          <div id="team-users-list" style="margin-top:14px"></div>
+        </div>
+
       </div>
       </div>
 
@@ -859,7 +902,7 @@
         </p>
 
         <!-- Bulk Add Panel (hidden by default) -->
-        <div id="blacklist-bulk-panel" class="hidden" style="background:var(--purple-dim);border:1px solid rgba(168,85,247,.3);border-radius:var(--radius);padding:var(--sp-4);margin-bottom:var(--sp-4);">
+        <div id="blacklist-bulk-panel" class="hidden" style="background:var(--purple-dim);border:1px solid color-mix(in srgb, var(--violet) 30%, transparent);border-radius:var(--radius);padding:var(--sp-4);margin-bottom:var(--sp-4);">
           <label class="form-label" for="blacklist-bulk-input" style="font-size:.85rem;color:var(--accent-text)">Nhập danh sách username (mỗi dòng 1 username, hoặc phân cách bằng dấu phẩy):</label>
           <textarea id="blacklist-bulk-input" class="form-input" rows="4" placeholder="user1&#10;user2&#10;user3" style="font-family:monospace;font-size:.85rem;margin-bottom:.5rem;resize:vertical"></textarea>
           <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
@@ -1322,7 +1365,7 @@
             </div>
 
             <!-- Progress Panel (hidden by default) -->
-            <div id="sim-progress-panel" class="hidden" style="margin-bottom:20px;padding:16px;border-radius:10px;background:linear-gradient(135deg, rgba(99,102,241,0.08), rgba(168,85,247,0.08));border:1px solid rgba(99,102,241,0.2)">
+            <div id="sim-progress-panel" class="hidden" style="margin-bottom:20px;padding:16px;border-radius:10px;background:linear-gradient(135deg, color-mix(in srgb, var(--violet) 8%, transparent), color-mix(in srgb, var(--violet) 8%, transparent));border:1px solid color-mix(in srgb, var(--violet) 20%, transparent)">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                 <h4 style="margin:0;color:var(--accent)">⏳ Deep Crawl Progress</h4>
                 <span id="sim-progress-status" style="font-size:12px;padding:3px 10px;border-radius:12px;background:var(--accent);color:white;font-weight:600">Running</span>
@@ -1352,23 +1395,23 @@
               <div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px;flex-wrap:wrap;gap:12px">
                 <h4 style="margin:0;color:var(--accent)">📋 Danh sách kênh tương tự đề xuất</h4>
                 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                  <button class="btn btn-sm" onclick="Members.selectOnlyTradingContacts(60)" style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;font-weight:600;display:flex;align-items:center;gap:5px" title="Chỉ chọn các contact thuộc kênh trading đạt từ 60 điểm trở lên">
+                  <button class="btn btn-sm" onclick="Members.selectOnlyTradingContacts(60)" style="background:linear-gradient(135deg,var(--green),#059669);color:#fff;border:none;font-weight:600;display:flex;align-items:center;gap:5px" title="Chỉ chọn các contact thuộc kênh trading đạt từ 60 điểm trở lên">
                     <span>⚡</span> <span>Chọn nhanh Trading (≥60đ)</span>
                   </button>
                   <input type="text" id="sim-import-job-id" class="form-input" style="width:200px;padding:6px 12px;font-size:13px" placeholder="Tên Scrape Job (e.g. leads_weex)">
                   <button class="btn btn-green btn-sm" onclick="Members.importCheckedContacts()">📥 Import Contact Đã Chọn</button>
-                  <button class="btn btn-ghost btn-sm" onclick="Members.clearDeepCrawlResults()" style="color:#ef4444;border-color:rgba(239,68,68,0.3)" title="Xóa toàn bộ kết quả trên bảng">🗑️ Xóa bảng</button>
+                  <button class="btn btn-ghost btn-sm" onclick="Members.clearDeepCrawlResults()" style="color:var(--red);border-color:color-mix(in srgb, var(--red) 30%, transparent)" title="Xóa toàn bộ kết quả trên bảng">🗑️ Xóa bảng</button>
                 </div>
               </div>
 
               <!-- Filter Bar (Depth + Trading Classification) -->
-              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:10px 12px;">
+              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;background:color-mix(in srgb, var(--text) 2%, transparent);border:1px solid color-mix(in srgb, var(--text) 6%, transparent);border-radius:10px;padding:10px 12px;">
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                  <span style="font-size:0.75rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">🎯 Phân loại Trading:</span>
+                  <span style="font-size:0.75rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px">🎯 Phân loại Trading:</span>
                   <div id="sim-trading-filter-tabs" style="display:flex;gap:6px;flex-wrap:wrap"></div>
                 </div>
-                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,0.04);padding-top:8px;">
-                  <span style="font-size:0.75rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">🌐 Độ sâu (Depth):</span>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid color-mix(in srgb, var(--text) 4%, transparent);padding-top:8px;">
+                  <span style="font-size:0.75rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px">🌐 Độ sâu (Depth):</span>
                   <div id="sim-depth-filter-tabs" style="display:flex;gap:6px;flex-wrap:wrap"></div>
                 </div>
               </div>
@@ -1383,7 +1426,7 @@
                       <th>Subscribers</th>
                       <th width="50">Depth</th>
                       <th>Nguồn (Parent)</th>
-                      <th style="min-width:240px">Mô tả <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,0.2);color:#818cf8;margin-left:4px;font-weight:600">🌐 Auto EN</span></th>
+                      <th style="min-width:240px">Mô tả <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:color-mix(in srgb, var(--violet) 20%, transparent);color:#818cf8;margin-left:4px;font-weight:600">🌐 Auto EN</span></th>
                       <th>Admin Contact trích xuất</th>
                       <th>Hành động</th>
                     </tr>
@@ -1442,9 +1485,9 @@
 
   <!-- ══ Campaign Create/Edit Modal ══ -->
   <div class="modal-overlay" id="campaign-modal">
-    <div class="modal" style="width:680px;max-height:92vh;overflow-y:auto;border:1px solid rgba(167,139,250,0.25);box-shadow:0 20px 50px rgba(0,0,0,0.6);">
-      <div class="modal-header" style="border-bottom:1px solid rgba(255,255,255,0.08);padding:16px 20px;">
-        <span class="modal-title" id="campaign-modal-title" style="font-size:1.15rem;font-weight:700;color:#f3f4f6;display:flex;align-items:center;gap:8px;">
+    <div class="modal" style="width:680px;max-height:92vh;overflow-y:auto;border:1px solid color-mix(in srgb, var(--violet) 25%, transparent);box-shadow:0 20px 50px rgba(0,0,0,0.6);">
+      <div class="modal-header" style="border-bottom:1px solid color-mix(in srgb, var(--text) 8%, transparent);padding:16px 20px;">
+        <span class="modal-title" id="campaign-modal-title" style="font-size:1.15rem;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px;">
           <span>📝</span> <span>Tạo DM Campaign</span>
         </span>
         <button class="modal-close" onclick="Members.closeCampaignModal()">&times;</button>
@@ -1470,22 +1513,22 @@
           <label class="form-label" style="font-weight:600;font-size:0.85rem;display:flex;justify-content:space-between;align-items:center;">
             <span>💬 Nội dung tin nhắn</span>
           </label>
-          <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;line-height:1.5;">
-            🏷️ Biến cá nhân hóa: <code style="background:rgba(167,139,250,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;font-size:11px">{name}</code>
-            <code style="background:rgba(167,139,250,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;font-size:11px">{first_name}</code>
-            <code style="background:rgba(167,139,250,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;font-size:11px">{last_name}</code>
-            <code style="background:rgba(167,139,250,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;font-size:11px">{full_name}</code>
-            <code style="background:rgba(167,139,250,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;font-size:11px">{username}</code>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:6px;line-height:1.5;">
+            🏷️ Biến cá nhân hóa: <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{name}</code>
+            <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{first_name}</code>
+            <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{last_name}</code>
+            <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{full_name}</code>
+            <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{username}</code>
           </div>
           <div id="cmp-messages-list" style="display:flex;flex-direction:column;gap:12px;margin-top:6px;"></div>
-          <button class="btn btn-ghost btn-sm" onclick="Members.addCampaignMessage()" style="margin-top:10px;border:1px dashed rgba(167,139,250,0.4);color:#a78bfa;width:100%;justify-content:center;padding:8px 0;font-weight:600;">
+          <button class="btn btn-ghost btn-sm" onclick="Members.addCampaignMessage()" style="margin-top:10px;border:1px dashed color-mix(in srgb, var(--violet) 40%, transparent);color:var(--violet);width:100%;justify-content:center;padding:8px 0;font-weight:600;">
             + Thêm tin nhắn
           </button>
         </div>
 
         <!-- Limits & Delays Card -->
-        <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px 16px;">
-          <div style="font-size:0.82rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+        <div style="background:color-mix(in srgb, var(--text) 2%, transparent);border:1px solid color-mix(in srgb, var(--text) 8%, transparent);border-radius:12px;padding:14px 16px;">
+          <div style="font-size:0.82rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
             <span>⏱️</span> <span>Cấu Hình Giãn Cách & Giới Hạn (Anti-Ban)</span>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
@@ -1500,87 +1543,25 @@
             <div class="form-group" style="margin:0">
               <label class="form-label" style="font-size:0.78rem;">Giới Hạn DM/Ngày (Premium)</label>
               <input type="number" class="form-input" id="cmp-daily-limit" value="50" min="1" max="100" style="font-size:0.88rem;">
-              <span style="font-size:0.7rem;color:#9ca3af;display:block;margin-top:3px;">🔒 Acc Free: cố định max 10 DM/ngày</span>
+              <span style="font-size:0.7rem;color:var(--text2);display:block;margin-top:3px;">🔒 Acc Free: cố định max 10 DM/ngày</span>
             </div>
           </div>
         </div>
 
-        <!-- AI Agent & Smart Features Card -->
-        <div style="background:linear-gradient(135deg, rgba(139,92,246,0.08) 0%, rgba(99,102,241,0.04) 100%);border:1px solid rgba(167,139,250,0.25);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.05);">
-          <div style="font-size:0.85rem;font-weight:700;color:#a78bfa;display:flex;align-items:center;gap:6px;">
-            <span>🤖</span> <span>Trí Tuệ Nhân Tạo AI & Bản Địa Hóa (AI Features)</span>
-          </div>
-
-          <!-- AI Remix & AI Agent Row -->
-          <div style="display:grid;grid-template-columns:1fr 1.2fr;gap:14px;align-items:center;">
-            <div style="display:flex;align-items:center;gap:10px;background:rgba(0,0,0,0.2);padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
-              <label class="toggle" style="flex-shrink:0;">
-                <input type="checkbox" id="cmp-ai-remix">
-                <span class="toggle-slider"></span>
-              </label>
-              <div style="display:flex;flex-direction:column;">
-                <span style="font-size:0.83rem;font-weight:600;color:#f3f4f6;">AI Remix Tin Nhắn</span>
-                <span style="font-size:0.73rem;color:#9ca3af;">Biến tấu câu chữ chống trùng lặp</span>
-              </div>
-            </div>
-
-            <div>
-              <label class="form-label" style="font-size:0.78rem;margin-bottom:4px;">Gán AI Agent Theo Chiến Dịch</label>
-              <select id="cmp-ai-agent" class="form-input" style="font-size:0.83rem;padding:6px 10px;height:36px;background:rgba(0,0,0,0.25);">
-                <option value="">-- Khôi phục AI Agent mặc định --</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- Auto Resume Box -->
-          <div style="display:flex;align-items:flex-start;gap:12px;padding:12px;background:rgba(0,0,0,0.25);border:1px solid rgba(14,165,233,0.25);border-radius:8px;">
-            <label class="toggle" style="margin-top:2px;flex-shrink:0;">
-              <input type="checkbox" id="cmp-auto-resume" checked>
-              <span class="toggle-slider"></span>
-            </label>
-            <div style="flex:1;">
-              <div style="font-size:0.84rem;font-weight:700;color:#0ea5e9;display:flex;align-items:center;gap:6px;">
-                <span>🔄</span> <span>Tự Động Chạy Tiếp (Auto Resume)</span>
-              </div>
-              <div style="font-size:0.75rem;color:#9ca3af;margin-top:3px;line-height:1.4;">
-                Khi tất cả tài khoản bị SpamBot/PeerFlood hoặc hết daily limit, hệ thống sẽ tự kiểm tra mỗi 15 phút và chạy tiếp chiến dịch khi có account sẵn sàng.
-              </div>
-            </div>
-          </div>
-
-          <!-- Auto Native Language Box -->
-          <div style="display:flex;align-items:flex-start;gap:12px;padding:12px;background:rgba(0,0,0,0.25);border:1px solid rgba(167,139,250,0.2);border-radius:8px;">
-            <label class="toggle" style="margin-top:2px;flex-shrink:0;">
-              <input type="checkbox" id="cmp-auto-translate-native" checked>
-              <span class="toggle-slider"></span>
-            </label>
-            <div style="flex:1;">
-              <div style="font-size:0.84rem;font-weight:700;color:#c084fc;display:flex;align-items:center;gap:6px;">
-                <span>🌐</span> <span>Tự Động Dịch Ngôn Ngữ Bản Địa (Auto Native Language)</span>
-              </div>
-              <div style="font-size:0.75rem;color:#9ca3af;margin-top:3px;line-height:1.4;">
-                AI tự động phát hiện quốc gia & tiếng mẹ đẻ của khách hàng (Trung 🇨🇳, Nga 🇷🇺, Thổ 🇹🇷, Việt 🇻🇳, Hàn 🇰🇷...) để gửi DM bằng ngôn ngữ bản địa của họ, giúp tăng Reply Rate 3-5x!
-              </div>
-            </div>
-          </div>
-
-          <!-- Lead Scoring / ICP Filter Box -->
-          <div style="padding:12px;background:rgba(0,0,0,0.25);border:1px solid rgba(52,211,153,0.25);border-radius:8px;">
-            <div style="font-size:0.84rem;font-weight:700;color:#34d399;display:flex;align-items:center;gap:6px;">
-              <span>🎯</span> <span>Lọc Lead Chất Lượng (ICP Score)</span>
-            </div>
-            <div style="font-size:0.75rem;color:#9ca3af;margin-top:3px;line-height:1.4;margin-bottom:8px;">
-              Bỏ qua lead chất lượng thấp trước khi gửi (dựa trên username, tên, Premium, hoạt động gần đây). <b>0 = tắt lọc</b> (mặc định). Khuyến nghị 40–60 để tiết kiệm quota & giảm nguy cơ ban.
-            </div>
-            <input type="number" id="cmp-min-lead-score" class="form-input" min="0" max="100" step="5" value="0"
-                   style="font-size:0.83rem;padding:6px 10px;height:36px;background:rgba(0,0,0,0.25);width:120px;">
-          </div>
+        <!-- AI & automation settings (compact) -->
+        <div class="set-list">
+          <div class="set-head">🤖 AI &amp; tự động</div>
+          <div class="set-row"><span class="set-name">AI Remix <span class="info-i" tabindex="0" data-tip="AI viết lại mỗi tin nhắn với câu chữ khác nhưng giữ nguyên ý, để tin không bị trùng lặp và giảm nguy cơ bị đánh dấu spam.">i</span></span><label class="toggle"><input type="checkbox" id="cmp-ai-remix"><span class="toggle-slider"></span></label></div>
+          <div class="set-row"><span class="set-name">AI Agent <span class="info-i" tabindex="0" data-tip="Agent cung cấp API key, phong cách viết và kiến thức sản phẩm cho AI Remix của chiến dịch này. Để trống thì dùng Agent mặc định.">i</span></span><select id="cmp-ai-agent" class="form-input set-ctrl"><option value="">— Mặc định —</option></select></div>
+          <div class="set-row"><span class="set-name">Tự chạy tiếp <span class="info-i" tabindex="0" data-tip="Khi mọi tài khoản bị SpamBot/PeerFlood hoặc hết giới hạn trong ngày, hệ thống kiểm tra lại mỗi 15 phút và tự chạy tiếp khi có tài khoản sẵn sàng.">i</span></span><label class="toggle"><input type="checkbox" id="cmp-auto-resume" checked><span class="toggle-slider"></span></label></div>
+          <div class="set-row"><span class="set-name">Dịch tiếng bản địa <span class="info-i" tabindex="0" data-tip="AI đoán quốc gia của người nhận (Trung, Nga, Thổ, Việt, Hàn…) và gửi DM bằng tiếng mẹ đẻ của họ, nên tỉ lệ trả lời cao hơn.">i</span></span><label class="toggle"><input type="checkbox" id="cmp-auto-translate-native" checked><span class="toggle-slider"></span></label></div>
+          <div class="set-row"><span class="set-name">Lọc lead (ICP) <span class="info-i" tabindex="0" data-tip="Bỏ qua lead có điểm chất lượng thấp hơn mức này. Điểm tính từ username, tên, Premium và hoạt động gần đây. 0 = tắt lọc. Nên đặt 40–60 để tiết kiệm quota và giảm nguy cơ ban.">i</span></span><input type="number" id="cmp-min-lead-score" class="form-input set-ctrl set-num" min="0" max="100" step="5" value="0"></div>
         </div>
       </div>
 
-      <div class="modal-footer" style="border-top:1px solid rgba(255,255,255,0.08);padding:14px 20px;">
+      <div class="modal-footer" style="border-top:1px solid color-mix(in srgb, var(--text) 8%, transparent);padding:14px 20px;">
         <button class="btn btn-ghost" onclick="Members.closeCampaignModal()" style="font-weight:600;">Hủy</button>
-        <button class="btn btn-primary" onclick="Members.saveCampaign()" style="font-weight:600;padding:8px 20px;background:linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);border:none;box-shadow:0 4px 14px rgba(139,92,246,0.4);">
+        <button class="btn btn-primary" onclick="Members.saveCampaign()" style="font-weight:600;padding:8px 20px;background:linear-gradient(135deg, var(--violet) 0%, var(--violet) 100%);border:none;box-shadow:0 4px 14px color-mix(in srgb, var(--violet) 40%, transparent);">
           💾 Lưu thay đổi
         </button>
       </div>
@@ -1693,8 +1674,12 @@
 
         <!-- Targets -->
         <div class="form-group">
-          <label class="form-label">Chọn nhóm / kênh đích</label>
-          <input type="text" class="search-input" style="width:100%;margin-bottom:8px" placeholder="Tìm kiếm..." id="chat-search" oninput="App.filterChats()">
+          <label class="form-label">Chọn nhóm đích</label>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <input type="text" class="form-input" style="flex:1" placeholder="Dán link nhóm: @username, t.me/abc hoặc t.me/+mã mời" id="chat-join-link" onkeydown="if(event.key==='Enter'){event.preventDefault();App.joinGroupByLink()}">
+            <button type="button" class="btn btn-ghost btn-sm" id="chat-join-btn" onclick="App.joinGroupByLink()" title="Tài khoản sẽ join nhóm (nếu chưa) và nhóm được thêm vào lịch">➕ Join &amp; thêm</button>
+          </div>
+          <input type="text" class="search-input" style="width:100%;margin-bottom:8px" placeholder="Tìm nhóm..." id="chat-search" oninput="App.filterChats()">
           <div class="chat-list" id="chat-list">
             <div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>
           </div>
@@ -1713,6 +1698,17 @@
             <button class="btn btn-ghost btn-sm" onclick="App.addMessage('document')">+ File</button>
             <button class="btn btn-ghost btn-sm" onclick="App.addMessage('poll')">+ Poll</button>
           </div>
+        </div>
+        <div class="form-group" style="border:1px solid var(--border);border-radius:10px;padding:10px 12px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
+            <input type="checkbox" id="sch-ai-remix" onchange="document.getElementById('sch-ai-agent-row').style.display=this.checked?'flex':'none'">
+            ✨ AI Remix — viết lại tin nhắn khác nhau cho mỗi nhóm
+          </label>
+          <div id="sch-ai-agent-row" style="display:none;gap:8px;align-items:center;margin-top:8px">
+            <span style="font-size:.85rem;color:var(--text2);white-space:nowrap">AI Agent:</span>
+            <select class="form-select" id="sch-ai-agent" style="flex:1"><option value="">— Mặc định (không dùng Knowledge) —</option></select>
+          </div>
+          <div style="font-size:.75rem;color:var(--text2);margin-top:6px">AI giữ nguyên ý, link và @mention; dùng Remix Instruction + Knowledge của Agent đã chọn. Lỗi AI thì gửi nguyên văn.</div>
         </div>
       </div>
       <div class="modal-footer">
@@ -1750,16 +1746,43 @@
           <div id="acc-bulk-fields" class="hidden">
             <label class="form-label">Danh sách tài khoản</label>
             <textarea id="acc-bulk-input" class="form-input" rows="8" style="resize:vertical;min-height:140px;font-family:monospace;font-size:12px" placeholder="+84912345678&#10;+84987654321 | socks5://user:pass@host:1080"></textarea>
-            <div style="font-size:11px;color:var(--text2);margin:6px 0 12px">Mỗi dòng: <code>số điện thoại | proxy</code>. Proxy có thể bỏ trống. OTP được xác nhận lần lượt.</div>
+            <div style="font-size:11px;color:var(--text2);margin:6px 0 12px">Mỗi dòng: <code>số điện thoại | proxy</code>. Proxy có thể bỏ trống. OTP được xác nhận lần lượt, 2FA chung tự điền.</div>
+            <div class="form-group">
+              <label class="form-label">Mật khẩu 2FA chung <span style="font-size:.8rem;color:var(--text-secondary);font-weight:400">(tuỳ chọn)</span></label>
+              <input type="password" id="acc-bulk-2fa" class="form-input" placeholder="Dùng cho mọi tài khoản có bật 2FA" autocomplete="new-password">
+            </div>
             <button class="btn btn-primary btn-full" onclick="App.startBulkAccounts()">Bắt đầu thêm hàng loạt</button>
           </div>
+        </div>
+        <!-- Bulk re-login -->
+        <div id="acc-step-relogin" class="hidden">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <label class="form-label" style="margin:0">Đăng nhập lại <span id="acc-relogin-count">0</span> tài khoản</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer"><input type="checkbox" id="acc-relogin-all" checked onchange="App.toggleReloginAll(this.checked)" style="accent-color:var(--primary)"> Chọn tất cả</label>
+          </div>
+          <div id="acc-relogin-list" style="max-height:200px;overflow:auto;background:var(--bg3);border-radius:8px;padding:4px;margin:0 0 12px"></div>
+          <div class="form-group">
+            <label class="form-label">Mật khẩu 2FA chung <span style="font-size:.8rem;color:var(--text-secondary);font-weight:400">(tuỳ chọn)</span></label>
+            <input type="password" id="acc-relogin-2fa" class="form-input" placeholder="Dùng cho mọi tài khoản có bật 2FA" autocomplete="new-password">
+          </div>
+          <div style="font-size:11px;color:var(--text2);margin:0 0 12px">OTP được gửi cho tất cả số, bạn nhập OTP từng dòng. Session cũ bị huỷ sẽ được thay bằng session mới.</div>
+          <button class="btn btn-primary btn-full" onclick="App.startBulkRelogin()">Bắt đầu đăng nhập lại</button>
+        </div>
+        <!-- Parallel bulk login -->
+        <div id="acc-step-parallel" class="hidden">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span id="acc-par-progress" style="font-size:12px;color:var(--text2)"></span>
+            <span style="font-size:11px;color:var(--text3)">OTP gửi lần lượt, nhập theo thứ tự bất kỳ · Enter để xác nhận</span>
+          </div>
+          <div id="acc-par-list" style="max-height:min(420px,60vh);overflow:auto;background:var(--bg3);border-radius:8px;margin-bottom:12px"></div>
+          <button class="btn btn-primary btn-full" onclick="App.finishParallelLogin()">Xong</button>
         </div>
         <!-- Step 2: OTP -->
         <div id="acc-step-otp" class="hidden">
           <div id="acc-bulk-progress" class="hidden" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
           <div class="form-group">
             <label class="form-label">Mã OTP <span id="acc-otp-phone" style="color:var(--accent-text);font-weight:400"></span></label>
-            <input type="text" class="form-input" id="acc-code" placeholder="12345" maxlength="6" inputmode="numeric">
+            <input type="text" class="form-input" id="acc-code" placeholder="12345" maxlength="6" inputmode="numeric" onkeydown="if(event.key==='Enter'&&!event.isComposing){event.preventDefault();App.verifyAccount()}">
           </div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-primary" style="flex:1" onclick="App.verifyAccount()">Xác nhận OTP</button>
@@ -1770,9 +1793,9 @@
         <div id="acc-step-2fa" class="hidden">
           <div class="form-group">
             <label class="form-label">Mật khẩu 2FA</label>
-            <input type="password" class="form-input" id="acc-password">
+            <input type="password" class="form-input" id="acc-password" onkeydown="if(event.key==='Enter'&&!event.isComposing){event.preventDefault();App.verify2FAAccount()}">
           </div>
-          <button class="btn btn-primary" style="width:100%" onclick="App.verify2FAAccount()">Xác nhận</button>
+          <div style="display:flex;gap:8px"><button class="btn btn-primary" style="flex:1" onclick="App.verify2FAAccount()">Xác nhận</button><button class="btn btn-ghost" onclick="App.skipBulkAccount()">Bỏ qua</button></div>
         </div>
       </div>
     </div>
@@ -1880,45 +1903,41 @@
         </div>
 
         <!-- Keywords -->
-        <div class="form-group" id="w-keywords-block">
-          <label class="form-label">Từ khóa kích hoạt</label>
-          <div style="display:flex;gap:8px">
-            <input type="text" class="form-input" id="w-keyword-input" placeholder="VD: BD Weex" style="flex:1"
-              onkeydown="if(event.key==='Enter'){App.addWatcherKeyword();event.preventDefault()}">
-            <button class="btn btn-ghost btn-sm" onclick="App.addWatcherKeyword()">+ Thêm</button>
+        <div class="wf-grid2">
+          <div class="form-group">
+            <label class="form-label wf-label">Từ khóa kích hoạt <span class="info-i" tabindex="0" data-tip="Ai nhắn trong nhóm có chứa từ khóa này sẽ được DM. Không phân biệt hoa/thường. Nhấn Enter để thêm.">i</span></label>
+            <div class="wf-inline">
+              <input type="text" class="form-input" id="w-keyword-input" placeholder="VD: BD Weex"
+                onkeydown="if(event.key==='Enter'){App.addWatcherKeyword();event.preventDefault()}">
+              <button type="button" class="wf-add" onclick="App.addWatcherKeyword()" title="Thêm">+</button>
+            </div>
+            <div id="w-keywords-tags" class="wf-tags"></div>
           </div>
-          <div id="w-keywords-tags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
-          <p class="form-hint">Case-insensitive. Nhấn Enter hoặc click Thêm.</p>
-        </div>
-
-        <!-- Excluded usernames -->
-        <div class="form-group">
-          <label class="form-label">🚫 Loại trừ username (không DM)</label>
-          <div style="display:flex;gap:8px">
-            <input type="text" class="form-input" id="w-exclude-input" placeholder="@username hoặc username" style="flex:1"
-              onkeydown="if(event.key==='Enter'){App.addWatcherExclude();event.preventDefault()}">
-            <button class="btn btn-ghost btn-sm" onclick="App.addWatcherExclude()">+ Thêm</button>
+          <div class="form-group">
+            <label class="form-label wf-label">Loại trừ username <span class="info-i" tabindex="0" data-tip="Những username / user_id này sẽ không bao giờ nhận DM, kể cả khi gõ đúng từ khóa. Ví dụ: admin, mod, đồng nghiệp.">i</span></label>
+            <div class="wf-inline">
+              <input type="text" class="form-input" id="w-exclude-input" placeholder="@username"
+                onkeydown="if(event.key==='Enter'){App.addWatcherExclude();event.preventDefault()}">
+              <button type="button" class="wf-add" onclick="App.addWatcherExclude()" title="Thêm">+</button>
+            </div>
+            <div id="w-exclude-tags" class="wf-tags"></div>
           </div>
-          <div id="w-exclude-tags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
-          <p class="form-hint">Những username/user_id này sẽ không nhận DM dù gõ từ khóa.</p>
         </div>
 
         <!-- Groups -->
         <div class="form-group">
-          <label class="form-label">Nhóm cần theo dõi</label>
-          <input type="text" class="search-input" style="width:100%;margin-bottom:8px" placeholder="Tìm kiếm nhóm..."
-            id="w-chat-search" oninput="App.filterWatcherChats()">
-          <div class="chat-list" id="w-chat-list" style="max-height:180px">
-            <div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>
-          </div>
-          <p class="form-hint">Chỉ hiển thị nhóm (group/supergroup) — kênh và bot không có thành viên tham gia nên không dùng được cho tính năng này.</p>
-          <div style="margin-top:10px;padding:10px;border:1px dashed var(--border);border-radius:8px;background:var(--bg3)">
-            <label class="form-label" style="font-size:12px">🔗 Không thấy nhóm trong danh sách? Dán link nhóm (group topic lớn thường bị ẩn)</label>
-            <div style="display:flex;gap:8px;margin-top:6px">
-              <input type="text" class="form-input" id="w-group-link" placeholder="https://t.me/... hoặc @username" style="flex:1">
-              <button type="button" class="btn btn-primary btn-sm" id="w-link-btn" onclick="App.resolveWatcherGroupLink()">➕ Thêm &amp; Join</button>
+          <label class="form-label wf-label">Nhóm cần theo dõi <span class="info-i" tabindex="0" data-tip="Chỉ hiển thị nhóm (group/supergroup) mà tài khoản đã tham gia. Không thấy nhóm (nhóm topic lớn hay bị ẩn)? Dán link t.me/... hoặc @username vào ô bên phải rồi bấm Join.">i</span></label>
+          <div class="wf-grouprow">
+            <input type="text" class="form-input" placeholder="🔍 Tìm nhóm..." id="w-chat-search" oninput="App.filterWatcherChats()">
+            <div class="wf-inline">
+              <input type="text" class="form-input" id="w-group-link" placeholder="🔗 Dán link t.me/... hoặc @username"
+                onkeydown="if(event.key==='Enter'){App.resolveWatcherGroupLink();event.preventDefault()}">
+              <button type="button" class="btn btn-primary btn-sm" id="w-link-btn" onclick="App.resolveWatcherGroupLink()">Join</button>
             </div>
-            <div id="w-link-status" style="font-size:12px;margin-top:6px"></div>
+          </div>
+          <div id="w-link-status" style="font-size:12px;margin:-2px 0 6px"></div>
+          <div class="chat-list" id="w-chat-list" style="max-height:200px">
+            <div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>
           </div>
         </div>
 
@@ -1962,6 +1981,21 @@
 
         <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
 
+        <!-- AI Remix -->
+        <div class="form-group" style="padding:14px;background:var(--bg2);border-radius:12px;border:1px solid var(--border)">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-bottom:0">
+            <input type="checkbox" id="w-ai-remix" checked style="accent-color:var(--accent);width:16px;height:16px"
+                   onchange="document.getElementById('w-ai-agent-row').style.display=this.checked?'flex':'none'">
+            <strong>🤖 AI Remix</strong>
+            <span class="info-i" tabindex="0" data-tip="Trước mỗi lần gửi, AI viết lại tin nhắn với câu chữ khác nhưng giữ nguyên ý, link và con số. Có thể dịch sang ngôn ngữ của người nhận. Nhờ vậy tin không bị trùng lặp, giảm nguy cơ Telegram đánh dấu spam.">i</span>
+          </label>
+          <div id="w-ai-agent-row" style="display:flex;gap:8px;align-items:center;margin-top:10px">
+            <span style="font-size:12px;color:var(--text2);white-space:nowrap">AI Agent</span>
+            <span class="info-i" tabindex="0" data-tip="Chọn Agent để AI dùng API key, hướng dẫn viết và kiến thức sản phẩm riêng của Agent đó. Để Mặc định thì dùng cấu hình AI chung trong Cài đặt.">i</span>
+            <select class="form-select" id="w-ai-agent" style="flex:1"><option value="">— Mặc định (cấu hình AI chung) —</option></select>
+          </div>
+        </div>
+
         <!-- DM Script -->
         <div class="form-group">
           <label class="form-label">Kịch bản DM</label>
@@ -1982,6 +2016,16 @@
   </div>
 
   <!-- ══ Test DM Modal ══ -->
+  <div class="modal-overlay" id="watcher-errors-modal">
+    <div class="modal" style="width:560px">
+      <div class="modal-header">
+        <span class="modal-title" id="we-title">Lỗi của rule</span>
+        <button class="modal-close" onclick="document.getElementById('watcher-errors-modal').classList.remove('open')">&times;</button>
+      </div>
+      <div class="modal-body" id="we-body"></div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="test-dm-modal">
     <div class="modal" style="width:440px">
       <div class="modal-header">
@@ -2006,17 +2050,17 @@
     </div>
   </div>
 
-  <script defer src="/static/js/polling.js?v=446"></script>
-  <script defer src="/static/js/api.js?v=446"></script>
-  <script defer src="/static/js/discord.js?v=446"></script>
-  <script defer src="/static/js/members.js?v=446"></script>
-  <script defer src="/static/js/analytics.js?v=446"></script>
-  <script defer src="/static/js/ai_agents.js?v=446"></script>
-  <script defer src="/static/js/ai_followup.js?v=446"></script>
-  <script defer src="/static/js/changelog.js?v=446"></script>
-  <script defer src="/static/js/help.js?v=446"></script>
-  <script defer src="/static/js/engagement.js?v=446"></script>
-  <script defer src="/static/js/app.js?v=446"></script>
+  <script defer src="/static/js/polling.js?v=482"></script>
+  <script defer src="/static/js/api.js?v=482"></script>
+  <script defer src="/static/js/discord.js?v=482"></script>
+  <script defer src="/static/js/members.js?v=482"></script>
+  <script defer src="/static/js/analytics.js?v=482"></script>
+  <script defer src="/static/js/ai_agents.js?v=482"></script>
+  <script defer src="/static/js/ai_followup.js?v=482"></script>
+  <script defer src="/static/js/changelog.js?v=482"></script>
+  <script defer src="/static/js/help.js?v=482"></script>
+  <script defer src="/static/js/engagement.js?v=482"></script>
+  <script defer src="/static/js/app.js?v=482"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">
@@ -2125,5 +2169,20 @@
     </div>
   </div>
 
-    </body>
+    
+  <!-- PWA install bottom sheet (shown on mobile by static/js/pwa.js) -->
+  <div id="pwa-install-sheet" class="pwa-sheet" role="dialog" aria-labelledby="pwa-sheet-title">
+    <div class="pwa-sheet-inner">
+      <img src="/static/icons/icon-192.png" alt="" class="pwa-sheet-icon" width="48" height="48">
+      <div class="pwa-sheet-text">
+        <div class="pwa-sheet-title" id="pwa-sheet-title">Cài TG Scheduler lên điện thoại</div>
+        <div class="pwa-sheet-sub">Mở nhanh như app, toàn màn hình, không cần vào trình duyệt.</div>
+        <div class="pwa-ios-steps" hidden>Bấm <b>Chia sẻ</b> <span aria-hidden="true">⎋</span> ở thanh dưới Safari → chọn <b>Thêm vào MH chính</b>.</div>
+      </div>
+      <button class="pwa-sheet-close" onclick="PWA.dismiss()" aria-label="Đóng">✕</button>
+    </div>
+    <button id="pwa-install-btn" class="btn btn-primary btn-full" onclick="PWA.install()">📲 Cài ứng dụng</button>
+  </div>
+  <script src="/static/js/pwa.js?v=482"></script>
+</body>
 </html>

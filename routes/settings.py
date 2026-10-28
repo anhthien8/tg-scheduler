@@ -131,15 +131,14 @@ async def fetch_models(payload: FetchModelsPayload):
     else:
         models_url = base_url + "/v1/models"
 
-    from ai_remix import _cf_access_headers
+    from ai_remix import _cf_access_headers, ai_request
     headers = {"Content-Type": "application/json", **_cf_access_headers(models_url)}
     if payload.api_key:
         headers["Authorization"] = f"Bearer {payload.api_key}"
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(models_url, headers=headers)
-            resp.raise_for_status()
+            resp = await ai_request(client, "GET", models_url, headers=headers)
             data = resp.json()
 
         # OpenAI format: { "data": [ { "id": "model-name", ... }, ... ] }

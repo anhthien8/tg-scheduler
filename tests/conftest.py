@@ -49,6 +49,7 @@ os.makedirs(tg_mock.SESSION_DIR, exist_ok=True)
 tg_mock._clients = {}
 tg_mock._auth_cache = {}
 tg_mock._me_cache = {}
+tg_mock._session_errors = {}
 
 class DummyClient:
     def __init__(self, *args, **kwargs):
@@ -78,6 +79,8 @@ class DummyClient:
         yield User()
     async def connect(self):
         pass
+    async def is_user_authorized(self):
+        return True
     async def disconnect(self):
         pass
     async def get_me(self):

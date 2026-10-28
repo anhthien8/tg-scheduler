@@ -57,6 +57,9 @@ async def enqueue_schedule(schedule_id: int):
         logger.warning(f"Schedule {schedule_id}: no messages or targets")
         return
 
+    await _ensure_joined(schedule_id, account_id, targets)
+    remix_cfg = await _remix_config(schedule) if schedule.get("ai_remix") else None
+
     q = get_queue()
     skipped_blocked = 0
     for target in targets:
@@ -70,6 +73,8 @@ async def enqueue_schedule(schedule_id: int):
             skipped_blocked += 1
             continue
         for msg in sorted(messages, key=lambda m: m.get("msg_order", 0)):
+            if remix_cfg and (msg.get("content") or "").strip() and msg.get("msg_type") != "poll":
+                msg = {**msg, "content": await _remix_text(schedule_id, msg["content"], target, remix_cfg)}
             await q.put({
                 "schedule_id": schedule_id,
                 "account_id": account_id,
@@ -88,6 +93,98 @@ async def enqueue_schedule(schedule_id: int):
         sch.remove_schedule_job(schedule_id)
 
     logger.info(f"Enqueued {len(messages)*len(targets)} items for schedule '{schedule['name']}' (account {account_id})")
+
+
+async def _remix_config(schedule: dict) -> dict | None:
+    """Provider, keys and instruction for AI Remix: the schedule's agent first, global settings as fallback."""
+    import json
+    agent = await db.get_ai_agent(schedule["ai_agent_id"]) if schedule.get("ai_agent_id") else None
+    provider, keys, kwargs = None, [], {}
+    if agent and agent.get("api_keys_json"):
+        provider, keys = agent.get("provider"), agent["api_keys_json"]
+        if agent.get("base_url"):
+            kwargs["base_url"] = agent["base_url"]
+        if agent.get("model"):
+            kwargs["model"] = agent["model"]
+    if not keys:
+        provs = ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]
+        cfg = await db.get_settings_bulk({"ai_provider": None, **{f"ai_keys_{p}": "[]" for p in provs}})
+        order = ([cfg["ai_provider"]] if cfg["ai_provider"] else []) + provs
+        for p in order:
+            try:
+                keys = json.loads(cfg.get(f"ai_keys_{p}") or "[]")
+            except Exception:
+                keys = []
+            if keys:
+                provider = p
+                break
+        if provider in ("openai_compatible", "chatgpt_oauth"):
+            prefix = "oai_compat" if provider == "openai_compatible" else "chatgpt_oauth"
+            env = await db.get_settings_bulk({f"ai_{prefix}_base_url": "", f"ai_{prefix}_model": ""})
+            if (env[f"ai_{prefix}_base_url"] or "").strip():
+                kwargs["base_url"] = env[f"ai_{prefix}_base_url"].strip()
+            if (env[f"ai_{prefix}_model"] or "").strip():
+                kwargs["model"] = env[f"ai_{prefix}_model"].strip()
+    if not keys:
+        logger.warning(f"Schedule {schedule['id']}: AI Remix bật nhưng không có API key — gửi nguyên văn")
+        return None
+
+    parts = ["This is a post for a Telegram GROUP chat, not a private DM: do not greet a specific person by name. "
+             "Rewrite it with different wording each time, keep the same meaning, language, links, @mentions, "
+             "numbers and emoji style, and keep roughly the same length."]
+    if agent:
+        if (agent.get("remix_instruction") or "").strip():
+            parts.append(agent["remix_instruction"].strip())
+        if (agent.get("knowledge_base") or "").strip():
+            parts.append("Product knowledge you may use to make the post more accurate and compelling "
+                         "(do not invent facts beyond it):\n" + agent["knowledge_base"].strip()[:6000])
+    return {"provider": provider, "keys": keys, "kwargs": kwargs, "instruction": "\n\n".join(parts)}
+
+
+async def _remix_text(schedule_id: int, text: str, target: dict, cfg: dict) -> str:
+    import ai_remix
+    try:
+        out = await ai_remix.remix_message(
+            original_text=text, provider=cfg["provider"], api_keys=cfg["keys"],
+            custom_instruction=cfg["instruction"], **cfg["kwargs"])
+        return out or text
+    except Exception as e:
+        logger.warning(f"Schedule {schedule_id}: AI Remix lỗi cho {target.get('chat_title')}: {e} — gửi nguyên văn")
+        return text
+
+
+async def _ensure_joined(schedule_id: int, account_id: int, targets: list) -> None:
+    """Join any target group the account isn't in yet, using the target's saved
+    @username / invite link. Failures are logged; the send then fails as before."""
+    if not any(t.get("chat_link") for t in targets):
+        return
+    try:
+        dialogs = await tg.get_dialogs(account_id)
+    except Exception as e:
+        logger.warning(f"Schedule {schedule_id}: cannot list dialogs to check membership: {e}")
+        return
+    member_ids = {abs(int(d.get("chat_id", 0))) for d in dialogs}
+    client = tg._clients.get(account_id)
+    if not client:
+        return
+    from reaction_watcher import _join_or_get_entity
+    for t in targets:
+        link = (t.get("chat_link") or "").strip()
+        if not link or abs(int(t["chat_id"])) in member_ids:
+            continue
+        try:
+            await _join_or_get_entity(client, link)
+            logger.info(f"Schedule {schedule_id}: account {account_id} auto-joined {t.get('chat_title') or link}")
+            await db.unblock_target(schedule_id, account_id, t["chat_id"])
+            await asyncio.sleep(random.uniform(4, 8))
+        except tg_errors.FloodWaitError as e:
+            logger.warning(f"Schedule {schedule_id}: join FloodWait {e.seconds}s — stop auto-join this run")
+            return
+        except Exception as e:
+            msg = str(e)
+            if "already" in msg.lower():
+                continue
+            logger.warning(f"Schedule {schedule_id}: auto-join {link} failed: {msg}")
 
 
 async def _send_single_message(account_id: int, msg: dict, chat_id: int) -> bool:

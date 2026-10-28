@@ -460,6 +460,21 @@ async def _do_send_dm_with_fallback(
                 ai_remix_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
                 ai_remix_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
 
+    # Per-rule AI Remix: the rule can turn it off, or use an AI Agent's keys and instructions.
+    _wrow = await db.get_watcher(watcher_id) or {}
+    if not _wrow.get("ai_remix", 1):
+        ai_enabled = False
+    elif _wrow.get("ai_agent_id"):
+        _agent = await db.get_ai_agent(_wrow["ai_agent_id"])
+        if _agent and _agent.get("api_keys_json"):
+            ai_provider, ai_keys, ai_enabled = _agent.get("provider"), _agent["api_keys_json"], True
+            ai_remix_kwargs = {k: _agent[k] for k in ("base_url", "model") if _agent.get(k)}
+        if _agent:
+            _extra = [x for x in (ai_custom_prompt, (_agent.get("remix_instruction") or "").strip()) if x]
+            if (_agent.get("knowledge_base") or "").strip():
+                _extra.append("Product knowledge you may use (do not invent facts beyond it):" + chr(10) + _agent["knowledge_base"].strip()[:6000])
+            ai_custom_prompt = (chr(10) * 2).join(_extra) or None
+
     last_error = None
 
     # ── Pre-resolve: get real access_hash from the primary account ────────────
