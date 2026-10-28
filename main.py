@@ -6,6 +6,7 @@ import logging
 import os
 import secrets
 import sys
+import time
 
 # Ensure stdout and stderr are not None when running via pythonw.exe or Windows background tasks
 if sys.stdout is None:
@@ -20,11 +21,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi import Depends, FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security.api_key import APIKeyHeader
+from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipResponder, IdentityResponder
@@ -93,6 +95,11 @@ async def verify_api_key(key: str = Security(api_key_header)):
         return
     if not secrets.compare_digest(key or "", API_KEY):
         raise HTTPException(status_code=403, detail="Unauthorized")
+
+
+# ── Dashboard username/password login (exchanges credentials for the API key) ─
+DASH_USER = os.getenv("DASHBOARD_USERNAME", "")
+DASH_PASS = os.getenv("DASHBOARD_PASSWORD", "")
 
 
 _startup_task = None
@@ -264,6 +271,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Dashboard login: exchange username/password for the API key (no auth dep) ─
+class DashboardLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+_login_fails: dict[str, list[float]] = {}
+
+
+@app.post("/api/login")
+async def dashboard_login(payload: DashboardLoginRequest, request: Request):
+    # Exposed via Cloudflare Tunnel → chặn dò mật khẩu: 5 lần sai / IP thì khoá 15 phút
+    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
+    now = time.time()
+    fails = [t for t in _login_fails.get(ip, []) if now - t < 900]
+    if len(fails) >= 5:
+        raise HTTPException(status_code=429, detail="Sai quá nhiều lần, thử lại sau 15 phút")
+    user_ok = DASH_USER and secrets.compare_digest(payload.username, DASH_USER)
+    pass_ok = DASH_PASS and secrets.compare_digest(payload.password, DASH_PASS)
+    if not (user_ok and pass_ok):
+        _login_fails[ip] = fails + [now]
+        await asyncio.sleep(1)
+        raise HTTPException(status_code=401, detail="Sai username hoặc mật khẩu")
+    _login_fails.pop(ip, None)
+    return {"api_key": API_KEY}
+
 
 # Include API routes (with API key auth dependency injected)
 _auth_dep = [Depends(verify_api_key)]

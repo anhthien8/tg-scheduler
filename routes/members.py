@@ -1933,9 +1933,39 @@ async def _run_campaign(campaign_id: int):
         except Exception:
             pass
 
+        # ── Pre-campaign session check ──
+        # is_connected() is only TCP; a revoked session (AuthKeyDuplicated,
+        # logged out) still "connects" and then every request hangs in
+        # Telethon's reconnect loop — the campaign sat at 0/N with no log.
+        dead_senders = []
+        for sid in list(sender_ids):
+            c = tg.get_client(sid)
+            try:
+                ok = bool(c) and await asyncio.wait_for(c.is_user_authorized(), timeout=15)
+                reason = "chưa đăng nhập / session hết hạn"
+            except asyncio.TimeoutError:
+                ok, reason = False, "không phản hồi sau 15s"
+            except Exception as e:
+                ok, reason = False, f"{type(e).__name__}"
+            if not ok:
+                dead_senders.append(sid)
+                flooded_accounts[sid] = float('inf')
+                logger.warning(f"[Campaign {campaign_id}] Account {sid} session hỏng ({reason}), loại khỏi danh sách gửi")
+                await db.add_dm_campaign_log(campaign_id, sid, 0, None, "failed",
+                                             f"Account {sid}: session hỏng ({reason}) — cần đăng nhập lại")
+        if len(dead_senders) == len(sender_ids):
+            logger.error(f"[Campaign {campaign_id}] 🛑 No sender account has a working session")
+            await db.update_dm_campaign_status(campaign_id, "error",
+                                                sent=sent, failed=failed, skipped=skipped)
+            await db.add_dm_campaign_log(campaign_id, None, 0, None, "failed",
+                                         f"🛑 Không còn tài khoản gửi nào dùng được (session hỏng: {', '.join(map(str, dead_senders))}). "
+                                         "Đăng nhập lại các tài khoản này hoặc chọn tài khoản gửi khác rồi chạy lại.")
+            _active_campaigns.pop(campaign_id, None)
+            return
+
         # ── Pre-campaign SpamBot health check ──
         # Automatically exclude accounts that are currently spam-limited
-        for sid in list(sender_ids):
+        for sid in [s for s in sender_ids if s not in dead_senders]:
             try:
                 spam_result = await tg.check_spam_status(sid)
                 if spam_result["status"] == "limited":

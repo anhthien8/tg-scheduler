@@ -25,7 +25,7 @@ if(document.readyState!=='complete'){await new Promise(r=>window.addEventListene
 if(hasCached){this.showDashboard(null);API.authStatus().then(s=>{if(s&&s.user)this._setUserInfo(s.user)}).catch(()=>{});return}
 try{const s=await API.authStatus();if(s.authenticated){this.showDashboard(s.user);return}}catch{}
 
-try{const a=await API.getAccounts();App._accounts=a.accounts||[];if(a.accounts&&a.accounts.length>0){this.showDashboard(null);return}}catch(e){if(e&&e.message==='Unauthorized'){/* Server requires X-API-Key (cloud deploy): ask for it instead of showing the add-account form */const k=prompt('Nhập API key (DASHBOARD_SECRET_KEY) để vào dashboard:');if(k&&k.trim()){localStorage.setItem('tgs_api_key',k.trim());location.reload();return}}}
+try{const a=await API.getAccounts();App._accounts=a.accounts||[];if(a.accounts&&a.accounts.length>0){this.showDashboard(null);return}}catch(e){if(e&&e.message==='Unauthorized'){/* Server cần đăng nhập: key cũ sai/hết hạn → xoá và hiện form username/mật khẩu */localStorage.removeItem('tgs_api_key');this.showLogin();return}}
 
 this.showLogin()},
 
@@ -36,7 +36,14 @@ toast(m,t='info'){const e=document.createElement('div');e.className=`toast ${t}`
 toggleSidebar(){const sb=document.getElementById('sidebar');const ov=document.getElementById('sidebar-overlay');if(sb){sb.classList.toggle('open');}if(ov){ov.classList.toggle('open');}},
 
 
-showLogin(){(document.getElementById('login-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('dashboard-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden')},
+showLogin(){(document.getElementById('login-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('dashboard-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
+// Chưa có API key trong trình duyệt → bắt đăng nhập username/password trước; có rồi → form thêm tài khoản Telegram
+const hasKey=!!localStorage.getItem('tgs_api_key');document.getElementById('dashboard-login-step')?.classList.toggle('hidden',hasKey);document.getElementById('login-step-setup')?.classList.toggle('hidden',!hasKey);
+const sub=document.getElementById('login-subtitle');if(sub)sub.textContent=hasKey?'Thêm tài khoản Telegram đầu tiên':'Đăng nhập để tiếp tục';},
+
+async dashboardLogin(){const u=(document.getElementById('dashboard-username')?.value||'').trim();const p=document.getElementById('dashboard-password')?.value||'';if(!u||!p)return this.toast('Nhập username và mật khẩu','error');
+try{const res=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await res.json().catch(()=>({}));if(!res.ok)throw new Error(d.detail||'Đăng nhập thất bại');
+localStorage.setItem('tgs_api_key',d.api_key);this.toast('Đăng nhập thành công!','success');location.reload()}catch(e){this.toast(e.message,'error')}},
 
 showDashboard(user){(document.getElementById('login-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('dashboard-page')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
 
@@ -1058,6 +1065,7 @@ async loadAccounts(){try{const[d,agentData]=await Promise.all([API.getAccounts()
 
 grid.innerHTML = this.accounts.map(a => {
   const logged = a.is_logged_in;
+  const sessErr = a.session_error || '';
   const isOff = Boolean(a.is_paused);
   const ui = a.user_info;
   const name = ui ? [ui.first_name, ui.last_name].filter(Boolean).join(' ') : a.name;
@@ -1075,9 +1083,9 @@ grid.innerHTML = this.accounts.map(a => {
     <!-- Header: Checkbox + Avatar + Name + meta inline -->
     <div style="display:flex;align-items:center;gap:10px">
       <input type="checkbox" class="acc-select-cb" data-acc-id="${a.id}" onchange="App.onAccountSelectChange()" style="width:16px;height:16px;cursor:pointer;accent-color:var(--primary);flex-shrink:0" title="Chọn tài khoản">
-      <div style="position:relative;width:38px;height:38px;flex-shrink:0;border-radius:50%;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#818cf8" title="${isOff ? 'Đã tắt' : (logged ? 'Online' : 'Disconnected')}">
+      <div style="position:relative;width:38px;height:38px;flex-shrink:0;border-radius:50%;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#818cf8" title="${isOff ? 'Đã tắt' : (sessErr ? esc(sessErr) : (logged ? 'Online' : 'Disconnected'))}">
         ${esc(initial)}
-        <span style="position:absolute;bottom:-1px;right:-1px;width:11px;height:11px;border-radius:50%;background:${isOff ? '#ef4444' : (logged ? '#10b981' : '#f59e0b')};border:2px solid var(--bg-card)"></span>
+        <span style="position:absolute;bottom:-1px;right:-1px;width:11px;height:11px;border-radius:50%;background:${(isOff || sessErr) ? '#ef4444' : (logged ? '#10b981' : '#f59e0b')};border:2px solid var(--bg-card)"></span>
       </div>
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:center;gap:6px">
@@ -1088,6 +1096,7 @@ grid.innerHTML = this.accounts.map(a => {
         <div style="font-size:11px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
           ${esc(uname)} · ID <span style="font-family:monospace">${a.api_id}</span> · <span style="color:${a.is_premium ? '#fbbf24' : 'var(--text2)'}">${dmLimit} DM/ngày</span>
         </div>
+        ${sessErr ? `<div style="font-size:11px;font-weight:600;color:#f87171;margin-top:3px" title="Tài khoản không nhận/gửi được tin cho tới khi đăng nhập lại bằng OTP">🔒 ${esc(sessErr)} — cần đăng nhập lại</div>` : ''}
       </div>
       <span style="cursor:pointer;font-size:14px;flex-shrink:0;${a.is_premium ? '' : 'opacity:.4'}" onclick="App.togglePremium(${a.id}, ${!a.is_premium})" title="${a.is_premium ? 'Premium — click để chuyển Thường (50→10 DM/ngày)' : 'Thường — click để nâng Premium (10→50 DM/ngày)'}">${a.is_premium ? '⭐' : '☆'}</span>
     </div>

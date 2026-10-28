@@ -15,6 +15,7 @@ CHANGELOG_DATA = [
         "badge": "LATEST",
         "summary": "Đo toàn bộ 98 API dashboard trên server thật: hầu hết < 100ms. Điểm nghẽn duy nhất là tab Cào & DM — tải ~7.000 lead bằng 69 request nối tiếp và vẽ lại cả bảng sau mỗi trang (3,3s). Nay tải song song, vẽ 1 lần, server cache số đếm: ~1,2s. Docker image không còn đóng gói DB/session Telegram; toàn bộ dữ liệu sống trên 1 volume /data.",
         "changes": [
+            {"type": "feature", "title": "Đăng nhập dashboard bằng username/mật khẩu", "desc": "Truy cập từ xa qua form đăng nhập thay vì nhập API key (khoá IP 15 phút sau 5 lần sai). Thẻ tài khoản báo rõ khi session bị Telegram huỷ; campaign dừng với lỗi rõ ràng khi không còn tài khoản gửi được.", "tag": "auth"},
             {
                 "type": "feature",
                 "title": "Nút 🔄 Reset cho campaign DM",

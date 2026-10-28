@@ -38,6 +38,12 @@ async def list_accounts():
     accounts = await db.get_all_accounts()
 
     async def get_acc_status(acc):
+        err = tg._session_errors.get(acc["id"])
+        if err:
+            acc["is_logged_in"] = False
+            acc["session_error"] = err
+            acc.setdefault("user_info", None)
+            return
         # Ưu tiên _me_cache (đã sync khi connect) — tránh gọi get_me() mỗi request
         cached = tg._me_cache.get(acc["id"])
         if cached:
@@ -104,6 +110,7 @@ async def remove_account(account_id: int):
     # Clean up client caches
     tg._clients.pop(account_id, None)
     tg._auth_cache.pop(account_id, None)
+    tg._session_errors.pop(account_id, None)
     tg._me_cache.pop(account_id, None)
     tg._dialogs_cache.pop(account_id, None)
 

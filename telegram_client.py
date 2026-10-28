@@ -472,6 +472,14 @@ async def create_client(
     return client
 
 
+# account_id -> human-readable reason the session is unusable (revoked,
+# logged out, ...). TCP may still "connect", so the UI can't rely on that.
+_session_errors: dict[int, str] = {}
+
+_REVOKED_ERRORS = ("AuthKeyDuplicated", "AuthKeyUnregistered", "SessionRevoked",
+                   "SessionExpired", "UserDeactivated", "AuthKeyInvalid")
+
+
 async def start_client(account_id: int) -> bool:
     """Connect and check authorization for an account."""
     client = _clients.get(account_id)
@@ -482,6 +490,7 @@ async def start_client(account_id: int) -> bool:
         is_auth = await client.is_user_authorized()
         _auth_cache[account_id] = is_auth
         if is_auth:
+            _session_errors.pop(account_id, None)
             try:
                 # Force updates stream and cache initialization
                 await client.get_dialogs(limit=5)
@@ -514,9 +523,14 @@ async def start_client(account_id: int) -> bool:
                 logger.info(f"Account {account_id}: connected (authorized)")
             return True
         logger.info(f"Account {account_id}: connected (not authorized)")
+        _session_errors[account_id] = "Chưa đăng nhập / session hết hạn"
         return False
     except Exception as e:
         logger.error(f"Account {account_id}: connect failed: {e}")
+        name = type(e).__name__
+        if any(k in name for k in _REVOKED_ERRORS):
+            _auth_cache[account_id] = False
+            _session_errors[account_id] = f"Session bị Telegram huỷ ({name.replace('Error', '')})"
         return False
 
 
