@@ -1590,6 +1590,25 @@ async def stop_campaign(campaign_id: int):
     return {"status": "stopped"}
 
 
+@router.post("/campaigns/{campaign_id}/reset")
+async def reset_campaign(campaign_id: int):
+    """Clear skipped/failed logs so those targets are retried on next start.
+    Success logs (and sent_count) are kept so nobody gets DMed twice."""
+    campaign = await db.get_dm_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign không tồn tại")
+    if campaign.get("status") == "running" or campaign_id in _active_campaigns:
+        raise HTTPException(status_code=409, detail="Hãy dừng campaign trước khi reset")
+    async with db.get_db() as conn:
+        cur = await conn.execute(
+            "DELETE FROM dm_campaign_logs WHERE campaign_id = ? AND status != 'success'",
+            (campaign_id,))
+        cleared = cur.rowcount
+        await conn.commit()
+    await db.update_dm_campaign_status(campaign_id, "paused", failed=0, skipped=0)
+    return {"status": "reset", "cleared": cleared}
+
+
 @router.post("/campaigns/{campaign_id}/auto-resume")
 async def set_campaign_auto_resume(campaign_id: int, req: AutoResumeUpdate):
     """Enable or disable automatic resume for a campaign in paused_auto state."""

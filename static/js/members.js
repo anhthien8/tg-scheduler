@@ -613,7 +613,7 @@ const Members = {
       let actions = '';
       if (c.status === 'draft' || c.status === 'paused' || c.status === 'paused_auto' || c.status === 'error' || c.status === 'completed') {
         actions += `<button class="btn btn-primary btn-sm" onclick="Members.startCampaign(${c.id})" title="Chạy campaign">▶</button>`;
-        actions += `<button class="btn btn-ghost btn-sm" onclick="Members.editCampaignMessages(${c.id})" title="Sửa tin nhắn & cài đặt">✏️</button>`;
+        actions += `<button class="btn btn-ghost btn-sm" onclick="Members.editCampaignMessages(${c.id})" title="Sửa tin nhắn & cài đặt">✏️</button>`;        actions += `<button class="btn btn-ghost btn-sm" onclick="Members.resetCampaign(${c.id})" title="Reset: chạy lại các lead đã bỏ qua/lỗi (giữ lead đã gửi)">🔄</button>`;
       }
       if (c.status === 'running') {
         actions += `<button class="btn btn-danger btn-sm" onclick="Members.stopCampaign(${c.id})" title="Dừng campaign">⏸</button>`;
@@ -746,6 +746,18 @@ const Members = {
       this.loadCampaigns();
       // Auto-refresh while running
       this._pollCampaign(id);
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+  },
+
+  async resetCampaign(id) {
+    if (!confirm('Reset campaign? Các lead bị bỏ qua/lỗi sẽ được chạy lại khi bấm ▶. Lead đã gửi thành công vẫn giữ, không gửi trùng.')) return;
+    try {
+      const r = await apiPost(`/api/members/campaigns/${id}/reset`, {});
+      App.toast(`Đã reset — ${r.cleared} lead sẽ được chạy lại`, 'success');
+      this._lastCampaignsUpdate = null;
+      this.loadCampaigns();
     } catch (e) {
       App.toast(e.message, 'error');
     }

@@ -16,6 +16,12 @@ CHANGELOG_DATA = [
         "summary": "Đo toàn bộ 98 API dashboard trên server thật: hầu hết < 100ms. Điểm nghẽn duy nhất là tab Cào & DM — tải ~7.000 lead bằng 69 request nối tiếp và vẽ lại cả bảng sau mỗi trang (3,3s). Nay tải song song, vẽ 1 lần, server cache số đếm: ~1,2s. Docker image không còn đóng gói DB/session Telegram; toàn bộ dữ liệu sống trên 1 volume /data.",
         "changes": [
             {
+                "type": "feature",
+                "title": "Nút 🔄 Reset cho campaign DM",
+                "desc": "Campaign đã chạy hết (vd. bỏ qua vì điểm ICP) giờ có thể reset: các lead bị bỏ qua/lỗi được chạy lại khi bấm ▶. Lead đã gửi thành công được giữ nguyên nên không ai bị DM trùng.",
+                "tag": "Chiến dịch DM"
+            },
+            {
                 "type": "fix",
                 "title": "Contact từ Deep Crawl không còn bị loại vì lead score 25",
                 "desc": "Contact import từ kênh tương tự chỉ có username nên luôn bị chấm 25 điểm và bị bỏ qua khi chiến dịch đặt ngưỡng ICP. Nay các contact này được gửi DM bình thường vì đã được lọc theo điểm trading của kênh.",
