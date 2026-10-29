@@ -1995,7 +1995,10 @@ async saveWatcher(){
     this.loadWatchers();
     // ── Membership check: warn if any account not in the group ──────────────
     try {
-      const chkRes = await API.checkMembership(accIds, [...this._watcherSelectedGroups]);
+      // Join rules only need the OBSERVER nick(s) inside the group — the sender DMs
+      // from outside. Keyword rules listen with the sender nick, so check those.
+      const chkAccs = (watchType==='join' && observerIds.length) ? observerIds : accIds;
+      const chkRes = await API.checkMembership(chkAccs, [...this._watcherSelectedGroups]);
       if(chkRes && chkRes.warnings && chkRes.warnings.length > 0) {
         this._showMembershipWarning(chkRes.warnings, payload.name);
       }
