@@ -529,7 +529,7 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
             "[AI Remix] %s key[%d] OK - %dc -> %dc",
             provider, idx, len(original_text), len(result)
         )
-        return result if result else original_text
+        return humanize_text(result) if result else original_text
 
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
@@ -594,7 +594,35 @@ async def generate_response(prompt: str, provider: str, api_keys: list[str], **k
         return None
 
 
-async def generate_chat_response(
+_HUMAN_STYLE_RULE = (
+    "\n\nWRITING STYLE (anti AI-detection, mandatory): write like a real person texting on Telegram. "
+    "NEVER use semicolons (;), em dashes (—), en dashes as separators, or bullet-like structure in casual chat. "
+    "Use short sentences, commas and periods only. No 'Furthermore/Moreover/Additionally', no perfectly balanced clauses."
+)
+
+
+def humanize_text(text):
+    """Strip punctuation that gives away AI writing (';', em/en dashes used as separators)."""
+    if not text:
+        return text
+    t = re.sub(r"[ \t]*;[ \t]*(?=\S)", ", ", text)
+    t = re.sub(r"[ \t]*;[ \t]*$", ".", t, flags=re.M)
+    t = re.sub(r"[ \t]+[—–][ \t]+", ", ", t)
+    t = re.sub(r"(?<=\w)—(?=\w)", ", ", t)
+    return t
+
+
+async def generate_chat_response(*args, **kwargs):
+    """Chat reply with anti AI-slop style rule + punctuation cleanup."""
+    if len(args) >= 2:
+        args = (args[0], (args[1] or "") + _HUMAN_STYLE_RULE) + tuple(args[2:])
+    elif "system_prompt" in kwargs:
+        kwargs["system_prompt"] = (kwargs["system_prompt"] or "") + _HUMAN_STYLE_RULE
+    res = await _generate_chat_response_raw(*args, **kwargs)
+    return humanize_text(res) if res else res
+
+
+async def _generate_chat_response_raw(
     messages_history: list[dict],
     system_prompt: str,
     provider: str,
