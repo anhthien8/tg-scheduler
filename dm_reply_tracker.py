@@ -404,6 +404,36 @@ _STEP_REMINDER_TEMPLATES = {
 }
 
 
+_RU_CHARS_RE = re.compile(r"[а-яё]", re.IGNORECASE)
+
+
+def get_decline_closing_reply(history: list[dict] | None) -> str:
+    """Polite thank-you + open-door CTA sent when the KOL declines and the AI
+    produced only tags (e.g. a bare [STOP]) — one message, then the AI stops."""
+    latest = ""
+    for m in reversed(history or []):
+        if m.get("role") == "user":
+            latest = m.get("content") or ""
+            break
+    if _VN_CHARS_RE.search(latest):
+        return (
+            "Cảm ơn bạn đã dành thời gian phản hồi nhé, mình hoàn toàn tôn trọng quyết định của bạn 🙏 "
+            "Nếu sau này cộng đồng bên bạn cần một sàn chính sách linh hoạt, môi trường mở và hỗ trợ tối đa "
+            "việc build cộng đồng, cứ nhắn mình ở đây bất cứ lúc nào nhé!"
+        )
+    if _RU_CHARS_RE.search(latest):
+        return (
+            "Спасибо за ответ и уделённое время, уважаем ваше решение 🙏 "
+            "Если в будущем вашему сообществу понадобится биржа с гибкими условиями, открытой средой "
+            "и максимальной поддержкой в развитии сообщества — пишите сюда в любое время!"
+        )
+    return (
+        "Thanks a lot for taking the time to reply — totally respect your decision 🙏 "
+        "If your community ever wants an exchange partner with flexible terms, an open environment "
+        "and full support for community building, just drop me a message here anytime!"
+    )
+
+
 def _normalize_uid(value) -> str:
     return re.sub(r"\D", "", str(value or ""))
 
@@ -521,7 +551,10 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
     if pred:
         lines.append(f"PREDICTED TIER (only because the KOL stated ~{kol_offer._fmt_num(pred.get('volume_m'))}M monthly volume): "
                      f"tier {pred.get('tier')} = {kol_offer._fmt_num(pred.get('revshare_pct'))}% revshare from the month after hitting it.")
-    lines.append("If the KOL clearly declines the partnership or asks you to stop messaging, append [STOP] on its own line. "
+    lines.append("If the KOL clearly declines the partnership or asks you to stop messaging: do NOT argue or re-pitch. "
+                 "Still write ONE short, warm reply in their language — thank them for their time, respect the decision, "
+                 "and leave the door open (if their community ever wants an open, flexible exchange partner with strong "
+                 "community-building support, they can message you here anytime). Then append [STOP] on its own line. "
                  "All [TAGS] are invisible to the KOL.")
     return "\n".join(lines)
 
@@ -1126,7 +1159,10 @@ async def generate_and_send_ai_reply_for_chat(
         ai_reply = await ai_rmx.generate_chat_response(history, combined_prompt, ai_provider, ai_keys, **kwargs)
 
         if not ai_reply:
+            logger.warning("[AIFollowUp] ⚠️ AI provider '%s' returned an empty reply for user @%s (%d) — nothing sent",
+                           ai_provider, sender_username or "?", user_id)
             return False
+        raw_ai_reply = ai_reply
 
         new_status = "active"
         # Extract profile trước alert để UID/campaign/community có mặt trong notification.
@@ -1192,7 +1228,14 @@ async def generate_and_send_ai_reply_for_chat(
 
         ai_reply = sanitize_telegram_html(ai_reply)
         if not ai_reply:
-            return False
+            if step_result.get("declined"):
+                ai_reply = get_decline_closing_reply(full_history)
+                logger.info("[AIFollowUp] 🙏 KOL @%s (%d) declined and AI reply was tags-only — sending polite closing",
+                            sender_username or "?", user_id)
+            else:
+                logger.warning("[AIFollowUp] ⚠️ AI reply empty after stripping tags for user @%s (%d) — nothing sent. "
+                               "Raw reply: %r", sender_username or "?", user_id, raw_ai_reply[:300])
+                return False
 
         if contains_ai_disclosure(ai_reply):
             logger.warning("[AIFollowUp] 🚫 Blocked AI-disclosure reply for user %d — using safe fallback", user_id)
