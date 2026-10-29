@@ -1814,7 +1814,7 @@ toggleWatcherAccount(accId, cb){
 
 },
 
-async _loadWatcherChatList(selectedIds=[]){const el=document.getElementById('w-chat-list');if(el)el.innerHTML='<div class="loading-overlay"><span class="spinner"></span> Đang tải...</div>';
+async _loadWatcherChatList(selectedIds=[]){const el=document.getElementById('w-chat-list');if(el)el.innerHTML='<div class="loading-overlay"><span class="spinner"></span> Đang tải nhóm từ nick '+((this._watcherType==='join'&&(this._watcherObserverIds||[]).length)?'theo dõi':'gửi')+'...</div>';const _seq=this._wChatSeq=(this._wChatSeq||0)+1;
 
   const selSet=new Set(selectedIds.map(Number));this._watcherSelectedGroups=new Set(selSet);
 
@@ -1826,9 +1826,12 @@ async _loadWatcherChatList(selectedIds=[]){const el=document.getElementById('w-c
     const accIds=obs.length?obs:[this._watcherActiveAccountId||(this.accounts[0]?.id||1)];
     const fetchChats=async id=>{const d=await API.getChats(id);return Array.isArray(d?.chats)?d.chats:(d?.command_id&&typeof API.pollCommand==='function'?((await API.pollCommand(d.command_id))?.result?.chats||[]):[])};
     const lists=await Promise.all(accIds.map(id=>fetchChats(id).catch(()=>[])));
+    if(_seq!==this._wChatSeq)return; // a newer load (observer toggled again) supersedes this one
     const seen=new Set();this._watcherChats=lists.flat().filter(c=>{const k=Number(c.chat_id);if(seen.has(k))return false;seen.add(k);return true});
 
-    this._renderWatcherChatList(this._watcherChats,selSet)
+    // Re-apply whatever is typed in the search box — the user may have searched while this was loading.
+    const q=(document.getElementById('w-chat-search')?.value||'').toLowerCase();
+    this._renderWatcherChatList(q?this._watcherChats.filter(c=>String(c.chat_title||'').toLowerCase().includes(q)):this._watcherChats,selSet)
 
   }catch(e){if(el)el.innerHTML=`<div style="padding:12px;color:var(--red)">Lỗi: ${e.message}</div>`}},
 
