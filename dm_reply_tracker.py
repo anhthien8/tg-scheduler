@@ -418,18 +418,18 @@ def get_decline_closing_reply(history: list[dict] | None) -> str:
     if _VN_CHARS_RE.search(latest):
         return (
             "Cảm ơn bạn đã dành thời gian phản hồi nhé, mình hoàn toàn tôn trọng quyết định của bạn 🙏 "
-            "Nếu sau này cộng đồng bên bạn cần một sàn chính sách linh hoạt, môi trường mở và hỗ trợ tối đa "
+            "Nếu lần tới cộng đồng bên bạn cần một sàn chính sách linh hoạt, môi trường mở và hỗ trợ tối đa "
             "việc build cộng đồng, cứ nhắn mình ở đây bất cứ lúc nào nhé!"
         )
     if _RU_CHARS_RE.search(latest):
         return (
             "Спасибо за ответ и уделённое время, уважаем ваше решение 🙏 "
-            "Если в будущем вашему сообществу понадобится биржа с гибкими условиями, открытой средой "
+            "Если в следующий раз вашему сообществу понадобится биржа с гибкими условиями, открытой средой "
             "и максимальной поддержкой в развитии сообщества — пишите сюда в любое время!"
         )
     return (
         "Thanks a lot for taking the time to reply — totally respect your decision 🙏 "
-        "If your community ever wants an exchange partner with flexible terms, an open environment "
+        "If next time your community needs an exchange partner with flexible terms, an open environment "
         "and full support for community building, just drop me a message here anytime!"
     )
 
@@ -553,7 +553,7 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
                      f"tier {pred.get('tier')} = {kol_offer._fmt_num(pred.get('revshare_pct'))}% revshare from the month after hitting it.")
     lines.append("If the KOL clearly declines the partnership or asks you to stop messaging: do NOT argue or re-pitch. "
                  "Still write ONE short, warm reply in their language — thank them for their time, respect the decision, "
-                 "and leave the door open (if their community ever wants an open, flexible exchange partner with strong "
+                 "and leave the door open (if next time their community needs an open, flexible exchange partner with strong "
                  "community-building support, they can message you here anytime). Then append [STOP] on its own line. "
                  "All [TAGS] are invisible to the KOL.")
     return "\n".join(lines)
