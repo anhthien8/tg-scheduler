@@ -412,3 +412,13 @@
 /* ── Mobile: template library one card per row ── */
 @media (max-width: 640px) { #tpl-list .stats-grid { grid-template-columns: 1fr !important; } }
 @media (max-width: 640px) { #view-changelog div[style*="align-items:flex-start;gap:12px;padding:12px"] { flex-wrap: wrap; } #view-changelog div[style*="align-items:flex-start;gap:12px;padding:12px"] > div { flex: 1 1 100%; min-width: 0; order: 2; } }
+
+/* Compact 2-column settings list (campaign AI & tự động) */
+.set-list.set-compact{display:grid;grid-template-columns:1fr 1fr}
+.set-list.set-compact .set-head{grid-column:1/-1;padding:8px 12px;font-size:13px}
+.set-list.set-compact .set-row{min-height:0;padding:6px 12px;font-size:13px}
+.set-list.set-compact .set-row:nth-child(even){border-right:1px solid color-mix(in srgb,var(--text) 8%,transparent)}
+.set-list.set-compact .set-ctrl{height:30px;padding:2px 8px;font-size:13px;max-width:150px}
+.set-list.set-compact .set-num{max-width:64px}
+.set-list.set-compact .toggle{transform:scale(.8);transform-origin:right center}
+@media (max-width:640px){.set-list.set-compact{grid-template-columns:1fr}.set-list.set-compact .set-row{border-right:0!important}}
