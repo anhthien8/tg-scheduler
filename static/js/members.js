@@ -2061,7 +2061,15 @@ const Members = {
       const first = await fetch(`/api/members/deep-crawl/results?slim=1&page=0&limit=${PAGE}`);
       const d0 = await first.json();
       const total = d0.total || 0;
-      if (!total) { this._renderDeepCrawlResults([]); return; }
+      if (!total) { this._dcCache = null; this._renderDeepCrawlResults([]); return; }
+
+      // Revisit with unchanged data: reuse the cached full set instead of
+      // re-downloading every page (~1 MB, 30+ requests) on each navigation.
+      const c = this._dcCache;
+      if (c && c.total === total && c.firstId === (d0.leads || [])[0]?.id) {
+        this._renderDeepCrawlResults(c.all, { counts: d0.counts, total, keepPage: true });
+        return;
+      }
 
       this._renderDeepCrawlResults(d0.leads || [], { counts: d0.counts, total });
 
@@ -2089,6 +2097,7 @@ const Members = {
         return;  // keep the first page on screen
       }
       const all = chunks.flat();
+      this._dcCache = { total, firstId: (d0.leads || [])[0]?.id, all };
       if (all.length > skip) {
         this._renderDeepCrawlResults(all, { counts: d0.counts, total, keepPage: true });
       }
