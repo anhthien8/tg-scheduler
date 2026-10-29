@@ -158,8 +158,8 @@ async def test_prompt_includes_broker_program(mock_send, mock_chat):
     mock_chat.return_value = "Sounds great"
     await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
     prompt = mock_chat.call_args_list[0][0][1]
-    assert "WEEX EXCHANGE BROKER PARTNERSHIP MODEL" in prompt
-    assert "neobank" in prompt and "never quote them" in prompt
+    assert "COMPANY/PLATFORM" in prompt and "Broker / B2B partnership model" in prompt
+    assert "neobank" in prompt
 
 
 async def test_decline_closing_reply_language():
