@@ -4733,7 +4733,7 @@ async def get_best_template_variant(template_id: int) -> int:
         return row[0] if row else 0
 
 
-async def find_campaign_log_for_user(sender_user_id: int) -> dict | None:
+async def find_campaign_log_for_user(sender_user_id: int, username: str | None = None) -> dict | None:
     """
     Find the most recent successful campaign log entry for a user.
     Returns dict with campaign_id, template_variant_id, template_variant_index
@@ -4744,13 +4744,13 @@ async def find_campaign_log_for_user(sender_user_id: int) -> dict | None:
         row = await (await db.execute("""
             SELECT campaign_id, template_variant_id, template_variant_index
             FROM dm_campaign_logs
-            WHERE target_user_id = ? AND status = 'success'
+            WHERE (target_user_id = ? OR (? <> '' AND lower(target_username) = lower(?))) AND status = 'success'
             ORDER BY sent_at DESC LIMIT 1
-        """, (sender_user_id,))).fetchone()
+        """, (sender_user_id, (username or "").lstrip("@"), (username or "").lstrip("@")))).fetchone()
         return dict(row) if row else None
 
 
-async def find_running_campaign_log_for_user(sender_user_id: int) -> dict | None:
+async def find_running_campaign_log_for_user(sender_user_id: int, username: str | None = None) -> dict | None:
     """
     Find the most recent successful campaign log entry for a user
     where the associated campaign status is currently 'running'.
@@ -4764,9 +4764,9 @@ async def find_running_campaign_log_for_user(sender_user_id: int) -> dict | None
             SELECT l.campaign_id, l.template_variant_id, l.template_variant_index, c.ai_agent_id
             FROM dm_campaign_logs l
             JOIN dm_campaigns c ON l.campaign_id = c.id
-            WHERE l.target_user_id = ? AND l.status = 'success' AND c.status = 'running'
+            WHERE (l.target_user_id = ? OR (? <> '' AND lower(l.target_username) = lower(?))) AND l.status = 'success' AND c.status = 'running'
             ORDER BY l.sent_at DESC LIMIT 1
-        """, (sender_user_id,))).fetchone()
+        """, (sender_user_id, (username or "").lstrip("@"), (username or "").lstrip("@")))).fetchone()
         if row:
             return dict(row)
         # 2. Fallback: any campaign (completed/paused) that has an AI agent configured
@@ -4774,14 +4774,14 @@ async def find_running_campaign_log_for_user(sender_user_id: int) -> dict | None
             SELECT l.campaign_id, l.template_variant_id, l.template_variant_index, c.ai_agent_id
             FROM dm_campaign_logs l
             JOIN dm_campaigns c ON l.campaign_id = c.id
-            WHERE l.target_user_id = ? AND l.status = 'success' AND c.ai_agent_id IS NOT NULL
+            WHERE (l.target_user_id = ? OR (? <> '' AND lower(l.target_username) = lower(?))) AND l.status = 'success' AND c.ai_agent_id IS NOT NULL
             ORDER BY l.sent_at DESC LIMIT 1
-        """, (sender_user_id,))).fetchone()
+        """, (sender_user_id, (username or "").lstrip("@"), (username or "").lstrip("@")))).fetchone()
         return dict(row) if row else None
 
 
 
-async def find_watcher_log_for_user(sender_user_id: int) -> dict | None:
+async def find_watcher_log_for_user(sender_user_id: int, username: str | None = None) -> dict | None:
     """
     Find the most recent successful watcher DM log entry for a user.
     Returns dict with watcher_id, template_variant_index or None.
@@ -4791,9 +4791,9 @@ async def find_watcher_log_for_user(sender_user_id: int) -> dict | None:
         row = await (await db.execute("""
             SELECT watcher_id, template_variant_index
             FROM watcher_dm_logs
-            WHERE target_user_id = ? AND status = 'success'
+            WHERE (target_user_id = ? OR (? <> '' AND lower(target_username) = lower(?))) AND status = 'success'
             ORDER BY sent_at DESC LIMIT 1
-        """, (sender_user_id,))).fetchone()
+        """, (sender_user_id, (username or "").lstrip("@"), (username or "").lstrip("@")))).fetchone()
         return dict(row) if row else None
 
 

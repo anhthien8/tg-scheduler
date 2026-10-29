@@ -856,6 +856,22 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
             _spawn_background(_remove_ai_send_after_delay(account_id, user_id))
 
 
+async def _source_agent_id(campaign_id, watcher_id):
+    """AI Agent of the campaign, else the Keyword DM rule, that sent the first DM."""
+    try:
+        if campaign_id:
+            cmp = await db.get_dm_campaign(campaign_id)
+            if cmp and cmp.get("ai_agent_id"):
+                return cmp["ai_agent_id"]
+        if watcher_id:
+            w = await db.get_watcher(watcher_id)
+            if w and w.get("ai_agent_id"):
+                return w["ai_agent_id"]
+    except Exception as e:
+        logger.debug("[AIFollowUp] source agent lookup failed: %s", e)
+    return None
+
+
 async def generate_and_send_ai_reply_for_chat(
     account_id: int,
     user_id: int,
@@ -938,12 +954,11 @@ async def generate_and_send_ai_reply_for_chat(
 
     # 3. Resolve AI Agent config
     agent_config = None
-    if target_campaign_id:
-        cmp = await db.get_dm_campaign(target_campaign_id)
-        if cmp and cmp.get("ai_agent_id"):
-            c_agent = await db.get_ai_agent(cmp["ai_agent_id"])
-            if c_agent and c_agent.get("is_active", 1):
-                agent_config = c_agent
+    src_agent_id = await _source_agent_id(target_campaign_id, watcher_id)
+    if src_agent_id:
+        c_agent = await db.get_ai_agent(src_agent_id)
+        if c_agent and c_agent.get("is_active", 1):
+            agent_config = c_agent
 
     if not agent_config:
         account_obj = await db.get_account(account_id)
@@ -1457,7 +1472,7 @@ def _make_handler(account_id: int):
             return
 
         # Record hot lead reply
-        watcher_log = await db.find_watcher_log_for_user(sender_id)
+        watcher_log = await db.find_watcher_log_for_user(sender_id, sender_username)
         watcher_id = watcher_log["watcher_id"] if watcher_log else None
 
         await db.add_dm_reply({
@@ -1495,7 +1510,7 @@ def _make_handler(account_id: int):
         # Template rotation recording
         try:
             import template_rotation as tmpl_rot
-            campaign_log = await db.find_campaign_log_for_user(sender_id)
+            campaign_log = await db.find_campaign_log_for_user(sender_id, sender_username)
             if campaign_log and campaign_log.get("template_variant_id"):
                 await tmpl_rot.record_reply(
                     template_id=campaign_log["template_variant_id"],
@@ -1519,7 +1534,7 @@ def _make_handler(account_id: int):
             if enabled_str.lower() in ("true", "1"):
                 # Identify campaign
                 target_campaign_id = None
-                running_log = await db.find_running_campaign_log_for_user(sender_id) or await db.find_campaign_log_for_user(sender_id)
+                running_log = await db.find_running_campaign_log_for_user(sender_id, sender_username) or await db.find_campaign_log_for_user(sender_id, sender_username)
                 if running_log:
                     target_campaign_id = running_log.get("campaign_id")
 
@@ -1588,8 +1603,11 @@ def _make_handler(account_id: int):
                 # Handover keywords check
                 account_obj = await db.get_account(account_id)
                 agent_id = account_obj.get("ai_agent_id") if account_obj else None
+                # No agent on the account → borrow the one from the campaign/rule that sent the first DM
+                if not agent_id:
+                    agent_id = await _source_agent_id(target_campaign_id, watcher_id)
 
-                # ── If this account has AI turned off ("Tắt"), skip AI reply entirely ──
+                # ── No agent on the account nor on the source campaign/rule: skip AI reply ──
                 if not agent_id:
                     logger.info("[AIFollowUp] Account #%d has AI Agent disabled (Tắt) — skipping AI reply for user %d",
                                 account_id, sender_id)

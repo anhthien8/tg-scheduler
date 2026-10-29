@@ -426,6 +426,25 @@ async def update_chat_status(account_id: int, user_id: int, req: UpdateChatStatu
     return {"status": "ok", "message": f"Đã chuyển trạng thái sang '{req.status}'"}
 
 
+@router.post("/chats/{account_id}/{user_id}/ai-reply")
+async def trigger_ai_reply(account_id: int, user_id: int):
+    """Make the AI answer the lead's last message now (e.g. one missed while AI was off)."""
+    import dm_reply_tracker as drt
+    chat = await db.get_followup_chat(account_id, user_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    uname = chat.get("username")
+    log = (await db.find_running_campaign_log_for_user(user_id, uname)
+           or await db.find_campaign_log_for_user(user_id, uname))
+    wlog = await db.find_watcher_log_for_user(user_id, uname)
+    sent = await drt.generate_and_send_ai_reply_for_chat(
+        account_id=account_id, user_id=user_id, sender_username=uname, sender_name=chat.get("name"),
+        target_campaign_id=(log or {}).get("campaign_id") or chat.get("campaign_id"),
+        watcher_id=(wlog or {}).get("watcher_id") or chat.get("watcher_id"),
+    )
+    return {"success": bool(sent)}
+
+
 @router.post("/trigger-drip")
 async def trigger_drip_followup():
     """Trigger automated Drip Follow-up for inactive chats (>48h)."""
