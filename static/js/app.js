@@ -1554,7 +1554,7 @@ logPage(p){this.logOffset=p*this.logLimit;this.loadLogs()},
 
 _watcherKeywords:[],_watcherExcludes:[],_watcherChats:[],_watcherSelectedGroups:new Set(),_watcherAccountOrder:[],_watcherObserverIds:[],_watcherType:'keyword',_wlOffset:0,_wlLimit:40,
 
-setWatcherType(t){this._watcherType=t;
+setWatcherType(t,noReload){this._watcherType=t;
   document.getElementById('w-type-keyword')?.classList.toggle('active',t==='keyword');
   document.getElementById('w-type-join')?.classList.toggle('active',t==='join');
   document.getElementById('w-keywords-block')?.classList.toggle('hidden',t==='join');
@@ -1569,12 +1569,15 @@ setWatcherType(t){this._watcherType=t;
   const senders=[...document.querySelectorAll('#w-accounts-list input[type=checkbox]:checked')].map(cbx=>parseInt(cbx.value));
   const observers=[...document.querySelectorAll('#w-observers-list input[type=checkbox]:checked')].map(cbx=>parseInt(cbx.value));
   this._renderWatcherAccounts(senders);
-  this._renderWatcherObservers(observers)},
+  this._renderWatcherObservers(observers);
+  this._watcherObserverIds=observers;
+  if(!noReload)this._loadWatcherChatList([...(this._watcherSelectedGroups||[])])},
 
 toggleWatcherObserver(id,cbx){
   const cur=new Set([...document.querySelectorAll('#w-observers-list input[type=checkbox]:checked')].map(c=>parseInt(c.value)));
   if(cbx.checked)cur.add(id);else cur.delete(id);
-  this._watcherObserverIds=[...cur]},
+  this._watcherObserverIds=[...cur];
+  this._loadWatcherChatList([...(this._watcherSelectedGroups||[])])},
 
 _renderWatcherObservers(selectedIds=null){
   const el=document.getElementById('w-observers-list');
@@ -1652,7 +1655,7 @@ async openWatcherModal(){
 
   (document.getElementById('w-join-delay-min') || me_dummy).value = '3';
   (document.getElementById('w-join-delay-max') || me_dummy).value = '15';
-  this.setWatcherType('keyword');
+  this.setWatcherType('keyword',true);
 
   this._watcherActiveAccountId=null;
 
@@ -1691,7 +1694,7 @@ async editWatcher(id){try{
 
   (document.getElementById('w-join-delay-min') || me_dummy).value = w.join_dm_delay_min ?? 3;
   (document.getElementById('w-join-delay-max') || me_dummy).value = w.join_dm_delay_max ?? 15;
-  this.setWatcherType(w.watch_type || 'keyword');
+  this.setWatcherType(w.watch_type || 'keyword',true);
 
   this._watcherExcludes=[...(w.excluded_usernames||[])];this._renderWatcherExcludes();
 
@@ -1817,9 +1820,13 @@ async _loadWatcherChatList(selectedIds=[]){const el=document.getElementById('w-c
 
   try{
 
-    const accId=this._watcherActiveAccountId||(this.accounts[0]?.id||1);
-
-    const d=await API.getChats(accId);this._watcherChats=Array.isArray(d?.chats)?d.chats:(d?.command_id&&typeof API.pollCommand==='function'?((await API.pollCommand(d.command_id))?.result?.chats||[]):[]);
+    // Join rules watch groups through the observer nick(s), so list THEIR groups;
+    // keyword rules listen with the sender nick.
+    const obs=(this._watcherType==='join')?(this._watcherObserverIds||[]):[];
+    const accIds=obs.length?obs:[this._watcherActiveAccountId||(this.accounts[0]?.id||1)];
+    const fetchChats=async id=>{const d=await API.getChats(id);return Array.isArray(d?.chats)?d.chats:(d?.command_id&&typeof API.pollCommand==='function'?((await API.pollCommand(d.command_id))?.result?.chats||[]):[])};
+    const lists=await Promise.all(accIds.map(id=>fetchChats(id).catch(()=>[])));
+    const seen=new Set();this._watcherChats=lists.flat().filter(c=>{const k=Number(c.chat_id);if(seen.has(k))return false;seen.add(k);return true});
 
     this._renderWatcherChatList(this._watcherChats,selSet)
 

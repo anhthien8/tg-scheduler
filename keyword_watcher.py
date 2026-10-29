@@ -299,29 +299,13 @@ async def _get_group_admin_ids(client, group_id: int) -> set:
             return ids
 
     try:
-        from telethon.tl.functions.channels import GetParticipantsRequest
-        from telethon.tl.types import (
-            ChannelParticipantAdmin,
-            ChannelParticipantCreator,
-            ChannelParticipantsAdmins,
-        )
-        # Resolve input peer for the group
+        from telethon.tl.types import ChannelParticipantsAdmins
+        # iter_participants handles both supergroups and basic groups
+        # (basic groups don't support channels.GetParticipantsRequest).
         input_chat = await client.get_input_entity(group_id)
-        result = await client(GetParticipantsRequest(
-            channel=input_chat,
-            filter=ChannelParticipantsAdmins(),
-            offset=0,
-            limit=200,
-            hash=0,
-        ))
         admin_ids = set()
-        for p in result.participants:
-            if isinstance(p, (ChannelParticipantAdmin, ChannelParticipantCreator)):
-                admin_ids.add(p.user_id)
-        # Also add any bots from the user list
-        for u in result.users:
-            if getattr(u, "bot", False):
-                admin_ids.add(u.id)
+        async for u in client.iter_participants(input_chat, filter=ChannelParticipantsAdmins, limit=200):
+            admin_ids.add(u.id)
         _admin_cache[group_id] = (admin_ids, now)
         logger.info(f"[AdminCache] Group {group_id}: cached {len(admin_ids)} admin/bot IDs")
         return admin_ids

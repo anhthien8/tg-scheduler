@@ -13,9 +13,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TG Scheduler">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/css/style.css?v=484">
-  <link rel="stylesheet" href="/static/css/themes.css?v=484">
-  <script src="/static/js/theme.js?v=484"></script>
+  <link rel="stylesheet" href="/static/css/style.css?v=486">
+  <link rel="stylesheet" href="/static/css/themes.css?v=486">
+  <script src="/static/js/theme.js?v=486"></script>
   <!-- Boot splash: paints instantly (CSS-only, no JS) so the user never sees a
        blank white screen while the app bundle parses/executes. Hidden as soon
        as app.js runs (body.app-ready). -->
@@ -1914,7 +1914,7 @@
             <div id="w-keywords-tags" class="wf-tags"></div>
           </div>
           <div class="form-group">
-            <label class="form-label wf-label">Loại trừ username <span class="info-i" tabindex="0" data-tip="Những username / user_id này sẽ không bao giờ nhận DM, kể cả khi gõ đúng từ khóa. Ví dụ: admin, mod, đồng nghiệp.">i</span></label>
+            <label class="form-label wf-label">Loại trừ username <span class="info-i" tabindex="0" data-tip="Những username / user_id này sẽ không bao giờ nhận DM, kể cả khi gõ đúng từ khóa. Mặc định hệ thống đã TỰ ĐỘNG loại trừ toàn bộ admin, chủ nhóm và bot của các nhóm đang theo dõi, nên chỉ cần thêm đồng nghiệp hoặc người quen.">i</span></label>
             <div class="wf-inline">
               <input type="text" class="form-input" id="w-exclude-input" placeholder="@username"
                 onkeydown="if(event.key==='Enter'){App.addWatcherExclude();event.preventDefault()}">
@@ -2050,17 +2050,17 @@
     </div>
   </div>
 
-  <script defer src="/static/js/polling.js?v=484"></script>
-  <script defer src="/static/js/api.js?v=484"></script>
-  <script defer src="/static/js/discord.js?v=484"></script>
-  <script defer src="/static/js/members.js?v=484"></script>
-  <script defer src="/static/js/analytics.js?v=484"></script>
-  <script defer src="/static/js/ai_agents.js?v=484"></script>
-  <script defer src="/static/js/ai_followup.js?v=484"></script>
-  <script defer src="/static/js/changelog.js?v=484"></script>
-  <script defer src="/static/js/help.js?v=484"></script>
-  <script defer src="/static/js/engagement.js?v=484"></script>
-  <script defer src="/static/js/app.js?v=484"></script>
+  <script defer src="/static/js/polling.js?v=486"></script>
+  <script defer src="/static/js/api.js?v=486"></script>
+  <script defer src="/static/js/discord.js?v=486"></script>
+  <script defer src="/static/js/members.js?v=486"></script>
+  <script defer src="/static/js/analytics.js?v=486"></script>
+  <script defer src="/static/js/ai_agents.js?v=486"></script>
+  <script defer src="/static/js/ai_followup.js?v=486"></script>
+  <script defer src="/static/js/changelog.js?v=486"></script>
+  <script defer src="/static/js/help.js?v=486"></script>
+  <script defer src="/static/js/engagement.js?v=486"></script>
+  <script defer src="/static/js/app.js?v=486"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">
@@ -2183,6 +2183,6 @@
     </div>
     <button id="pwa-install-btn" class="btn btn-primary btn-full" onclick="PWA.install()">📲 Cài ứng dụng</button>
   </div>
-  <script src="/static/js/pwa.js?v=484"></script>
+  <script src="/static/js/pwa.js?v=486"></script>
 </body>
 </html>
