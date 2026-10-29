@@ -1911,13 +1911,33 @@ addWatcherMessage(type,data=null){
 
   const _esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-  let inner=`<div class="msg-item-header"><span class="msg-item-type">${type.toUpperCase()}</span><label class="msg-variant-label">Phiên bản <span class="info-i" tabindex="0" data-tip="Muốn thử nhiều kịch bản khác nhau? Đánh số cho từng kịch bản (0, 1, 2…). Các tin cùng số gửi chung với nhau. Hệ thống tự xoay vòng các phiên bản và ưu tiên bản có nhiều người trả lời hơn. Chỉ có 1 kịch bản thì để hết là 0.">i</span> <input type="number" min="0" step="1" class="msg-variant" value="${_variant}" style="width:52px"></label><button class="msg-remove" onclick="this.closest('.msg-item').remove()">✕</button></div>`;
+  let inner=`<div class="msg-item-header"><span class="msg-item-type">${type.toUpperCase()}</span><label class="msg-variant-label">Phiên bản <span class="info-i" tabindex="0" data-tip="Dùng để A/B test nhiều kịch bản. Bấm + Text để thêm tin thứ 2 và đặt số khác (vd tin 1 = 0, tin 2 = 1). Mỗi người nhận chỉ nhận 1 phiên bản; hệ thống xoay vòng và ưu tiên bản có nhiều người trả lời hơn. Đổi số trên 1 tin duy nhất sẽ không có tác dụng gì.">i</span> <input type="number" min="0" step="1" class="msg-variant" value="${_variant}" style="width:52px" oninput="App._updateVariantHint()"></label><button class="msg-remove" onclick="this.closest('.msg-item').remove()">✕</button></div>`;
 
-  if(type==='text')inner+=`<textarea class="form-textarea msg-content" placeholder="Nội dung DM">${_esc(data?.content)}</textarea>`;
+  if(type==='text')inner+=`<textarea class="form-textarea msg-content" placeholder="Nội dung DM, vd: {Hey|Hi} {name}, saw you in {group}...">${_esc(data?.content)}</textarea>${App._msgTagBar()}`;
 
-  else if(['photo','video','document'].includes(type))inner+=`<div class="form-group" style="margin-bottom:8px"><input type="file" class="form-input msg-file" onchange="App.handleFileUpload(this)"><input type="hidden" class="msg-media-path" value="${_esc(data?.media_path)}">${App.mediaPreview(data?.media_path,type)}</div><textarea class="form-textarea msg-content" placeholder="Caption" rows="2">${_esc(data?.content)}</textarea>`;
+  else if(['photo','video','document'].includes(type))inner+=`<div class="form-group" style="margin-bottom:8px"><input type="file" class="form-input msg-file" onchange="App.handleFileUpload(this)"><input type="hidden" class="msg-media-path" value="${_esc(data?.media_path)}">${App.mediaPreview(data?.media_path,type)}</div><textarea class="form-textarea msg-content" placeholder="Caption" rows="2">${_esc(data?.content)}</textarea>${App._msgTagBar()}`;
 
-  div.innerHTML=inner;list.appendChild(div)},
+  div.innerHTML=inner;list.appendChild(div);this._updateVariantHint()},
+
+// Personalization tags (replaced per recipient by personalization.py) + spintax.
+_msgTagBar(){
+  const tags=[['{name}','Tên (first name, không có thì username)'],['{full_name}','Họ và tên'],['{username}','Username không có @'],['{group}','Tên nhóm nơi gặp người này'],['{Hey|Hi|Hello}','Spintax: chọn ngẫu nhiên 1 lựa chọn cho mỗi người, chống trùng lặp/spam']];
+  return '<div class="msg-tags"><span class="info-i" tabindex="0" data-tip="Bấm để chèn vào vị trí con trỏ. {name} hoặc [Name] đều được thay bằng tên người nhận. Dạng {a|b|c} chọn ngẫu nhiên 1 câu cho mỗi người nên mỗi DM khác nhau, giảm bị đánh dấu spam.">i</span>'+tags.map(([t,d])=>`<button type="button" class="msg-tag" title="${d}" onmousedown="event.preventDefault()" onclick="App._insertMsgTag(this,'${t}')">${t}</button>`).join('')+'</div>'},
+
+_insertMsgTag(btn,tag){
+  const ta=btn.closest('.msg-item')?.querySelector('textarea.msg-content');if(!ta)return;
+  const a=ta.selectionStart??ta.value.length,b=ta.selectionEnd??a;
+  ta.value=ta.value.slice(0,a)+tag+ta.value.slice(b);ta.focus();
+  // Select the spintax options so they can be overwritten straight away.
+  if(tag.includes('|'))ta.setSelectionRange(a+1,a+tag.length-1);else ta.setSelectionRange(a+tag.length,a+tag.length)},
+
+_updateVariantHint(){
+  const list=document.getElementById('w-messages-list');if(!list)return;
+  let hint=document.getElementById('w-variant-hint');
+  if(!hint){hint=document.createElement('div');hint.id='w-variant-hint';hint.className='msg-variant-hint';list.after(hint)}
+  const vs=new Set([...list.querySelectorAll('.msg-variant')].map(i=>parseInt(i.value)||0));
+  hint.innerHTML=vs.size>1?`🔀 Đang A/B test <b>${vs.size} phiên bản</b> (${[...vs].sort((x,y)=>x-y).join(', ')}). Mỗi người nhận 1 phiên bản, ưu tiên bản có tỉ lệ trả lời cao hơn.`:(list.children.length?'Chỉ có 1 phiên bản. Muốn A/B test thì thêm tin và đặt số Phiên bản khác.':'');
+},
 
 async saveWatcher(){
 

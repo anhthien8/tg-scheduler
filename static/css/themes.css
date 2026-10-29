@@ -354,7 +354,7 @@
 .info-i:hover, .info-i:focus { color: var(--accent); border-color: var(--accent); outline: none; }
 .info-i::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
   width: 260px; padding: 8px 10px; border-radius: 8px; background: var(--bg-elevated, #222); color: var(--text);
-  border: 1px solid var(--border); box-shadow: var(--shadow-lg); font-family: inherit; font-size: 12px; font-weight: 400; font-style: normal; line-height: 1.5;
+  border: 1px solid var(--border); box-shadow: var(--shadow-lg); font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif; font-size: 12px; font-weight: 400; font-style: normal; line-height: 1.5;
   text-align: left; white-space: normal; z-index: 50; opacity: 0; pointer-events: none; transition: opacity .12s; }
 .info-i:hover::after, .info-i:focus::after { opacity: 1; }
 .msg-variant-label { display: inline-flex; align-items: center; gap: 6px; }
@@ -422,3 +422,12 @@
 .set-list.set-compact .set-num{max-width:64px}
 .set-list.set-compact .toggle{transform:scale(.8);transform-origin:right center}
 @media (max-width:640px){.set-list.set-compact{grid-template-columns:1fr}.set-list.set-compact .set-row{border-right:0!important}}
+
+/* DM script: quick-insert personalization tags + A/B variant hint */
+.msg-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
+.msg-tags .msg-tag { font: 500 11px/1 'JetBrains Mono', monospace; padding: 4px 7px; border-radius: 6px; border: 1px dashed var(--border); background: var(--bg); color: var(--text2); cursor: pointer; }
+.msg-tags .msg-tag:hover { color: var(--accent); border-color: var(--accent); }
+.msg-variant-hint { font-size: 12px; color: var(--text2); margin: 6px 2px 0; }
+.msg-variant-hint b { color: var(--accent); }
+.msg-variant-label .info-i::after, .msg-tags .info-i::after { left: auto; right: -8px; transform: none; }
+.msg-tags .info-i::after { right: auto; left: -8px; }

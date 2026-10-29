@@ -82,5 +82,24 @@ def apply_personalization(text: str, member_info: dict) -> str:
         # Not a recognized variable — leave as-is
         return match.group(0)
 
+    # {name} and [Name] are both accepted — people naturally type either form.
     result = re.sub(r"\{(\w+)\}", _replace_match, text)
-    return result
+    result = re.sub(r"\[(\w+)\]", _replace_match, result)
+    return apply_spintax(result)
+
+
+_SPIN_RE = re.compile(r"\{([^{}]*\|[^{}]*)\}")
+
+
+def apply_spintax(text: str) -> str:
+    """Pick one random option from each {a|b|c} group (innermost first), so
+    every recipient gets a slightly different message (anti-spam)."""
+    import random
+    if not text or "|" not in text:
+        return text
+    for _ in range(20):  # nested groups resolve inside-out
+        new = _SPIN_RE.sub(lambda m: random.choice(m.group(1).split("|")).strip(), text)
+        if new == text:
+            break
+        text = new
+    return text
