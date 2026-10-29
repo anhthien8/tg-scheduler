@@ -151,6 +151,17 @@ async def test_tags_only_reply_without_decline_is_logged_not_sent(mock_send, moc
     assert "empty after stripping tags" in caplog.text
 
 
+@patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
+@patch("telegram_client.send_text_message", new_callable=AsyncMock)
+async def test_prompt_includes_broker_program(mock_send, mock_chat):
+    await _setup_agent_chat("We are a fintech platform looking for an exchange partner")
+    mock_chat.return_value = "Sounds great"
+    await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
+    prompt = mock_chat.call_args_list[0][0][1]
+    assert "WEEX EXCHANGE BROKER PARTNERSHIP MODEL" in prompt
+    assert "neobank" in prompt and "never quote them" in prompt
+
+
 async def test_decline_closing_reply_language():
     vi = tracker.get_decline_closing_reply([{"role": "user", "content": "Cảm ơn, bên mình không hợp tác"}])
     en = tracker.get_decline_closing_reply([{"role": "user", "content": "Not interested, thanks"}])
