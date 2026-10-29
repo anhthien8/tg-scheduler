@@ -350,6 +350,35 @@ async def _try_call(provider, api_key, prompt, **kwargs):
         raise ValueError("Unknown provider: " + provider)
 
 
+_KEY_TERM_RE = re.compile(
+    r"No[ -][A-Z]{2,}"                                  # No KYC
+    r"|\b[A-Z][a-z]+[A-Z][A-Za-z]*(?: \d+)?"            # MetaTrader 5, TradingView
+    r"|\b[A-Z]{2,}[A-Za-z0-9]*(?: \d+)?\b"              # API, HFT, USDT, MT5
+    r"|\d+(?:[.,]\d+)?\s*(?:[-–]\s*\d+(?:[.,]\d+)?\s*)?%"  # 50-80%
+)
+
+
+def _key_terms(text):
+    """Selling-point tokens a remix must keep: acronyms, CamelCase product names,
+    'No KYC'-style claims and percentages."""
+    seen, out = set(), []
+    for m in _KEY_TERM_RE.finditer(text or ""):
+        t = m.group(0).strip()
+        if t.lower() in seen or any(t.lower() in o.lower() for o in out):
+            continue
+        seen.add(t.lower())
+        out.append(t)
+    return out[:20]
+
+
+def _key_points_rule(original_text):
+    terms = _key_terms(original_text)
+    if not terms:
+        return ""
+    return ("11. MUST-KEEP KEY POINTS (each must appear in the output as the same Latin term): "
+            + ", ".join(terms) + "\n")
+
+
 def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto_translate_native=False, member_info=None):
     name_hint = ""
     if sender_name:
@@ -420,10 +449,14 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
         "6. Write naturally like a real person texting a colleague or collaborator: casual, friendly, authentic, peer-to-peer. Avoid robotic sales pitches or corporate jargon.\n"
         "7. STRUCTURE AS A SINGLE COHESIVE MESSAGE (3-Act Flow):\n"
         "   - Hook / Warm greeting with context\n"
-        "   - Clear, concise core value (1-2 sentences)\n"
+        "   - Core value: carry over EVERY concrete selling point from the original (features, product names, numbers, percentages, terms).\n"
+        "     If there are 3+ points, list them compactly (a short list or one tight sentence) instead of summarizing them away.\n"
         "   - End with a low-friction, polite open-ended question to invite genuine dialogue.\n"
+        "10. NEVER shorten by dropping selling points. Aim for roughly the same length as the original (80-120%).\n"
+        "    Keep technical/brand terms in their original Latin form even when translating (e.g. No KYC, API, HFT, MetaTrader 5, USDT).\n"
         "8. Output ONLY the rephrased message. No intro, no quotes, no explanation, no multiple message splits.\n"
         "9. FORMAT for visual breathing room: separate thoughts with a blank line between paragraphs (double newline). Never output a dense wall of text.\n"
+        + _key_points_rule(original_text)
         + instruction_addon
         + name_hint
         + "\n\nOriginal message:\n---\n"
