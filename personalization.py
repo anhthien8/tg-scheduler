@@ -71,6 +71,10 @@ def apply_personalization(text: str, member_info: dict) -> str:
         "username": username,
         "group": group,
         "community": group,
+        # No-underscore aliases: [fullname], [firstname], [lastname]
+        "fullname": full_name,
+        "firstname": first_name or username or _DEFAULT_NAME_FALLBACK,
+        "lastname": last_name,
     }
 
     # Case-insensitive replacement using regex

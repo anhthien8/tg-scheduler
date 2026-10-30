@@ -1921,7 +1921,7 @@ addWatcherMessage(type,data=null){
 
 // Personalization tags (replaced per recipient by personalization.py) + spintax.
 _msgTagBar(){
-  const tags=[['{name}','Tên (first name, không có thì username)'],['{full_name}','Họ và tên'],['{username}','Username không có @'],['{group}','Tên nhóm nơi gặp người này'],['{Hey|Hi|Hello}','Spintax: chọn ngẫu nhiên 1 lựa chọn cho mỗi người, chống trùng lặp/spam']];
+  const tags=[['{name}','Tên (first name, không có thì username)'],['{full_name}','Họ và tên (cũng nhận [fullname])'],['{last_name}','Họ (cũng nhận [lastname])'],['{username}','Username không có @'],['{group}','Tên nhóm nơi gặp người này'],['{Hey|Hi|Hello}','Spintax: chọn ngẫu nhiên 1 lựa chọn cho mỗi người, chống trùng lặp/spam']];
   return '<div class="msg-tags"><span class="info-i" tabindex="0" data-tip="Bấm để chèn vào vị trí con trỏ. {name} hoặc [Name] đều được thay bằng tên người nhận. Dạng {a|b|c} chọn ngẫu nhiên 1 câu cho mỗi người nên mỗi DM khác nhau, giảm bị đánh dấu spam.">i</span>'+tags.map(([t,d])=>`<button type="button" class="msg-tag" title="${d}" onmousedown="event.preventDefault()" onclick="App._insertMsgTag(this,'${t}')">${t}</button>`).join('')+'</div>'},
 
 _insertMsgTag(btn,tag){
