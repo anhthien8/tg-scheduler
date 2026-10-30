@@ -1359,7 +1359,13 @@ def _make_handler(account_id: int):
 
                 msg_content = event.raw_text or event.message.message or ""
                 if not msg_content.strip():
-                    return
+                    # Stickers/media carry no text; still count them as a manual opener.
+                    if getattr(event.message, "sticker", None):
+                        msg_content = "[Sticker]"
+                    elif getattr(event.message, "media", None):
+                        msg_content = "[Media]"
+                    else:
+                        return
 
                 # If AI is currently sending, this outgoing msg IS the AI message — skip
                 if (account_id, dest_id) in _pending_ai_sends:
@@ -1379,7 +1385,27 @@ def _make_handler(account_id: int):
 
                 # Human admin is manually sending → ALWAYS lock out AI
                 existing_f_chat = await db.get_followup_chat(account_id, dest_id)
-                if existing_f_chat:
+                if not existing_f_chat:
+                    # Admin opened a DM with a brand-new user: start an active AI
+                    # chat with this opener as context, so the AI Agent answers
+                    # when the user replies (no human takeover for openers).
+                    if await is_internal_account_user(dest_id):
+                        return
+                    try:
+                        peer = await event.get_chat()
+                    except Exception:
+                        peer = None
+                    if peer is not None and getattr(peer, "bot", False):
+                        return
+                    p_user = getattr(peer, "username", None) or ""
+                    p_name = (f"{getattr(peer, 'first_name', '') or ''} "
+                              f"{getattr(peer, 'last_name', '') or ''}").strip() or p_user or str(dest_id)
+                    await db.get_or_create_followup_chat(
+                        account_id=account_id, user_id=dest_id, username=p_user, name=p_name)
+                    await db.append_followup_chat_message(account_id, dest_id, "assistant", msg_content)
+                    logger.info("[AIFollowUp] Manual opener to new user %d (acc=%d) — AI will reply when they answer",
+                                dest_id, account_id)
+                elif existing_f_chat:
                     logger.info(
                         "🚨 [AIFollowUp] Human Admin manual message detected to user %d (acc=%d)! Pausing AI Agent.",
                         dest_id, account_id
