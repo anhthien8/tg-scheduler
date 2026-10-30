@@ -355,8 +355,8 @@
 .info-i::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
   width: 260px; padding: 8px 10px; border-radius: 8px; background: var(--bg-elevated, #222); color: var(--text);
   border: 1px solid var(--border); box-shadow: var(--shadow-lg); font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif; font-size: 12px; font-weight: 400; font-style: normal; line-height: 1.5;
-  text-align: left; white-space: normal; z-index: 50; opacity: 0; pointer-events: none; transition: opacity .12s; }
-.info-i:hover::after, .info-i:focus::after { opacity: 1; }
+  text-align: left; white-space: normal; z-index: 50; display: none; pointer-events: none; }
+.info-i:hover::after, .info-i:focus::after { display: block; }
 .msg-variant-label { display: inline-flex; align-items: center; gap: 6px; }
 /* ── Uploaded media preview ── */
 .media-prev { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 6px; border: 1px solid var(--border);
