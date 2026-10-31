@@ -872,6 +872,35 @@ async def _source_agent_id(campaign_id, watcher_id):
     return None
 
 
+_MAX_IMAGE_BYTES = 4 * 1024 * 1024
+
+
+async def _event_images(event) -> list[str]:
+    """Photo (or image file) on the incoming message as a base64 data URL, for vision models."""
+    msg = getattr(event, "message", None) if event is not None else None
+    if msg is None:
+        return []
+    mime = "image/jpeg"
+    if getattr(msg, "photo", None):
+        pass
+    else:
+        doc = getattr(msg, "document", None)
+        mime = (getattr(doc, "mime_type", "") or "") if doc else ""
+        if not mime.startswith("image/") or mime == "image/webp" and getattr(msg, "sticker", None):
+            return []
+        if (getattr(doc, "size", 0) or 0) > _MAX_IMAGE_BYTES:
+            return []
+    try:
+        data = await msg.download_media(file=bytes)
+    except Exception as ex:
+        logger.debug("[AIFollowUp] Image download failed: %s", ex)
+        return []
+    if not data or len(data) > _MAX_IMAGE_BYTES:
+        return []
+    import base64
+    return [f"data:{mime};base64,{base64.b64encode(data).decode()}"]
+
+
 async def generate_and_send_ai_reply_for_chat(
     account_id: int,
     user_id: int,
@@ -1138,7 +1167,11 @@ async def generate_and_send_ai_reply_for_chat(
 
     # _pending_ai_sends already locked at guard check (line 291)
     try:
-        ai_reply = await ai_rmx.generate_chat_response(history, combined_prompt, ai_provider, ai_keys, **kwargs)
+        _imgs = await _event_images(event)
+        if _imgs:
+            logger.info("[AIFollowUp] 🖼 Passing %d image(s) to %s for user %d", len(_imgs), ai_provider, user_id)
+        ai_reply = await ai_rmx.generate_chat_response(
+            history, combined_prompt, ai_provider, ai_keys, **({**kwargs, "images": _imgs} if _imgs else kwargs))
 
         if not ai_reply:
             return False
@@ -1342,6 +1375,27 @@ async def is_internal_account_user(user_id: int) -> bool:
     return int(user_id) in all_ids
 
 
+async def _seed_history_from_dialog(account_id: int, user_id: int, event, limit: int = 12) -> int:
+    """Copy the last messages before `event` from Telegram into an empty AI history."""
+    try:
+        msgs = await event.client.get_messages(user_id, limit=limit, max_id=event.message.id)
+    except Exception as ex:
+        logger.debug("[AIFollowUp] Dialog seed fetch failed for %d: %s", user_id, ex)
+        return 0
+    n = 0
+    for m in reversed(msgs or []):
+        txt = (getattr(m, "message", "") or "").strip()
+        if not txt:
+            txt = "[Sticker]" if getattr(m, "sticker", None) else ("[Media]" if getattr(m, "media", None) else "")
+        if not txt:
+            continue
+        await db.append_followup_chat_message(account_id, user_id, "assistant" if m.out else "user", txt)
+        n += 1
+    if n:
+        logger.info("[AIFollowUp] Seeded %d prior dialog messages for user %d (acc=%d)", n, user_id, account_id)
+    return n
+
+
 def _make_handler(account_id: int):
     """Factory creating the event handler for a specific account."""
 
@@ -1473,6 +1527,17 @@ def _make_handler(account_id: int):
             media_tag = "[Attached Document Proof]"
 
         message_text = f"{raw_msg} {media_tag}".strip() if media_tag else raw_msg
+
+        # Keep the quoted message: "Which language is this?" is meaningless without it.
+        try:
+            if getattr(event.message, "reply_to_msg_id", None):
+                replied = await event.get_reply_message()
+                q = (getattr(replied, "message", "") or "").strip() if replied else ""
+                if q:
+                    who = "your earlier message" if getattr(replied, "out", False) else "their earlier message"
+                    message_text = f'{message_text}\n[Quoting {who}: "{q[:600]}"]'
+        except Exception as _q_err:
+            logger.debug("[Inbox] Quoted message fetch error: %s", _q_err)
 
         # Bot check
         if is_bot_account(sender_username, sender_name, message_text,
@@ -1607,6 +1672,11 @@ def _make_handler(account_id: int):
                         logger.info("[AIFollowUp] ⏰ 12h elapsed since human takeover for user %d — auto-resuming!", sender_id)
                         await db.update_followup_chat_status(account_id, sender_id, "active")
                         current_status = "active"
+
+                # Opener sent by a campaign/rule/manual flow may not be stored.
+                # Seed from the real dialog so the AI knows what it already said.
+                if not (chat.get("history") or []):
+                    await _seed_history_from_dialog(account_id, sender_id, event)
 
                 # Always append incoming user message
                 chat = await db.append_followup_chat_message(account_id, sender_id, "user", message_text)

@@ -598,6 +598,12 @@ _HUMAN_STYLE_RULE = (
     "\n\nWRITING STYLE (anti AI-detection, mandatory): write like a real person texting on Telegram. "
     "NEVER use semicolons (;), em dashes (—), en dashes as separators, or bullet-like structure in casual chat. "
     "Use short sentences, commas and periods only. No 'Furthermore/Moreover/Additionally', no perfectly balanced clauses."
+    "\n\nFACT CHECK (mandatory): when the user asks about a message you sent (its language, wording, meaning), "
+    "look at your earlier messages in the history and any [Quoting ...] text, and answer from that. "
+    "If an earlier message was in another language, admit it naturally (e.g. 'oh sorry, that one went out in Russian by mistake') "
+    "and restate it in the user's language. If an image is attached to the latest message you can see it, read it carefully "
+    "and answer from what it really shows. Images from earlier messages are NOT visible to you: never describe them, "
+    "ask the user to resend or type the part they mean. Never invent facts you cannot see."
 )
 
 
@@ -700,7 +706,7 @@ async def _generate_chat_response_raw(
             alt_keys = [k.strip() for k in alt_keys if k and str(k).strip()]
             if not alt_keys:
                 continue
-            alt_kwargs = {}
+            alt_kwargs = {"images": kwargs.get("images")} if kwargs.get("images") else {}
             if alt_prov == "openai_compatible":
                 alt_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
                 alt_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
@@ -727,7 +733,25 @@ async def _generate_chat_response_raw(
     return None
 
 
+_VISION_PROVIDERS = ("openai", "openai_compatible")
+
+
+def _attach_images(messages: list[dict], images: list[str]) -> list[dict]:
+    """Return a copy where the last user message carries the images (OpenAI vision format)."""
+    out = [dict(m) for m in messages]
+    for m in reversed(out):
+        if m.get("role") == "user":
+            parts = [{"type": "text", "text": m.get("content") or ""}]
+            parts += [{"type": "image_url", "image_url": {"url": u}} for u in images]
+            m["content"] = parts
+            break
+    return out
+
+
 async def _call_chat_provider(provider: str, api_key: str, messages: list[dict], **kwargs) -> str | None:
+    images = kwargs.pop("images", None)
+    if images and provider in _VISION_PROVIDERS:
+        messages = _attach_images(messages, images)
     if provider == "openai":
         url = "https://api.openai.com/v1/chat/completions"
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
