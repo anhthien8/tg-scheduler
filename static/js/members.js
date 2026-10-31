@@ -3391,6 +3391,8 @@ const Members = {
         if (!card) return;
         const slot = card.querySelector('.spam-badge-slot');
         if (slot) slot.innerHTML = this._spamBadgeHtml(r.status, r.message);
+        App._spamStatus = App._spamStatus || {};
+        App._spamStatus[r.account_id] = r;
       });
 
       const freeCount = results.filter(r => r.status === 'free').length;

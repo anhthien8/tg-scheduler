@@ -1653,7 +1653,7 @@ async def deep_crawl_similar_channels(
 
 
 
-async def check_spam_status(account_id: int) -> dict:
+async def _check_spam_status_raw(account_id: int) -> dict:
     """Check account spam status by messaging @SpamBot.
 
     Returns dict with keys:
@@ -1726,6 +1726,20 @@ async def check_spam_status(account_id: int) -> dict:
             "message": f"Lỗi kiểm tra: {str(e)[:200]}",
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
+
+
+async def check_spam_status(account_id: int) -> dict:
+    """Check @SpamBot and remember the result so the Accounts page can show it."""
+    result = await _check_spam_status_raw(account_id)
+    try:
+        import json as _json
+        import database as _db
+        cache = _json.loads(await _db.get_setting("spam_status_cache", "{}") or "{}")
+        cache[str(account_id)] = {k: result.get(k) for k in ("status", "message", "checked_at")}
+        await _db.set_setting("spam_status_cache", _json.dumps(cache, ensure_ascii=False))
+    except Exception as e:
+        logger.debug(f"[SpamCheck] Could not cache result for {account_id}: {e}")
+    return result
 
 
 async def invite_to_channel(account_id: int, channel, users) -> dict:

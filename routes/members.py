@@ -1709,6 +1709,16 @@ async def check_account_spam(account_id: int):
     return {"account_id": account_id, **result}
 
 
+@router.get("/accounts/spam-status")
+async def get_spam_status_cache():
+    """Last known @SpamBot result per account (from manual checks and campaign pre-checks)."""
+    import json as _json
+    try:
+        return {"statuses": _json.loads(await db.get_setting("spam_status_cache", "{}") or "{}")}
+    except Exception:
+        return {"statuses": {}}
+
+
 @router.post("/accounts/spam-check-all")
 async def check_all_accounts_spam():
     """Check spam status of all connected accounts via @SpamBot."""
@@ -2219,15 +2229,24 @@ async def _run_campaign(campaign_id: int):
                         peer = await client.get_entity(username)
                     else:
                         peer = await client.get_entity(user_id)
-                except Exception:
+                except Exception as pe1:
                     try:
                         from telethon.tl.types import PeerUser
                         peer = await client.get_entity(PeerUser(user_id))
                     except Exception as pe2:
                         skipped += 1
-                        await db.finish_dm_campaign_reservation(campaign_id, user_id, "failed", str(pe2)[:80])
+                        reason = str(pe1 if username else pe2)[:80]
+                        # A username that no longer exists will never resolve: record it as
+                        # done so auto-resume stops retrying the same dead target forever.
+                        gone = bool(username) and any(k in str(pe1) for k in (
+                            "No user has", "Nobody is using", "UsernameNotOccupied",
+                            "UsernameInvalid", "Cannot find any entity"))
+                        await db.finish_dm_campaign_reservation(
+                            campaign_id, user_id, "sent" if gone else "failed",
+                            ("unresolvable: " if gone else "") + reason)
                         await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username,
-                                                    "skipped", f"Không resolve được: {str(pe2)[:80]}")
+                                                    "skipped", f"Không resolve được: {reason}"
+                                                    + (" (username không tồn tại — bỏ qua vĩnh viễn)" if gone else ""))
                         await asyncio.sleep(base_delay)  # Always respect delay to avoid FloodWait
                         continue
 

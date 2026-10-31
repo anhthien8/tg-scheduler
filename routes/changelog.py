@@ -8,11 +8,27 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.12.0",
+        "date": "31/10/2026",
+        "title": "🌍 AI nhắn đúng ngôn ngữ từng user, đọc được ảnh + 🛡️ badge SpamBot trên trang Tài khoản",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "AI chọn ngôn ngữ theo hồ sơ của chính người nhận (ngôn ngữ Telegram, mã vùng SĐT, location, bio, kênh, group), mặc định tiếng Anh. AI Agent đọc lịch sử chat thật, tin trích dẫn và ảnh user gửi. Bạn chủ động DM user mới thì AI tự tiếp tục trả lời. Trang Tài khoản có nút kiểm tra SpamBot và badge trạng thái.",
+        "changes": [
+            {"type": "feature", "title": "Ngôn ngữ DM theo từng user", "desc": "Thứ tự: ngôn ngữ cài trong Telegram, mã vùng SĐT, location, bio, tên hiển thị, kênh cá nhân, group nguồn. Không tìm được thì dùng tiếng Anh. Bỏ việc đoán ngôn ngữ theo tên chiến dịch (trước đây chiến dịch tên 'rus' ép tiếng Nga cho mọi người).", "tag": "AI"},
+            {"type": "feature", "title": "AI Agent đọc ảnh và tin trích dẫn", "desc": "Ảnh user gửi được chuyển cho model có vision; tin nhắn reply giữ nguyên đoạn được trích dẫn; lịch sử AI lấy từ hội thoại Telegram thật.", "tag": "AI"},
+            {"type": "feature", "title": "Chủ động DM user mới → AI tự trả lời tiếp", "desc": "Khi bạn tự nhắn tin mở đầu (kể cả sticker/ảnh) cho user mới, cuộc chat được bật AI và AI trả lời khi user phản hồi.", "tag": "AI Agent"},
+            {"type": "feature", "title": "Tag [fullname] / [firstname] / [lastname]", "desc": "Thêm alias cá nhân hóa và nút chèn tag họ trong ô soạn tin.", "tag": "DM"},
+            {"type": "feature", "title": "Nút 🛡️ Kiểm tra Spam + badge trạng thái", "desc": "Trang Tài khoản hiện ✅ Sạch / 🚫 Bị giới hạn / ⚠️ Không rõ cạnh tên, lưu lại sau khi tải lại trang và tự cập nhật mỗi lần chiến dịch kiểm tra SpamBot.", "tag": "Tài khoản"},
+            {"type": "fix", "title": "Không gửi lại mãi cho username không tồn tại", "desc": "Username đã bị xóa được bỏ qua vĩnh viễn thay vì thử lại mỗi lần chiến dịch tự chạy; log ghi đúng lỗi của username.", "tag": "Campaign"},
+        ],
+    },
+    {
         "version": "v3.11.0",
         "date": "29/10/2026",
         "title": "📱 PWA + đăng nhập theo team, giao diện gọn cho mobile, AI dự phòng thông minh hơn",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Cài dashboard như app trên điện thoại (PWA), mỗi thành viên team có tài khoản riêng, chọn theme. Keyword DM, form rule và cửa sổ chiến dịch được thiết kế lại gọn, có icon ⓘ giải thích. AI tự chuyển sang 9Router local khi Cloudflare chặn; Groq dùng model mới lấy trực tiếp theo API key.",
         "changes": [
             {"type": "feature", "title": "PWA, tài khoản team và theme", "desc": "Cài dashboard lên màn hình chính điện thoại; mỗi thành viên đăng nhập bằng tài khoản riêng, tên hiện ở sidebar; chọn theme sáng/tối/màu.", "tag": "UI"},

@@ -1085,7 +1085,7 @@ async removeDashTask(i){
   await this._saveDashTasks();this._renderDashboardTasks();
 },
 
-async loadAccounts(){try{const[d,agentData]=await Promise.all([API.getAccounts(),API.get('/api/ai-agents').catch(()=>({agents:[]}))]);this.accounts=d.accounts||[];App._accounts=this.accounts;this._aiAgents=agentData.agents||[];this.renderAccounts()}catch(e){this.toast(e.message,'error')}},
+async loadAccounts(){try{const[d,agentData]=await Promise.all([API.getAccounts(),API.get('/api/ai-agents').catch(()=>({agents:[]}))]);this.accounts=d.accounts||[];App._accounts=this.accounts;this._aiAgents=agentData.agents||[];this.renderAccounts();API.get('/api/members/accounts/spam-status').then(r=>{this._spamStatus=r.statuses||{};this.renderAccounts()}).catch(()=>{})}catch(e){this.toast(e.message,'error')}},
 
 _accState(a){if(a.is_paused)return 'paused';if(a.session_error||!a.is_logged_in)return 'login';return 'active'},
 
@@ -1120,7 +1120,7 @@ renderAccounts(){
   <span class="acc-who" title="${esc(tip)}">
     <span class="acc-ava">${esc((name||'T').trim().charAt(0).toUpperCase())}</span>
     <span class="acc-id">
-      <span class="acc-name"><b>${esc(name)}</b>${a.is_premium?'<span class="acc-tag" title="Premium · 50 DM/ngày">Premium</span>':''}${a.is_flagged?`<button class="acc-flag" onclick="App.showAccountWarnings(${a.id})" title="${esc(a.flag_reason||'')} — bấm để xem chi tiết">Cảnh báo</button>`:''}<span class="spam-badge-slot"></span></span>
+      <span class="acc-name"><b>${esc(name)}</b>${a.is_premium?'<span class="acc-tag" title="Premium · 50 DM/ngày">Premium</span>':''}${a.is_flagged?`<button class="acc-flag" onclick="App.showAccountWarnings(${a.id})" title="${esc(a.flag_reason||'')} — bấm để xem chi tiết">Cảnh báo</button>`:''}<span class="spam-badge-slot">${this._spamBadge(a.id)}</span></span>
       <span class="acc-sub">${esc(sub)} <button class="acc-link" onclick="App.togglePremium(${a.id}, ${!a.is_premium})">${a.is_premium?'Hạ Thường':'Nâng Premium'}</button></span>
     </span>
   </span>
@@ -1134,6 +1134,8 @@ renderAccounts(){
   </span>
 </div>`}).join('');
 },
+
+_spamBadge(id){const r=(this._spamStatus||{})[id];if(!r||typeof Members==='undefined')return '';const when=r.checked_at?new Date(r.checked_at).toLocaleString('vi-VN'):'';return Members._spamBadgeHtml(r.status,`Kiểm tra lúc ${when}${r.message?' — '+r.message:''}`)},
 
 openAddAccountModal(){this._bulkQueue=null;document.getElementById('acc-step-parallel')?.classList.add('hidden');document.getElementById('acc-step-relogin')?.classList.add('hidden');this._bulkDone=[];this._bulkFailed=[];(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-phone') || me_dummy).value = '';const proxyEl=document.getElementById('acc-proxy');if(proxyEl)proxyEl.value='';const bulk=document.getElementById('acc-bulk-input');if(bulk)bulk.value='';document.getElementById('acc-bulk-progress')?.classList.add('hidden');document.getElementById('acc-bulk-skip')?.classList.add('hidden');this.setAccountAddMode('single');(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
 
