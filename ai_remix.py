@@ -2,6 +2,7 @@
 AI Remix Module - Supports Gemini, DeepSeek, OpenAI, Groq, and OpenAI-Compatible APIs.
 Round-robin rotation across multiple API keys per provider to avoid rate limits.
 """
+import asyncio
 import json
 import logging
 import re
@@ -379,6 +380,145 @@ def _key_points_rule(original_text):
             + ", ".join(terms) + "\n")
 
 
+LANGUAGE_NAMES = {
+    "en": "English", "ru": "Russian", "uk": "Ukrainian", "zh": "Chinese", "ja": "Japanese",
+    "ko": "Korean", "vi": "Vietnamese", "th": "Thai", "ar": "Arabic", "fa": "Persian",
+    "he": "Hebrew", "hi": "Hindi", "tr": "Turkish", "es": "Spanish", "pt": "Portuguese",
+    "fr": "French", "de": "German", "it": "Italian", "id": "Indonesian", "ms": "Malay",
+    "pl": "Polish", "nl": "Dutch", "bn": "Bengali", "ur": "Urdu",
+}
+
+# Phone country code -> language (only used when Telegram exposes the number).
+_PHONE_LANG = [
+    ("380", "uk"), ("375", "ru"), ("998", "ru"), ("996", "ru"), ("992", "ru"), ("994", "tr"),
+    ("971", "ar"), ("966", "ar"), ("965", "ar"), ("974", "ar"), ("973", "ar"), ("968", "ar"),
+    ("962", "ar"), ("961", "ar"), ("964", "ar"), ("963", "ar"), ("972", "he"), ("880", "bn"),
+    ("852", "zh"), ("853", "zh"), ("886", "zh"), ("351", "pt"),
+    ("84", "vi"), ("86", "zh"), ("81", "ja"), ("82", "ko"), ("66", "th"), ("62", "id"),
+    ("60", "ms"), ("90", "tr"), ("98", "fa"), ("91", "hi"), ("92", "ur"), ("20", "ar"),
+    ("55", "pt"), ("34", "es"), ("52", "es"), ("54", "es"), ("57", "es"), ("56", "es"),
+    ("51", "es"), ("58", "es"), ("33", "fr"), ("49", "de"), ("43", "de"), ("39", "it"),
+    ("48", "pl"), ("31", "nl"), ("7", "ru"),
+]
+
+_VI_CHARS = set("ăâđêôơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ")
+
+
+# Script ranges (code points) -> language. Kana is checked before Han so Japanese wins.
+_SCRIPTS = [
+    (0x3040, 0x30FF, "ja", 1), (0x0400, 0x04FF, "ru", 2), (0x4E00, 0x9FFF, "zh", 2),
+    (0xAC00, 0xD7AF, "ko", 2), (0x0E00, 0x0E7F, "th", 2), (0x0600, 0x06FF, "ar", 2),
+    (0x0750, 0x077F, "ar", 2), (0x0590, 0x05FF, "he", 2), (0x0900, 0x097F, "hi", 2),
+]
+
+# Latin-script place / language words found in Telegram location, bio or channel titles.
+_PLACE_WORDS = {
+    "ru": ["russia", "moscow", "moskva", "saint petersburg", "st. petersburg", "kazakhstan", "almaty", "astana",
+           "belarus", "minsk", "uzbekistan", "tashkent", "kyrgyzstan", "bishkek", "russian"],
+    "uk": ["ukraine", "kyiv", "kiev", "kharkiv", "odesa", "odessa", "lviv", "ukrainian"],
+    "vi": ["vietnam", "viet nam", "hanoi", "ha noi", "ho chi minh", "saigon", "sai gon", "da nang", "vietnamese"],
+    "zh": ["china", "beijing", "shanghai", "shenzhen", "guangzhou", "hong kong", "taiwan", "taipei", "chinese"],
+    "ja": ["japan", "tokyo", "osaka", "japanese"],
+    "ko": ["korea", "seoul", "busan", "korean"],
+    "th": ["thailand", "bangkok", "thai"],
+    "id": ["indonesia", "jakarta", "bali", "surabaya", "indonesian", "bahasa"],
+    "ms": ["malaysia", "kuala lumpur", "malay"],
+    "tr": ["turkey", "turkiye", "türkiye", "istanbul", "ankara", "turkish"],
+    "fa": ["iran", "tehran", "persian", "farsi"],
+    "ar": ["uae", "dubai", "abu dhabi", "saudi", "riyadh", "egypt", "cairo", "qatar", "doha", "kuwait", "arabic"],
+    "hi": ["india", "mumbai", "delhi", "bangalore", "bengaluru", "hindi"],
+    "ur": ["pakistan", "karachi", "lahore", "islamabad", "urdu"],
+    "bn": ["bangladesh", "dhaka", "bengali", "bangla"],
+    "pt": ["brazil", "brasil", "são paulo", "sao paulo", "rio de janeiro", "portugal", "lisbon", "lisboa", "portuguese"],
+    "es": ["spain", "españa", "madrid", "barcelona", "mexico", "méxico", "argentina", "buenos aires", "colombia",
+           "bogota", "bogotá", "chile", "peru", "perú", "venezuela", "spanish", "español"],
+    "fr": ["france", "paris", "french", "français"],
+    "de": ["germany", "deutschland", "berlin", "munich", "münchen", "austria", "german", "deutsch"],
+    "it": ["italy", "italia", "rome", "roma", "milan", "milano", "italian"],
+    "pl": ["poland", "polska", "warsaw", "warszawa", "polish"],
+    "nl": ["netherlands", "amsterdam", "dutch"],
+    "he": ["israel", "tel aviv", "hebrew"],
+}
+
+
+def _text_lang(text: str) -> str:
+    """Language suggested by one free-text field, or '' if it tells us nothing."""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    for lo, hi, code, need in _SCRIPTS:
+        if sum(1 for ch in t if lo <= ord(ch) <= hi) >= need:
+            return code
+    low = t.lower()
+    if any(ch in _VI_CHARS for ch in low):
+        return "vi"
+    import re as _re
+    for code, words in _PLACE_WORDS.items():
+        for w in words:
+            if _re.search(r"(?<![a-zà-ỹ])" + _re.escape(w) + r"(?![a-zà-ỹ])", low):
+                return code
+    return ""
+
+
+def detect_user_language(member_info: dict | None, with_source: bool = False):
+    """Pick the recipient's language from their own profile. Falls back to English.
+
+    Order: Telegram lang_code, phone country code, Telegram location, bio,
+    display name, personal channel, then the source group as the weakest hint.
+    Campaign names are deliberately ignored (a Russian-named campaign used to
+    force Russian on English speakers).
+    """
+    mi = member_info or {}
+    def done(code, src):
+        return (code, src) if with_source else code
+    lc = str(mi.get("lang_code") or "").strip().lower().replace("_", "-")
+    if lc and lc.split("-")[0] in LANGUAGE_NAMES:
+        return done(lc.split("-")[0], "lang_code")
+    phone = "".join(ch for ch in str(mi.get("phone") or "") if ch.isdigit())
+    if phone:
+        for pre, code in _PHONE_LANG:
+            if phone.startswith(pre):
+                return done(code, "phone")
+    name = f"{mi.get('first_name') or ''} {mi.get('last_name') or ''}".strip()
+    for field, val in (("location", mi.get("location")), ("bio", mi.get("bio")), ("name", name),
+                       ("channel", mi.get("channel_title")), ("group", mi.get("community_hint"))):
+        code = _text_lang(val or "")
+        if code:
+            return done(code, field)
+    return done("en", "default")
+
+
+async def fetch_profile_hints(client, peer) -> dict:
+    """Location, bio and personal channel title from the user's full profile (best effort)."""
+    uid = getattr(peer, "id", None)
+    if not uid:
+        return {}
+    if uid in _PROFILE_HINT_CACHE:
+        return _PROFILE_HINT_CACHE[uid]
+    hints = {}
+    try:
+        from telethon.tl.functions.users import GetFullUserRequest
+        full = await asyncio.wait_for(client(GetFullUserRequest(peer)), timeout=8)
+        fu = full.full_user
+        hints["bio"] = fu.about or ""
+        loc = getattr(fu, "business_location", None)
+        hints["location"] = getattr(loc, "address", "") or ""
+        ch_id = getattr(fu, "personal_channel_id", None)
+        if ch_id:
+            for ch in full.chats or []:
+                if ch.id == ch_id:
+                    hints["channel_title"] = getattr(ch, "title", "") or ""
+    except Exception as ex:
+        logger.debug("[Lang] Full profile fetch failed for %s: %s", uid, ex)
+    if len(_PROFILE_HINT_CACHE) > 5000:
+        _PROFILE_HINT_CACHE.clear()
+    _PROFILE_HINT_CACHE[uid] = hints
+    return hints
+
+
+_PROFILE_HINT_CACHE: dict = {}
+
+
 def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto_translate_native=False, member_info=None):
     name_hint = ""
     if sender_name:
@@ -395,44 +535,13 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
         )
 
     if auto_translate_native:
-        mem_info = member_info or {}
-        lang_code = mem_info.get("lang_code", "") or ""
-        first_name = mem_info.get("first_name", "") or ""
-        last_name = mem_info.get("last_name", "") or ""
-        username = mem_info.get("username", "") or ""
-        likely_language = mem_info.get("likely_language", "") or ""
-        community_hint = mem_info.get("community_hint", "") or ""
-        # Heuristic language detection from name when lang_code is unavailable
-        detected_lang = lang_code
-        if not detected_lang and likely_language:
-            detected_lang = likely_language
-        if not detected_lang:
-            # Prioritize display name; usernames often add Latin noise (e.g. Chinese user @alex123).
-            display_name = f"{first_name} {last_name}".strip() or username
-            # Cyrillic → Russian; CJK → Chinese; Hangul → Korean; Arabic/Persian script
-            cyrillic = sum(1 for c in display_name if '\u0400' <= c <= '\u04ff')
-            cjk = sum(1 for c in display_name if '\u4e00' <= c <= '\u9fff')
-            hangul = sum(1 for c in display_name if '\uac00' <= c <= '\ud7af')
-            arabic = sum(1 for c in display_name if '\u0600' <= c <= '\u06ff' or '\u0750' <= c <= '\u077f')
-            # Require at least two script characters to avoid guessing from one symbol.
-            if cyrillic >= 2:
-                detected_lang = "ru"
-            elif cjk >= 2:
-                detected_lang = "zh"
-            elif hangul >= 2:
-                detected_lang = "ko"
-            elif arabic >= 2:
-                detected_lang = "ar"
+        code, src = detect_user_language(member_info, with_source=True)
+        logger.info("[Lang] Recipient language=%s (from %s)", code, src)
+        lang_name = LANGUAGE_NAMES.get(code, "English")
         lang_rule = (
-            f"\n3. AUTO-LOCALIZATION / NATIVE LANGUAGE RULE:\n"
-            f"   - Target recipient Telegram lang_code: '{lang_code}'\n"
-            f"   - Heuristic detected language: '{detected_lang}'\n"
-            + (f"   - Source community language hint: '{community_hint}'\n" if community_hint else "")
-            + f"   - Target recipient name: '{first_name} {last_name}', username: @{username}\n"
-            f"   - DETECT the recipient's likely native language based on: (a) lang_code '{lang_code}', (b) heuristic detection '{detected_lang}', (c) community hint, (d) name script analysis.\n"
-            f"     (e.g., 'vi' -> Vietnamese, 'zh'/'zh-hans'/'zh-hant' -> Chinese, 'ru' -> Russian, 'tr' -> Turkish, 'fa'/'ar' -> Persian/Arabic, 'ko' -> Korean, 'ja' -> Japanese, 'es' -> Spanish, 'de' -> German, 'fr' -> French, 'en' -> English).\n"
-            f"   - TRANSLATE and rephrase the outreach message into their native language naturally, engagingly, and authentically.\n"
-            f"   - If ALL signals are unavailable or ambiguous, check name character script (Hanzi, Cyrillic, Arabic script). If still ambiguous, write in natural English.\n"
+            f"\n3. LANGUAGE (mandatory): write the whole message in {lang_name}. "
+            "This was decided from the recipient's own Telegram profile, so do not guess another language "
+            "from the community, the campaign or the original text. Translate naturally, like a native speaker.\n"
         )
     else:
         lang_rule = "\n3. Keep the SAME language as the original - do NOT translate.\n"

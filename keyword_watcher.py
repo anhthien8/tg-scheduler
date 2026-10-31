@@ -606,9 +606,11 @@ async def _do_send_dm_with_fallback(
                     "first_name": _peer_first,
                     "last_name": _peer_last,
                     "username": username,
-                    "lang_code": getattr(peer, "lang_code", None),
+                    "lang_code": getattr(peer, "lang_code", None), "phone": getattr(peer, "phone", None),
                     "community_hint": group_title or "",
                 }
+                if not _member_info.get('lang_code') and not _member_info.get('phone'):
+                    _member_info.update(await ai_rmx.fetch_profile_hints(client, peer))
                 _auto_native = bool(await db.get_setting("ai_auto_translate_native", "1") == "1")
 
                 if ai_enabled and msg_to_send.get("msg_type") == "text" and msg_to_send.get("content"):

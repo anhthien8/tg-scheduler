@@ -2267,18 +2267,16 @@ async def _run_campaign(campaign_id: int):
                         if ai_provider and ai_keys:
                             try:
                                 auto_native = bool(campaign.get("auto_translate_native", 1))
-                                campaign_hint = str(campaign.get("name", ""))
-                                # Word-boundary match — tránh false positive kiểu "Trust" chứa "rus"
-                                _hint_words = re.findall(r"[a-zа-яё]+", campaign_hint.lower())
-                                campaign_lang = "ru" if any(w in ("rus", "russian", "russia", "nga", "ru") or w.startswith("рос") or w.startswith("рус") for w in _hint_words) else ""
                                 mem_info = {
                                     "first_name": member.get("first_name"),
                                     "last_name": member.get("last_name"),
                                     "username": username,
                                     "lang_code": member.get("lang_code"),
-                                    "likely_language": campaign_lang,
+                                    "phone": member.get("phone"),
                                     "community_hint": member.get("group_title", "")
                                 }
+                                if not mem_info.get('lang_code') and not mem_info.get('phone'):
+                                    mem_info.update(await ai_rmx.fetch_profile_hints(client, peer))
                                 remixed_content = await ai_rmx.remix_message(
                                     original_text=content,
                                     provider=ai_provider,
