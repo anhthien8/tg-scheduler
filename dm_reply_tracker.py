@@ -964,7 +964,8 @@ async def generate_and_send_ai_reply_for_chat(
     chat_check = await db.get_followup_chat(account_id, user_id)
     if chat_check:
         takeover_str = chat_check.get("human_takeover_at")
-        if takeover_str:
+        # An admin who switched the chat back to 'active' has handed it to the AI.
+        if takeover_str and chat_check.get("status") != "active":
             try:
                 # SQLite datetime('now') is UTC without tzinfo — always compare in UTC
                 dt_tk = datetime.fromisoformat(takeover_str).replace(tzinfo=timezone.utc)

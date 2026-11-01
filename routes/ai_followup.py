@@ -436,9 +436,24 @@ async def update_chat_status(account_id: int, user_id: int, req: UpdateChatStatu
         await db.update_followup_chat_status(account_id, user_id, "paused_admin")
         return {"status": "ok", "message": "Đã chuyển sang bước 'Đã gắn link' và tạm dừng AI"}
 
-    ok = await db.update_followup_chat_status(account_id, user_id, req.status)
+    if req.status == "active":
+        # Turning AI back on must also clear the human-takeover stamp, otherwise
+        # the 12h "admin is chatting" guard keeps the AI silent.
+        ok = await db.resume_ai_for_user(account_id, user_id)
+    else:
+        ok = await db.update_followup_chat_status(account_id, user_id, req.status)
     if not ok:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    if req.status == "active":
+        # Answer a lead message that arrived while the AI was off.
+        chat = await db.get_followup_chat(account_id, user_id)
+        try:
+            hist = json.loads((chat or {}).get("history_json") or "[]")
+        except Exception:
+            hist = []
+        if hist and hist[-1].get("role") == "user":
+            asyncio.create_task(trigger_ai_reply(account_id, user_id))
+            return {"status": "ok", "message": "Đã bật AI — đang trả lời tin nhắn đang chờ"}
     return {"status": "ok", "message": f"Đã chuyển trạng thái sang '{req.status}'"}
 
 
