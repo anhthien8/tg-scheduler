@@ -23,3 +23,20 @@ def test_trivial_learned_rules_are_flagged():
     assert t.is_trivial_learned_rule("Do you have a demo account?", ":D :D :D :D :D :D :D :D :D")
     assert not t.is_trivial_learned_rule(
         "Do you offer a demo account?", "Yes, we can open a demo account so you can test the platform first.")
+
+
+def test_blocked_user_ids_reads_list_and_fails_closed():
+    import asyncio, types
+
+    class Client:
+        async def __call__(self, req):
+            return types.SimpleNamespace(blocked=[types.SimpleNamespace(peer_id=types.SimpleNamespace(user_id=42))])
+
+    class Broken:
+        async def __call__(self, req):
+            raise RuntimeError("offline")
+
+    cache = {}
+    assert asyncio.run(t._blocked_user_ids(1, Client(), cache)) == {42}
+    assert 7 not in cache[1]
+    assert 7 in asyncio.run(t._blocked_user_ids(2, Broken(), cache))

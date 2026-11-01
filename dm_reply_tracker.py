@@ -2242,6 +2242,36 @@ def _kol_local_hour(lang: str, now_utc: datetime | None = None) -> int:
     return (now_utc.hour + _LANG_UTC_OFFSET.get((lang or "en").split("-")[0], 0)) % 24
 
 
+async def _blocked_user_ids(account_id: int, client, cache: dict) -> set[int]:
+    """User ids this account has blocked on Telegram (fetched once per care run)."""
+    if account_id in cache:
+        return cache[account_id]
+    ids: set[int] = set()
+    try:
+        from telethon.tl.functions.contacts import GetBlockedRequest
+        offset = 0
+        while True:
+            res = await client(GetBlockedRequest(offset=offset, limit=100))
+            batch = [getattr(b.peer_id, "user_id", None) for b in res.blocked]
+            ids.update(i for i in batch if i)
+            offset += len(res.blocked)
+            if len(res.blocked) < 100:
+                break
+    except Exception as e:
+        logger.warning("[KolCare] Could not read blocked list for account %s: %s", account_id, e)
+        ids = None  # unknown → skip this account's chats rather than risk messaging a blocked user
+    cache[account_id] = ids if ids is not None else _ALL_BLOCKED
+    return cache[account_id]
+
+
+class _AllSet(set):
+    def __contains__(self, item):
+        return True
+
+
+_ALL_BLOCKED = _AllSet()
+
+
 async def _kol_care_settings() -> tuple[bool, int, int]:
     enabled = str(await db.get_setting("kol_care_enabled", "1")).strip().lower() in ("1", "true", "on", "yes")
     try:
@@ -2291,6 +2321,7 @@ async def process_monthly_kol_care() -> dict:
         sent_today = {r[0]: r[1] for r in await cur.fetchall()}
 
     sent, events = 0, " and ".join(KOL_CARE_EVENT_LINKS)
+    blocked_cache: dict[int, set[int]] = {}
     for chat in chats:
         account_id, user_id = chat["account_id"], chat["user_id"]
         if sent_today.get(account_id, 0) >= cap:
@@ -2308,6 +2339,8 @@ async def process_monthly_kol_care() -> dict:
                 continue
             client = tg.get_client(account_id)
             if not client or not client.is_connected():
+                continue
+            if user_id in await _blocked_user_ids(account_id, client, blocked_cache):
                 continue
 
             account_obj = await db.get_account(account_id)

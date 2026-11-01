@@ -1983,13 +1983,15 @@ async def _run_campaign(campaign_id: int):
         # Automatically exclude accounts that are currently spam-limited
         for sid in [s for s in sender_ids if s not in dead_senders]:
             try:
-                spam_result = await tg.check_spam_status(sid)
+                # At most one @SpamBot check per account per day, shared by all campaigns.
+                spam_result = await tg.check_spam_status(sid, max_age_hours=24)
                 if spam_result["status"] == "limited":
                     logger.warning(f"[Campaign {campaign_id}] ⚠️ Account {sid} is spam-limited, excluding from senders")
                     flooded_accounts[sid] = float('inf')
                     await db.add_dm_campaign_log(campaign_id, sid, 0, None, "skipped",
                                                 f"SpamBot: tài khoản đang bị giới hạn — {spam_result['message'][:80]}")
-                await asyncio.sleep(2)  # Delay between SpamBot checks
+                if not spam_result.get("cached"):
+                    await asyncio.sleep(2)  # Delay between SpamBot checks
             except Exception as e:
                 logger.warning(f"[Campaign {campaign_id}] SpamBot check failed for {sid}: {e}")
 

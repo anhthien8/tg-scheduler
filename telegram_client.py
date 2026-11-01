@@ -1736,8 +1736,36 @@ async def _check_spam_status_raw(account_id: int) -> dict:
         }
 
 
-async def check_spam_status(account_id: int) -> dict:
-    """Check @SpamBot and remember the result so the Accounts page can show it."""
+async def get_cached_spam_status(account_id: int, max_age_hours: float = 24) -> dict | None:
+    """Last @SpamBot result if it is recent and conclusive, else None."""
+    try:
+        import json as _json
+        import database as _db
+        from datetime import datetime, timezone
+        cache = _json.loads(await _db.get_setting("spam_status_cache", "{}") or "{}")
+        entry = cache.get(str(account_id)) or {}
+        if entry.get("status") not in ("free", "limited") or not entry.get("checked_at"):
+            return None
+        checked = datetime.fromisoformat(entry["checked_at"])
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - checked).total_seconds() < max_age_hours * 3600:
+            return {**entry, "cached": True}
+    except Exception as e:
+        logger.debug(f"[SpamCheck] Cache read failed for {account_id}: {e}")
+    return None
+
+
+async def check_spam_status(account_id: int, max_age_hours: float = 0) -> dict:
+    """Check @SpamBot and remember the result so the Accounts page can show it.
+
+    max_age_hours > 0 reuses a cached result younger than that instead of
+    messaging @SpamBot again (campaign starts use 24h: at most one check a day).
+    """
+    if max_age_hours > 0:
+        cached = await get_cached_spam_status(account_id, max_age_hours)
+        if cached:
+            return cached
     result = await _check_spam_status_raw(account_id)
     try:
         import json as _json
