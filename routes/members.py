@@ -1852,6 +1852,12 @@ async def _run_campaign(campaign_id: int):
         # Get already-sent user IDs for this campaign
         existing_logs = await db.get_dm_campaign_logs(campaign_id, limit=50000)
         sent_user_ids = {log["target_user_id"] for log in existing_logs if log["status"] == "success"}
+        # Skips that won't change on a resume: don't re-log or re-count them.
+        _permanent_skip = ("Trong blacklist", "Tài khoản là Telegram Bot", "Là tài khoản nội bộ",
+                           "Đã từng nhận DM")
+        perm_skipped_ids = {log["target_user_id"] for log in existing_logs
+                            if log["status"] == "skipped" and log["target_user_id"]
+                            and (log.get("error_message") or "").startswith(_permanent_skip)}
 
         # ── Cross-campaign / watcher dedup pre-loading ──
         exclude_previous_dms = bool(campaign.get("exclude_previous_dms", 1))
@@ -2079,6 +2085,8 @@ async def _run_campaign(campaign_id: int):
 
             user_id = member["user_id"]
             username = member.get("username")
+            if user_id in perm_skipped_ids:
+                continue
 
             # ── Bot filter: Layer 1 (pre-send username / is_bot check) ──
             if member.get("is_bot") or tg.is_bot_account(None, username):
@@ -2099,8 +2107,8 @@ async def _run_campaign(campaign_id: int):
                 skipped += 1
                 continue
 
-            # Skip already sent in current campaign
-            if user_id in sent_user_ids:
+            # Skip already sent (or permanently skipped) in current campaign
+            if user_id in sent_user_ids or user_id in perm_skipped_ids:
                 continue
 
             # Skip previously sent in other campaigns/watchers if exclude_previous_dms is True

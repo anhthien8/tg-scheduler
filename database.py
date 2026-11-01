@@ -3965,6 +3965,19 @@ async def update_dm_campaign_status(campaign_id: int, status: str,
                                      sent: int = None, failed: int = None, skipped: int = None,
                                      ai_agent_id: int = None):
     async with get_db() as db:
+        if sent is not None or failed is not None or skipped is not None:
+            # Resumes revisit the whole list, so in-memory counters count a
+            # target once per attempt. Count each target once, by its best outcome.
+            row = await (await db.execute("""
+                SELECT SUM(best='success'), SUM(best='failed'), SUM(best='skipped') FROM (
+                    SELECT CASE WHEN SUM(status='success') > 0 THEN 'success'
+                                WHEN SUM(status='failed') > 0 THEN 'failed'
+                                ELSE 'skipped' END AS best
+                    FROM dm_campaign_logs
+                    WHERE campaign_id = ? AND target_user_id != 0
+                    GROUP BY target_user_id)
+            """, (campaign_id,))).fetchone()
+            sent, failed, skipped = (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0))
         updates = ["status = ?", "updated_at = datetime('now')"]
         params = [status]
         if sent is not None:
