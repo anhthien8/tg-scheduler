@@ -287,6 +287,11 @@ if(page==='ai-followup'){
                 <small style="color:var(--text2);font-size:0.7rem;">Mặc định: 48, 168 (2 bước)</small>
               </div>
             </div>
+            <div style="grid-column:1/-1;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:6px;font-weight:600"><input type="checkbox" id="aifu-care-enabled"> 💌 Chăm sóc KOL định kỳ <span class="info-i" tabindex="0" data-tip="Mỗi chu kỳ, AI nhắn 1 tin ngắn (mỗi lần viết khác) cho KOL đã chốt hoặc đã chạy hết drip mà vẫn im: giới thiệu sự kiện tháng (weex.com/rewards, affiliates.weex.com/promotion), hỏi cần hỗ trợ gì (marketing, tài khoản demo, Elite Bot) và mời cafe nếu cùng thành phố, không thì gọi ngắn. Chỉ gửi 9h–20h giờ của KOL; bỏ qua người đã từ chối, blacklist hoặc vừa chat trong chu kỳ.">i</span></label>
+              <label style="display:flex;align-items:center;gap:6px">Chu kỳ <select id="aifu-care-days" class="form-input" style="width:auto;padding:4px 8px"><option value="30">30 ngày</option><option value="45">45 ngày</option><option value="60">60 ngày</option></select></label>
+              <label style="display:flex;align-items:center;gap:6px">Tối đa/ngày/tài khoản <input type="number" id="aifu-care-cap" class="form-input" min="0" max="50" style="width:64px;padding:4px 8px"> <span class="info-i" tabindex="0" data-tip="Giới hạn số tin chăm sóc mỗi tài khoản Telegram gửi trong 1 ngày để tránh bị báo spam. 0 = tạm dừng.">i</span></label>
+            </div>
           </div>
           <div style="text-align:right;margin-top:16px">
             <button class="btn btn-primary" onclick="AIFollowUp.saveSettings()">💾 Lưu cấu hình</button>

@@ -750,6 +750,10 @@ async def _async_distill_human_rule(account_id: int, user_id: int, message_text:
                     rule_status = "pending"
                     logger.warning("🎓 [Self-Learning] Rule held as PENDING (off-ladder figures %s): '%s'",
                                    bad_figures, rule["question"])
+                elif is_trivial_learned_rule(rule["question"], rule["answer"]):
+                    rule_status = "pending"
+                    logger.info("🎓 [Self-Learning] Rule held as PENDING (trivial/noise): '%s' -> '%s'",
+                                rule["question"], rule["answer"])
                 await db.add_learned_knowledge(
                     ai_agent_id=agent_id,
                     source_user_id=user_id,
@@ -761,6 +765,18 @@ async def _async_distill_human_rule(account_id: int, user_id: int, message_text:
                             agent_id, rule_status, rule["question"], rule["answer"])
     except Exception as e:
         logger.debug("[Self-Learning] Distillation failed: %s", e)
+
+
+_TRIVIAL_ANSWER_RE = re.compile(r"^[\s\d@+\-_.,:;!?()=\[\]<>/*#~^'\"]*$")
+
+
+def is_trivial_learned_rule(question: str, answer: str) -> bool:
+    """Noise a human takeover produces (IDs, emoticons, "ok", "ừm") that must
+    not become an auto-approved rule: too short, or no real words."""
+    q, a = (question or "").strip(), (answer or "").strip()
+    if len(a) < 25 or len(q) < 6:
+        return True
+    return bool(_TRIVIAL_ANSWER_RE.match(a)) or len(re.findall(r"[^\W\d_]{2,}", a)) < 4
 
 
 def is_bot_account(username: str | None, name: str | None = None, message_text: str | None = None,
@@ -1039,45 +1055,7 @@ async def generate_and_send_ai_reply_for_chat(
             }
 
     # 4. Resolve API Provider & Keys
-    kwargs = {}
-    ai_provider = None
-    ai_keys = []
-    if agent_config:
-        agent_keys = agent_config.get("api_keys_json", [])
-        if isinstance(agent_keys, str):
-            try:
-                agent_keys = json.loads(agent_keys)
-            except Exception:
-                agent_keys = []
-        if agent_keys:
-            ai_provider = agent_config.get("provider", "gemini")
-            ai_keys = agent_keys
-
-    if not ai_keys:
-        async def _load_provider_keys(prov):
-            if not prov: return []
-            try:
-                raw = await db.get_setting(f"ai_keys_{prov}", "[]")
-                return json.loads(raw) if raw else []
-            except Exception: return []
-
-        ai_provider = await db.get_setting("ai_provider", "gemini")
-        ai_keys = await _load_provider_keys(ai_provider)
-        if not ai_keys:
-            all_providers = ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]
-            for alt_prov in all_providers:
-                alt_keys = await _load_provider_keys(alt_prov)
-                if alt_keys:
-                    ai_provider = alt_prov
-                    ai_keys = alt_keys
-                    break
-
-    if ai_provider in ("openai_compatible", "chatgpt_oauth"):
-        prefix = "ai_oai_compat_" if ai_provider == "openai_compatible" else "ai_chatgpt_oauth_"
-        b_url = (agent_config.get("base_url") if agent_config else "") or (await db.get_setting(f"{prefix}base_url", ""))
-        mod = (agent_config.get("model") if agent_config else "") or (await db.get_setting(f"{prefix}model", ""))
-        if b_url and b_url.strip(): kwargs["base_url"] = b_url.strip()
-        if mod and mod.strip(): kwargs["model"] = mod.strip()
+    ai_provider, ai_keys, kwargs = await _resolve_ai_provider(agent_config)
 
     if not ai_keys:
         logger.warning("[AIFollowUp] ⚠️ Cannot generate AI reply for user %d: No API Keys configured!", user_id)
@@ -1805,6 +1783,10 @@ async def _followup_periodic_loop():
                 await process_step_reminders()
             except Exception as e_step:
                 logger.error("[StepReminder] Error in step reminder batch: %s", e_step)
+            try:
+                await process_monthly_kol_care()
+            except Exception as e_care:
+                logger.error("[KolCare] Error in monthly care batch: %s", e_care)
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -1996,6 +1978,48 @@ def _drip_instruction_for_stage(stage: int, total_stages: int, tier: str = "Tier
     )
 
 
+async def _resolve_ai_provider(agent_config: dict | None) -> tuple[str | None, list, dict]:
+    """Provider, keys and base_url/model kwargs: the agent's own keys first,
+    then the global ai_provider, then any provider that has keys."""
+    async def _load_provider_keys(prov):
+        if not prov: return []
+        try:
+            raw = await db.get_setting(f"ai_keys_{prov}", "[]")
+            return json.loads(raw) if raw else []
+        except Exception: return []
+
+    kwargs: dict = {}
+    ai_provider, ai_keys = None, []
+    if agent_config:
+        agent_keys = agent_config.get("api_keys_json", [])
+        if isinstance(agent_keys, str):
+            try:
+                agent_keys = json.loads(agent_keys)
+            except Exception:
+                agent_keys = []
+        if agent_keys:
+            ai_provider = agent_config.get("provider", "gemini")
+            ai_keys = agent_keys
+
+    if not ai_keys:
+        ai_provider = await db.get_setting("ai_provider", "gemini")
+        ai_keys = await _load_provider_keys(ai_provider)
+        if not ai_keys:
+            for alt_prov in ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]:
+                alt_keys = await _load_provider_keys(alt_prov)
+                if alt_keys:
+                    ai_provider, ai_keys = alt_prov, alt_keys
+                    break
+
+    if ai_provider in ("openai_compatible", "chatgpt_oauth"):
+        prefix = "ai_oai_compat_" if ai_provider == "openai_compatible" else "ai_chatgpt_oauth_"
+        b_url = (agent_config.get("base_url") if agent_config else "") or (await db.get_setting(f"{prefix}base_url", ""))
+        mod = (agent_config.get("model") if agent_config else "") or (await db.get_setting(f"{prefix}model", ""))
+        if b_url and b_url.strip(): kwargs["base_url"] = b_url.strip()
+        if mod and mod.strip(): kwargs["model"] = mod.strip()
+    return ai_provider, ai_keys, kwargs
+
+
 async def process_drip_followups() -> dict:
     """
     1. Scan human takeover chats (>12h since update) where user is waiting for a reply -> Auto-resume & Send AI Reply!
@@ -2154,17 +2178,9 @@ async def process_drip_followups() -> dict:
 
             try:
                 history = json.loads(chat.get("history_json", "[]"))
-                ai_provider = agent_config.get("provider", "gemini") if agent_config else "gemini"
-                ai_keys = agent_config.get("api_keys_json", []) if agent_config else []
-                if isinstance(ai_keys, str):
-                    ai_keys = json.loads(ai_keys)
+                ai_provider, ai_keys, kwargs = await _resolve_ai_provider(agent_config)
                 if not ai_keys:
                     continue
-
-                kwargs = {}
-                if ai_provider in ("openai_compatible", "chatgpt_oauth") and agent_config:
-                    if agent_config.get("base_url"): kwargs["base_url"] = agent_config["base_url"]
-                    if agent_config.get("model"): kwargs["model"] = agent_config["model"]
 
                 msg = await ai_rmx.generate_chat_response(history[-5:], combined, ai_provider, ai_keys, **kwargs)
                 if msg:
@@ -2188,6 +2204,133 @@ async def process_drip_followups() -> dict:
         logger.error("[DripEngine] Error in drip batch: %s", e_drip)
 
     return {"sent": sent_count, "errors": errors}
+
+
+# ── Monthly KOL care ───────────────────────────────────────────────────────
+# Every N days, one short check-in to signed / post-deal KOLs (and prospects
+# whose drip is exhausted): this month's events, what support they need, and
+# a coffee (same city) or short call invite. Never to declined/blacklisted.
+
+KOL_CARE_EVENT_LINKS = ("https://www.weex.com/rewards", "https://affiliates.weex.com/promotion/")
+
+# Rough UTC offset per language, used to keep check-ins within local business hours.
+_LANG_UTC_OFFSET = {
+    "vi": 7, "th": 7, "id": 7, "zh": 8, "ms": 8, "fil": 8, "ja": 9, "ko": 9,
+    "ru": 3, "uk": 2, "tr": 3, "ar": 3, "fa": 3, "hi": 5, "bn": 6, "ur": 5,
+    "de": 1, "fr": 1, "es": 1, "it": 1, "pl": 1, "nl": 1, "pt": -3, "en": 0,
+}
+
+_KOL_CARE_INSTRUCTION = (
+    "[MONTHLY KOL CARE CHECK-IN]: We have not talked for about {days} days. Write ONE short, warm message "
+    "(2-4 sentences, in the KOL's language, same tone as before, NOT a template - vary wording every month):\n"
+    "1) A light personal hello that references something from our past chat if possible.\n"
+    "2) Mention there are new events/rewards this month: {events} (share at most these links, do not invent event details or figures).\n"
+    "3) Ask what extra support would help them push WEEX now (e.g. marketing materials, a demo account, Elite Bot).\n"
+    "4) Offer to grab a coffee if we are in the same city, otherwise a quick 10-15 min call.\n"
+    "No pressure, no re-pitching the commission ladder, do NOT reveal you are AI."
+)
+
+
+def _kol_local_hour(lang: str, now_utc: datetime | None = None) -> int:
+    now_utc = now_utc or datetime.now(timezone.utc)
+    return (now_utc.hour + _LANG_UTC_OFFSET.get((lang or "en").split("-")[0], 0)) % 24
+
+
+async def _kol_care_settings() -> tuple[bool, int, int]:
+    enabled = str(await db.get_setting("kol_care_enabled", "1")).strip().lower() in ("1", "true", "on", "yes")
+    try:
+        days = int(await db.get_setting("kol_care_interval_days", "30"))
+    except (TypeError, ValueError):
+        days = 30
+    try:
+        cap = int(await db.get_setting("kol_care_daily_cap", "5"))
+    except (TypeError, ValueError):
+        cap = 5
+    return enabled, max(7, days), max(0, cap)
+
+
+async def process_monthly_kol_care() -> dict:
+    """Send the periodic care check-in to eligible KOLs (see block comment)."""
+    import aiosqlite
+    enabled, days, cap = await _kol_care_settings()
+    if not enabled or cap == 0:
+        return {"sent": 0, "skipped": "disabled"}
+
+    async with db.get_db() as db_conn:
+        db_conn.row_factory = aiosqlite.Row
+        # Eligible: post-deal KOLs or stage=signed, plus engaged prospects whose
+        # drip ran out. Silent (both sides) and not cared for in `days`.
+        cur = await db_conn.execute("""
+            SELECT * FROM ai_followup_chats
+            WHERE status NOT IN ('bot_ignored', 'paused_admin')
+              AND COALESCE(NULLIF(kol_step, ''), 'prospect') != 'declined'
+              AND COALESCE(NULLIF(stage, ''), 'new') != 'paused'
+              AND (
+                    COALESCE(NULLIF(stage, ''), 'new') = 'signed'
+                 OR COALESCE(NULLIF(kol_step, ''), 'prospect') IN ('link_confirmed', 'first_post', 'active', 'dormant')
+                 OR (status = 'active' AND COALESCE(NULLIF(kol_step, ''), 'prospect') = 'prospect'
+                     AND last_user_message_at IS NOT NULL AND COALESCE(last_drip_stage, 0) >= 2)
+              )
+              AND datetime(MAX(COALESCE(last_user_message_at, '1970-01-01'), COALESCE(updated_at, '1970-01-01'),
+                               COALESCE(last_care_at, '1970-01-01'))) <= datetime('now', ?)
+            ORDER BY COALESCE(last_care_at, updated_at) ASC
+            LIMIT 50
+        """, (f"-{days} days",))
+        chats = [dict(r) for r in await cur.fetchall()]
+        cur = await db_conn.execute("""
+            SELECT account_id, COUNT(*) FROM ai_followup_chats
+            WHERE last_care_at IS NOT NULL AND date(last_care_at) = date('now')
+            GROUP BY account_id
+        """)
+        sent_today = {r[0]: r[1] for r in await cur.fetchall()}
+
+    sent, events = 0, " and ".join(KOL_CARE_EVENT_LINKS)
+    for chat in chats:
+        account_id, user_id = chat["account_id"], chat["user_id"]
+        if sent_today.get(account_id, 0) >= cap:
+            continue
+        try:
+            if await db.is_user_blacklisted(user_id=user_id, username=chat.get("username", "")):
+                continue
+            history = json.loads(chat.get("history_json") or "[]")
+            if not history:
+                continue
+            last_user_text = next((h.get("content", "") for h in reversed(history)
+                                   if h.get("role") == "user" and isinstance(h.get("content"), str)), "")
+            lang = ai_rmx.detect_user_language({"bio": last_user_text, "first_name": chat.get("name") or ""})
+            if not 9 <= _kol_local_hour(lang) < 20:
+                continue
+            client = tg.get_client(account_id)
+            if not client or not client.is_connected():
+                continue
+
+            account_obj = await db.get_account(account_id)
+            agent_id = account_obj.get("ai_agent_id") if account_obj else None
+            agent_config = await db.get_ai_agent(agent_id) if agent_id else None
+            ai_provider, ai_keys, kwargs = await _resolve_ai_provider(agent_config)
+            if not ai_keys:
+                continue
+            combined = ((agent_config.get("system_prompt", "") if agent_config else "")
+                        + "\n\n" + _KOL_CARE_INSTRUCTION.format(days=days, events=events))
+            msg = await ai_rmx.generate_chat_response(history[-8:], combined, ai_provider, ai_keys, **kwargs)
+            if not msg:
+                continue
+            msg = sanitize_telegram_html(msg)
+            if contains_ai_disclosure(msg) or kol_offer.find_off_ladder_figures(msg):
+                logger.warning("[KolCare] 🚫 Blocked unsafe care message for user %d", user_id)
+                continue
+            if await _send_ai_message(account_id, user_id, msg):
+                async with db.get_db() as db_conn:
+                    await db_conn.execute(
+                        "UPDATE ai_followup_chats SET last_care_at = datetime('now') WHERE account_id = ? AND user_id = ?",
+                        (account_id, user_id))
+                    await db_conn.commit()
+                sent += 1
+                sent_today[account_id] = sent_today.get(account_id, 0) + 1
+                logger.info("[KolCare] 💌 Monthly check-in sent to user %d (acc %d, lang=%s)", user_id, account_id, lang)
+        except Exception as e:
+            logger.error("[KolCare] Failed care check-in for user %d: %s", user_id, e)
+    return {"sent": sent, "candidates": len(chats)}
 
 
 # ── Outreach Nudge Engine ──────────────────────────────────────────────────

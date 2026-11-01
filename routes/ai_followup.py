@@ -34,6 +34,10 @@ class AIFollowUpSettings(BaseModel):
     # Outreach nudge: delay hours before nudging and max nudge count.
     outreach_nudge_delay_hours: int = 24
     outreach_nudge_max: int = 1
+    # Monthly KOL care (None = keep current value, e.g. quick toggle).
+    kol_care_enabled: Optional[bool] = None
+    kol_care_interval_days: Optional[int] = None
+    kol_care_daily_cap: Optional[int] = None
 
 
 class UpdateChatStatusRequest(BaseModel):
@@ -339,6 +343,9 @@ async def get_settings():
     except (ValueError, TypeError):
         nudge_max = 1
 
+    from dm_reply_tracker import _kol_care_settings
+    care_enabled, care_days, care_cap = await _kol_care_settings()
+
     return {
         "enabled": enabled_str.lower() in ("true", "1"),
         "system_prompt": default_prompt if sys_prompt is None else sys_prompt,
@@ -351,6 +358,9 @@ async def get_settings():
         "drip_cadence_tier_c": tier_c,
         "outreach_nudge_delay_hours": nudge_delay,
         "outreach_nudge_max": nudge_max,
+        "kol_care_enabled": care_enabled,
+        "kol_care_interval_days": care_days,
+        "kol_care_daily_cap": care_cap,
     }
 
 
@@ -365,6 +375,12 @@ async def save_settings(req: AIFollowUpSettings):
     # Outreach nudge settings
     await db.set_setting("outreach_nudge_delay_hours", str(max(1, req.outreach_nudge_delay_hours)))
     await db.set_setting("outreach_nudge_max", str(max(0, req.outreach_nudge_max)))
+    if req.kol_care_enabled is not None:
+        await db.set_setting("kol_care_enabled", "1" if req.kol_care_enabled else "0")
+    if req.kol_care_interval_days is not None:
+        await db.set_setting("kol_care_interval_days", str(req.kol_care_interval_days if req.kol_care_interval_days in (30, 45, 60) else 30))
+    if req.kol_care_daily_cap is not None:
+        await db.set_setting("kol_care_daily_cap", str(min(50, max(0, req.kol_care_daily_cap))))
     # Validate + persist the drip cadences (hours, increasing, positive).
     cadence = _parse_cadence_or_default(req.drip_cadence_hours, [24, 72, 168])
     tier_a = _parse_cadence_or_default(req.drip_cadence_tier_a, [12, 24, 48, 96])

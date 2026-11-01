@@ -248,6 +248,12 @@ const AIFollowUp = {
     if (tierBEl) tierBEl.value = (this.settings.drip_cadence_tier_b || [24, 72, 168]).join(', ');
     const tierCEl = document.getElementById('aifu-drip-tier-c');
     if (tierCEl) tierCEl.value = (this.settings.drip_cadence_tier_c || [48, 168]).join(', ');
+    const careEn = document.getElementById('aifu-care-enabled');
+    if (careEn) careEn.checked = this.settings.kol_care_enabled !== false;
+    const careDays = document.getElementById('aifu-care-days');
+    if (careDays) careDays.value = String(this.settings.kol_care_interval_days || 30);
+    const careCap = document.getElementById('aifu-care-cap');
+    if (careCap) careCap.value = this.settings.kol_care_daily_cap ?? 5;
   },
 
   // ── KOL Channel Auto-Forward Settings ──────────────────────────────
@@ -372,7 +378,10 @@ const AIFollowUp = {
       drip_cadence_hours: this._parseHoursInput('aifu-drip-cadence', [24, 72, 168]),
       drip_cadence_tier_a: this._parseHoursInput('aifu-drip-tier-a', [12, 24, 48, 96]),
       drip_cadence_tier_b: this._parseHoursInput('aifu-drip-tier-b', [24, 72, 168]),
-      drip_cadence_tier_c: this._parseHoursInput('aifu-drip-tier-c', [48, 168])
+      drip_cadence_tier_c: this._parseHoursInput('aifu-drip-tier-c', [48, 168]),
+      kol_care_enabled: document.getElementById('aifu-care-enabled')?.checked ?? true,
+      kol_care_interval_days: parseInt(document.getElementById('aifu-care-days')?.value || '30', 10),
+      kol_care_daily_cap: parseInt(document.getElementById('aifu-care-cap')?.value || '5', 10)
     };
   },
 

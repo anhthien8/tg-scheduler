@@ -1079,6 +1079,8 @@ async def init_db():
             # Step-based reminders (max 2 per step, >= 48h apart).
             ("step_reminders_sent", "INTEGER DEFAULT 0"),
             ("last_step_reminder_at", "TEXT"),
+            # Monthly KOL care check-in (process_monthly_kol_care).
+            ("last_care_at", "TEXT"),
         ]:
             await _add_column(db, "ai_followup_chats", col_name, col_def)
         # @username / invite link so a schedule can auto-join a group before posting.
