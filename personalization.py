@@ -27,7 +27,7 @@ def apply_personalization(text: str, member_info: dict) -> str:
     Supported variables (case-insensitive):
       {name}       — first_name, falls back to username, then "friend"
       {first_name} — Telegram first_name (or fallback)
-      {last_name}  — Telegram last_name (or "")
+      {last_name}  — Telegram last_name, falls back to first_name, then full_name
       {full_name}  — first_name + last_name combined
       {username}   — Telegram username without @ (or "")
       {group}      — source group/community title (or "")
@@ -62,11 +62,14 @@ def apply_personalization(text: str, member_info: dict) -> str:
     name = first_name or username or _DEFAULT_NAME_FALLBACK
     full_name = f"{first_name} {last_name}".strip() if first_name else (username or _DEFAULT_NAME_FALLBACK)
 
+    # {last_name} falls back to first name, then full name (username / "friend")
+    last_or_fallback = last_name or first_name or full_name
+
     # Replacement map (lowercase key -> value)
     replacements = {
         "name": name,
         "first_name": first_name or username or _DEFAULT_NAME_FALLBACK,
-        "last_name": last_name,
+        "last_name": last_or_fallback,
         "full_name": full_name,
         "username": username,
         "group": group,
@@ -74,7 +77,7 @@ def apply_personalization(text: str, member_info: dict) -> str:
         # No-underscore aliases: [fullname], [firstname], [lastname]
         "fullname": full_name,
         "firstname": first_name or username or _DEFAULT_NAME_FALLBACK,
-        "lastname": last_name,
+        "lastname": last_or_fallback,
     }
 
     # Case-insensitive replacement using regex

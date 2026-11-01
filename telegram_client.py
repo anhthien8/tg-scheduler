@@ -1674,8 +1674,16 @@ async def _check_spam_status_raw(account_id: int) -> dict:
         # Resolve @SpamBot entity
         spam_bot = await client.get_entity("SpamBot")
 
-        # Send /start command
-        await client.send_message(spam_bot, "/start")
+        # Send /start command (unblock @SpamBot first if this account blocked it)
+        try:
+            await client.send_message(spam_bot, "/start")
+        except Exception as send_err:
+            if "blocked" not in str(send_err).lower():
+                raise
+            from telethon.tl.functions.contacts import UnblockRequest
+            await client(UnblockRequest(id=spam_bot))
+            logger.info(f"[SpamCheck] Account {account_id}: unblocked @SpamBot")
+            await client.send_message(spam_bot, "/start")
 
         # Wait for response (SpamBot replies within seconds)
         await asyncio.sleep(3)
@@ -1737,6 +1745,13 @@ async def check_spam_status(account_id: int) -> dict:
         cache = _json.loads(await _db.get_setting("spam_status_cache", "{}") or "{}")
         cache[str(account_id)] = {k: result.get(k) for k in ("status", "message", "checked_at")}
         await _db.set_setting("spam_status_cache", _json.dumps(cache, ensure_ascii=False))
+        # PeerFlood auto-pauses the whole account; once SpamBot says it is clean
+        # again, turn it back on so DMs and the AI Agent resume by themselves.
+        if result.get("status") == "free":
+            acc = await _db.get_account(account_id)
+            if acc and acc.get("is_paused") and str(acc.get("pause_reason") or "").startswith("PeerFlood"):
+                await _db.unpause_account(account_id)
+                logger.info(f"[SpamCheck] Account {account_id} is free again — auto-unpaused (was PeerFlood)")
     except Exception as e:
         logger.debug(f"[SpamCheck] Could not cache result for {account_id}: {e}")
     return result

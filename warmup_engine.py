@@ -231,10 +231,11 @@ async def run_warmup_job(job_id: int):
 
         await db.update_warmup_job_status(job_id, "running")
 
-        # Get AI settings
-        ai_provider = await db.get_setting("ai_provider", "")
-        ai_api_key = await db.get_setting("ai_api_key", "")
-        ai_api_keys = [k.strip() for k in ai_api_key.split(",") if k.strip()] if ai_api_key else []
+        # AI settings — same provider/key/model lookup as scheduled group posts
+        ai_cfg = None
+        if any(s.get("use_ai_remix") for s in scripts):
+            import message_queue
+            ai_cfg = await message_queue._remix_config({"id": f"warmup-{job_id}"})
 
         chat_id = group["chat_id"]
         account_index = 0
@@ -315,7 +316,7 @@ async def run_warmup_job(job_id: int):
                     async with account_busy.acquire(acc_id, "warmup", ttl_secs=60):
                         success, error_detail = await _execute_behavior(
                             acc_id, behavior, chat_id, scripts, script_index,
-                            ai_provider, ai_api_keys, job, job_id, group
+                            ai_cfg, job, job_id, group
                         )
                 except Exception as busy_err:
                     if "AccountBusy" in str(type(busy_err).__name__):
@@ -347,7 +348,6 @@ async def run_warmup_job(job_id: int):
                     "read_history": "history_reads",
                     "view_profile": "profiles_viewed",
                     "forward_message": "forwards_sent",
-                    "join_channel": "channels_joined",
                 }
                 counter = counter_map.get(behavior)
                 if counter and hasattr(db, "increment_warmup_counter"):
@@ -396,7 +396,7 @@ async def run_warmup_job(job_id: int):
 
 async def _execute_behavior(
     acc_id: int, behavior: str, chat_id, scripts, script_index: int,
-    ai_provider: str, ai_api_keys: list, job: dict, job_id: int, group: dict
+    ai_cfg: dict | None, job: dict, job_id: int, group: dict
 ) -> tuple[bool, str | None]:
     """Execute a single warmup behavior. Returns (success, error_detail)."""
     try:
@@ -423,9 +423,11 @@ async def _execute_behavior(
             content = script["content"]
 
             # AI remix if enabled
-            if script.get("use_ai_remix") and ai_provider and ai_api_keys:
+            if script.get("use_ai_remix") and ai_cfg:
                 try:
-                    content = await remix_message(content, ai_provider, ai_api_keys)
+                    content = await remix_message(
+                        content, ai_cfg["provider"], ai_cfg["keys"],
+                        custom_instruction=ai_cfg["instruction"], **ai_cfg["kwargs"]) or content
                 except Exception as e:
                     logger.warning("[Warmup] AI remix failed: %s, using original", e)
 
@@ -450,16 +452,20 @@ async def _execute_behavior(
                 return False, error_msg
 
         elif behavior == "join_channel":
-            # Placeholder — join from curated channel list (if configured)
-            # For now, just view the group entity as a safe substitute
+            # No auto-joining: record how many groups/channels the account is
+            # really a member of, so the graduation check uses true numbers.
             try:
                 client = tg.get_client(acc_id)
-                if client:
-                    await client.get_entity(int(chat_id))
-                    return True, None
+                if not client:
+                    return False, "no client"
+                count = 0
+                async for d in client.iter_dialogs(limit=300):
+                    if d.is_group or d.is_channel:
+                        count += 1
+                await db.create_or_update_warmup_progress(acc_id, channels_joined=count)
+                return True, None
             except Exception as e:
                 return False, str(e)[:200]
-            return False, "no client"
 
         else:
             return False, f"unknown behavior: {behavior}"

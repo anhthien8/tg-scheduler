@@ -5337,7 +5337,8 @@ async def append_followup_chat_message(
     user_id: int,
     role: str,
     content: str,
-    inc_reply_count: bool = False
+    inc_reply_count: bool = False,
+    model: str | None = None,
 ) -> dict | None:
     async with get_db() as db:
         await db.execute("BEGIN IMMEDIATE")  # Serialize history read-modify-write across connections.
@@ -5358,7 +5359,8 @@ async def append_followup_chat_message(
         history.append({
             "role": role,
             "content": content,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            **({"model": model} if model else {}),
         })
         # Keep last 60 messages to preserve deep context
         if len(history) > 60:

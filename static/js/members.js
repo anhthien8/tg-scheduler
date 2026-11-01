@@ -637,7 +637,7 @@ const Members = {
       }
       if (c.status === 'paused_auto') {
         metaParts.push(autoResume
-          ? `<span style="color:var(--green)" title="Hệ thống tự kiểm tra mỗi 15 phút và chạy tiếp khi account hết bị khóa">🔄 Auto-resume BẬT</span>`
+          ? `<span style="color:var(--green)" title="Hệ thống tự kiểm tra mỗi 150 phút và chạy tiếp khi account hết bị khóa">🔄 Auto-resume BẬT</span>`
           : `<span style="color:var(--text2)" title="Campaign sẽ không tự chạy tiếp — cần bấm ▶ thủ công">⏹ Auto-resume TẮT</span>`);
         metaParts.push(`<a href="javascript:void(0)" onclick="Members.toggleAutoResume(${c.id}, ${autoResume ? 0 : 1})" style="color:var(--primary);text-decoration:underline">${autoResume ? 'Tắt' : 'Bật'}</a>`);
       }

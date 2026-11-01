@@ -20,8 +20,10 @@ def test_full_name_combines_first_and_last():
     assert apply_personalization("{full_name}", {"first_name": "A", "last_name": "B"}) == "A B"
 
 
-def test_last_name_defaults_to_empty():
-    assert apply_personalization("[{last_name}]", {"first_name": "A"}) == "[]"
+def test_last_name_falls_back_to_first_then_full_name():
+    assert apply_personalization("[{last_name}]", {"first_name": "A"}) == "[A]"
+    assert apply_personalization("[{last_name}]", {"username": "u1"}) == "[u1]"
+    assert apply_personalization("[{last_name}]", {"first_name": "A", "last_name": "B"}) == "[B]"
 
 
 def test_unknown_variable_is_left_intact():

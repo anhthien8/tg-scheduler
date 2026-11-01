@@ -384,7 +384,12 @@ _STEP_GUIDANCE = {
         "First post is in. Keep the relationship warm, answer questions, no new asks — the team verifies volume on our side."
     ),
     "active": "Active partner. Support them; answer questions; no onboarding asks.",
-    "declined": "The KOL declined the partnership. Be polite and brief; do NOT pitch again.",
+    "declined": (
+        "The KOL declined and already got one objection-handling reply. Do NOT persuade again. "
+        "If they now show interest or ask something, help normally. Otherwise close in 1-2 warm sentences in their language "
+        "that turn this into a support channel: thank them and say that whenever they need help (trading, the exchange, KOL tools) "
+        "they can message here anytime. NEVER say you will stop writing / won't message again."
+    ),
     "dormant": "The KOL went quiet after agreeing. Be light and friendly; one soft check-in at most, no pressure.",
 }
 
@@ -521,7 +526,12 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
     if pred:
         lines.append(f"PREDICTED TIER (only because the KOL stated ~{kol_offer._fmt_num(pred.get('volume_m'))}M monthly volume): "
                      f"tier {pred.get('tier')} = {kol_offer._fmt_num(pred.get('revshare_pct'))}% revshare from the month after hitting it.")
-    lines.append("If the KOL clearly declines the partnership or asks you to stop messaging, append [STOP] on its own line. "
+    lines.append("IF THE KOL SAYS NOT INTERESTED OR OBJECTS TO THE TERMS (without asking you to stop): send at most ONE short reply "
+                 "(2-3 sentences, their language): acknowledge their point, give ONE verified benefit taken only from the facts above "
+                 "that directly answers their stated reason, and end with one easy question (yes/no or a quick choice). "
+                 "Never resend the full pitch or list several benefits. "
+                 "IF THEY EXPLICITLY ASK YOU TO STOP: no benefit, just thank them and say they can message here anytime they need support. "
+                 "In both cases append [STOP] on its own line (halts automatic follow-ups); never say you will stop writing. "
                  "All [TAGS] are invisible to the KOL.")
     return "\n".join(lines)
 
@@ -843,7 +853,8 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
         try:
             if await tg.send_text_message(account_id, user_id, text) is False:
                 return False
-            await db.append_followup_chat_message(account_id, user_id, "assistant", text, inc_reply_count=True)
+            await db.append_followup_chat_message(account_id, user_id, "assistant", text, inc_reply_count=True,
+                                                    model=ai_rmx.last_model_used() or None)
             if new_status != "active":
                 await db.update_followup_chat_status(account_id, user_id, new_status)
             if drip_stage is not None:
@@ -2375,7 +2386,8 @@ async def process_outreach_nudges() -> dict:
                         errors.append(f"send_failed for user {user_id}")
                         continue
                     # Record in chat history
-                    await db.append_followup_chat_message(account_id, user_id, "assistant", msg, inc_reply_count=True)
+                    await db.append_followup_chat_message(account_id, user_id, "assistant", msg, inc_reply_count=True,
+                                                              model=ai_rmx.last_model_used() or None)
                     # Record nudge
                     await db.record_nudge(account_id, user_id, channel, "sent",
                                           watcher_id=watcher_id, campaign_id=campaign_id)
