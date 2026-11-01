@@ -258,6 +258,7 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None) 
         "  NEVER name another exchange. NEVER use the phrase \"B-book\" or any variant.",
         "YOU MAY SETTLE ON YOUR OWN: " + "; ".join(ladder.get("ai_may_close") or []) + ".",
         "YOU MUST END YOUR REPLY WITH [HANDOVER_REQUIRED] FOR: " + "; ".join(ladder.get("must_handover") or []) + ".",
+        UPFRONT_PROOF_RULE,
         "NEVER quote any % or $ figure that is not in this ladder (no internal estimates, no 'total payout' maths, no ranges like 50-60%).",
     ]
     pred = predicted_tier(ladder, volume_claimed)
@@ -378,6 +379,18 @@ def get_safe_offer_fallback_reply(lang: str = "en") -> str:
 
 
 # ── Storage ─────────────────────────────────────────────────────────────────
+
+# Upfront asks: collect proof first, then answer with the agent's own upfront rule.
+UPFRONT_PROOF_RULE = (
+    "UPFRONT / FIXED-FEE REQUESTS (overrides the handover list above for the FIRST ask): do NOT hand over yet. "
+    "First, ONCE, ask the KOL for a screen-recorded VIDEO of their trading/referral performance for the LAST 3 MONTHS "
+    "(affiliate dashboard: referred volume, active traders, commission), clearly showing the deal terms of the exchange "
+    "they currently partner with (rate, any upfront/fixed fee they receive). They may hide UID, balance and email. "
+    "Do not promise anything in return for the video. "
+    "After the video is received (or the KOL refuses / cannot provide it), reply following your system prompt's upfront rule, "
+    "and append [HANDOVER_REQUIRED] so the team reviews the proof or the exception request."
+)
+
 
 async def get_ladder() -> dict:
     """Current ladder (setting) or the default when unset/invalid."""

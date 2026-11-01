@@ -1086,7 +1086,8 @@ async def generate_and_send_ai_reply_for_chat(
         "   - PHOTO / SCREENSHOT HANDLING: When the partner sends a screenshot (dashboard, group stats):\n"
         "     * Acknowledge briefly (e.g. 'Got the screenshot bro! Let me check the stats 👍'). Answer any accompanying question.\n"
         "     * NEVER ask for proof/video again once a screenshot has been received!\n"
-        "   - DEMANDING / DIFFICULT CASES ESCALATION: When the KOL's demands exceed normal scope (large upfront budget, complex sponsorship), politely escalate to the exchange's committee for special approval. Reply IN THE USER'S LANGUAGE:\n"
+        "     * Only acknowledge a file/screenshot/video if the LATEST user messages carry an [Attached ...] tag. Stickers, GIFs, memes and emoji are casual reactions: react like a human (laugh, empathise), never say 'received the file' or 'team will review'. If an image looks like a meme/joke rather than stats, treat it as banter.\n"
+        "   - DEMANDING / DIFFICULT CASES ESCALATION: When the KOL's demands exceed normal scope (complex sponsorship; or an upfront request AFTER the 3-month performance video was received or refused — see the UPFRONT rule), politely escalate to the exchange's committee for special approval. Reply IN THE USER'S LANGUAGE:\n"
         "     * English example: 'This is a special case that goes beyond my usual authority. Let me forward your detailed proposal to the WEEX Partnership Committee for a dedicated review!'\n"
         "     * Vietnamese example: 'Case này đặc biệt và vượt thẩm quyền thông thường của mình rồi, để mình chuyển tiếp proposal chi tiết của bạn lên Ban Giám Đốc / Partnership Committee của sàn WEEX để duyệt riêng nhé!'\n"
         "     * Then append [HANDOVER_REQUIRED].\n"
@@ -1096,7 +1097,7 @@ async def generate_and_send_ai_reply_for_chat(
         "   - Tier B (Intent 40-79): Interested in exchange benefits, asking detailed questions.\n"
         "   - Tier C (Intent 0-39): Casual question, low interest, or greeting.\n"
         "10. HANDOVER TRIGGER (CRITICAL): Append [HANDOVER_REQUIRED] on its own line (before METRICS) when ANY of these apply:\n"
-        "   - Prospect asks for fixed fee, upfront payment, retainer, or sponsorship budget.\n"
+        "   - Prospect asks for fixed fee, upfront payment, retainer, or sponsorship budget AND has already sent (or refused) the 3-month trading-performance video. On the FIRST upfront ask, request that video instead (no tag).\n"
         "   - Prospect requests a call, meeting, or contract discussion.\n"
         "   - Prospect asks to speak with a human, admin, or manager.\n"
         "   - Prospect provides volume proof (screenshot/recording) that needs human verification.\n"
@@ -1499,16 +1500,21 @@ def _make_handler(account_id: int):
 
         raw_msg = event.raw_text or event.message.message or ""
         
-        has_video = bool(getattr(event.message, "video", None) or getattr(event.message, "video_note", None) or getattr(event.message, "gif", None))
+        # Stickers, GIFs and animated emoji are Telethon documents; they are reactions, not proof.
+        is_reaction = bool(getattr(event.message, "sticker", None) or getattr(event.message, "gif", None)
+                           or getattr(event.message, "dice", None))
+        has_video = bool(not is_reaction and (getattr(event.message, "video", None) or getattr(event.message, "video_note", None)))
         has_photo = bool(getattr(event.message, "photo", None))
-        has_document = bool(getattr(event.message, "document", None) and not has_video)
-        
+        has_document = bool(getattr(event.message, "document", None) and not has_video and not is_reaction)
+
         msg_lower = (raw_msg or "").lower()
         if "video" in msg_lower and any(w in msg_lower for w in ("done", "check", "sent", "send", "uploaded", "here")):
             has_video = True
 
         media_tag = ""
-        if has_video:
+        if is_reaction and not has_video:
+            media_tag = "[Sent a sticker/GIF reaction - casual emotion only, NOT a file or proof; never say you received a file]"
+        elif has_video:
             media_tag = "[Attached Video Proof]"
         elif has_photo:
             media_tag = "[Attached Screenshot/Photo Proof]"
