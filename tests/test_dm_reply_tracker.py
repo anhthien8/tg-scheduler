@@ -399,3 +399,25 @@ async def test_async_distill_human_rule_success(mock_distill):
     assert len(rules) == 1
     assert rules[0]["question_pattern"] == "what is pricing?"
     assert rules[0]["learned_answer"] == "pricing is 50 usd"
+
+
+
+async def test_source_leak_detected_and_replaced():
+    leaks = [
+        "According to the supplied DOCX the campaign ends soon",
+        "Source C01 shows the August campaigns",
+        "Theo tài liệu được cung cấp thì chương trình đã hết hạn",
+        "My knowledge base says the cap is 200 USD",
+        "That's an owner-supplied ceiling",
+    ]
+    for text in leaks:
+        assert tracker.contains_ai_disclosure(text), text
+    for text in ("WEEX supports up to 80% revshare and daily settlement",
+                 "Ủa đúng rồi, mình người Việt nè",
+                 "The documented process is in the app under Services",
+                 "Can you share your PDF deck?",
+                 "Thanks for the provided data bro"):
+        assert not tracker.contains_source_leak(text), text
+    safe = tracker.get_safe_fallback_reply(leaks[0])
+    assert "check" in safe.lower() and "bot" not in safe.lower()
+    assert "team" in tracker.get_safe_fallback_reply(leaks[2])
