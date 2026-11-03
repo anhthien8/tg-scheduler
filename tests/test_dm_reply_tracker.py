@@ -421,3 +421,19 @@ async def test_source_leak_detected_and_replaced():
     safe = tracker.get_safe_fallback_reply(leaks[0])
     assert "check" in safe.lower() and "bot" not in safe.lower()
     assert "team" in tracker.get_safe_fallback_reply(leaks[2])
+
+
+
+@patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
+@patch("telegram_client.send_text_message", new_callable=AsyncMock)
+async def test_decline_with_off_ladder_figure_sends_closing_not_number_check(mock_send, mock_chat):
+    await _setup_agent_chat("Hi not interested")
+    mock_chat.return_value = "No worries! Our 85% offer stays open anytime 🙏\n[STOP]"
+
+    with patch("dm_reply_tracker._notify_main_account_handover", new_callable=AsyncMock):
+        res = await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
+
+    assert res is True
+    sent = mock_send.call_args[0][2]
+    assert sent == tracker.get_decline_closing_reply([{"role": "user", "content": "Hi not interested"}])
+    assert "double-check" not in sent and "%" not in sent

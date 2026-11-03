@@ -578,7 +578,7 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
         lines.append(f"PREDICTED TIER (only because the KOL stated ~{kol_offer._fmt_num(pred.get('volume_m'))}M monthly volume): "
                      f"tier {pred.get('tier')} = {kol_offer._fmt_num(pred.get('revshare_pct'))}% revshare from the month after hitting it.")
     lines.append("If the KOL clearly declines the partnership or asks you to stop messaging: do NOT argue or re-pitch. "
-                 "Still write ONE short, warm reply in their language — thank them for their time, respect the decision, "
+                 "Still write ONE short, warm reply in their language with NO numbers or rates — thank them for their time, respect the decision, "
                  "and leave the door open (if next time their community needs an open, flexible exchange partner with strong "
                  "community-building support, they can message you here anytime). Then append [STOP] on its own line. "
                  "All [TAGS] are invisible to the KOL.")
@@ -1266,7 +1266,10 @@ async def generate_and_send_ai_reply_for_chat(
             if off_ladder:
                 logger.warning("[AIFollowUp] 🚫 Blocked off-ladder figures %s for user %d — using safe fallback",
                                off_ladder, user_id)
-                ai_reply = kol_offer.get_safe_offer_fallback_reply(_detect_reply_lang(full_history))
+                # A decline gets the polite closing, not a "let me check the numbers"
+                # promise the KOL never asked for.
+                ai_reply = (get_decline_closing_reply(full_history) if step_result.get("declined")
+                            else kol_offer.get_safe_offer_fallback_reply(_detect_reply_lang(full_history)))
                 new_status = "needs_human"
                 _spawn_background(_notify_main_account_handover(
                     account_id, user_id, sender_username,
