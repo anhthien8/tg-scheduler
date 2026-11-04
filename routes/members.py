@@ -1808,6 +1808,9 @@ async def _run_campaign(campaign_id: int):
 
             if ai_provider:
                 ai_keys = _provider_keys(ai_provider)
+                if not ai_keys and ai_provider == "openai_compatible":
+                    # Keyless self-hosted router (9Router) stays the active provider.
+                    ai_keys, _ = await ai_rmx.get_provider_config(ai_provider)
 
             if not ai_keys:
                 for alt_prov in all_providers:
@@ -2500,6 +2503,8 @@ async def _run_campaign(campaign_id: int):
                     "USER_ID_INVALID",
                     "CHAT_SEND_PLAIN_FORBIDDEN",
                     "CHAT_GUEST_SEND_FORBIDDEN",
+                    # Recipient charges Telegram Stars per incoming message.
+                    "ALLOW_PAYMENT_REQUIRED",
                 ]
                 if any(p.lower() in err_lower for p in skip_patterns):
                     skipped += 1

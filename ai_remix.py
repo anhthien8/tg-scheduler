@@ -337,7 +337,7 @@ async def _call_openai_compatible(api_key, prompt, base_url, model):
     """Call any OpenAI-compatible API endpoint."""
     url = base_url.rstrip('/') + '/chat/completions'
     headers = {
-        "Authorization": "Bearer " + api_key,
+        "Authorization": "Bearer " + (api_key or "none"),  # keyless 9Router
         "Content-Type": "application/json",
         **_cf_access_headers(url),
     }
@@ -613,29 +613,56 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
     return prompt
 
 
+# Fallback after the active provider. Override with the `ai_fallback_order`
+# setting (JSON list) — e.g. to put a new free provider ahead of the paid ones.
+DEFAULT_FALLBACK_ORDER = ["chatgpt_oauth", "gemini", "groq", "openai_compatible", "openai", "deepseek"]
+
+
+async def get_fallback_order() -> list[str]:
+    import database as db
+    try:
+        raw = await db.get_setting("ai_fallback_order", "")
+        order = json.loads(raw) if raw else []
+        if isinstance(order, list) and order:
+            known = set(DEFAULT_FALLBACK_ORDER)
+            return [p for p in order if p in known] + [p for p in DEFAULT_FALLBACK_ORDER if p not in order]
+    except Exception:
+        pass
+    return list(DEFAULT_FALLBACK_ORDER)
+
+
+async def get_provider_config(provider: str) -> tuple[list[str], dict]:
+    """(keys, kwargs) for a provider. A self-hosted openai_compatible router
+    (9Router) with base_url + model counts as configured even without a key."""
+    import database as db
+    raw = await db.get_setting(f"ai_keys_{provider}", "[]")
+    try:
+        keys = json.loads(raw) if raw else []
+    except Exception:
+        keys = []
+    if not keys and provider == "gemini":
+        legacy_k = await db.get_setting("gemini_api_key", "")
+        if legacy_k and legacy_k.strip():
+            keys = [legacy_k.strip()]
+    keys = [k.strip() for k in keys if k and str(k).strip()]
+    kwargs = {}
+    if provider in ("openai_compatible", "chatgpt_oauth"):
+        prefix = "oai_compat" if provider == "openai_compatible" else "chatgpt_oauth"
+        kwargs["base_url"] = (await db.get_setting(f"ai_{prefix}_base_url", "") or "").strip()
+        kwargs["model"] = (await db.get_setting(f"ai_{prefix}_model", "") or "").strip()
+        if provider == "openai_compatible" and not keys and kwargs["base_url"] and kwargs["model"]:
+            keys = [""]
+    return keys, kwargs
+
+
 async def _auto_fallback_remix(failed_provider, prompt):
     """Fallback across alternative configured providers if primary provider fails (e.g. 429 quota, auth error)."""
     try:
-        import database as db
-        fallback_order = ["chatgpt_oauth", "gemini", "groq", "openai_compatible", "openai", "deepseek"]
-        for alt_prov in fallback_order:
+        for alt_prov in await get_fallback_order():
             if alt_prov == failed_provider:
                 continue
-            alt_raw = await db.get_setting(f"ai_keys_{alt_prov}", "[]")
-            alt_keys = json.loads(alt_raw) if alt_raw else []
-            if not alt_keys and alt_prov == "gemini":
-                legacy_k = await db.get_setting("gemini_api_key", "")
-                if legacy_k and legacy_k.strip():
-                    alt_keys = [legacy_k.strip()]
-            alt_keys = [k.strip() for k in alt_keys if k and str(k).strip()]
+            alt_keys, alt_kwargs = await get_provider_config(alt_prov)
             if alt_keys:
-                alt_kwargs = {}
-                if alt_prov == "openai_compatible":
-                    alt_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
-                    alt_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
-                elif alt_prov == "chatgpt_oauth":
-                    alt_kwargs["base_url"] = await db.get_setting("ai_chatgpt_oauth_base_url", "")
-                    alt_kwargs["model"] = await db.get_setting("ai_chatgpt_oauth_model", "")
                 logger.info("[AI Remix] 🔄 Auto-fallback from '%s' to '%s' (%d keys available)...", failed_provider, alt_prov, len(alt_keys))
                 for a_key in alt_keys:
                     try:
@@ -658,8 +685,6 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
     """
     if not original_text or not original_text.strip():
         return original_text
-    if not api_keys:
-        return original_text
 
     prompt = _build_prompt(
         original_text,
@@ -668,15 +693,23 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
         auto_translate_native=auto_translate_native,
         member_info=member_info
     )
+    if not api_keys:
+        logger.warning("[AI Remix] No keys for active provider '%s' — trying fallbacks", provider)
+        fb = await _auto_fallback_remix(provider, prompt)
+        return ensure_paragraphs(humanize_text(fb)) if fb else original_text
     idx, key = _next_key(api_keys, provider)
 
     try:
         result = await _try_call(provider, key, prompt, **kwargs)
+        if not result or not result.strip():
+            logger.warning("[AI Remix] %s key[%d] returned empty — trying fallbacks", provider, idx)
+            fb = await _auto_fallback_remix(provider, prompt)
+            return ensure_paragraphs(humanize_text(fb)) if fb else original_text
         logger.info(
             "[AI Remix] %s key[%d] OK - %dc -> %dc",
             provider, idx, len(original_text), len(result)
         )
-        return ensure_paragraphs(humanize_text(result)) if result else original_text
+        return ensure_paragraphs(humanize_text(result))
 
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
