@@ -1,13 +1,15 @@
 /**
  * Zalo Outreach Module
  * ────────────────────
- * QR login, scrape group members / event attendees, friend-request campaigns.
+ * Several nicks (QR login each), scrape group members / event attendees,
+ * friend-request campaigns shared across nicks.
  */
 const Zalo = (() => {
   let _loginPoll = null;
   let _sources = [];
   let _groups = [];
   let _editingId = null;
+  let _accounts = [];
 
   const STATUS_LABEL = {
     new: ['Chưa liên hệ', ''],
@@ -16,6 +18,7 @@ const Zalo = (() => {
     greeted: ['Đã chào', 'badge-green'],
     failed: ['Lỗi', 'badge-red'],
     skipped: ['Bỏ qua', ''],
+    blocked: ['Đã chặn', 'badge-red'],
   };
 
   function esc(s) {
@@ -27,46 +30,99 @@ const Zalo = (() => {
   const el = (id) => document.getElementById(id);
 
   async function init() {
-    await loadAccount();
+    await loadAccounts();
     await Promise.all([loadSources(), loadCampaigns(), loadContacts()]);
   }
 
-  // ── Account ──
-  async function loadAccount() {
+  // ── Nicks ──
+  const LOGIN_BUSY = ['waiting_qr', 'qr_ready', 'scanned'];
+  const nickName = (id) => {
+    const a = _accounts.find((x) => x.id === id);
+    return a ? (a.me && a.me.name) || a.name || a.uid || id : id;
+  };
+
+  function qrBlock(l) {
+    if (l.state === 'qr_ready' && l.qr) {
+      const src = l.qr.startsWith('data:') ? l.qr : `data:image/png;base64,${l.qr}`;
+      return `<div style="display:flex;gap:16px;align-items:center">
+        <img src="${src}" alt="QR đăng nhập Zalo" style="width:170px;height:170px;background:#fff;border-radius:8px;padding:6px">
+        <div style="color:var(--text2);font-size:.9rem">Mở Zalo trên điện thoại của nick cần thêm → biểu tượng QR → quét mã này.<br>Mã hết hạn sau khoảng 1 phút.</div></div>`;
+    }
+    if (l.state === 'scanned') return `✅ ${esc(l.scanned || '')} đã quét — xác nhận đăng nhập trên điện thoại...`;
+    if (l.state === 'waiting_qr') return 'Đang tạo mã QR...';
+    return `<span style="color:var(--text2)">${l.error ? '⚠️ ' + esc(l.error) : 'Chưa đăng nhập'}</span>`;
+  }
+
+  function accountRow(a) {
+    const l = a.login || {};
+    const me = a.me || {};
+    const name = me.name || a.name || '(nick mới)';
+    const avatar = me.avatar || a.avatar;
+    const head = `${avatar ? `<img src="${esc(avatar)}" alt="" style="width:36px;height:36px;border-radius:50%">` : '<div style="width:36px;height:36px;border-radius:50%;background:var(--border)"></div>'}
+      <div style="min-width:160px"><b>${esc(name)}</b><div style="color:var(--text2);font-size:.8rem">${a.uid || me.uid ? 'UID ' + esc(me.uid || a.uid) : ''}</div></div>`;
+    const del = `<button class="btn btn-danger btn-sm" onclick="Zalo.removeAccount('${esc(a.id)}')">Xoá</button>`;
+
+    if (!a.logged_in) {
+      const rescan = LOGIN_BUSY.includes(l.state) ? ''
+        : `<button class="btn btn-primary btn-sm" onclick="Zalo.relogin('${esc(a.id)}')">Quét QR</button>`;
+      return `<div class="zalo-nick" style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
+        ${a.pending ? '' : head}<div style="flex:1">${qrBlock(l)}</div>
+        <div style="white-space:nowrap">${rescan} ${del}</div></div>`;
+    }
+
+    let state;
+    if (!a.enabled) state = '<span class="badge">Đã tắt</span>';
+    else if (a.resting) state = `<span class="badge badge-red" title="${esc(a.last_error || '')}">Nghỉ đến ${esc(a.paused_until)}</span>`;
+    else if (a.sent_today >= a.cap_today) state = '<span class="badge badge-blue">Đủ hạn mức hôm nay</span>';
+    else state = '<span class="badge badge-green">Sẵn sàng</span>';
+    const rate = a.requested_total ? `${a.accepted_total}/${a.requested_total} đồng ý (${Math.round(100 * a.accepted_total / a.requested_total)}%)` : 'chưa mời ai';
+    return `<div class="zalo-nick" style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
+      ${head}
+      <div style="flex:1;min-width:200px;font-size:.85rem">
+        ${state}
+        <div>Hôm nay <b>${a.sent_today}/${a.cap_today}</b> lời mời
+          ${a.cap_note ? `<span style="color:var(--text2)">· ${esc(a.cap_note)}</span>` : ''}
+          <span style="color:var(--text2)">· giới hạn nick ${a.daily_cap}/ngày</span></div>
+        <div style="color:var(--text2)">${rate}</div>
+        ${a.last_error && !a.resting ? `<div style="color:var(--red);font-size:.8rem">⚠️ ${esc(a.last_error)}</div>` : ''}
+      </div>
+      <div style="white-space:nowrap">
+        ${a.resting ? `<button class="btn btn-secondary btn-sm" onclick="Zalo.resumeAccount('${esc(a.id)}')">Cho chạy lại</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="Zalo.editCap('${esc(a.id)}')">Giới hạn</button>
+        <button class="btn btn-ghost btn-sm" onclick="Zalo.toggleAccount('${esc(a.id)}')">${a.enabled ? 'Tắt' : 'Bật'}</button>
+        ${del}</div></div>`;
+  }
+
+  async function loadAccounts() {
     const box = el('zalo-account');
     if (!box) return;
-    let st;
     try {
-      st = await apiGet('/api/zalo/status');
+      _accounts = await apiGet('/api/zalo/accounts');
     } catch (e) {
       box.innerHTML = `<div class="empty-state">⚠️ ${esc(e.message)}</div>`;
       return;
     }
-    if (st.logged_in) {
-      stopPoll();
-      const me = st.me || {};
-      box.innerHTML = `<div style="display:flex;align-items:center;gap:12px">
-        ${me.avatar ? `<img src="${esc(me.avatar)}" alt="" style="width:40px;height:40px;border-radius:50%">` : ''}
-        <div style="flex:1"><b>${esc(me.name || me.uid)}</b><div style="color:var(--text2);font-size:.85rem">UID ${esc(me.uid)} · đã đăng nhập</div></div>
-        <button class="btn btn-ghost btn-sm" onclick="Zalo.logout()">Đăng xuất</button></div>`;
-      return;
+    box.innerHTML = _accounts.length ? _accounts.map(accountRow).join('')
+      : '<div class="empty-state">Chưa có nick nào — bấm "+ Thêm nick Zalo" rồi quét QR.</div>';
+
+    const sel = el('zalo-group-account');
+    if (sel) {
+      const cur = sel.value;
+      const live = _accounts.filter((a) => a.logged_in);
+      sel.innerHTML = live.map((a) => `<option value="${esc(a.id)}">${esc(nickName(a.id))}</option>`).join('')
+        || '<option value="">(chưa có nick)</option>';
+      if (live.some((a) => a.id === cur)) sel.value = cur;
     }
-    const l = st.login || {};
-    if (l.state === 'qr_ready' && l.qr) {
-      const src = l.qr.startsWith('data:') ? l.qr : `data:image/png;base64,${l.qr}`;
-      box.innerHTML = `<div style="display:flex;gap:16px;align-items:center">
-        <img src="${src}" alt="QR đăng nhập Zalo" style="width:180px;height:180px;background:#fff;border-radius:8px;padding:6px">
-        <div style="color:var(--text2)">Mở Zalo trên điện thoại → biểu tượng QR → quét mã này.<br>Mã hết hạn sau khoảng 1 phút.</div></div>`;
-    } else if (l.state === 'scanned') {
-      box.innerHTML = `<div class="empty-state">✅ ${esc(l.scanned || '')} đã quét — xác nhận đăng nhập trên điện thoại...</div>`;
-    } else if (l.state === 'waiting_qr') {
-      box.innerHTML = `<div class="empty-state">Đang tạo mã QR...</div>`;
-    } else {
-      stopPoll();
-      box.innerHTML = `<div style="display:flex;align-items:center;gap:12px">
-        <div style="flex:1;color:var(--text2)">${l.error ? '⚠️ ' + esc(l.error) : 'Chưa đăng nhập Zalo.'}</div>
-        <button class="btn btn-primary btn-sm" onclick="Zalo.login()">Đăng nhập bằng QR</button></div>`;
-    }
+    if (_accounts.some((a) => !a.logged_in && LOGIN_BUSY.includes((a.login || {}).state))) startPoll();
+    else stopPoll();
+  }
+
+  function startPoll() {
+    if (_loginPoll) return;
+    _loginPoll = setInterval(() => {
+      if (!el('zalo-account') || el('view-zalo')?.classList.contains('hidden')) return stopPoll();
+      loadAccounts();
+    }, 2000);
   }
 
   function stopPoll() {
@@ -74,24 +130,63 @@ const Zalo = (() => {
     _loginPoll = null;
   }
 
-  async function login() {
+  async function addAccount() {
     try {
-      await apiPost('/api/zalo/login', {});
+      await apiPost('/api/zalo/accounts', {});
     } catch (e) {
       return toast(e.message, 'error');
     }
-    stopPoll();
-    _loginPoll = setInterval(async () => {
-      if (!el('zalo-account') || el('view-zalo')?.classList.contains('hidden')) return stopPoll();
-      await loadAccount();
-    }, 2000);
-    loadAccount();
+    loadAccounts();
   }
 
-  async function logout() {
-    if (!confirm('Đăng xuất Zalo? Chiến dịch đang chạy sẽ dừng gửi.')) return;
-    await apiPost('/api/zalo/logout', {});
-    loadAccount();
+  async function relogin(id) {
+    try {
+      await apiPost(`/api/zalo/accounts/${id}/login`, {});
+    } catch (e) {
+      return toast(e.message, 'error');
+    }
+    loadAccounts();
+  }
+
+  async function removeAccount(id) {
+    if (!confirm(`Xoá nick "${nickName(id)}"? Phiên đăng nhập bị xoá, người nick này đã mời sẽ không được gửi tin chào nữa.`)) return;
+    try {
+      await apiDelete(`/api/zalo/accounts/${id}`);
+    } catch (e) {
+      return toast(e.message, 'error');
+    }
+    loadAccounts();
+  }
+
+  async function saveAccount(id, patch) {
+    const a = _accounts.find((x) => x.id === id);
+    if (!a) return;
+    try {
+      await apiPut(`/api/zalo/accounts/${id}`, { enabled: !!a.enabled, daily_cap: a.daily_cap, ...patch });
+    } catch (e) {
+      return toast(e.message, 'error');
+    }
+    loadAccounts();
+  }
+
+  function toggleAccount(id) {
+    const a = _accounts.find((x) => x.id === id);
+    if (a) saveAccount(id, { enabled: !a.enabled });
+  }
+
+  function editCap(id) {
+    const a = _accounts.find((x) => x.id === id);
+    if (!a) return;
+    const v = prompt(`Số lời mời tối đa mỗi ngày cho "${nickName(id)}" sau khi làm ấm (1–60).\nNick mới: 15–20 · nick lâu năm: 25–40.`, a.daily_cap);
+    if (v == null) return;
+    const n = parseInt(v, 10);
+    if (!(n >= 1 && n <= 60)) return toast('Nhập số từ 1 đến 60', 'error');
+    saveAccount(id, { daily_cap: n });
+  }
+
+  async function resumeAccount(id) {
+    await apiPost(`/api/zalo/accounts/${id}/resume`, {});
+    loadAccounts();
   }
 
   // ── Groups & events ──
@@ -99,7 +194,7 @@ const Zalo = (() => {
     const box = el('zalo-groups');
     box.innerHTML = '<div class="empty-state">Đang tải nhóm...</div>';
     try {
-      _groups = await apiGet('/api/zalo/groups');
+      _groups = await apiGet(`/api/zalo/groups?account=${encodeURIComponent(groupAccount())}`);
     } catch (e) {
       box.innerHTML = `<div class="empty-state">⚠️ ${esc(e.message)}</div>`;
       return;
@@ -131,14 +226,15 @@ const Zalo = (() => {
     });
   }
 
+  const groupAccount = () => el('zalo-group-account')?.value || '';
   const groupName = (id) => (_groups.find((g) => g.id === id) || {}).name || '';
 
   async function scrapeGroup(id, btn) {
     btn.disabled = true;
     btn.textContent = 'Đang quét...';
     try {
-      const r = await apiPost(`/api/zalo/groups/${id}/scrape`, { group_name: groupName(id) });
-      let msg = `Đã lấy ${r.total} thành viên (${r.new} mới)`;
+      const r = await apiPost(`/api/zalo/groups/${id}/scrape`, { group_name: groupName(id), account: groupAccount() });
+      let msg = `Đã lấy ${r.total} thành viên (${r.new} mới, đã loại ${r.admins_skipped || 0} ban quản trị)`;
       if (r.partial) msg += ` — Zalo chỉ trả ${r.total}/${r.group_total}, nhóm cộng đồng lớn có thể bị giới hạn`;
       toast(msg, r.partial ? 'warning' : 'success');
       loadSources();
@@ -158,7 +254,7 @@ const Zalo = (() => {
     const cell = row.firstElementChild;
     cell.innerHTML = '<div class="empty-state">Đang tải sự kiện...</div>';
     try {
-      const evs = await apiGet(`/api/zalo/groups/${id}/events`);
+      const evs = await apiGet(`/api/zalo/groups/${id}/events?account=${encodeURIComponent(groupAccount())}`);
       if (!evs.length) {
         cell.innerHTML = '<div class="empty-state">Nhóm không có sự kiện / nhắc hẹn.</div>';
         return;
@@ -167,7 +263,7 @@ const Zalo = (() => {
         <span style="flex:1">📅 ${esc(ev.title || '(không tiêu đề)')}
           <span style="color:var(--text2);font-size:.8rem">${ev.start_time ? new Date(ev.start_time).toLocaleString('vi-VN') : ''}
           ${ev.accept_count != null ? ` · ${ev.accept_count} tham gia` : ''}</span></span>
-        <button class="btn btn-secondary btn-sm" data-title="${esc(ev.title)}"
+        <button class="btn btn-secondary btn-sm" data-title="${esc(ev.title)}" data-creator="${esc(ev.creator_id || '')}"
           onclick="Zalo.scrapeEvent('${esc(ev.id)}','${esc(id)}',this)">Lấy người tham gia</button></div>`).join('');
     } catch (e) {
       cell.innerHTML = `<div class="empty-state">⚠️ ${esc(e.message)}</div>`;
@@ -178,8 +274,11 @@ const Zalo = (() => {
     btn.disabled = true;
     btn.textContent = 'Đang lấy...';
     try {
-      const r = await apiPost(`/api/zalo/events/${eventId}/scrape`, { title: btn.dataset.title || '', group_name: groupName(groupId) });
-      toast(`Đã lấy ${r.total} người tham gia (${r.new} mới)`, 'success');
+      const r = await apiPost(`/api/zalo/events/${eventId}/scrape`, {
+        title: btn.dataset.title || '', group_name: groupName(groupId),
+        group_id: groupId, creator_id: btn.dataset.creator || '', account: groupAccount(),
+      });
+      toast(`Đã lấy ${r.total} người tham gia (${r.new} mới, đã loại ${r.admins_skipped || 0} ban quản trị)`, 'success');
       loadSources();
       loadContacts();
     } catch (e) {
@@ -243,14 +342,27 @@ const Zalo = (() => {
       return;
     }
     box.innerHTML = `${filterNote}<div style="color:var(--text2);font-size:.85rem;margin-bottom:6px">${data.total} liên hệ${data.total > data.items.length ? ` (hiện ${data.items.length})` : ''}</div>
-      <div style="max-height:480px;overflow:auto"><table class="data-table" style="width:100%"><thead><tr><th>Tên</th><th>Nguồn</th><th>Trạng thái</th><th>Cập nhật</th></tr></thead><tbody>
+      <div style="max-height:480px;overflow:auto"><table class="data-table" style="width:100%"><thead><tr><th>Tên</th><th>Nguồn</th><th>Trạng thái</th><th>Nick gửi</th><th>Cập nhật</th><th></th></tr></thead><tbody>
       ${data.items.map((c) => {
         const [label, cls] = STATUS_LABEL[c.status] || [c.status, ''];
         return `<tr><td>${c.avatar ? `<img src="${esc(c.avatar)}" alt="" style="width:22px;height:22px;border-radius:50%;vertical-align:middle;margin-right:6px">` : ''}${esc(c.name || c.uid)}</td>
           <td style="font-size:.8rem;color:var(--text2)">${esc(c.source_names || '')}</td>
           <td><span class="badge ${cls}" ${c.last_error ? `title="${esc(c.last_error)}"` : ''}>${label}</span></td>
-          <td style="font-size:.8rem">${esc(c.updated_at || '')}</td></tr>`;
+          <td style="font-size:.8rem">${c.account_id ? esc(nickName(c.account_id)) : ''}</td>
+          <td style="font-size:.8rem">${esc(c.updated_at || '')}</td>
+          <td>${c.status === 'blocked'
+            ? `<button class="btn btn-ghost btn-sm" onclick="Zalo.blockContact('${esc(c.uid)}', false)">Bỏ chặn</button>`
+            : c.status === 'new' ? `<button class="btn btn-ghost btn-sm" title="Không nick nào được liên hệ người này" onclick="Zalo.blockContact('${esc(c.uid)}', true)">Chặn</button>` : ''}</td></tr>`;
       }).join('')}</tbody></table></div>`;
+  }
+
+  async function blockContact(uid, blocked) {
+    try {
+      await apiPost(`/api/zalo/contacts/${uid}/block`, { blocked });
+    } catch (e) {
+      return toast(e.message, 'error');
+    }
+    loadContacts();
   }
 
   // ── Campaigns ──
@@ -269,14 +381,15 @@ const Zalo = (() => {
     }
     const stBadge = { running: ['Đang chạy', 'badge-green'], paused: ['Tạm dừng', 'badge-purple'], done: ['Hết danh sách', 'badge-blue'] };
     box.innerHTML = `<table class="data-table" style="width:100%"><thead><tr><th>Chiến dịch</th><th>Trạng thái</th>
-      <th>Hôm nay <span class="info-i" tabindex="0" data-tip="Số lời mời kết bạn đã gửi hôm nay / giới hạn mỗi ngày">i</span></th>
+      <th>Hôm nay <span class="info-i" tabindex="0" data-tip="Số lời mời kết bạn đã gửi hôm nay (cộng tất cả nick) / giới hạn tổng của chiến dịch">i</span></th>
       <th>Đã mời</th><th>Đồng ý</th><th>Đã chào</th><th></th></tr></thead><tbody>
       ${list.map((c) => {
         const [label, cls] = stBadge[c.status] || [c.status, ''];
         const srcNames = c.sources.length
           ? c.sources.map((k) => (_sources.find((s) => `${s.source_type}:${s.source_id}` === k) || {}).source_name || k).join(', ')
           : 'Tất cả liên hệ';
-        return `<tr><td><b>${esc(c.name)}</b><div style="font-size:.8rem;color:var(--text2)">${esc(srcNames)}</div>
+        const nicks = c.accounts && c.accounts.length ? c.accounts.map(nickName).join(', ') : 'Tất cả nick';
+        return `<tr><td><b>${esc(c.name)}</b><div style="font-size:.8rem;color:var(--text2)">${esc(srcNames)} · 👤 ${esc(nicks)}</div>
             ${c.last_error ? `<div style="font-size:.8rem;color:var(--red)">⚠️ ${esc(c.last_error)}</div>` : ''}</td>
           <td><span class="badge ${cls}">${label}</span></td>
           <td>${c.sent_today}/${c.daily_limit}</td><td>${c.requested}</td><td>${c.accepted}</td><td>${c.greeted}</td>
@@ -294,13 +407,17 @@ const Zalo = (() => {
   async function openCampaign(id) {
     const form = el('zalo-campaign-form');
     _editingId = id || null;
-    let c = { name: '', sources: [], friend_msg: 'Chào {name}, mình cũng trong nhóm {AFFILIATE CRYPTO|cộng đồng} — kết bạn giao lưu nhé!',
-      greet_msg: 'Cảm ơn {name} đã đồng ý kết bạn 🙌', daily_limit: 20, min_delay_sec: 300, max_delay_sec: 900, start_hour: 8, end_hour: 22 };
+    let c = { name: '', sources: [], accounts: [], friend_msg: 'Chào {name}, mình cũng trong nhóm {AFFILIATE CRYPTO|cộng đồng} — kết bạn giao lưu nhé!',
+      greet_msg: 'Cảm ơn {name} đã đồng ý kết bạn 🙌', daily_limit: 100, min_delay_sec: 300, max_delay_sec: 900, start_hour: 8, end_hour: 22 };
     if (id) {
       const list = await apiGet('/api/zalo/campaigns');
       c = list.find((x) => x.id === id) || c;
     }
     if (!_sources.length) await loadSources();
+    if (!_accounts.length) await loadAccounts();
+    const nickOpts = _accounts.filter((a) => !a.pending && (a.uid || a.logged_in)).map((a) => `<label style="display:block;font-size:.9rem">
+      <input type="checkbox" class="zc-acc" value="${esc(a.id)}" ${(c.accounts || []).includes(a.id) ? 'checked' : ''}> ${esc(nickName(a.id))}
+      <span style="color:var(--text2)">(${a.logged_in ? `${a.cap_today}/ngày hôm nay` : 'chưa đăng nhập'})</span></label>`).join('');
     form.classList.remove('hidden');
     form.innerHTML = `<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">
       <div class="form-group"><label class="form-label" for="zc-name">Tên chiến dịch</label>
@@ -311,6 +428,10 @@ const Zalo = (() => {
         ${_sources.map((s) => { const k = `${s.source_type}:${s.source_id}`; return `<label style="display:block;font-size:.9rem">
           <input type="checkbox" class="zc-src" value="${esc(k)}" ${c.sources.includes(k) ? 'checked' : ''}> ${esc(s.source_name)} <span style="color:var(--text2)">(${s.pending} chưa liên hệ)</span></label>`; }).join('') || '<span style="color:var(--text2)">Chưa có nguồn — quét nhóm/sự kiện trước.</span>'}
         </div></div>
+      <div class="form-group"><label class="form-label">Nick gửi
+        <span class="info-i" tabindex="0" data-tip="Các nick được phép gửi cho chiến dịch này. Không chọn gì = tất cả nick đang bật. Mỗi nick có giới hạn và thời gian nghỉ riêng; các nick gửi xen kẽ, không bao giờ cùng lúc.">i</span></label>
+        <div style="max-height:120px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:6px">
+        ${nickOpts || '<span style="color:var(--text2)">Chưa có nick — thêm nick ở mục Nick Zalo.</span>'}</div></div>
       <div class="form-group"><label class="form-label" for="zc-friend">Lời nhắn kèm lời mời kết bạn
         <span class="info-i" tabindex="0" data-tip="Hiện trong lời mời kết bạn, tối đa 150 ký tự. {name} = tên gọi, {full_name} = họ tên đầy đủ, {a|b} = chọn ngẫu nhiên a hoặc b để mỗi người nhận câu hơi khác nhau.">i</span></label>
         <textarea class="form-input" id="zc-friend" rows="2" maxlength="150">${esc(c.friend_msg)}</textarea></div>
@@ -318,11 +439,11 @@ const Zalo = (() => {
         <span class="info-i" tabindex="0" data-tip="Tự gửi tin nhắn này khi người đó chấp nhận lời mời (kiểm tra mỗi 5 phút, trong giờ hoạt động). Để trống nếu không muốn gửi.">i</span></label>
         <textarea class="form-input" id="zc-greet" rows="3">${esc(c.greet_msg)}</textarea></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
-        <div class="form-group"><label class="form-label" for="zc-limit">Mời / ngày
-          <span class="info-i" tabindex="0" data-tip="Tài khoản Zalo mới nên để 10–20, tài khoản lâu năm tối đa ~30–40 để tránh bị khoá tính năng kết bạn.">i</span></label>
-          <input type="number" class="form-input" id="zc-limit" min="1" max="100" value="${c.daily_limit}"></div>
+        <div class="form-group"><label class="form-label" for="zc-limit">Tổng mời / ngày
+          <span class="info-i" tabindex="0" data-tip="Trần tổng của cả chiến dịch (cộng mọi nick). Giới hạn an toàn của từng nick đặt ở mục Nick Zalo — VD 4 nick × 25 = 100/ngày.">i</span></label>
+          <input type="number" class="form-input" id="zc-limit" min="1" max="500" value="${c.daily_limit}"></div>
         <div class="form-group"><label class="form-label" for="zc-min">Nghỉ tối thiểu (giây)
-          <span class="info-i" tabindex="0" data-tip="Thời gian chờ ngẫu nhiên giữa 2 lời mời, nằm giữa tối thiểu và tối đa.">i</span></label>
+          <span class="info-i" tabindex="0" data-tip="Mỗi nick chờ ngẫu nhiên trong khoảng này giữa 2 lời mời của chính nó.">i</span></label>
           <input type="number" class="form-input" id="zc-min" min="60" value="${c.min_delay_sec}"></div>
         <div class="form-group"><label class="form-label" for="zc-max">Nghỉ tối đa (giây)</label>
           <input type="number" class="form-input" id="zc-max" min="60" value="${c.max_delay_sec}"></div>
@@ -345,6 +466,7 @@ const Zalo = (() => {
     const body = {
       name: el('zc-name').value.trim(),
       sources: [...document.querySelectorAll('.zc-src:checked')].map((x) => x.value),
+      accounts: [...document.querySelectorAll('.zc-acc:checked')].map((x) => x.value),
       friend_msg: el('zc-friend').value.trim(),
       greet_msg: el('zc-greet').value.trim(),
       daily_limit: +el('zc-limit').value,
@@ -399,7 +521,7 @@ const Zalo = (() => {
   }
 
   return {
-    init, login, logout, loadGroups, filterGroups, scrapeGroup, toggleEvents, scrapeEvent,
+    init, addAccount, relogin, removeAccount, toggleAccount, editCap, resumeAccount, blockContact, loadGroups, filterGroups, scrapeGroup, toggleEvents, scrapeEvent,
     loadContacts, filterSource, openCampaign, closeCampaign, saveCampaign,
     startCampaign, pauseCampaign, deleteCampaign, showLogs,
   };

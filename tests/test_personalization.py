@@ -28,7 +28,7 @@ class TestApplyPersonalization:
             "last_name": "",
             "username": "crypto_king",
         })
-        assert result == "Hey crypto_king!"
+        assert result == "Hey Crypto_king!"
 
     def test_name_fallback_to_friend(self):
         """When both first_name and username are empty, {name} should be 'friend'."""
@@ -70,7 +70,7 @@ class TestApplyPersonalization:
             "last_name": "",
             "username": "johndoe",
         })
-        assert result == "johndoe"
+        assert result == "Johndoe"
 
     def test_case_insensitive(self):
         """Variables should be case-insensitive."""
@@ -152,7 +152,7 @@ class TestApplyPersonalization:
             "Hi {name}, your handle is @{username}",
             {"username": "trader99"},
         )
-        assert result == "Hi trader99, your handle is @trader99"
+        assert result == "Hi Trader99, your handle is @trader99"
 
 
 if __name__ == "__main__":

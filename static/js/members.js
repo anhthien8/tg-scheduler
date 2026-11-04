@@ -2680,7 +2680,8 @@ const Members = {
     // Import only the selected contacts of leads in the current tab/depth filter,
     // so picking "Trading & Scalping" doesn't also import every other tab's contacts.
     const inView = new Set();
-    this._applySimFilters(this._similarLeads).forEach(l => (l.contacts || []).forEach(c => inView.add(c)));
+    const viewLeads = this._applySimFilters(this._similarLeads);
+    viewLeads.forEach(l => (l.contacts || []).forEach(c => inView.add(c)));
     const cleanContacts = Array.from(this._selectedContacts).filter(c => inView.has(c) && !this._isBotUsername(c));
     if (!cleanContacts.length) {
       App.toast('Chưa chọn contact hợp lệ nào trong tab hiện tại!', 'error');
@@ -2695,7 +2696,9 @@ const Members = {
 
     const groupTitle = `Deep Crawl Contacts (${jobId})`;
 
-    if (!confirm(`Lưu ${cleanContacts.length} contacts đã chọn vào job "${jobId}"?`)) return;
+    const picked = new Set(cleanContacts);
+    const nCh = viewLeads.filter(l => (l.contacts || []).some(c => picked.has(c))).length;
+    if (!confirm(`Lưu ${cleanContacts.length} contacts (admin của ${nCh} kênh — 1 kênh có thể có nhiều admin) vào job "${jobId}"?`)) return;
 
     try {
       const res = await fetch('/api/members/import-contacts', {

@@ -57,6 +57,56 @@ async def add_group(req: GroupCreate):
     return {"id": group_id, "success": True}
 
 
+class GroupQuickAdd(BaseModel):
+    link: str
+    name: Optional[str] = ""
+
+
+@router.post("/groups/quick-add")
+async def quick_add_group(req: GroupQuickAdd):
+    """Add a warmup group from just a t.me link / @username / chat id.
+
+    Resolves it with the first connected account (joining public groups or
+    invite links if needed) so the user never has to look up the chat id."""
+    import telegram_client as tg
+    from telethon import utils as tl_utils
+    from reaction_watcher import _join_or_get_entity
+
+    link = (req.link or "").strip()
+    if not link:
+        raise HTTPException(status_code=400, detail="Thiếu link nhóm")
+    target = int(link) if link.lstrip("-").isdigit() else link
+    last_err = "Không có tài khoản nào đang kết nối"
+    for acc_id, client in list(tg._clients.items()):
+        if not client or not client.is_connected():
+            continue
+        try:
+            if isinstance(target, int):
+                entity = await asyncio.wait_for(client.get_entity(target), timeout=20.0)
+            else:
+                entity = await asyncio.wait_for(_join_or_get_entity(client, target), timeout=30.0)
+            if entity is None:
+                raise ValueError("Không xác định được nhóm từ link")
+        except Exception as e:
+            last_err = str(e) or type(e).__name__
+            continue
+        title = getattr(entity, "title", "") or ""
+        uname = getattr(entity, "username", "") or ""
+        data = {
+            "name": (req.name or "").strip() or title or uname or link,
+            "chat_id": str(tl_utils.get_peer_id(entity)),
+            "chat_title": title,
+            "chat_username": uname,
+        }
+        for g in await db.get_warmup_groups():
+            if str(g.get("chat_id")) == data["chat_id"]:
+                raise HTTPException(status_code=400, detail=f"Nhóm đã có trong danh sách: {g.get('name')}")
+        group_id = await db.create_warmup_group(data)
+        tg._dialogs_cache.pop(acc_id, None)
+        return {"id": group_id, "success": True, **data}
+    raise HTTPException(status_code=400, detail=f"Không lấy được nhóm: {last_err}")
+
+
 @router.delete("/groups/{group_id}")
 async def remove_group(group_id: int):
     # Stop any running jobs for this group first

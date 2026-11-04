@@ -222,6 +222,10 @@ if(page==='ai-followup'){
             <div class="stat-label">✅ Đã gắn link trở lên</div>
             <div class="stat-value green" id="aifu-stat-onboarded">–</div>
           </div>
+          <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.openSupportedKols()" title="Danh sách KOL đã chốt deal: đang support và đã từng support (ngủ đông)">
+            <div class="stat-label">🤝 KOL support</div>
+            <div class="stat-value accent" id="aifu-stat-supported">–</div>
+          </div>
           <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.filterByStatus('')" title="Bấm để xem tất cả">
             <div class="stat-label">Tổng lead</div>
             <div class="stat-value" id="aifu-stat-total">–</div>
@@ -423,6 +427,18 @@ if(page==='ai-followup'){
               <tbody id="aifu-ref-codes-body"><tr><td colspan="5" style="text-align:center;color:var(--text2);padding:12px">Đang tải...</td></tr></tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <!-- Supported KOLs Modal -->
+      <div id="aifu-kol-modal" class="modal-overlay">
+        <div class="modal" style="max-width:980px;width:96vw">
+          <div class="modal-header">
+            <h3 style="margin:0;font-size:15px">🤝 KOL đã & đang support <span class="info-i" title="KOL đã chốt deal (từ bước Đồng ý deal trở lên). Đang support = Đồng ý deal → Hoạt động. Đã support = Ngủ đông. Bấm 1 dòng để mở chat.">i</span></h3>
+            <button class="modal-close" onclick="document.getElementById('aifu-kol-modal').classList.remove('open')" aria-label="Đóng">&times;</button>
+          </div>
+          <div style="padding:10px 16px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap" id="aifu-kol-chips"></div>
+          <div class="modal-body" style="max-height:65vh;overflow:auto;padding:10px 16px 16px" id="aifu-kol-body"></div>
         </div>
       </div>
 
@@ -783,12 +799,10 @@ if(page==='warmup'){
       <!-- Add Group Modal -->
       <div id="warmup-group-modal" class="modal-overlay">
         <div class="modal">
-          <div class="modal-header"><h3 class="modal-title">Them nhom warmup</h3><button class="modal-close" onclick="(document.getElementById('warmup-group-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
+          <div class="modal-header"><h3 class="modal-title">Thêm nhóm warmup</h3><button class="modal-close" onclick="(document.getElementById('warmup-group-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
           <div class="modal-body">
-            <div class="form-group"><label class="form-label">Ten nhom</label><input type="text" id="wg-name" class="form-input" placeholder="VD: Crypto VN"></div>
-            <div class="form-group"><label class="form-label">Chat ID</label><input type="text" id="wg-chat-id" class="form-input" placeholder="ID nhom Telegram"></div>
-            <div class="form-group"><label class="form-label">Tieu de</label><input type="text" id="wg-chat-title" class="form-input" placeholder="Tieu de nhom (tuy chon)"></div>
-            <div class="form-group"><label class="form-label">Username</label><input type="text" id="wg-chat-username" class="form-input" placeholder="@username (tuy chon)"></div>
+            <div class="form-group"><label class="form-label">Link nhóm <span class="info-i" title="Dán link t.me/..., @username, link mời t.me/+... hoặc chat ID. Hệ thống tự lấy ID, tên nhóm và tự join nếu cần.">i</span></label><input type="text" id="wg-link" class="form-input" placeholder="t.me/cryptovn hoặc @cryptovn" onkeydown="if(event.key==='Enter')Warmup.saveGroup()"></div>
+            <div class="form-group"><label class="form-label">Tên hiển thị <span style="color:var(--text2);font-weight:400">(tuỳ chọn — mặc định lấy tên nhóm)</span></label><input type="text" id="wg-name" class="form-input" placeholder="Để trống = tên nhóm trên Telegram"></div>
           </div>
           <div class="modal-footer"><button class="btn btn-primary" onclick="Warmup.saveGroup()">Luu</button></div>
         </div>
@@ -4519,14 +4533,14 @@ Object.assign(App, {
     const isRead = this._inboxFilter === 'unread' ? 0
                  : this._inboxFilter === 'read'   ? 1
                  : undefined;
-    let url = `/api/inbox?limit=${this._inboxLimit}&offset=${this._inboxOffset}`;
+    let url = `/api/inbox/threads?limit=${this._inboxLimit}&offset=${this._inboxOffset}`;
     if(isRead !== undefined) url += `&is_read=${isRead}`;
     if(this._inboxAccountFilter) url += `&account_id=${this._inboxAccountFilter}`;
 
     try{
       const r = await fetch(url);
       const d = await r.json();
-      const replies = d.replies || [];
+      const replies = d.threads || [];
       this._inboxHasMore = replies.length === this._inboxLimit;
       if(reset){
         this._inboxRenderRows(replies, true);
@@ -4565,37 +4579,65 @@ Object.assign(App, {
     }
     if(empty) empty.classList.add('hidden');
 
-    replies.forEach(rep => {
-      const isUnread = rep.is_read === 0;
-      const name = rep.sender_name || (rep.sender_username ? '@'+rep.sender_username : `ID ${rep.sender_user_id}`);
-      const username = rep.sender_username ? `<br><span style="color:var(--text2);font-size:.78rem">@${rep.sender_username}</span>` : '';
-      const msg  = (rep.message_text||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      const short = msg.length > 80 ? msg.slice(0,80)+'…' : msg;
-      const watcher = rep.watcher_name
-        ? `<span style="font-size:.8rem;padding:2px 6px;border-radius:4px;background:var(--bg3);color:var(--text2)">${rep.watcher_name}</span>`
+    const esc = t => String(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    replies.forEach(t => {
+      const isUnread = t.unread > 0;
+      const key = `${t.account_id}-${t.sender_user_id}`;
+      const name = esc(t.sender_name || (t.sender_username ? '@'+t.sender_username : `ID ${t.sender_user_id}`));
+      const username = t.sender_username ? `<br><span style="color:var(--text2);font-size:.78rem">@${esc(t.sender_username)}</span>` : '';
+      const badge = isUnread ? ` <span class="badge" style="background:var(--accent);color:#000;border-radius:10px;padding:0 6px;font-size:.7rem">${t.unread}</span>` : '';
+      const msgs = (t.messages||[]).map(m => {
+        const txt = esc(m.message_text); const short = txt.length > 120 ? txt.slice(0,120)+'…' : txt;
+        return `<div style="padding:2px 0;${m.is_read===0?'font-weight:600':''}"><span style="color:var(--text2);font-size:.72rem">${(m.received_at||'').replace('T',' ').slice(11,16)}</span> ${short}</div>`;
+      }).join('');
+      const more = t.total > 3 ? `<div style="color:var(--text2);font-size:.72rem">+${t.total-3} tin cũ hơn</div>` : '';
+      const watcher = t.watcher_name
+        ? `<span style="font-size:.8rem;padding:2px 6px;border-radius:4px;background:var(--bg3);color:var(--text2)">${esc(t.watcher_name)}</span>`
         : `<span style="color:var(--text2);font-size:.8rem">—</span>`;
-      const acc = rep.account_name || `acc#${rep.account_id}`;
-      const dt  = rep.received_at ? rep.received_at.replace('T',' ').slice(0,16) : '';
-      const rowStyle = isUnread ? 'background:rgba(var(--accent-rgb,255,136,0),.07)' : '';
-
+      const dt = t.last_at ? t.last_at.replace('T',' ').slice(0,16) : '';
       const tr = document.createElement('tr');
-      tr.id = `inbox-row-${rep.id}`;
-      tr.style.cssText = rowStyle;
+      tr.id = `inbox-row-${key}`;
+      if(isUnread) tr.style.cssText = 'background:rgba(var(--accent-rgb,255,136,0),.07)';
       tr.innerHTML = `
-        <td style="font-weight:${isUnread?'600':'400'}">${name}${username}</td>
-        <td style="max-width:260px;word-break:break-word;font-size:.85rem">${short}</td>
+        <td style="font-weight:${isUnread?'600':'400'}">${name}${badge}${username}</td>
+        <td style="max-width:380px;word-break:break-word;font-size:.85rem">${msgs}${more}</td>
         <td>${watcher}</td>
-        <td style="font-size:.82rem;color:var(--text2)">${acc}</td>
+        <td style="font-size:.82rem;color:var(--text2)">${esc(t.account_name || 'acc#'+t.account_id)}</td>
         <td style="font-size:.78rem;color:var(--text2);white-space:nowrap">${dt}</td>
-        <td>${isUnread
-          ? `<button class="btn btn-ghost" style="padding:4px 10px;font-size:.75rem" onclick="App.inboxMarkRead(${rep.id})">✓ Đọc</button>`
-          : `<span style="font-size:.75rem;color:var(--text2)">✓</span>`
-        }</td>
-      `;
+        <td style="white-space:nowrap">
+          <button class="btn btn-primary btn-sm" onclick="App.inboxOpenChat(${t.account_id},${t.sender_user_id})">💬 Chat</button>
+          ${isUnread ? `<button class="btn btn-ghost btn-sm" onclick="App.inboxMarkThreadRead(${t.account_id},${t.sender_user_id})">✓ Đọc</button>` : ''}
+        </td>`;
       tbody.appendChild(tr);
     });
 
     if(more) more.style.display = this._inboxHasMore ? 'inline-block' : 'none';
+  },
+
+  async inboxMarkThreadRead(acc, uid){
+    await fetch(`/api/inbox/threads/${acc}/${uid}/read`, {method:'POST'});
+    const row = document.getElementById(`inbox-row-${acc}-${uid}`);
+    if(row){
+      row.style.background = '';
+      row.querySelector('td:first-child').style.fontWeight = '400';
+      row.querySelector('td:first-child .badge')?.remove();
+      row.querySelectorAll('td:nth-child(2) div').forEach(d => d.style.fontWeight = '');
+      row.querySelector('td:last-child .btn-ghost')?.remove();
+    }
+    if (Polling.isActive('inbox:badge')) Polling.run('inbox:badge');
+  },
+
+  // Open the AI Agent chat modal (last 200 messages) for this sender.
+  async inboxOpenChat(acc, uid){
+    this.inboxMarkThreadRead(acc, uid);
+    this.navigate('ai-followup');
+    for(let i = 0; i < 40; i++){
+      if(window.AIFollowUp && AIFollowUp._chats?.some(c => c.account_id === acc && c.user_id === uid)){
+        return AIFollowUp.openChat(acc, uid);
+      }
+      await new Promise(r => setTimeout(r, 250));
+    }
+    App.toast('Lead này chưa có trong AI Agent (chưa từng được AI theo dõi)', 'error');
   },
 
   // ── Mark single as read ────────────────────────────────────────
@@ -4898,25 +4940,20 @@ const Warmup = {
 
   openAddGroup() {
     (document.getElementById('wg-name') || me_dummy).value = '';
-    (document.getElementById('wg-chat-id') || me_dummy).value = '';
-    (document.getElementById('wg-chat-title') || me_dummy).value = '';
-    (document.getElementById('wg-chat-username') || me_dummy).value = '';
+    (document.getElementById('wg-link') || me_dummy).value = '';
     (document.getElementById('warmup-group-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
+    setTimeout(() => document.getElementById('wg-link')?.focus(), 50);
   },
 
   async saveGroup() {
-    const name = (document.getElementById('wg-name')?.value || "").trim();
-    const chatId = (document.getElementById('wg-chat-id')?.value || "").trim();
-    if (!name || !chatId) { App.toast('Nhap ten va chat ID', 'error'); return; }
+    const link = (document.getElementById('wg-link')?.value || "").trim();
+    if (!link) { App.toast('Dán link hoặc @username của nhóm', 'error'); return; }
     try {
-      await API.post('/api/warmup/groups', {
-        name,
-        chat_id: chatId,
-        chat_title: (document.getElementById('wg-chat-title')?.value || "").trim(),
-        chat_username: (document.getElementById('wg-chat-username')?.value || "").trim()
+      const r = await API.post('/api/warmup/groups/quick-add', {
+        link, name: (document.getElementById('wg-name')?.value || "").trim()
       });
       (document.getElementById('warmup-group-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
-      App.toast('Da them nhom', 'success');
+      App.toast(`Đã thêm nhóm: ${r.name}`, 'success');
       this.loadGroups();
     } catch(e) { App.toast(e.message, 'error'); }
   },

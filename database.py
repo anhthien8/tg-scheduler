@@ -3556,6 +3556,67 @@ async def get_dm_replies(
         return [dict(r) for r in rows]
 
 
+async def get_dm_reply_threads(
+    limit: int = 30,
+    offset: int = 0,
+    is_read: int | None = None,
+    account_id: int | None = None,
+    per_thread: int = 3,
+) -> list[dict]:
+    """Inbox grouped per (account, sender): newest thread first, with the last
+    `per_thread` messages and the unread count. Same visibility rules as
+    get_dm_replies (no bots, only people we DM'd first)."""
+    conds = [
+        "(r.sender_username IS NULL OR r.sender_username NOT LIKE '%bot')",
+        """(EXISTS (SELECT 1 FROM watcher_dm_logs wdl WHERE wdl.target_user_id = r.sender_user_id AND wdl.status = 'success')
+            OR EXISTS (SELECT 1 FROM dm_campaign_logs dcl WHERE dcl.target_user_id = r.sender_user_id AND dcl.status = 'success'))""",
+    ]
+    params: list = []
+    if account_id is not None:
+        conds.append("r.account_id = ?")
+        params.append(account_id)
+    where = " AND ".join(conds)
+    having = ""
+    if is_read == 0:
+        having = "HAVING SUM(CASE WHEN r.is_read = 0 THEN 1 ELSE 0 END) > 0"
+    elif is_read == 1:
+        having = "HAVING SUM(CASE WHEN r.is_read = 0 THEN 1 ELSE 0 END) = 0"
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        threads = [dict(r) for r in await (await db.execute(f"""
+            SELECT r.account_id, r.sender_user_id,
+                   MAX(r.received_at) AS last_at, COUNT(*) AS total,
+                   SUM(CASE WHEN r.is_read = 0 THEN 1 ELSE 0 END) AS unread
+            FROM dm_replies r WHERE {where}
+            GROUP BY r.account_id, r.sender_user_id {having}
+            ORDER BY last_at DESC LIMIT ? OFFSET ?
+        """, params + [limit, offset])).fetchall()]
+        for t in threads:
+            msgs = [dict(r) for r in await (await db.execute("""
+                SELECT r.id, r.message_text, r.received_at, r.is_read, r.sender_name, r.sender_username,
+                       kw.name AS watcher_name, a.name AS account_name
+                FROM dm_replies r
+                LEFT JOIN keyword_watchers kw ON kw.id = r.watcher_id
+                LEFT JOIN accounts a ON a.id = r.account_id
+                WHERE r.account_id = ? AND r.sender_user_id = ?
+                ORDER BY r.received_at DESC LIMIT ?
+            """, (t["account_id"], t["sender_user_id"], per_thread))).fetchall()]
+            head = msgs[0] if msgs else {}
+            t.update(sender_name=head.get("sender_name"), sender_username=head.get("sender_username"),
+                     account_name=head.get("account_name"),
+                     watcher_name=next((m["watcher_name"] for m in msgs if m.get("watcher_name")), None),
+                     messages=list(reversed(msgs)))
+        return threads
+
+
+async def mark_thread_read(account_id: int, sender_user_id: int) -> int:
+    async with get_db() as db:
+        cur = await db.execute("UPDATE dm_replies SET is_read = 1 WHERE account_id = ? AND sender_user_id = ? AND is_read = 0",
+                               (account_id, sender_user_id))
+        await db.commit()
+        return cur.rowcount
+
+
 async def mark_reply_read(reply_id: int) -> bool:
     """Mark a single reply as read. Returns True if a row was updated."""
     async with get_db() as db:
@@ -7399,6 +7460,40 @@ async def get_kol_step_counts() -> dict:
         """)
         counts = {r["step"]: r["n"] for r in await cursor.fetchall()}
     return {s: counts.get(s, 0) for s in KOL_STEP_ALL}
+
+
+SUPPORTED_KOL_STEPS = ("deal_agreed", "uid_received", "link_confirmed", "first_post", "active", "dormant")
+
+
+async def get_supported_kols() -> list[dict]:
+    """KOLs we have closed a deal with: currently supported (deal_agreed..active)
+    or formerly supported (dormant). `deal_at` = first time they left prospect."""
+    ph = ",".join("?" * len(SUPPORTED_KOL_STEPS))
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(f"""
+            SELECT c.account_id, c.user_id, c.username, c.name, c.status, c.summary,
+                   c.lead_tier, c.intent_score, c.verification_status, c.campaign_id,
+                   COALESCE(c.kol_step, 'prospect') AS kol_step, c.kol_step_updated_at,
+                   c.last_care_at, c.last_user_message_at, c.created_at, c.updated_at,
+                   a.name AS account_name,
+                   p.weex_uid, p.vip_code, p.affiliate_link, p.channel_link, p.followers,
+                   p.volume_claimed, p.selected_campaign,
+                   (SELECT MIN(e.created_at) FROM kol_step_events e
+                     WHERE e.account_id = c.account_id AND e.user_id = c.user_id
+                       AND e.to_step NOT IN ('prospect', 'declined')) AS deal_at
+            FROM ai_followup_chats c
+            LEFT JOIN accounts a ON a.id = c.account_id
+            LEFT JOIN kol_profiles p ON p.account_id = c.account_id AND p.user_id = c.user_id
+            WHERE COALESCE(NULLIF(c.kol_step, ''), 'prospect') IN ({ph})
+            ORDER BY CASE WHEN c.kol_step = 'dormant' THEN 1 ELSE 0 END,
+                     COALESCE(c.kol_step_updated_at, c.updated_at) DESC
+        """, SUPPORTED_KOL_STEPS)
+        rows = [dict(r) for r in await cursor.fetchall()]
+    for r in rows:
+        r["support_state"] = "past" if r["kol_step"] == "dormant" else "current"
+        r["deal_at"] = r.get("deal_at") or r.get("kol_step_updated_at")
+    return rows
 
 
 async def get_leads_by_kol_step(step: str, limit: int = 20) -> list[dict]:

@@ -2,9 +2,10 @@
 Zalo storage — contacts scraped from groups/events, outreach campaigns and logs.
 
 A contact's status is global: once someone was sent a friend request by any
-campaign, no other campaign touches them again.
+campaign (from any nick), nothing touches them again. The nick that sent the
+request is pinned in account_id — the accept check and greeting use that nick.
   new → requested → friend → greeted
-  (or skipped / failed)
+  (or skipped / failed / blocked — blocked = never contact, from any nick)
 """
 import json
 from datetime import datetime, timedelta
@@ -74,7 +75,27 @@ async def ensure_schema():
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS idx_zalo_logs_camp ON zalo_campaign_logs(campaign_id, created_at);
+            CREATE TABLE IF NOT EXISTS zalo_accounts (
+                id TEXT PRIMARY KEY,                  -- bridge slot id
+                uid TEXT DEFAULT '',
+                name TEXT DEFAULT '',
+                avatar TEXT DEFAULT '',
+                enabled INTEGER DEFAULT 1,
+                daily_cap INTEGER DEFAULT 25,         -- ceiling once warmed up
+                first_used TEXT,                      -- date of first friend request (warm-up start)
+                next_action_at TEXT,
+                paused_until TEXT,
+                consecutive_errors INTEGER DEFAULT 0,
+                last_error TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
         """)
+        for table, col, ddl in (("zalo_contacts", "account_id", "TEXT"),
+                                ("zalo_campaign_logs", "account_id", "TEXT"),
+                                ("zalo_campaigns", "accounts", "TEXT NOT NULL DEFAULT '[]'")):
+            cur = await conn.execute(f"PRAGMA table_info({table})")
+            if col not in {r[1] for r in await cur.fetchall()}:
+                await conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
         await conn.commit()
     _schema_ready = True
 
@@ -179,7 +200,25 @@ async def contact_stats() -> dict:
         return {r[0]: r[1] for r in await cur.fetchall()}
 
 
-async def set_contact_status(uid: str, status: str, campaign_id: int | None = None, error: str | None = None):
+async def skip_admins(uids: list[str]) -> int:
+    """Group owners/deputies are never outreach targets: mark any not-yet-contacted
+    ones as skipped (covers contacts scraped before admins were filtered out)."""
+    uids = [str(u) for u in uids if u]
+    if not uids:
+        return 0
+    await ensure_schema()
+    async with db.get_db() as conn:
+        cur = await conn.execute(
+            f"UPDATE zalo_contacts SET status = 'skipped', last_error = 'Ban quản trị nhóm', updated_at = ? "
+            f"WHERE status = 'new' AND uid IN ({','.join('?' * len(uids))})",
+            (_now(), *uids),
+        )
+        await conn.commit()
+        return cur.rowcount
+
+
+async def set_contact_status(uid: str, status: str, campaign_id: int | None = None, error: str | None = None,
+                             account_id: str | None = None):
     col = {"requested": "requested_at", "friend": "friend_at", "greeted": "greeted_at"}.get(status)
     sets = ["status = ?", "updated_at = ?", "last_error = ?"]
     params: list = [status, _now(), error]
@@ -189,6 +228,9 @@ async def set_contact_status(uid: str, status: str, campaign_id: int | None = No
     if campaign_id is not None:
         sets.append("campaign_id = ?")
         params.append(campaign_id)
+    if account_id is not None:
+        sets.append("account_id = ?")
+        params.append(account_id)
     async with db.get_db() as conn:
         conn.row_factory = aiosqlite.Row
         await conn.execute(f"UPDATE zalo_contacts SET {', '.join(sets)} WHERE uid = ?", params + [uid])
@@ -226,19 +268,23 @@ async def touch_contact(uid: str):
 
 # ── Campaigns ─────────────────────────────────────────────────────────────────
 
-CAMPAIGN_FIELDS = ("name", "sources", "friend_msg", "greet_msg", "daily_limit",
+CAMPAIGN_FIELDS = ("name", "sources", "accounts", "friend_msg", "greet_msg", "daily_limit",
                    "min_delay_sec", "max_delay_sec", "start_hour", "end_hour")
+
+
+_JSON_FIELDS = ("sources", "accounts")
 
 
 def _campaign(row) -> dict:
     d = dict(row)
-    d["sources"] = json.loads(d.get("sources") or "[]")
+    for f in _JSON_FIELDS:
+        d[f] = json.loads(d.get(f) or "[]")
     return d
 
 
 async def create_campaign(data: dict) -> int:
     await ensure_schema()
-    vals = [json.dumps(data[f]) if f == "sources" else data[f] for f in CAMPAIGN_FIELDS]
+    vals = [json.dumps(data.get(f) or []) if f in _JSON_FIELDS else data[f] for f in CAMPAIGN_FIELDS]
     async with db.get_db() as conn:
         conn.row_factory = aiosqlite.Row
         cur = await conn.execute(
@@ -250,7 +296,7 @@ async def create_campaign(data: dict) -> int:
 
 
 async def update_campaign(cid: int, data: dict):
-    vals = [json.dumps(data[f]) if f == "sources" else data[f] for f in CAMPAIGN_FIELDS]
+    vals = [json.dumps(data.get(f) or []) if f in _JSON_FIELDS else data[f] for f in CAMPAIGN_FIELDS]
     async with db.get_db() as conn:
         conn.row_factory = aiosqlite.Row
         await conn.execute(
@@ -318,12 +364,14 @@ async def sent_today(cid: int) -> int:
         return (await cur.fetchone())[0]
 
 
-async def add_log(cid: int, uid: str, name: str, action: str, ok: bool, error: str | None = None):
+async def add_log(cid: int, uid: str, name: str, action: str, ok: bool, error: str | None = None,
+                  account_id: str | None = None):
     async with db.get_db() as conn:
         conn.row_factory = aiosqlite.Row
         await conn.execute(
-            "INSERT INTO zalo_campaign_logs (campaign_id, uid, name, action, ok, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (cid, uid, name, action, 1 if ok else 0, error, _now()),
+            "INSERT INTO zalo_campaign_logs (campaign_id, uid, name, action, ok, error, account_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (cid, uid, name, action, 1 if ok else 0, error, account_id, _now()),
         )
         await conn.commit()
 
@@ -336,3 +384,77 @@ async def list_logs(cid: int, limit: int = 100) -> list[dict]:
             "SELECT * FROM zalo_campaign_logs WHERE campaign_id = ? ORDER BY id DESC LIMIT ?", (cid, limit)
         )
         return _rows(await cur.fetchall())
+
+
+async def block_contact(uid: str, blocked: bool = True):
+    """Global do-not-contact list: no nick ever sends to a blocked uid."""
+    await set_contact_status(uid, "blocked" if blocked else "new", error="Chặn thủ công" if blocked else None)
+
+
+# ── Accounts (nicks) ──────────────────────────────────────────────────────────
+
+_ACCOUNT_STATS_SQL = """
+    SELECT a.*,
+      (SELECT COUNT(*) FROM zalo_campaign_logs l WHERE l.account_id = a.id AND l.action = 'friend_request'
+           AND l.ok = 1 AND l.created_at >= :today) AS sent_today,
+      (SELECT COUNT(*) FROM zalo_contacts z WHERE z.account_id = a.id
+           AND z.status IN ('requested','friend','greeted')) AS requested_total,
+      (SELECT COUNT(*) FROM zalo_contacts z WHERE z.account_id = a.id
+           AND z.status IN ('friend','greeted')) AS accepted_total
+    FROM zalo_accounts a
+"""
+
+
+def _today() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+async def sync_accounts(bridge_accounts: list[dict]):
+    """Mirror bridge slots into zalo_accounts (keeps per-nick settings and stats)."""
+    await ensure_schema()
+    async with db.get_db() as conn:
+        for a in bridge_accounts:
+            me = a.get("me") or {}
+            await conn.execute(
+                "INSERT INTO zalo_accounts (id, uid, name, avatar) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET uid = COALESCE(NULLIF(excluded.uid, ''), uid), "
+                "name = COALESCE(NULLIF(excluded.name, ''), name), "
+                "avatar = COALESCE(NULLIF(excluded.avatar, ''), avatar)",
+                (a["id"], str(me.get("uid") or ""), me.get("name") or "", me.get("avatar") or ""),
+            )
+        await conn.commit()
+
+
+async def list_accounts() -> list[dict]:
+    await ensure_schema()
+    async with db.get_db() as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute(_ACCOUNT_STATS_SQL + " ORDER BY a.created_at, a.id", {"today": _today()})
+        return _rows(await cur.fetchall())
+
+
+async def get_account(acc_id: str) -> dict | None:
+    await ensure_schema()
+    async with db.get_db() as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute(_ACCOUNT_STATS_SQL + " WHERE a.id = :id", {"today": _today(), "id": acc_id})
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+
+async def set_account_state(acc_id: str, **fields):
+    if not fields:
+        return
+    await ensure_schema()
+    async with db.get_db() as conn:
+        await conn.execute(
+            f"UPDATE zalo_accounts SET {', '.join(k + ' = ?' for k in fields)} WHERE id = ?",
+            list(fields.values()) + [acc_id],
+        )
+        await conn.commit()
+
+
+async def delete_account(acc_id: str):
+    async with db.get_db() as conn:
+        await conn.execute("DELETE FROM zalo_accounts WHERE id = ?", (acc_id,))
+        await conn.commit()

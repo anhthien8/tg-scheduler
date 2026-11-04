@@ -191,7 +191,7 @@ async def run_invite_campaign(campaign_id: int):
                 elif invite_mode == "dm_link":
                     # Send DM with invite link
                     msg_text = dm_message_template
-                    msg_text = msg_text.replace("{name}", first_name or username or "bạn")
+                    msg_text = msg_text.replace("{name}", ((first_name or username or "")[:1].upper() + (first_name or username or "")[1:]) or "bạn")
                     msg_text = msg_text.replace("{group_name}", target_title or target_chat)
                     msg_text = msg_text.replace("{invite_link}", invite_link or "")
 

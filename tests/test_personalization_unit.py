@@ -12,7 +12,7 @@ def test_replaces_first_name():
 
 
 def test_falls_back_to_username_then_friend():
-    assert apply_personalization("Hi {name}", {"username": "jdoe"}) == "Hi jdoe"
+    assert apply_personalization("Hi {name}", {"username": "jdoe"}) == "Hi Jdoe"
     assert apply_personalization("Hi {name}", {}) == "Hi friend"
 
 
@@ -22,7 +22,7 @@ def test_full_name_combines_first_and_last():
 
 def test_last_name_falls_back_to_first_then_full_name():
     assert apply_personalization("[{last_name}]", {"first_name": "A"}) == "[A]"
-    assert apply_personalization("[{last_name}]", {"username": "u1"}) == "[u1]"
+    assert apply_personalization("[{last_name}]", {"username": "u1"}) == "[U1]"
     assert apply_personalization("[{last_name}]", {"first_name": "A", "last_name": "B"}) == "[B]"
 
 

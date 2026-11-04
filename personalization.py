@@ -51,16 +51,21 @@ def apply_personalization(text: str, member_info: dict) -> str:
     if member_info is None:
         return text
 
-    first_name = (member_info.get("first_name") or "").strip()
-    last_name = (member_info.get("last_name") or "").strip()
+    # Names are greeted with a capitalised first letter ("rouzii" -> "Rouzii");
+    # the rest is kept as-is so "McDonald" / "DeFi_Kid" survive.
+    def _cap(s: str) -> str:
+        return s[:1].upper() + s[1:]
+
+    first_name = _cap((member_info.get("first_name") or "").strip())
+    last_name = _cap((member_info.get("last_name") or "").strip())
     username = (member_info.get("username") or "").strip()
     # Source community / group the lead was found in — lets copy reference the
     # shared context (e.g. "saw you in {group}") instead of generic outreach.
     group = (member_info.get("group_title") or member_info.get("community_hint") or "").strip()
 
     # Build derived values
-    name = first_name or username or _DEFAULT_NAME_FALLBACK
-    full_name = f"{first_name} {last_name}".strip() if first_name else (username or _DEFAULT_NAME_FALLBACK)
+    name = first_name or _cap(username) or _DEFAULT_NAME_FALLBACK
+    full_name = f"{first_name} {last_name}".strip() if first_name else (_cap(username) or _DEFAULT_NAME_FALLBACK)
 
     # {last_name} falls back to first name, then full name (username / "friend")
     last_or_fallback = last_name or first_name or full_name
@@ -68,7 +73,7 @@ def apply_personalization(text: str, member_info: dict) -> str:
     # Replacement map (lowercase key -> value)
     replacements = {
         "name": name,
-        "first_name": first_name or username or _DEFAULT_NAME_FALLBACK,
+        "first_name": first_name or _cap(username) or _DEFAULT_NAME_FALLBACK,
         "last_name": last_or_fallback,
         "full_name": full_name,
         "username": username,
@@ -76,7 +81,7 @@ def apply_personalization(text: str, member_info: dict) -> str:
         "community": group,
         # No-underscore aliases: [fullname], [firstname], [lastname]
         "fullname": full_name,
-        "firstname": first_name or username or _DEFAULT_NAME_FALLBACK,
+        "firstname": first_name or _cap(username) or _DEFAULT_NAME_FALLBACK,
         "lastname": last_or_fallback,
     }
 

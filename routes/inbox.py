@@ -40,6 +40,19 @@ async def list_inbox(
     return {"replies": replies, "count": len(replies)}
 
 
+@router.get("/threads")
+async def list_threads(limit: int = 30, offset: int = 0, is_read: Optional[int] = None,
+                       account_id: Optional[int] = None):
+    """Inbox collapsed per sender: last 3 messages + unread count per thread."""
+    threads = await db.get_dm_reply_threads(limit=limit, offset=offset, is_read=is_read, account_id=account_id)
+    return {"threads": threads, "count": len(threads)}
+
+
+@router.post("/threads/{account_id}/{sender_user_id}/read")
+async def mark_thread_read(account_id: int, sender_user_id: int):
+    return {"ok": True, "updated": await db.mark_thread_read(account_id, sender_user_id)}
+
+
 @router.get("/unread-count")
 async def unread_count():
     """Return the number of unread DM replies (used by the badge in the UI)."""

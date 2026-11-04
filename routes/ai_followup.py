@@ -405,10 +405,25 @@ async def get_stats():
             "step_counts": step_counts}
 
 
+@router.post("/scan-pinned-uids")
+async def scan_pinned_uids():
+    """Read pinned messages in all KOL DMs now and save any UID found."""
+    import dm_reply_tracker as drt
+    return await drt.process_pinned_uids(force=True)
+
+
+@router.get("/supported-kols")
+async def get_supported_kols():
+    """KOLs that closed a deal: currently supported + formerly supported (dormant)."""
+    kols = await db.get_supported_kols()
+    return {"kols": kols, "current": sum(k["support_state"] == "current" for k in kols),
+            "past": sum(k["support_state"] == "past" for k in kols)}
+
+
 @router.get("/chats")
 async def get_chats(
     status: Optional[str] = Query(None, description="Filter status: active, paused_admin, onboarded, needs_human"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=2000),
     offset: int = Query(0, ge=0),
     include_history: bool = Query(False, description="Include chat history (heavy)")
 ):
@@ -525,12 +540,12 @@ async def send_chat_message(account_id: int, user_id: int, req: SendChatMessageR
 
 
 @router.get("/chats/{account_id}/{user_id}/history")
-async def get_chat_history(account_id: int, user_id: int):
-    """Get full message history for a single chat (lazy-loaded by modal)."""
+async def get_chat_history(account_id: int, user_id: int, limit: int = Query(200, ge=1, le=5000)):
+    """Last `limit` messages of a chat (lazy-loaded by modal)."""
     chat = await db.get_followup_chat(account_id, user_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
-    return {"history": chat.get("history", []), "summary": chat.get("summary", ""), "lead_tier": chat.get("lead_tier", "Tier C"), "intent_score": chat.get("intent_score", 0)}
+    return {"history": (chat.get("history") or [])[-limit:], "summary": chat.get("summary", ""), "lead_tier": chat.get("lead_tier", "Tier C"), "intent_score": chat.get("intent_score", 0)}
 
 
 @router.get("/chats/{account_id}/{user_id}/summary")

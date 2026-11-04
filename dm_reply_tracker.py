@@ -437,6 +437,70 @@ def extract_uid_candidates_from_messages(history: list[dict] | None) -> set[str]
     return found
 
 
+def uid_from_pinned_text(text: str) -> str:
+    """UID in a pinned message: a bare 6-12 digit message, or a number next to 'UID'."""
+    text = (text or "").strip().rstrip(".!")
+    if _UID_BARE_RE.fullmatch(text):
+        return text
+    mt = _UID_NEAR_RE.search(text)
+    return (mt.group(1) or mt.group(2)) if mt else ""
+
+
+async def sync_pinned_uid(account_id: int, user_id: int, client) -> str:
+    """Admins pin the KOL's latest WEEX UID in the DM, so a pinned UID is the
+    source of truth: it overrides the stored UID and advances the step.
+    Returns the UID applied ('' if none / unchanged)."""
+    from telethon.tl.types import InputMessagesFilterPinned
+    msgs = await client.get_messages(user_id, limit=5, filter=InputMessagesFilterPinned)
+    uid = ""
+    for m in sorted(msgs or [], key=lambda x: x.date, reverse=True):
+        uid = uid_from_pinned_text(getattr(m, "message", "") or "")
+        if uid:
+            break
+    if not uid:
+        return ""
+    prof = await db.get_kol_profile(account_id, user_id) or {}
+    if _normalize_uid(prof.get("weex_uid")) == uid:
+        await maybe_advance_uid_received(account_id, user_id, uid, actor="system:pinned")
+        return ""
+    await db.upsert_kol_profile(account_id, user_id, {"weex_uid": uid})
+    logger.info("[KOL Memory] Pinned UID %s saved for user %d (acc=%d)", uid, user_id, account_id)
+    await maybe_advance_uid_received(account_id, user_id, uid, actor="system:pinned")
+    await db.refresh_missing_items(account_id, user_id)
+    return uid
+
+
+_PINNED_SCAN_EVERY = 6 * 3600
+_last_pinned_scan = 0.0
+
+
+async def process_pinned_uids(force: bool = False) -> dict:
+    """Every 6h: read pinned messages in every live KOL DM and pick up UIDs."""
+    global _last_pinned_scan
+    if not force and time.time() - _last_pinned_scan < _PINNED_SCAN_EVERY:
+        return {"skipped": "recent"}
+    _last_pinned_scan = time.time()
+    async with db.get_db() as conn:
+        cur = await conn.execute("""
+            SELECT account_id, user_id FROM ai_followup_chats
+            WHERE status != 'bot_ignored' AND COALESCE(NULLIF(kol_step, ''), 'prospect') != 'declined'
+        """)
+        rows = await cur.fetchall()
+    found = 0
+    for account_id, user_id in rows:
+        client = tg.get_client(account_id)
+        if not client or not client.is_connected():
+            continue
+        try:
+            if await sync_pinned_uid(account_id, user_id, client):
+                found += 1
+        except Exception as e:
+            logger.debug("[PinnedUID] user %d (acc=%d): %s", user_id, account_id, e)
+        await asyncio.sleep(1.5)
+    logger.info("[PinnedUID] Scanned %d chats, %d new UID(s)", len(rows), found)
+    return {"scanned": len(rows), "found": found}
+
+
 async def maybe_advance_uid_received(account_id: int, user_id: int, uid: str, actor: str = "system:uid") -> bool:
     """Move the lead to `uid_received` once a UID is confirmed by both sources.
 
@@ -529,6 +593,8 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
     lines.append("IF THE KOL SAYS NOT INTERESTED OR OBJECTS TO THE TERMS (without asking you to stop): send at most ONE short reply "
                  "(2-3 sentences, their language): acknowledge their point, give ONE verified benefit taken only from the facts above "
                  "that directly answers their stated reason, and end with one easy question (yes/no or a quick choice). "
+                 "If they reject referral/affiliate campaigns in general, that one benefit is the MARKETING SUPPORT package "
+                 "from the knowledge base, with its concrete numbers (e.g. up to $200/month marketing fee, ads for their community, seeding accounts). "
                  "Never resend the full pitch or list several benefits. "
                  "IF THEY EXPLICITLY ASK YOU TO STOP: no benefit, just thank them and say they can message here anytime they need support. "
                  "In both cases append [STOP] on its own line (halts automatic follow-ups); never say you will stop writing. "
@@ -1790,6 +1856,10 @@ async def _followup_periodic_loop():
                 await process_step_reminders()
             except Exception as e_step:
                 logger.error("[StepReminder] Error in step reminder batch: %s", e_step)
+            try:
+                await process_pinned_uids()
+            except Exception as e_pin:
+                logger.error("[PinnedUID] Error in pinned UID scan: %s", e_pin)
             try:
                 await process_monthly_kol_care()
             except Exception as e_care:

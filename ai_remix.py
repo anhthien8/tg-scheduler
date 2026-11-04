@@ -56,9 +56,41 @@ def _should_fallback(exc: Exception) -> bool:
     return False
 
 
+_local_up_cache = {"t": 0.0, "up": False}
+
+
+async def _local_router_up() -> bool:
+    """Cached (60s) check that the local 9router answers."""
+    now = time.time()
+    if now - _local_up_cache["t"] < 60:
+        return _local_up_cache["up"]
+    try:
+        async with httpx.AsyncClient(timeout=2) as c:
+            r = await c.get(LOCAL_AI_ROUTER.rstrip("/") + "/v1/models")
+            up = r.status_code < 500
+    except Exception:
+        up = False
+    _local_up_cache.update(t=now, up=up)
+    return up
+
+
 async def ai_request(client: httpx.AsyncClient, method: str, url: str, **kw) -> httpx.Response:
     """HTTP call to an OpenAI-compatible router; if a remote router is blocked
-    (Cloudflare Access 403, tunnel down) retry the same path on localhost."""
+    (Cloudflare Access 403, tunnel down) retry the same path on localhost.
+
+    When the router also runs on this machine, call it directly: going out
+    through the tunnel only to be blocked by Cloudflare wastes a round trip."""
+    alt = _local_fallback_url(url)
+    if alt and await _local_router_up():
+        try:
+            resp = await client.request(method, alt, **kw)
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            # Local router hiccup: try the public endpoint as before.
+            if isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout)):
+                _local_up_cache["t"] = 0.0
+            logger.warning("[AI] local %s failed (%s) — trying %s", alt, type(e).__name__, url)
     try:
         resp = await client.request(method, url, **kw)
         resp.raise_for_status()
@@ -149,15 +181,21 @@ def _mark_key_failed(provider, idx):
     _key_cooldown[(provider, idx)] = time.time()
 
 
+# gemini-2.0-flash was retired by Google (404); thinking is disabled so the
+# output budget is spent on the reply itself.
+GEMINI_MODEL = "gemini-2.5-flash"
+
+
 async def _call_gemini(api_key, prompt):
-    url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-           "gemini-2.0-flash:generateContent?key=" + api_key)
+    # Key goes in a header, not the URL, so it never lands in httpx/error logs.
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.9, "maxOutputTokens": 1024}
+        "generationConfig": {"temperature": 0.9, "maxOutputTokens": 1024,
+                             "thinkingConfig": {"thinkingBudget": 0}}
     }
     async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.post(url, json=payload)
+        resp = await client.post(url, json=payload, headers={"x-goog-api-key": api_key})
         resp.raise_for_status()
         data = resp.json()
         return data["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -564,7 +602,7 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
         "10. NEVER shorten by dropping selling points. Aim for roughly the same length as the original (80-120%).\n"
         "    Keep technical/brand terms in their original Latin form even when translating (e.g. No KYC, API, HFT, MetaTrader 5, USDT).\n"
         "8. Output ONLY the rephrased message. No intro, no quotes, no explanation, no multiple message splits.\n"
-        "9. FORMAT for visual breathing room: separate thoughts with a blank line between paragraphs (double newline). Never output a dense wall of text.\n"
+        "9. FORMAT for visual breathing room: greeting on its own line, then short paragraphs of 1-2 sentences each, separated by a blank line (double newline). The closing question is its own paragraph. Never output a dense wall of text.\n"
         + _key_points_rule(original_text)
         + instruction_addon
         + name_hint
@@ -638,7 +676,7 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
             "[AI Remix] %s key[%d] OK - %dc -> %dc",
             provider, idx, len(original_text), len(result)
         )
-        return humanize_text(result) if result else original_text
+        return ensure_paragraphs(humanize_text(result)) if result else original_text
 
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
@@ -656,14 +694,14 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
                     result2 = await _try_call(provider, key2, prompt, **kwargs)
                     if result2:
                         logger.info("[AI Remix] Retry key[%d] succeeded", idx2)
-                        return result2
+                        return ensure_paragraphs(humanize_text(result2))
             except Exception as e2:
                 logger.warning("[AI Remix] Retry failed: %s", e2)
         
         # Auto fallback to other providers
         fb = await _auto_fallback_remix(provider, prompt)
         if fb:
-            return fb
+            return ensure_paragraphs(humanize_text(fb))
         return original_text
 
     except Exception as e:
@@ -671,7 +709,7 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
         logger.warning("[AI Remix] %s key[%d] error: %s", provider, idx, e)
         fb = await _auto_fallback_remix(provider, prompt)
         if fb:
-            return fb
+            return ensure_paragraphs(humanize_text(fb))
         return original_text
 
 
@@ -714,6 +752,31 @@ _HUMAN_STYLE_RULE = (
     "and answer from what it really shows. Images from earlier messages are NOT visible to you: never describe them, "
     "ask the user to resend or type the part they mean. Never invent facts you cannot see."
 )
+
+
+def ensure_paragraphs(text, max_chars=220):
+    """Break dense paragraphs into short ones (blank line between) so the DM is
+    easy to read on a phone. The model often ignores the formatting rule and
+    returns one wall of text, so this enforces it after the fact."""
+    if not text:
+        return text
+    out = []
+    for para in re.split(r"\n\s*\n", text.strip()):
+        para = para.strip()
+        if len(para) <= max_chars or "\n" in para:
+            out.append(para)
+            continue
+        sentences = re.split(r"(?<=[.!?])\s+(?=[A-ZÀ-ỹЀ-ӿ\"'(])", para)
+        chunk = ""
+        for sent in sentences:
+            if chunk and len(chunk) + len(sent) + 1 > max_chars:
+                out.append(chunk)
+                chunk = sent
+            else:
+                chunk = f"{chunk} {sent}".strip()
+        if chunk:
+            out.append(chunk)
+    return "\n\n".join(out)
 
 
 def humanize_text(text):
@@ -957,7 +1020,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             return data["choices"][0]["message"]["content"].strip()
 
     elif provider == "gemini":
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
         sys_prompt = messages[0]["content"] if (messages and messages[0]["role"] == "system") else ""
         raw_msgs = messages[1:] if (messages and messages[0]["role"] == "system") else messages
 
@@ -983,15 +1046,16 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
         payload = {
             "contents": merged_contents,
             "systemInstruction": {"parts": [{"text": sys_prompt}]} if sys_prompt else None,
-            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1000}
+            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1000,
+                                 "thinkingConfig": {"thinkingBudget": 0}}
         }
         payload = {k: v for k, v in payload.items() if v is not None}
 
         async with httpx.AsyncClient(timeout=25) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, json=payload, headers={"x-goog-api-key": api_key})
             resp.raise_for_status()
             data = resp.json()
-            _record_model(f"{data.get('modelVersion') or 'gemini-2.0-flash'} @ {resp.url.host}")
+            _record_model(f"{data.get('modelVersion') or GEMINI_MODEL} @ {resp.url.host}")
             return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
     elif provider == "openai_compatible":

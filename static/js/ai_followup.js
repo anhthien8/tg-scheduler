@@ -433,7 +433,7 @@ const AIFollowUp = {
   // ── Leads: load + stats + chips + pagination ─────────────────────
   async loadChats() {
     try {
-      const res = await fetch('/api/ai-followup/chats?limit=200&include_history=false');
+      const res = await fetch('/api/ai-followup/chats?limit=2000&include_history=false');
       if (!res.ok) throw new Error('Lỗi tải danh sách lead');
       const data = await res.json();
       this._chats = data.chats || [];
@@ -458,6 +458,7 @@ const AIFollowUp = {
     set('aifu-stat-total', this._chats.length);
     set('aifu-stat-nudged', this._chats.filter(c => c.nudged).length);
     this.renderStepCards();
+    this.loadSupportedCount();
   },
 
   renderStepCards() {
@@ -811,6 +812,67 @@ const AIFollowUp = {
     }
   },
 
+  // ── Supported KOLs (deal_agreed+ and dormant) ─────────────────────
+  _kols: [],
+  _kolFilter: 'current',
+
+  async loadSupportedCount() {
+    try {
+      const d = await (await fetch('/api/ai-followup/supported-kols')).json();
+      this._kols = d.kols || [];
+      const el = document.getElementById('aifu-stat-supported');
+      if (el) el.textContent = d.past ? `${d.current} · ${d.past}` : String(d.current);
+      if (el) el.title = `${d.current} đang support · ${d.past} đã support`;
+    } catch (e) { /* card stays – */ }
+  },
+
+  async openSupportedKols() {
+    document.getElementById('aifu-kol-modal')?.classList.add('open');
+    document.getElementById('aifu-kol-body').innerHTML = '<div style="text-align:center;color:var(--text2);padding:20px">⏳ Đang tải...</div>';
+    await this.loadSupportedCount();
+    this.renderSupportedKols();
+  },
+
+  filterSupported(f) { this._kolFilter = f; this.renderSupportedKols(); },
+
+  renderSupportedKols() {
+    const cur = this._kols.filter(k => k.support_state === 'current');
+    const past = this._kols.filter(k => k.support_state === 'past');
+    const chip = (v, l) => `<button class="btn btn-sm ${this._kolFilter === v ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.filterSupported('${v}')">${l}</button>`;
+    document.getElementById('aifu-kol-chips').innerHTML =
+      chip('current', `🟢 Đang support (${cur.length})`) + chip('past', `💤 Đã support (${past.length})`) + chip('all', `Tất cả (${this._kols.length})`);
+    const rows = this._kolFilter === 'current' ? cur : this._kolFilter === 'past' ? past : this._kols;
+    const body = document.getElementById('aifu-kol-body');
+    if (!rows.length) { body.innerHTML = '<div style="text-align:center;color:var(--text2);padding:20px">Chưa có KOL nào</div>'; return; }
+    const d = v => v ? new Date(String(v).replace(' ', 'T') + (String(v).includes('Z') || String(v).includes('+') ? '' : 'Z')).toLocaleDateString('vi-VN') : '–';
+    const link = (u, t) => u ? `<a href="${esc(u)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(t)}</a>` : '–';
+    body.innerHTML = `<table class="table" style="width:100%;font-size:12px"><thead><tr>
+        <th>KOL</th><th>Account</th><th>Bước</th><th>UID / VIP</th><th>Kênh</th><th>Ngày chốt</th><th>Chăm sóc gần nhất</th>
+      </tr></thead><tbody>${rows.map(k => {
+        const sm = this.STEP_META[k.kol_step] || { label: k.kol_step, emoji: '', color: 'var(--text2)' };
+        const who = esc(k.name || '') + (k.username ? ` <span style="color:var(--text2)">@${esc(k.username)}</span>` : '');
+        const chan = k.channel_link ? link(k.channel_link, k.followers ? `${k.followers} followers` : 'Kênh') : (k.followers ? esc(String(k.followers)) : '–');
+        return `<tr style="cursor:pointer" onclick="AIFollowUp.openKolChat(${k.account_id},${k.user_id})" title="Mở chat">
+          <td>${who || '#' + k.user_id}</td>
+          <td>${esc(k.account_name || '#' + k.account_id)}</td>
+          <td style="color:${sm.color};white-space:nowrap;font-weight:600">${sm.emoji} ${esc(sm.label)}</td>
+          <td style="font-family:monospace">${esc(k.weex_uid || '–')}${k.vip_code ? ` / ${esc(k.vip_code)}` : ''}</td>
+          <td>${chan}</td>
+          <td>${d(k.deal_at)}</td>
+          <td>${d(k.last_care_at)}</td>
+        </tr>`;
+      }).join('')}</tbody></table>`;
+  },
+
+  openKolChat(accountId, userId) {
+    if (!this._chats.find(x => x.account_id === accountId && x.user_id === userId)) {
+      const k = this._kols.find(x => x.account_id === accountId && x.user_id === userId);
+      if (k) this._chats.push({ ...k, missing_items: [] });
+    }
+    document.getElementById('aifu-kol-modal')?.classList.remove('open');
+    this.openChat(accountId, userId);
+  },
+
   // ── Chat modal ────────────────────────────────────────────────────
   async openChat(accountId, userId) {
     const c = this._chats.find(x => x.account_id === accountId && x.user_id === userId);
@@ -875,22 +937,23 @@ const AIFollowUp = {
     const el = document.getElementById('aifu-modal-actions');
     if (!el || !c) return;
     const toggle = c.status === 'active'
-      ? `<button class="btn btn-ghost" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'paused_admin')">⏸ Chat tay</button>`
-      : `<button class="btn btn-ghost" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')">▶️ Bật AI</button>`;
-    const blkBtn = `<button class="btn btn-danger" data-acc="${c.account_id}" data-uid="${c.user_id}" data-username="${esc(c.username||'')}" onclick="AIFollowUp.addToBlacklistDirect(Number(this.dataset.acc),Number(this.dataset.uid),this.dataset.username);AIFollowUp.closeHistoryModal()" title="Cấm AI chat 100% với lead này">🚫 Blacklist</button>`;
+      ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'paused_admin')">⏸ Chat tay</button>`
+      : `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')">▶️ Bật AI</button>`;
+    const blkBtn = `<button class="btn btn-danger btn-sm" data-acc="${c.account_id}" data-uid="${c.user_id}" data-username="${esc(c.username||'')}" onclick="AIFollowUp.addToBlacklistDirect(Number(this.dataset.acc),Number(this.dataset.uid),this.dataset.username);AIFollowUp.closeHistoryModal()" title="Cấm AI chat 100% với lead này">🚫 Blacklist</button>`;
     const vs = c.verification_status || 'none';
     const vsLabel = {none:'🔍 Chưa verify', requested:'📤 Đã yêu cầu', submitted:'📎 Đã nộp', verified:'✅ Verified', rejected:'❌ Từ chối'}[vs] || vs;
-    const vsBtn = `<button class="btn btn-ghost" onclick="AIFollowUp.cycleVerification(${c.account_id},${c.user_id})" title="Click để đổi trạng thái verify">${vsLabel}</button>`;
+    const vsBtn = `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.cycleVerification(${c.account_id},${c.user_id})" title="Click để đổi trạng thái verify">${vsLabel}</button>`;
     const cur = this.stepOf(c);
     const rank = this.stepRank(cur);
     const next = rank >= 0 && rank < this.STEPS.length - 1 ? this.STEPS[rank + 1] : null;
     const nextBtn = next
-      ? `<button class="btn btn-green" onclick="AIFollowUp.setStep(${c.account_id},${c.user_id},'${next}')" title="Chuyển sang bước tiếp theo (ghi vào kol_step_events)">➡️ ${this.stepLabel(next)}</button>`
+      ? `<button class="btn btn-green btn-sm" onclick="AIFollowUp.setStep(${c.account_id},${c.user_id},'${next}')" title="Chuyển sang bước tiếp theo (ghi vào kol_step_events)">➡️ ${this.stepLabel(next)}</button>`
       : '';
     const opts = [...this.STEPS, 'declined', 'dormant'].map((s, i) =>
       `<option value="${s}" ${s === cur ? 'disabled' : ''}>${i < this.STEPS.length ? i + '. ' : ''}${this.stepLabel(s)}${s === cur ? ' (hiện tại)' : ''}</option>`).join('');
-    const stepSel = `<select class="form-input" style="width:auto;padding:6px 8px;font-size:12px" title="Admin đặt bước bất kỳ (tiến/lùi)" onchange="AIFollowUp.stepSelectChanged(this,${c.account_id},${c.user_id})"><option value="">🪜 Đặt bước…</option>${opts}</select>`;
-    el.innerHTML = `${toggle}${blkBtn}${vsBtn}<button class="btn btn-ghost" onclick="AIFollowUp.editProfile(${c.account_id},${c.user_id})">📍 Hồ sơ & phân công</button>${nextBtn}${stepSel}<button class="btn btn-primary" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>`;
+    const stepSel = `<select class="form-input" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:12px" title="Admin đặt bước bất kỳ (tiến/lùi)" onchange="AIFollowUp.stepSelectChanged(this,${c.account_id},${c.user_id})"><option value="">Đặt bước…</option>${opts}</select>`;
+    el.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center';
+    el.innerHTML = `${toggle}${blkBtn}${vsBtn}<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.editProfile(${c.account_id},${c.user_id})">📍 Hồ sơ & phân công</button>${nextBtn}${stepSel}<button class="btn btn-primary btn-sm" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>`;
   },
 
   async cycleVerification(accountId, userId) {

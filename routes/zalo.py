@@ -5,6 +5,7 @@ QR login, group/event scraping into zalo_contacts, outreach campaigns
 (friend request + greeting after accept).
 """
 import logging
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -17,68 +18,128 @@ logger = logging.getLogger("tg-scheduler.zalo")
 router = APIRouter(prefix="/api/zalo", tags=["zalo"])
 
 
-async def _bridge(method: str, path: str, json: dict | None = None, timeout: float = 60):
+async def _bridge(method: str, path: str, json: dict | None = None, timeout: float = 60,
+                  account: str | None = None):
     try:
-        return await zo.call(method, path, json, timeout=timeout)
+        return await zo.call(method, path, json, timeout=timeout, account=account or None)
     except zo.BridgeError as e:
         raise HTTPException(e.status if 400 <= e.status < 600 else 502, str(e))
 
 
-# ── Account ───────────────────────────────────────────────────────────────────
+# ── Nicks (accounts) ──────────────────────────────────────────────────────────
 
 @router.get("/status")
 async def status():
     return await _bridge("GET", "/status")
 
 
-@router.post("/login")
-async def start_login():
-    return await _bridge("POST", "/login/qr")
+@router.get("/accounts")
+async def list_accounts():
+    """Bridge login state merged with per-nick settings, today's usage and health."""
+    st = await _bridge("GET", "/status")
+    bridge = {a["id"]: a for a in st.get("accounts") or []}
+    await store.sync_accounts(list(bridge.values()))
+    out = []
+    for acc in await store.list_accounts():
+        b = bridge.get(acc["id"])
+        if not b:
+            continue  # session removed on the bridge side
+        cap, note = zo.account_cap(acc)
+        out.append({**acc, "logged_in": b["logged_in"], "login": b["login"], "me": b["me"],
+                    "cap_today": cap, "cap_note": note,
+                    "resting": bool(acc.get("paused_until") and not zo._due(acc["paused_until"]))})
+    # Slots still waiting for their first QR scan aren't in the DB yet.
+    known = {a["id"] for a in out}
+    out += [{"id": b["id"], "logged_in": False, "login": b["login"], "me": None, "pending": True}
+            for b in bridge.values() if b["id"] not in known and not b["logged_in"]]
+    return out
 
 
-@router.post("/logout")
-async def logout():
-    return await _bridge("POST", "/logout")
+@router.post("/accounts")
+async def add_account():
+    return await _bridge("POST", "/accounts")
+
+
+@router.post("/accounts/{acc_id}/login")
+async def relogin_account(acc_id: str):
+    return await _bridge("POST", f"/accounts/{acc_id}/login")
+
+
+class AccountSettings(BaseModel):
+    enabled: bool = True
+    daily_cap: int = Field(default=25, ge=1, le=60)
+
+
+@router.put("/accounts/{acc_id}")
+async def update_account(acc_id: str, body: AccountSettings):
+    if not await store.get_account(acc_id):
+        raise HTTPException(404, "Không tìm thấy nick")
+    await store.set_account_state(acc_id, enabled=int(body.enabled), daily_cap=body.daily_cap)
+    return {"success": True}
+
+
+@router.post("/accounts/{acc_id}/resume")
+async def resume_account(acc_id: str):
+    await store.set_account_state(acc_id, paused_until=None, consecutive_errors=0, last_error=None)
+    return {"success": True}
+
+
+@router.delete("/accounts/{acc_id}")
+async def remove_account(acc_id: str):
+    await _bridge("DELETE", f"/accounts/{acc_id}")
+    await store.delete_account(acc_id)
+    return {"success": True}
 
 
 # ── Sources ───────────────────────────────────────────────────────────────────
 
 @router.get("/groups")
-async def groups():
-    return await _bridge("GET", "/groups", timeout=120)
+async def groups(account: str = ""):
+    return await _bridge("GET", "/groups", timeout=120, account=account)
 
 
 @router.get("/groups/{group_id}/events")
-async def group_events(group_id: str):
-    return await _bridge("GET", f"/groups/{group_id}/events")
+async def group_events(group_id: str, account: str = ""):
+    return await _bridge("GET", f"/groups/{group_id}/events", account=account)
 
 
 class GroupScrape(BaseModel):
     group_name: str = ""
+    account: str = ""
 
 
 @router.post("/groups/{group_id}/scrape")
 async def scrape_group(group_id: str, body: GroupScrape):
-    res = await _bridge("GET", f"/groups/{group_id}/members", timeout=600)
+    res = await _bridge("GET", f"/groups/{group_id}/members", timeout=600, account=body.account)
     name = res["group"].get("name") or body.group_name or group_id
     counts = await store.upsert_contacts(res["members"], "group", group_id, name)
+    counts["admins_skipped"] = len(res.get("admins") or [])
+    await store.skip_admins(res.get("admins") or [])
     total = res["group"].get("total") or 0
     return {**counts, "group_total": total,
-            "partial": bool(total and counts["total"] < total - 1)}
+            "partial": bool(total and counts["total"] + counts["admins_skipped"] < total - 1)}
 
 
 class EventScrape(BaseModel):
     title: str = ""
     group_name: str = ""
+    group_id: str = ""     # → bridge drops this group's owner/deputies
+    creator_id: str = ""   # → bridge drops the event's creator
+    account: str = ""
 
 
 @router.post("/events/{event_id}/scrape")
 async def scrape_event(event_id: str, body: EventScrape):
-    res = await _bridge("GET", f"/events/{event_id}/responses", timeout=600)
+    qs = urlencode({k: v for k, v in (("group", body.group_id), ("creator", body.creator_id)) if v})
+    res = await _bridge("GET", f"/events/{event_id}/responses" + (f"?{qs}" if qs else ""), timeout=600,
+                        account=body.account)
     label = body.title or event_id
     if body.group_name:
         label = f"{label} ({body.group_name})"
-    return await store.upsert_contacts(res["accept"], "event", event_id, f"📅 {label}")
+    counts = await store.upsert_contacts(res["accept"], "event", event_id, f"📅 {label}")
+    counts["admins_skipped"] = len(res.get("admins") or [])
+    await store.skip_admins(res.get("admins") or [])
+    return counts
 
 
 @router.get("/sources")
@@ -91,6 +152,17 @@ async def contacts(status: str = "", source: str = "", q: str = "", limit: int =
     return await store.list_contacts(status, source, q, min(limit, 1000), offset)
 
 
+class BlockBody(BaseModel):
+    blocked: bool = True
+
+
+@router.post("/contacts/{uid}/block")
+async def block_contact(uid: str, body: BlockBody):
+    """Global do-not-contact: no nick will ever invite or message this uid."""
+    await store.block_contact(uid, body.blocked)
+    return {"success": True}
+
+
 @router.get("/stats")
 async def stats():
     return await store.contact_stats()
@@ -101,9 +173,10 @@ async def stats():
 class CampaignPayload(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     sources: list[str] = []
+    accounts: list[str] = []   # nick ids allowed to send; empty = every enabled nick
     friend_msg: str = Field(default="", max_length=150)  # Zalo caps the friend-request note
     greet_msg: str = Field(default="", max_length=2000)
-    daily_limit: int = Field(default=20, ge=1, le=100)
+    daily_limit: int = Field(default=20, ge=1, le=500)  # campaign total across nicks
     min_delay_sec: int = Field(default=300, ge=60)
     max_delay_sec: int = Field(default=900, ge=60)
     start_hour: int = Field(default=8, ge=0, le=23)
@@ -135,7 +208,7 @@ async def start_campaign(cid: int):
         raise HTTPException(404, "Không tìm thấy chiến dịch")
     st = await _bridge("GET", "/status")
     if not st.get("logged_in"):
-        raise HTTPException(409, "Zalo chưa đăng nhập")
+        raise HTTPException(409, "Chưa có nick Zalo nào đăng nhập")
     await store.set_campaign_state(cid, status="running", consecutive_errors=0, last_error=None)
     await zo.start()
     return {"success": True}

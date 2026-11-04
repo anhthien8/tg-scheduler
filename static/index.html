@@ -1076,7 +1076,11 @@
         </p>
 
         <div class="card" style="margin-bottom:1.25rem">
-          <h3 style="margin:0 0 .75rem;font-size:1rem;color:var(--accent)">👤 Tài khoản Zalo</h3>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+            <h3 style="margin:0;font-size:1rem;color:var(--accent)">👤 Nick Zalo
+              <span class="info-i" tabindex="0" data-tip="Nhiều nick chia nhau gửi: mỗi người chỉ được 1 nick mời. Nick mới tự 'làm ấm' — ngày đầu 5 lời mời, mỗi ngày +3 cho tới giới hạn riêng của nick. Nick lỗi 3 lần liên tiếp tự nghỉ 24h; tỷ lệ đồng ý dưới 20% thì giới hạn tự giảm một nửa.">i</span></h3>
+            <button class="btn btn-primary btn-sm" onclick="Zalo.addAccount()">+ Thêm nick Zalo</button>
+          </div>
           <div id="zalo-account"><div class="empty-state">Đang tải...</div></div>
         </div>
 
@@ -1084,7 +1088,10 @@
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
             <h3 style="margin:0;font-size:1rem;color:var(--accent)">👥 Nhóm & sự kiện
               <span class="info-i" tabindex="0" data-tip="Quét thành viên: lấy toàn bộ người trong nhóm. Sự kiện: lấy những người bấm 'Tham gia' trong nhắc hẹn/sự kiện của nhóm.">i</span></h3>
-            <button class="btn btn-secondary btn-sm" onclick="Zalo.loadGroups()">Tải danh sách nhóm</button>
+            <div style="display:flex;gap:6px;align-items:center">
+              <select class="form-input" id="zalo-group-account" style="width:170px" title="Nick dùng để đọc nhóm" onchange="Zalo.loadGroups()"></select>
+              <button class="btn btn-secondary btn-sm" onclick="Zalo.loadGroups()">Tải danh sách nhóm</button>
+            </div>
           </div>
           <div id="zalo-groups"><div class="empty-state">Bấm "Tải danh sách nhóm" sau khi đăng nhập.</div></div>
         </div>
@@ -1115,6 +1122,7 @@
                 <option value="friend">Đã là bạn</option>
                 <option value="greeted">Đã chào</option>
                 <option value="failed">Lỗi</option>
+                <option value="blocked">Đã chặn</option>
               </select>
             </div>
           </div>
@@ -2113,11 +2121,11 @@
   <script defer src="/static/js/polling.js?v=492"></script>
   <script defer src="/static/js/api.js?v=492"></script>
   <script defer src="/static/js/discord.js?v=492"></script>
-  <script defer src="/static/js/zalo.js?v=492"></script>
-  <script defer src="/static/js/members.js?v=492"></script>
+  <script defer src="/static/js/zalo.js?v=494"></script>
+  <script defer src="/static/js/members.js?v=498"></script>
   <script defer src="/static/js/analytics.js?v=492"></script>
   <script defer src="/static/js/ai_agents.js?v=492"></script>
-  <script defer src="/static/js/ai_followup.js?v=492"></script>
+  <script defer src="/static/js/ai_followup.js?v=496"></script>
   <script defer src="/static/js/changelog.js?v=492"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=492"></script>
@@ -2152,7 +2160,7 @@
           <thead>
             <tr>
               <th>Người gửi</th>
-              <th>Tin nhắn</th>
+              <th>3 tin gần nhất</th>
               <th>Watcher</th>
               <th>Account nhận</th>
               <th>Thời gian</th>
