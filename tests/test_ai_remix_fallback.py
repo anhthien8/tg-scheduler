@@ -50,3 +50,21 @@ async def test_no_keys_for_active_provider_still_tries_fallbacks():
     with patch("ai_remix._try_call", new=AsyncMock(return_value="from gemini")) as m:
         out = await ai_remix.remix_message("Hello", "groq", [])
     assert out == "from gemini" and m.call_args[0][0] == "gemini"
+
+
+async def test_check_providers_reports_dead_primary_and_live_fallback():
+    await _cfg_9router()
+    await db.set_setting("ai_keys_gemini", '["gk"]')
+
+    async def fake_call(provider, key, prompt, **kw):
+        if provider == "openai_compatible":
+            raise ConnectionError("9Router unreachable")
+        return "OK"
+
+    with patch("ai_remix._try_call", new=AsyncMock(side_effect=fake_call)):
+        res = await ai_remix.check_providers("openai_compatible")
+    by = {r["provider"]: r for r in res}
+    assert res[0]["provider"] == "openai_compatible" and res[0]["primary"] is True
+    assert by["openai_compatible"]["ok"] is False and "unreachable" in by["openai_compatible"]["error"]
+    assert by["gemini"]["ok"] is True
+    assert "groq" not in by  # unconfigured providers are not pinged
