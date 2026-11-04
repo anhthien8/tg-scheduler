@@ -16,10 +16,23 @@ from models import AccountCreate, SendCodeRequest, VerifyCodeRequest
 logger = logging.getLogger("tg-scheduler")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-# Default Telegram Desktop credentials (safe official client creds)
-# Users can override per-account, but these work for 99% of cases
-_DEFAULT_API_ID   = 2040
-_DEFAULT_API_HASH = "b18441a1ff607e10a989891a5462e627"
+# Default app credentials used when an account is added with only a phone number.
+# Override with TG_DEFAULT_API_ID / TG_DEFAULT_API_HASH (legacy API_ID / API_HASH
+# from .env also accepted). Falls back to the official Telegram Desktop creds,
+# which work for 99% of cases.
+_TG_DESKTOP_API_ID   = 2040
+_TG_DESKTOP_API_HASH = "b18441a1ff607e10a989891a5462e627"
+
+
+def _default_api_creds() -> tuple[int, str]:
+    """(api_id, api_hash) from env, or the Telegram Desktop pair. Placeholder or
+    half-set values (e.g. "your_api_id", id without hash) are ignored."""
+    for id_key, hash_key in (("TG_DEFAULT_API_ID", "TG_DEFAULT_API_HASH"), ("API_ID", "API_HASH")):
+        api_id = (os.getenv(id_key) or "").strip()
+        api_hash = (os.getenv(hash_key) or "").strip()
+        if api_id.isdigit() and len(api_hash) == 32:
+            return int(api_id), api_hash
+    return _TG_DESKTOP_API_ID, _TG_DESKTOP_API_HASH
 
 
 # ── Account CRUD ──
@@ -52,7 +65,9 @@ async def list_accounts():
             return
         # Cache cold: connected clients are authorized by definition (the engine
         # only keeps live ones); do NOT pay a Telegram round-trip here.
-        acc["is_logged_in"] = acc["id"] in tg._clients and tg._clients[acc["id"]].is_connected()
+        # Chỉ tin "đã kết nối" khi DB cũng ghi nhận đã đăng nhập: client tạo mới
+        # để gửi OTP vẫn connected nhưng CHƯA authorized.
+        acc["is_logged_in"] = bool(acc.get("is_logged_in")) and acc["id"] in tg._clients and tg._clients[acc["id"]].is_connected()
         acc.setdefault("user_info", None)
 
     for acc in accounts:
@@ -68,9 +83,11 @@ async def add_account(req: AccountCreate):
     session_name = f"account_{req.phone.replace('+', '').replace(' ', '')}"
 
     # Use provided API creds or fall back to TG Desktop defaults
-    api_id   = int(req.api_id)   if req.api_id   else _DEFAULT_API_ID
-    api_hash = req.api_hash      if req.api_hash  else _DEFAULT_API_HASH
-    name     = req.name          if req.name      else req.phone  # will be updated after login
+    if req.api_id and req.api_hash:
+        api_id, api_hash = int(req.api_id), req.api_hash.strip()
+    else:
+        api_id, api_hash = _default_api_creds()
+    name     = (req.name or "").strip() or req.phone  # phone = placeholder, replaced by TG name after login
     proxy_url = req.proxy_url or None
 
     account_id = await db.create_account({
@@ -142,20 +159,30 @@ async def verify_code(req: VerifyCodeRequest):
     result = await tg.sign_in(req.account_id, req.phone, req.code,
                               req.phone_code_hash, req.password)
     if result.get("success"):
-        # Auto-update name from real TG profile
+        # Auto-name from the real TG profile, unless the user typed a name
+        # when adding (name still equal to the phone = placeholder).
         try:
-            me = await tg.get_me(req.account_id)
-            if me:
-                real_name = " ".join(filter(None, [me.get("first_name",""), me.get("last_name","")])).strip()
+            acc = await db.get_account(req.account_id) or {}
+            cur_name = (acc.get("name") or "").strip()
+            if cur_name in ("", (acc.get("phone") or "").strip()):
+                # sign_in already returns the profile — no extra get_me round-trip
+                me = result if result.get("first_name") or result.get("last_name") else await tg.get_me(req.account_id)
+                real_name = " ".join(filter(None, [(me or {}).get("first_name") or "",
+                                                   (me or {}).get("last_name") or ""])).strip()
                 if real_name:
                     await db.update_account_name(req.account_id, real_name)
+            if result.get("user_id"):
+                await db.update_account_telegram_user_id(req.account_id, result["user_id"])
         except Exception as _e:
             logger.debug(f"Could not auto-name account {req.account_id}: {_e}")
 
         await db.update_account_login_status(req.account_id, True)
+        tg._session_errors.pop(req.account_id, None)  # xoá cờ "chưa đăng nhập" cũ
         # Load scheduler jobs for this account
         await sch.load_all_jobs()
         return result
+    if result.get("needs_password") and req.password:
+        raise HTTPException(status_code=400, detail=result.get("error", "Mật khẩu 2FA không đúng"))
     if result.get("needs_password"):
         return {"success": False, "needs_password": True, "message": "2FA password required"}
     raise HTTPException(status_code=400, detail=result.get("error", "Login failed"))
@@ -224,6 +251,12 @@ async def get_dm_stats(account_id: int):
         "limit_reached": limit_reached,
         "remaining": max(0, limit - count)
     }
+
+@router.get("/accounts/{account_id}/warnings")
+async def account_warnings_route(account_id: int):
+    """What caused the warning flag, grouped by error."""
+    return await db.get_account_warnings(account_id)
+
 
 @router.post("/accounts/{account_id}/unflag")
 async def unflag_account_route(account_id: int):

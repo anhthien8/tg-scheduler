@@ -299,29 +299,13 @@ async def _get_group_admin_ids(client, group_id: int) -> set:
             return ids
 
     try:
-        from telethon.tl.functions.channels import GetParticipantsRequest
-        from telethon.tl.types import (
-            ChannelParticipantAdmin,
-            ChannelParticipantCreator,
-            ChannelParticipantsAdmins,
-        )
-        # Resolve input peer for the group
+        from telethon.tl.types import ChannelParticipantsAdmins
+        # iter_participants handles both supergroups and basic groups
+        # (basic groups don't support channels.GetParticipantsRequest).
         input_chat = await client.get_input_entity(group_id)
-        result = await client(GetParticipantsRequest(
-            channel=input_chat,
-            filter=ChannelParticipantsAdmins(),
-            offset=0,
-            limit=200,
-            hash=0,
-        ))
         admin_ids = set()
-        for p in result.participants:
-            if isinstance(p, (ChannelParticipantAdmin, ChannelParticipantCreator)):
-                admin_ids.add(p.user_id)
-        # Also add any bots from the user list
-        for u in result.users:
-            if getattr(u, "bot", False):
-                admin_ids.add(u.id)
+        async for u in client.iter_participants(input_chat, filter=ChannelParticipantsAdmins, limit=200):
+            admin_ids.add(u.id)
         _admin_cache[group_id] = (admin_ids, now)
         logger.info(f"[AdminCache] Group {group_id}: cached {len(admin_ids)} admin/bot IDs")
         return admin_ids
@@ -459,6 +443,21 @@ async def _do_send_dm_with_fallback(
             else:
                 ai_remix_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
                 ai_remix_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
+
+    # Per-rule AI Remix: the rule can turn it off, or use an AI Agent's keys and instructions.
+    _wrow = await db.get_watcher(watcher_id) or {}
+    if not _wrow.get("ai_remix", 1):
+        ai_enabled = False
+    elif _wrow.get("ai_agent_id"):
+        _agent = await db.get_ai_agent(_wrow["ai_agent_id"])
+        if _agent and _agent.get("api_keys_json"):
+            ai_provider, ai_keys, ai_enabled = _agent.get("provider"), _agent["api_keys_json"], True
+            ai_remix_kwargs = {k: _agent[k] for k in ("base_url", "model") if _agent.get(k)}
+        if _agent:
+            _extra = [x for x in (ai_custom_prompt, (_agent.get("remix_instruction") or "").strip()) if x]
+            if (_agent.get("knowledge_base") or "").strip():
+                _extra.append("Product knowledge you may use (do not invent facts beyond it):" + chr(10) + _agent["knowledge_base"].strip()[:6000])
+            ai_custom_prompt = (chr(10) * 2).join(_extra) or None
 
     last_error = None
 
@@ -607,9 +606,11 @@ async def _do_send_dm_with_fallback(
                     "first_name": _peer_first,
                     "last_name": _peer_last,
                     "username": username,
-                    "lang_code": getattr(peer, "lang_code", None),
+                    "lang_code": getattr(peer, "lang_code", None), "phone": getattr(peer, "phone", None),
                     "community_hint": group_title or "",
                 }
+                if not _member_info.get('lang_code') and not _member_info.get('phone'):
+                    _member_info.update(await ai_rmx.fetch_profile_hints(client, peer))
                 _auto_native = bool(await db.get_setting("ai_auto_translate_native", "1") == "1")
 
                 if ai_enabled and msg_to_send.get("msg_type") == "text" and msg_to_send.get("content"):

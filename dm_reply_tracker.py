@@ -410,7 +410,12 @@ _STEP_GUIDANCE = {
         "First post is in. Keep the relationship warm, answer questions, no new asks — the team verifies volume on our side."
     ),
     "active": "Active partner. Support them; answer questions; no onboarding asks.",
-    "declined": "The KOL declined the partnership. Be polite and brief; do NOT pitch again.",
+    "declined": (
+        "The KOL declined and already got one objection-handling reply. Do NOT persuade again. "
+        "If they now show interest or ask something, help normally. Otherwise close in 1-2 warm sentences in their language "
+        "that turn this into a support channel: thank them and say that whenever they need help (trading, the exchange, KOL tools) "
+        "they can message here anytime. NEVER say you will stop writing / won't message again."
+    ),
     "dormant": "The KOL went quiet after agreeing. Be light and friendly; one soft check-in at most, no pressure.",
 }
 
@@ -486,6 +491,70 @@ def extract_uid_candidates_from_messages(history: list[dict] | None) -> set[str]
         if _UID_BARE_RE.fullmatch(stripped):
             found.add(stripped)
     return found
+
+
+def uid_from_pinned_text(text: str) -> str:
+    """UID in a pinned message: a bare 6-12 digit message, or a number next to 'UID'."""
+    text = (text or "").strip().rstrip(".!")
+    if _UID_BARE_RE.fullmatch(text):
+        return text
+    mt = _UID_NEAR_RE.search(text)
+    return (mt.group(1) or mt.group(2)) if mt else ""
+
+
+async def sync_pinned_uid(account_id: int, user_id: int, client) -> str:
+    """Admins pin the KOL's latest WEEX UID in the DM, so a pinned UID is the
+    source of truth: it overrides the stored UID and advances the step.
+    Returns the UID applied ('' if none / unchanged)."""
+    from telethon.tl.types import InputMessagesFilterPinned
+    msgs = await client.get_messages(user_id, limit=5, filter=InputMessagesFilterPinned)
+    uid = ""
+    for m in sorted(msgs or [], key=lambda x: x.date, reverse=True):
+        uid = uid_from_pinned_text(getattr(m, "message", "") or "")
+        if uid:
+            break
+    if not uid:
+        return ""
+    prof = await db.get_kol_profile(account_id, user_id) or {}
+    if _normalize_uid(prof.get("weex_uid")) == uid:
+        await maybe_advance_uid_received(account_id, user_id, uid, actor="system:pinned")
+        return ""
+    await db.upsert_kol_profile(account_id, user_id, {"weex_uid": uid})
+    logger.info("[KOL Memory] Pinned UID %s saved for user %d (acc=%d)", uid, user_id, account_id)
+    await maybe_advance_uid_received(account_id, user_id, uid, actor="system:pinned")
+    await db.refresh_missing_items(account_id, user_id)
+    return uid
+
+
+_PINNED_SCAN_EVERY = 6 * 3600
+_last_pinned_scan = 0.0
+
+
+async def process_pinned_uids(force: bool = False) -> dict:
+    """Every 6h: read pinned messages in every live KOL DM and pick up UIDs."""
+    global _last_pinned_scan
+    if not force and time.time() - _last_pinned_scan < _PINNED_SCAN_EVERY:
+        return {"skipped": "recent"}
+    _last_pinned_scan = time.time()
+    async with db.get_db() as conn:
+        cur = await conn.execute("""
+            SELECT account_id, user_id FROM ai_followup_chats
+            WHERE status != 'bot_ignored' AND COALESCE(NULLIF(kol_step, ''), 'prospect') != 'declined'
+        """)
+        rows = await cur.fetchall()
+    found = 0
+    for account_id, user_id in rows:
+        client = tg.get_client(account_id)
+        if not client or not client.is_connected():
+            continue
+        try:
+            if await sync_pinned_uid(account_id, user_id, client):
+                found += 1
+        except Exception as e:
+            logger.debug("[PinnedUID] user %d (acc=%d): %s", user_id, account_id, e)
+        await asyncio.sleep(1.5)
+    logger.info("[PinnedUID] Scanned %d chats, %d new UID(s)", len(rows), found)
+    return {"scanned": len(rows), "found": found}
 
 
 async def maybe_advance_uid_received(account_id: int, user_id: int, uid: str, actor: str = "system:uid") -> bool:
@@ -577,10 +646,14 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
     if pred:
         lines.append(f"PREDICTED TIER (only because the KOL stated ~{kol_offer._fmt_num(pred.get('volume_m'))}M monthly volume): "
                      f"tier {pred.get('tier')} = {kol_offer._fmt_num(pred.get('revshare_pct'))}% revshare from the month after hitting it.")
-    lines.append("If the KOL clearly declines the partnership or asks you to stop messaging: do NOT argue or re-pitch. "
-                 "Still write ONE short, warm reply in their language with NO numbers or rates — thank them for their time, respect the decision, "
-                 "and leave the door open (if next time their community needs an open, flexible exchange partner with strong "
-                 "community-building support, they can message you here anytime). Then append [STOP] on its own line. "
+    lines.append("IF THE KOL SAYS NOT INTERESTED OR OBJECTS TO THE TERMS (without asking you to stop): send at most ONE short reply "
+                 "(2-3 sentences, their language): acknowledge their point, give ONE verified benefit taken only from the facts above "
+                 "that directly answers their stated reason, and end with one easy question (yes/no or a quick choice). "
+                 "If they reject referral/affiliate campaigns in general, that one benefit is the MARKETING SUPPORT package "
+                 "from the knowledge base, with its concrete numbers (e.g. up to $200/month marketing fee, ads for their community, seeding accounts). "
+                 "Never resend the full pitch or list several benefits. "
+                 "IF THEY EXPLICITLY ASK YOU TO STOP: no benefit, just thank them and say they can message here anytime they need support. "
+                 "In both cases append [STOP] on its own line (halts automatic follow-ups); never say you will stop writing. "
                  "All [TAGS] are invisible to the KOL.")
     return "\n".join(lines)
 
@@ -799,6 +872,10 @@ async def _async_distill_human_rule(account_id: int, user_id: int, message_text:
                     rule_status = "pending"
                     logger.warning("🎓 [Self-Learning] Rule held as PENDING (off-ladder figures %s): '%s'",
                                    bad_figures, rule["question"])
+                elif is_trivial_learned_rule(rule["question"], rule["answer"]):
+                    rule_status = "pending"
+                    logger.info("🎓 [Self-Learning] Rule held as PENDING (trivial/noise): '%s' -> '%s'",
+                                rule["question"], rule["answer"])
                 await db.add_learned_knowledge(
                     ai_agent_id=agent_id,
                     source_user_id=user_id,
@@ -810,6 +887,18 @@ async def _async_distill_human_rule(account_id: int, user_id: int, message_text:
                             agent_id, rule_status, rule["question"], rule["answer"])
     except Exception as e:
         logger.debug("[Self-Learning] Distillation failed: %s", e)
+
+
+_TRIVIAL_ANSWER_RE = re.compile(r"^[\s\d@+\-_.,:;!?()=\[\]<>/*#~^'\"]*$")
+
+
+def is_trivial_learned_rule(question: str, answer: str) -> bool:
+    """Noise a human takeover produces (IDs, emoticons, "ok", "ừm") that must
+    not become an auto-approved rule: too short, or no real words."""
+    q, a = (question or "").strip(), (answer or "").strip()
+    if len(a) < 25 or len(q) < 6:
+        return True
+    return bool(_TRIVIAL_ANSWER_RE.match(a)) or len(re.findall(r"[^\W\d_]{2,}", a)) < 4
 
 
 def is_bot_account(username: str | None, name: str | None = None, message_text: str | None = None,
@@ -902,7 +991,8 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
         try:
             if await tg.send_text_message(account_id, user_id, text) is False:
                 return False
-            await db.append_followup_chat_message(account_id, user_id, "assistant", text, inc_reply_count=True)
+            await db.append_followup_chat_message(account_id, user_id, "assistant", text, inc_reply_count=True,
+                                                    model=ai_rmx.last_model_used() or None)
             if new_status != "active":
                 await db.update_followup_chat_status(account_id, user_id, new_status)
             if drip_stage is not None:
@@ -913,6 +1003,51 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
             return True
         finally:
             _spawn_background(_remove_ai_send_after_delay(account_id, user_id))
+
+
+async def _source_agent_id(campaign_id, watcher_id):
+    """AI Agent of the campaign, else the Keyword DM rule, that sent the first DM."""
+    try:
+        if campaign_id:
+            cmp = await db.get_dm_campaign(campaign_id)
+            if cmp and cmp.get("ai_agent_id"):
+                return cmp["ai_agent_id"]
+        if watcher_id:
+            w = await db.get_watcher(watcher_id)
+            if w and w.get("ai_agent_id"):
+                return w["ai_agent_id"]
+    except Exception as e:
+        logger.debug("[AIFollowUp] source agent lookup failed: %s", e)
+    return None
+
+
+_MAX_IMAGE_BYTES = 4 * 1024 * 1024
+
+
+async def _event_images(event) -> list[str]:
+    """Photo (or image file) on the incoming message as a base64 data URL, for vision models."""
+    msg = getattr(event, "message", None) if event is not None else None
+    if msg is None:
+        return []
+    mime = "image/jpeg"
+    if getattr(msg, "photo", None):
+        pass
+    else:
+        doc = getattr(msg, "document", None)
+        mime = (getattr(doc, "mime_type", "") or "") if doc else ""
+        if not mime.startswith("image/") or mime == "image/webp" and getattr(msg, "sticker", None):
+            return []
+        if (getattr(doc, "size", 0) or 0) > _MAX_IMAGE_BYTES:
+            return []
+    try:
+        data = await msg.download_media(file=bytes)
+    except Exception as ex:
+        logger.debug("[AIFollowUp] Image download failed: %s", ex)
+        return []
+    if not data or len(data) > _MAX_IMAGE_BYTES:
+        return []
+    import base64
+    return [f"data:{mime};base64,{base64.b64encode(data).decode()}"]
 
 
 async def generate_and_send_ai_reply_for_chat(
@@ -951,7 +1086,8 @@ async def generate_and_send_ai_reply_for_chat(
     chat_check = await db.get_followup_chat(account_id, user_id)
     if chat_check:
         takeover_str = chat_check.get("human_takeover_at")
-        if takeover_str:
+        # An admin who switched the chat back to 'active' has handed it to the AI.
+        if takeover_str and chat_check.get("status") != "active":
             try:
                 # SQLite datetime('now') is UTC without tzinfo — always compare in UTC
                 dt_tk = datetime.fromisoformat(takeover_str).replace(tzinfo=timezone.utc)
@@ -997,12 +1133,11 @@ async def generate_and_send_ai_reply_for_chat(
 
     # 3. Resolve AI Agent config
     agent_config = None
-    if target_campaign_id:
-        cmp = await db.get_dm_campaign(target_campaign_id)
-        if cmp and cmp.get("ai_agent_id"):
-            c_agent = await db.get_ai_agent(cmp["ai_agent_id"])
-            if c_agent and c_agent.get("is_active", 1):
-                agent_config = c_agent
+    src_agent_id = await _source_agent_id(target_campaign_id, watcher_id)
+    if src_agent_id:
+        c_agent = await db.get_ai_agent(src_agent_id)
+        if c_agent and c_agent.get("is_active", 1):
+            agent_config = c_agent
 
     if not agent_config:
         account_obj = await db.get_account(account_id)
@@ -1043,45 +1178,7 @@ async def generate_and_send_ai_reply_for_chat(
             }
 
     # 4. Resolve API Provider & Keys
-    kwargs = {}
-    ai_provider = None
-    ai_keys = []
-    if agent_config:
-        agent_keys = agent_config.get("api_keys_json", [])
-        if isinstance(agent_keys, str):
-            try:
-                agent_keys = json.loads(agent_keys)
-            except Exception:
-                agent_keys = []
-        if agent_keys:
-            ai_provider = agent_config.get("provider", "gemini")
-            ai_keys = agent_keys
-
-    if not ai_keys:
-        async def _load_provider_keys(prov):
-            if not prov: return []
-            try:
-                raw = await db.get_setting(f"ai_keys_{prov}", "[]")
-                return json.loads(raw) if raw else []
-            except Exception: return []
-
-        ai_provider = await db.get_setting("ai_provider", "gemini")
-        ai_keys = await _load_provider_keys(ai_provider)
-        if not ai_keys:
-            all_providers = ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]
-            for alt_prov in all_providers:
-                alt_keys = await _load_provider_keys(alt_prov)
-                if alt_keys:
-                    ai_provider = alt_prov
-                    ai_keys = alt_keys
-                    break
-
-    if ai_provider in ("openai_compatible", "chatgpt_oauth"):
-        prefix = "ai_oai_compat_" if ai_provider == "openai_compatible" else "ai_chatgpt_oauth_"
-        b_url = (agent_config.get("base_url") if agent_config else "") or (await db.get_setting(f"{prefix}base_url", ""))
-        mod = (agent_config.get("model") if agent_config else "") or (await db.get_setting(f"{prefix}model", ""))
-        if b_url and b_url.strip(): kwargs["base_url"] = b_url.strip()
-        if mod and mod.strip(): kwargs["model"] = mod.strip()
+    ai_provider, ai_keys, kwargs = await _resolve_ai_provider(agent_config)
 
     if not ai_keys:
         logger.warning("[AIFollowUp] ⚠️ Cannot generate AI reply for user %d: No API Keys configured!", user_id)
@@ -1112,7 +1209,8 @@ async def generate_and_send_ai_reply_for_chat(
         "   - PHOTO / SCREENSHOT HANDLING: When the partner sends a screenshot (dashboard, group stats):\n"
         "     * Acknowledge briefly (e.g. 'Got the screenshot bro! Let me check the stats 👍'). Answer any accompanying question.\n"
         "     * NEVER ask for proof/video again once a screenshot has been received!\n"
-        "   - DEMANDING / DIFFICULT CASES ESCALATION: When the KOL's demands exceed normal scope (large upfront budget, complex sponsorship), politely escalate to the exchange's committee for special approval. Reply IN THE USER'S LANGUAGE:\n"
+        "     * Only acknowledge a file/screenshot/video if the LATEST user messages carry an [Attached ...] tag. Stickers, GIFs, memes and emoji are casual reactions: react like a human (laugh, empathise), never say 'received the file' or 'team will review'. If an image looks like a meme/joke rather than stats, treat it as banter.\n"
+        "   - DEMANDING / DIFFICULT CASES ESCALATION: When the KOL's demands exceed normal scope (complex sponsorship; or an upfront request AFTER the 3-month performance video was received or refused — see the UPFRONT rule), politely escalate to the exchange's committee for special approval. Reply IN THE USER'S LANGUAGE:\n"
         "     * English example: 'This is a special case that goes beyond my usual authority. Let me forward your detailed proposal to the WEEX Partnership Committee for a dedicated review!'\n"
         "     * Vietnamese example: 'Case này đặc biệt và vượt thẩm quyền thông thường của mình rồi, để mình chuyển tiếp proposal chi tiết của bạn lên Ban Giám Đốc / Partnership Committee của sàn WEEX để duyệt riêng nhé!'\n"
         "     * Then append [HANDOVER_REQUIRED].\n"
@@ -1122,7 +1220,7 @@ async def generate_and_send_ai_reply_for_chat(
         "   - Tier B (Intent 40-79): Interested in exchange benefits, asking detailed questions.\n"
         "   - Tier C (Intent 0-39): Casual question, low interest, or greeting.\n"
         "10. HANDOVER TRIGGER (CRITICAL): Append [HANDOVER_REQUIRED] on its own line (before METRICS) when ANY of these apply:\n"
-        "   - Prospect asks for fixed fee, upfront payment, retainer, or sponsorship budget.\n"
+        "   - Prospect asks for fixed fee, upfront payment, retainer, or sponsorship budget AND has already sent (or refused) the 3-month trading-performance video. On the FIRST upfront ask, request that video instead (no tag).\n"
         "   - Prospect requests a call, meeting, or contract discussion.\n"
         "   - Prospect asks to speak with a human, admin, or manager.\n"
         "   - Prospect has ACTUALLY SENT volume proof (their message carries an [Attached ...] tag) that needs human verification.\n"
@@ -1182,7 +1280,11 @@ async def generate_and_send_ai_reply_for_chat(
 
     # _pending_ai_sends already locked at guard check (line 291)
     try:
-        ai_reply = await ai_rmx.generate_chat_response(history, combined_prompt, ai_provider, ai_keys, **kwargs)
+        _imgs = await _event_images(event)
+        if _imgs:
+            logger.info("[AIFollowUp] 🖼 Passing %d image(s) to %s for user %d", len(_imgs), ai_provider, user_id)
+        ai_reply = await ai_rmx.generate_chat_response(
+            history, combined_prompt, ai_provider, ai_keys, **({**kwargs, "images": _imgs} if _imgs else kwargs))
 
         if not ai_reply:
             logger.warning("[AIFollowUp] ⚠️ AI provider '%s' returned an empty reply for user @%s (%d) — nothing sent",
@@ -1387,6 +1489,27 @@ async def is_internal_account_user(user_id: int) -> bool:
     return int(user_id) in all_ids
 
 
+async def _seed_history_from_dialog(account_id: int, user_id: int, event, limit: int = 12) -> int:
+    """Copy the last messages before `event` from Telegram into an empty AI history."""
+    try:
+        msgs = await event.client.get_messages(user_id, limit=limit, max_id=event.message.id)
+    except Exception as ex:
+        logger.debug("[AIFollowUp] Dialog seed fetch failed for %d: %s", user_id, ex)
+        return 0
+    n = 0
+    for m in reversed(msgs or []):
+        txt = (getattr(m, "message", "") or "").strip()
+        if not txt:
+            txt = "[Sticker]" if getattr(m, "sticker", None) else ("[Media]" if getattr(m, "media", None) else "")
+        if not txt:
+            continue
+        await db.append_followup_chat_message(account_id, user_id, "assistant" if m.out else "user", txt)
+        n += 1
+    if n:
+        logger.info("[AIFollowUp] Seeded %d prior dialog messages for user %d (acc=%d)", n, user_id, account_id)
+    return n
+
+
 def _make_handler(account_id: int):
     """Factory creating the event handler for a specific account."""
 
@@ -1404,7 +1527,13 @@ def _make_handler(account_id: int):
 
                 msg_content = event.raw_text or event.message.message or ""
                 if not msg_content.strip():
-                    return
+                    # Stickers/media carry no text; still count them as a manual opener.
+                    if getattr(event.message, "sticker", None):
+                        msg_content = "[Sticker]"
+                    elif getattr(event.message, "media", None):
+                        msg_content = "[Media]"
+                    else:
+                        return
 
                 # If AI is currently sending, this outgoing msg IS the AI message — skip
                 if (account_id, dest_id) in _pending_ai_sends:
@@ -1424,7 +1553,27 @@ def _make_handler(account_id: int):
 
                 # Human admin is manually sending → ALWAYS lock out AI
                 existing_f_chat = await db.get_followup_chat(account_id, dest_id)
-                if existing_f_chat:
+                if not existing_f_chat:
+                    # Admin opened a DM with a brand-new user: start an active AI
+                    # chat with this opener as context, so the AI Agent answers
+                    # when the user replies (no human takeover for openers).
+                    if await is_internal_account_user(dest_id):
+                        return
+                    try:
+                        peer = await event.get_chat()
+                    except Exception:
+                        peer = None
+                    if peer is not None and getattr(peer, "bot", False):
+                        return
+                    p_user = getattr(peer, "username", None) or ""
+                    p_name = (f"{getattr(peer, 'first_name', '') or ''} "
+                              f"{getattr(peer, 'last_name', '') or ''}").strip() or p_user or str(dest_id)
+                    await db.get_or_create_followup_chat(
+                        account_id=account_id, user_id=dest_id, username=p_user, name=p_name)
+                    await db.append_followup_chat_message(account_id, dest_id, "assistant", msg_content)
+                    logger.info("[AIFollowUp] Manual opener to new user %d (acc=%d) — AI will reply when they answer",
+                                dest_id, account_id)
+                elif existing_f_chat:
                     logger.info(
                         "🚨 [AIFollowUp] Human Admin manual message detected to user %d (acc=%d)! Pausing AI Agent.",
                         dest_id, account_id
@@ -1475,16 +1624,21 @@ def _make_handler(account_id: int):
 
         raw_msg = event.raw_text or event.message.message or ""
         
-        has_video = bool(getattr(event.message, "video", None) or getattr(event.message, "video_note", None) or getattr(event.message, "gif", None))
+        # Stickers, GIFs and animated emoji are Telethon documents; they are reactions, not proof.
+        is_reaction = bool(getattr(event.message, "sticker", None) or getattr(event.message, "gif", None)
+                           or getattr(event.message, "dice", None))
+        has_video = bool(not is_reaction and (getattr(event.message, "video", None) or getattr(event.message, "video_note", None)))
         has_photo = bool(getattr(event.message, "photo", None))
-        has_document = bool(getattr(event.message, "document", None) and not has_video)
-        
+        has_document = bool(getattr(event.message, "document", None) and not has_video and not is_reaction)
+
         msg_lower = (raw_msg or "").lower()
         if "video" in msg_lower and any(w in msg_lower for w in ("done", "check", "sent", "send", "uploaded", "here")):
             has_video = True
 
         media_tag = ""
-        if has_video:
+        if is_reaction and not has_video:
+            media_tag = "[Sent a sticker/GIF reaction - casual emotion only, NOT a file or proof; never say you received a file]"
+        elif has_video:
             media_tag = "[Attached Video Proof]"
         elif has_photo:
             media_tag = "[Attached Screenshot/Photo Proof]"
@@ -1492,6 +1646,17 @@ def _make_handler(account_id: int):
             media_tag = "[Attached Document Proof]"
 
         message_text = f"{raw_msg} {media_tag}".strip() if media_tag else raw_msg
+
+        # Keep the quoted message: "Which language is this?" is meaningless without it.
+        try:
+            if getattr(event.message, "reply_to_msg_id", None):
+                replied = await event.get_reply_message()
+                q = (getattr(replied, "message", "") or "").strip() if replied else ""
+                if q:
+                    who = "your earlier message" if getattr(replied, "out", False) else "their earlier message"
+                    message_text = f'{message_text}\n[Quoting {who}: "{q[:600]}"]'
+        except Exception as _q_err:
+            logger.debug("[Inbox] Quoted message fetch error: %s", _q_err)
 
         # Bot check
         if is_bot_account(sender_username, sender_name, message_text,
@@ -1517,7 +1682,7 @@ def _make_handler(account_id: int):
             return
 
         # Record hot lead reply
-        watcher_log = await db.find_watcher_log_for_user(sender_id)
+        watcher_log = await db.find_watcher_log_for_user(sender_id, sender_username)
         watcher_id = watcher_log["watcher_id"] if watcher_log else None
 
         await db.add_dm_reply({
@@ -1555,7 +1720,7 @@ def _make_handler(account_id: int):
         # Template rotation recording
         try:
             import template_rotation as tmpl_rot
-            campaign_log = await db.find_campaign_log_for_user(sender_id)
+            campaign_log = await db.find_campaign_log_for_user(sender_id, sender_username)
             if campaign_log and campaign_log.get("template_variant_id"):
                 await tmpl_rot.record_reply(
                     template_id=campaign_log["template_variant_id"],
@@ -1579,7 +1744,7 @@ def _make_handler(account_id: int):
             if enabled_str.lower() in ("true", "1"):
                 # Identify campaign
                 target_campaign_id = None
-                running_log = await db.find_running_campaign_log_for_user(sender_id) or await db.find_campaign_log_for_user(sender_id)
+                running_log = await db.find_running_campaign_log_for_user(sender_id, sender_username) or await db.find_campaign_log_for_user(sender_id, sender_username)
                 if running_log:
                     target_campaign_id = running_log.get("campaign_id")
 
@@ -1627,6 +1792,11 @@ def _make_handler(account_id: int):
                         await db.update_followup_chat_status(account_id, sender_id, "active")
                         current_status = "active"
 
+                # Opener sent by a campaign/rule/manual flow may not be stored.
+                # Seed from the real dialog so the AI knows what it already said.
+                if not (chat.get("history") or []):
+                    await _seed_history_from_dialog(account_id, sender_id, event)
+
                 # Always append incoming user message
                 chat = await db.append_followup_chat_message(account_id, sender_id, "user", message_text)
 
@@ -1648,8 +1818,11 @@ def _make_handler(account_id: int):
                 # Handover keywords check
                 account_obj = await db.get_account(account_id)
                 agent_id = account_obj.get("ai_agent_id") if account_obj else None
+                # No agent on the account → borrow the one from the campaign/rule that sent the first DM
+                if not agent_id:
+                    agent_id = await _source_agent_id(target_campaign_id, watcher_id)
 
-                # ── If this account has AI turned off ("Tắt"), skip AI reply entirely ──
+                # ── No agent on the account nor on the source campaign/rule: skip AI reply ──
                 if not agent_id:
                     logger.info("[AIFollowUp] Account #%d has AI Agent disabled (Tắt) — skipping AI reply for user %d",
                                 account_id, sender_id)
@@ -1740,6 +1913,14 @@ async def _followup_periodic_loop():
                 await process_step_reminders()
             except Exception as e_step:
                 logger.error("[StepReminder] Error in step reminder batch: %s", e_step)
+            try:
+                await process_pinned_uids()
+            except Exception as e_pin:
+                logger.error("[PinnedUID] Error in pinned UID scan: %s", e_pin)
+            try:
+                await process_monthly_kol_care()
+            except Exception as e_care:
+                logger.error("[KolCare] Error in monthly care batch: %s", e_care)
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -1931,6 +2112,48 @@ def _drip_instruction_for_stage(stage: int, total_stages: int, tier: str = "Tier
     )
 
 
+async def _resolve_ai_provider(agent_config: dict | None) -> tuple[str | None, list, dict]:
+    """Provider, keys and base_url/model kwargs: the agent's own keys first,
+    then the global ai_provider, then any provider that has keys."""
+    async def _load_provider_keys(prov):
+        if not prov: return []
+        try:
+            raw = await db.get_setting(f"ai_keys_{prov}", "[]")
+            return json.loads(raw) if raw else []
+        except Exception: return []
+
+    kwargs: dict = {}
+    ai_provider, ai_keys = None, []
+    if agent_config:
+        agent_keys = agent_config.get("api_keys_json", [])
+        if isinstance(agent_keys, str):
+            try:
+                agent_keys = json.loads(agent_keys)
+            except Exception:
+                agent_keys = []
+        if agent_keys:
+            ai_provider = agent_config.get("provider", "gemini")
+            ai_keys = agent_keys
+
+    if not ai_keys:
+        ai_provider = await db.get_setting("ai_provider", "gemini")
+        ai_keys = await _load_provider_keys(ai_provider)
+        if not ai_keys:
+            for alt_prov in ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]:
+                alt_keys = await _load_provider_keys(alt_prov)
+                if alt_keys:
+                    ai_provider, ai_keys = alt_prov, alt_keys
+                    break
+
+    if ai_provider in ("openai_compatible", "chatgpt_oauth"):
+        prefix = "ai_oai_compat_" if ai_provider == "openai_compatible" else "ai_chatgpt_oauth_"
+        b_url = (agent_config.get("base_url") if agent_config else "") or (await db.get_setting(f"{prefix}base_url", ""))
+        mod = (agent_config.get("model") if agent_config else "") or (await db.get_setting(f"{prefix}model", ""))
+        if b_url and b_url.strip(): kwargs["base_url"] = b_url.strip()
+        if mod and mod.strip(): kwargs["model"] = mod.strip()
+    return ai_provider, ai_keys, kwargs
+
+
 async def process_drip_followups() -> dict:
     """
     1. Scan human takeover chats (>12h since update) where user is waiting for a reply -> Auto-resume & Send AI Reply!
@@ -2089,17 +2312,9 @@ async def process_drip_followups() -> dict:
 
             try:
                 history = json.loads(chat.get("history_json", "[]"))
-                ai_provider = agent_config.get("provider", "gemini") if agent_config else "gemini"
-                ai_keys = agent_config.get("api_keys_json", []) if agent_config else []
-                if isinstance(ai_keys, str):
-                    ai_keys = json.loads(ai_keys)
+                ai_provider, ai_keys, kwargs = await _resolve_ai_provider(agent_config)
                 if not ai_keys:
                     continue
-
-                kwargs = {}
-                if ai_provider in ("openai_compatible", "chatgpt_oauth") and agent_config:
-                    if agent_config.get("base_url"): kwargs["base_url"] = agent_config["base_url"]
-                    if agent_config.get("model"): kwargs["model"] = agent_config["model"]
 
                 msg = await ai_rmx.generate_chat_response(history[-5:], combined, ai_provider, ai_keys, **kwargs)
                 if msg:
@@ -2123,6 +2338,168 @@ async def process_drip_followups() -> dict:
         logger.error("[DripEngine] Error in drip batch: %s", e_drip)
 
     return {"sent": sent_count, "errors": errors}
+
+
+# ── Monthly KOL care ───────────────────────────────────────────────────────
+# Every N days, one short check-in to signed / post-deal KOLs (and prospects
+# whose drip is exhausted): this month's events, what support they need, and
+# a coffee (same city) or short call invite. Never to declined/blacklisted.
+
+KOL_CARE_EVENT_LINKS = ("https://www.weex.com/rewards", "https://affiliates.weex.com/promotion/")
+
+# Rough UTC offset per language, used to keep check-ins within local business hours.
+_LANG_UTC_OFFSET = {
+    "vi": 7, "th": 7, "id": 7, "zh": 8, "ms": 8, "fil": 8, "ja": 9, "ko": 9,
+    "ru": 3, "uk": 2, "tr": 3, "ar": 3, "fa": 3, "hi": 5, "bn": 6, "ur": 5,
+    "de": 1, "fr": 1, "es": 1, "it": 1, "pl": 1, "nl": 1, "pt": -3, "en": 0,
+}
+
+_KOL_CARE_INSTRUCTION = (
+    "[MONTHLY KOL CARE CHECK-IN]: We have not talked for about {days} days. Write ONE short, warm message "
+    "(2-4 sentences, in the KOL's language, same tone as before, NOT a template - vary wording every month):\n"
+    "1) A light personal hello that references something from our past chat if possible.\n"
+    "2) Mention there are new events/rewards this month: {events} (share at most these links, do not invent event details or figures). "
+    "If their community is about airdrops/Web3/new tokens, instead highlight WEEX WE-Launch: holding WXT lets their members share "
+    "the prize pools of new token launches - a ready-made airdrop hunt for their group (link: https://www.weex.com/we-launch).\n"
+    "3) Ask what extra support would help them push WEEX now (e.g. marketing materials, a demo account, Elite Bot).\n"
+    "4) Offer to grab a coffee if we are in the same city, otherwise a quick 10-15 min call.\n"
+    "No pressure, no re-pitching the commission ladder, do NOT reveal you are AI."
+)
+
+
+def _kol_local_hour(lang: str, now_utc: datetime | None = None) -> int:
+    now_utc = now_utc or datetime.now(timezone.utc)
+    return (now_utc.hour + _LANG_UTC_OFFSET.get((lang or "en").split("-")[0], 0)) % 24
+
+
+async def _blocked_user_ids(account_id: int, client, cache: dict) -> set[int]:
+    """User ids this account has blocked on Telegram (fetched once per care run)."""
+    if account_id in cache:
+        return cache[account_id]
+    ids: set[int] = set()
+    try:
+        from telethon.tl.functions.contacts import GetBlockedRequest
+        offset = 0
+        while True:
+            res = await client(GetBlockedRequest(offset=offset, limit=100))
+            batch = [getattr(b.peer_id, "user_id", None) for b in res.blocked]
+            ids.update(i for i in batch if i)
+            offset += len(res.blocked)
+            if len(res.blocked) < 100:
+                break
+    except Exception as e:
+        logger.warning("[KolCare] Could not read blocked list for account %s: %s", account_id, e)
+        ids = None  # unknown → skip this account's chats rather than risk messaging a blocked user
+    cache[account_id] = ids if ids is not None else _ALL_BLOCKED
+    return cache[account_id]
+
+
+class _AllSet(set):
+    def __contains__(self, item):
+        return True
+
+
+_ALL_BLOCKED = _AllSet()
+
+
+async def _kol_care_settings() -> tuple[bool, int, int]:
+    enabled = str(await db.get_setting("kol_care_enabled", "1")).strip().lower() in ("1", "true", "on", "yes")
+    try:
+        days = int(await db.get_setting("kol_care_interval_days", "30"))
+    except (TypeError, ValueError):
+        days = 30
+    try:
+        cap = int(await db.get_setting("kol_care_daily_cap", "5"))
+    except (TypeError, ValueError):
+        cap = 5
+    return enabled, max(7, days), max(0, cap)
+
+
+async def process_monthly_kol_care() -> dict:
+    """Send the periodic care check-in to eligible KOLs (see block comment)."""
+    import aiosqlite
+    enabled, days, cap = await _kol_care_settings()
+    if not enabled or cap == 0:
+        return {"sent": 0, "skipped": "disabled"}
+
+    async with db.get_db() as db_conn:
+        db_conn.row_factory = aiosqlite.Row
+        # Eligible: post-deal KOLs or stage=signed, plus engaged prospects whose
+        # drip ran out. Silent (both sides) and not cared for in `days`.
+        cur = await db_conn.execute("""
+            SELECT * FROM ai_followup_chats
+            WHERE status NOT IN ('bot_ignored', 'paused_admin')
+              AND COALESCE(NULLIF(kol_step, ''), 'prospect') != 'declined'
+              AND COALESCE(NULLIF(stage, ''), 'new') != 'paused'
+              AND (
+                    COALESCE(NULLIF(stage, ''), 'new') = 'signed'
+                 OR COALESCE(NULLIF(kol_step, ''), 'prospect') IN ('link_confirmed', 'first_post', 'active', 'dormant')
+                 OR (status = 'active' AND COALESCE(NULLIF(kol_step, ''), 'prospect') = 'prospect'
+                     AND last_user_message_at IS NOT NULL AND COALESCE(last_drip_stage, 0) >= 2)
+              )
+              AND datetime(MAX(COALESCE(last_user_message_at, '1970-01-01'), COALESCE(updated_at, '1970-01-01'),
+                               COALESCE(last_care_at, '1970-01-01'))) <= datetime('now', ?)
+            ORDER BY COALESCE(last_care_at, updated_at) ASC
+            LIMIT 50
+        """, (f"-{days} days",))
+        chats = [dict(r) for r in await cur.fetchall()]
+        cur = await db_conn.execute("""
+            SELECT account_id, COUNT(*) FROM ai_followup_chats
+            WHERE last_care_at IS NOT NULL AND date(last_care_at) = date('now')
+            GROUP BY account_id
+        """)
+        sent_today = {r[0]: r[1] for r in await cur.fetchall()}
+
+    sent, events = 0, " and ".join(KOL_CARE_EVENT_LINKS)
+    blocked_cache: dict[int, set[int]] = {}
+    for chat in chats:
+        account_id, user_id = chat["account_id"], chat["user_id"]
+        if sent_today.get(account_id, 0) >= cap:
+            continue
+        try:
+            if await db.is_user_blacklisted(user_id=user_id, username=chat.get("username", "")):
+                continue
+            history = json.loads(chat.get("history_json") or "[]")
+            if not history:
+                continue
+            last_user_text = next((h.get("content", "") for h in reversed(history)
+                                   if h.get("role") == "user" and isinstance(h.get("content"), str)), "")
+            lang = ai_rmx.detect_user_language({"bio": last_user_text, "first_name": chat.get("name") or ""})
+            if not 9 <= _kol_local_hour(lang) < 20:
+                continue
+            client = tg.get_client(account_id)
+            if not client or not client.is_connected():
+                continue
+            if user_id in await _blocked_user_ids(account_id, client, blocked_cache):
+                continue
+
+            account_obj = await db.get_account(account_id)
+            agent_id = account_obj.get("ai_agent_id") if account_obj else None
+            agent_config = await db.get_ai_agent(agent_id) if agent_id else None
+            ai_provider, ai_keys, kwargs = await _resolve_ai_provider(agent_config)
+            if not ai_keys:
+                continue
+            combined = ((agent_config.get("system_prompt", "") if agent_config else "")
+                        + "\n\n" + _KOL_CARE_INSTRUCTION.format(days=days, events=events))
+            msg = await ai_rmx.generate_chat_response(history[-8:], combined, ai_provider, ai_keys, **kwargs)
+            if not msg:
+                continue
+            msg = sanitize_telegram_html(msg)
+            if contains_ai_disclosure(msg) or kol_offer.find_off_ladder_figures(msg):
+                logger.warning("[KolCare] 🚫 Blocked unsafe care message for user %d", user_id)
+                continue
+            if await _send_ai_message(account_id, user_id, msg):
+                async with db.get_db() as db_conn:
+                    await db_conn.execute(
+                        "UPDATE ai_followup_chats SET last_care_at = datetime('now') WHERE account_id = ? AND user_id = ?",
+                        (account_id, user_id))
+                    await db_conn.commit()
+                sent += 1
+                sent_today[account_id] = sent_today.get(account_id, 0) + 1
+                logger.info("[KolCare] 💌 Monthly check-in sent to user %d (acc %d, lang=%s)", user_id, account_id, lang)
+        except Exception as e:
+            logger.error("[KolCare] Failed care check-in for user %d: %s", user_id, e)
+    return {"sent": sent, "candidates": len(chats)}
 
 
 # ── Outreach Nudge Engine ──────────────────────────────────────────────────
@@ -2321,7 +2698,8 @@ async def process_outreach_nudges() -> dict:
                         errors.append(f"send_failed for user {user_id}")
                         continue
                     # Record in chat history
-                    await db.append_followup_chat_message(account_id, user_id, "assistant", msg, inc_reply_count=True)
+                    await db.append_followup_chat_message(account_id, user_id, "assistant", msg, inc_reply_count=True,
+                                                              model=ai_rmx.last_model_used() or None)
                     # Record nudge
                     await db.record_nudge(account_id, user_id, channel, "sent",
                                           watcher_id=watcher_id, campaign_id=campaign_id)

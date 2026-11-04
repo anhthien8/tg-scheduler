@@ -1,0 +1,287 @@
+"""
+Zalo API Routes
+───────────────
+QR login, group/event scraping into zalo_contacts, outreach campaigns
+(friend request + greeting after accept).
+"""
+import logging
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+import zalo_outreach as zo
+import zalo_store as store
+
+logger = logging.getLogger("tg-scheduler.zalo")
+
+router = APIRouter(prefix="/api/zalo", tags=["zalo"])
+
+
+async def _bridge(method: str, path: str, json: dict | None = None, timeout: float = 60,
+                  account: str | None = None):
+    try:
+        return await zo.call(method, path, json, timeout=timeout, account=account or None)
+    except zo.BridgeError as e:
+        raise HTTPException(e.status if 400 <= e.status < 600 else 502, str(e))
+
+
+# ── Nicks (accounts) ──────────────────────────────────────────────────────────
+
+@router.get("/status")
+async def status():
+    return await _bridge("GET", "/status")
+
+
+@router.get("/accounts")
+async def list_accounts():
+    """Bridge login state merged with per-nick settings, today's usage and health."""
+    st = await _bridge("GET", "/status")
+    bridge = {a["id"]: a for a in st.get("accounts") or []}
+    await store.sync_accounts(list(bridge.values()))
+    out = []
+    for acc in await store.list_accounts():
+        b = bridge.get(acc["id"])
+        if not b:
+            continue  # session removed on the bridge side
+        cap, note = zo.account_cap(acc)
+        out.append({**acc, "logged_in": b["logged_in"], "login": b["login"], "me": b["me"],
+                    "cap_today": cap, "cap_note": note,
+                    "resting": bool(acc.get("paused_until") and not zo._due(acc["paused_until"]))})
+    # Slots still waiting for their first QR scan aren't in the DB yet.
+    known = {a["id"] for a in out}
+    out += [{"id": b["id"], "logged_in": False, "login": b["login"], "me": None, "pending": True}
+            for b in bridge.values() if b["id"] not in known and not b["logged_in"]]
+    return out
+
+
+@router.post("/accounts")
+async def add_account():
+    return await _bridge("POST", "/accounts")
+
+
+@router.post("/accounts/{acc_id}/login")
+async def relogin_account(acc_id: str):
+    return await _bridge("POST", f"/accounts/{acc_id}/login")
+
+
+class AccountSettings(BaseModel):
+    enabled: bool = True
+    daily_cap: int = Field(default=25, ge=1, le=60)
+
+
+@router.put("/accounts/{acc_id}")
+async def update_account(acc_id: str, body: AccountSettings):
+    if not await store.get_account(acc_id):
+        raise HTTPException(404, "Không tìm thấy nick")
+    await store.set_account_state(acc_id, enabled=int(body.enabled), daily_cap=body.daily_cap)
+    return {"success": True}
+
+
+@router.post("/accounts/{acc_id}/resume")
+async def resume_account(acc_id: str):
+    await store.set_account_state(acc_id, paused_until=None, consecutive_errors=0, last_error=None)
+    return {"success": True}
+
+
+@router.delete("/accounts/{acc_id}")
+async def remove_account(acc_id: str):
+    await _bridge("DELETE", f"/accounts/{acc_id}")
+    await store.delete_account(acc_id)
+    return {"success": True}
+
+
+# ── Sources ───────────────────────────────────────────────────────────────────
+
+@router.get("/groups")
+async def groups(account: str = ""):
+    return await _bridge("GET", "/groups", timeout=120, account=account)
+
+
+@router.get("/groups/{group_id}/events")
+async def group_events(group_id: str, account: str = ""):
+    return await _bridge("GET", f"/groups/{group_id}/events", account=account)
+
+
+class GroupScrape(BaseModel):
+    group_name: str = ""
+    account: str = ""
+
+
+@router.post("/groups/{group_id}/scrape")
+async def scrape_group(group_id: str, body: GroupScrape):
+    res = await _bridge("GET", f"/groups/{group_id}/members", timeout=600, account=body.account)
+    name = res["group"].get("name") or body.group_name or group_id
+    counts = await store.upsert_contacts(res["members"], "group", group_id, name)
+    counts["admins_skipped"] = len(res.get("admins") or [])
+    await store.skip_admins(res.get("admins") or [])
+    total = res["group"].get("total") or 0
+    return {**counts, "group_total": total,
+            "partial": bool(total and counts["total"] + counts["admins_skipped"] < total - 1)}
+
+
+class ActiveScrape(BaseModel):
+    group_name: str = ""
+    account: str = ""
+    count: int = Field(1000, ge=50, le=2000)
+
+
+@router.post("/groups/{group_id}/scrape-active")
+async def scrape_active(group_id: str, body: ActiveScrape):
+    """Members who posted in the group's last `count` messages (admins dropped)."""
+    res = await _bridge("GET", f"/groups/{group_id}/active?count={body.count}", timeout=600, account=body.account)
+    name = body.group_name or group_id
+    counts = await store.upsert_contacts(res["members"], "active", group_id, f"🔥 Active · {name}")
+    counts["admins_skipped"] = len(res.get("admins") or [])
+    await store.skip_admins(res.get("admins") or [])
+    return {**counts, "messages_scanned": res.get("messages_scanned") or 0, "oldest_ts": res.get("oldest_ts")}
+
+
+class WatchPayload(BaseModel):
+    group_name: str = ""
+    account: str = ""
+    campaign_id: int
+    enabled: bool = True
+
+
+@router.get("/watches")
+async def list_watches():
+    rows = await store.list_watches()
+    try:
+        accs = {a["id"]: a for a in (await _bridge("GET", "/status")).get("accounts") or []}
+    except HTTPException:
+        accs = {}
+    for w in rows:
+        a = accs.get(w["account_id"]) if w["account_id"] else next(iter(accs.values()), None)
+        w["listening"] = bool(a and a.get("listening"))
+        w["listen_error"] = (a or {}).get("listen_error") or (None if a and a.get("logged_in") else "Nick chưa đăng nhập")
+    return rows
+
+
+@router.put("/watches/{group_id}")
+async def save_watch(group_id: str, body: WatchPayload):
+    c = await store.get_campaign(body.campaign_id)
+    if not c:
+        raise HTTPException(404, "Không tìm thấy chiến dịch")
+    await store.save_watch(group_id, body.group_name, body.account or None, body.campaign_id, body.enabled)
+    # a campaign limited to some sources must also include this group's newcomers
+    if c["sources"] and f"join:{group_id}" not in c["sources"]:
+        await store.update_campaign(c["id"], {**c, "sources": c["sources"] + [f"join:{group_id}"]})
+    return {"ok": True}
+
+
+@router.delete("/watches/{group_id}")
+async def delete_watch(group_id: str):
+    await store.delete_watch(group_id)
+    return {"ok": True}
+
+
+class EventScrape(BaseModel):
+    title: str = ""
+    group_name: str = ""
+    group_id: str = ""     # → bridge drops this group's owner/deputies
+    creator_id: str = ""   # → bridge drops the event's creator
+    account: str = ""
+
+
+@router.post("/events/{event_id}/scrape")
+async def scrape_event(event_id: str, body: EventScrape):
+    qs = urlencode({k: v for k, v in (("group", body.group_id), ("creator", body.creator_id)) if v})
+    res = await _bridge("GET", f"/events/{event_id}/responses" + (f"?{qs}" if qs else ""), timeout=600,
+                        account=body.account)
+    label = body.title or event_id
+    if body.group_name:
+        label = f"{label} ({body.group_name})"
+    counts = await store.upsert_contacts(res["accept"], "event", event_id, f"📅 {label}")
+    counts["admins_skipped"] = len(res.get("admins") or [])
+    await store.skip_admins(res.get("admins") or [])
+    return counts
+
+
+@router.get("/sources")
+async def sources():
+    return await store.list_sources()
+
+
+@router.get("/contacts")
+async def contacts(status: str = "", source: str = "", q: str = "", limit: int = 200, offset: int = 0):
+    return await store.list_contacts(status, source, q, min(limit, 1000), offset)
+
+
+class BlockBody(BaseModel):
+    blocked: bool = True
+
+
+@router.post("/contacts/{uid}/block")
+async def block_contact(uid: str, body: BlockBody):
+    """Global do-not-contact: no nick will ever invite or message this uid."""
+    await store.block_contact(uid, body.blocked)
+    return {"success": True}
+
+
+@router.get("/stats")
+async def stats():
+    return await store.contact_stats()
+
+
+# ── Campaigns ─────────────────────────────────────────────────────────────────
+
+class CampaignPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    sources: list[str] = []
+    accounts: list[str] = []   # nick ids allowed to send; empty = every enabled nick
+    friend_msg: str = Field(default="", max_length=150)  # Zalo caps the friend-request note
+    greet_msg: str = Field(default="", max_length=2000)
+    daily_limit: int = Field(default=20, ge=1, le=500)  # campaign total across nicks
+    min_delay_sec: int = Field(default=300, ge=60)
+    max_delay_sec: int = Field(default=900, ge=60)
+    start_hour: int = Field(default=8, ge=0, le=23)
+    end_hour: int = Field(default=22, ge=0, le=24)
+
+
+@router.get("/campaigns")
+async def list_campaigns():
+    return await store.list_campaigns()
+
+
+@router.post("/campaigns")
+async def create_campaign(p: CampaignPayload):
+    cid = await store.create_campaign(p.model_dump())
+    return {"id": cid}
+
+
+@router.put("/campaigns/{cid}")
+async def update_campaign(cid: int, p: CampaignPayload):
+    if not await store.get_campaign(cid):
+        raise HTTPException(404, "Không tìm thấy chiến dịch")
+    await store.update_campaign(cid, p.model_dump())
+    return {"success": True}
+
+
+@router.post("/campaigns/{cid}/start")
+async def start_campaign(cid: int):
+    if not await store.get_campaign(cid):
+        raise HTTPException(404, "Không tìm thấy chiến dịch")
+    st = await _bridge("GET", "/status")
+    if not st.get("logged_in"):
+        raise HTTPException(409, "Chưa có nick Zalo nào đăng nhập")
+    await store.set_campaign_state(cid, status="running", consecutive_errors=0, last_error=None)
+    await zo.start()
+    return {"success": True}
+
+
+@router.post("/campaigns/{cid}/pause")
+async def pause_campaign(cid: int):
+    await store.set_campaign_state(cid, status="paused")
+    return {"success": True}
+
+
+@router.delete("/campaigns/{cid}")
+async def delete_campaign(cid: int):
+    await store.delete_campaign(cid)
+    return {"success": True}
+
+
+@router.get("/campaigns/{cid}/logs")
+async def campaign_logs(cid: int, limit: int = 100):
+    return await store.list_logs(cid, min(limit, 500))

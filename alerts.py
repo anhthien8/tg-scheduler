@@ -27,8 +27,23 @@ BACKUP_DIR = os.path.join(os.path.dirname(db.DB_PATH), "backups")
 BACKUP_KEEP = 7
 
 
-async def send_alert(kind: str, text: str):
-    """Gửi cảnh báo về Saved Messages. Dedup theo kind trong 1 giờ."""
+async def _team_chat(client):
+    """Nhóm nhận báo cáo lead (setting lead_alert_chat, mặc định "Weex OS").
+
+    Tìm theo tên trong dialog của account; gửi không reply_to → vào topic General
+    nếu là forum. None nếu account không ở trong nhóm.
+    """
+    title = (await db.get_setting("lead_alert_chat", "Weex OS") or "").strip().lower()
+    if not title:
+        return None
+    async for d in client.iter_dialogs(limit=300):
+        if (d.is_group or d.is_channel) and title in (d.name or "").lower():
+            return d.entity
+    return None
+
+
+async def send_alert(kind: str, text: str, to_team: bool = False):
+    """Gửi cảnh báo về Saved Messages (hoặc nhóm team nếu to_team). Dedup theo kind trong 1 giờ."""
     try:
         if await db.get_setting("alerts_enabled", "1") != "1":
             return
@@ -45,8 +60,13 @@ async def send_alert(kind: str, text: str):
             client = tg.get_client(a["id"])
             if not client or not client.is_connected():
                 continue
+            target = "me"
+            if to_team:
+                target = await _team_chat(client)
+                if target is None:
+                    continue  # account này không ở trong nhóm, thử account khác
             ts = datetime.now().strftime("%d/%m %H:%M")
-            await client.send_message("me", f"🚨 [TG Scheduler] {text}\n({ts})")
+            await client.send_message(target, f"🚨 [TG Scheduler] {text}\n({ts})")
             _alert_log[kind] = now
             logger.info(f"[Alert] Sent '{kind}': {text}")
             return
@@ -135,7 +155,8 @@ async def check_lead_sla():
         await send_alert(
             "lead_sla",
             f"⏰ {len(stale)} lead Tier A/B đang chờ người thật >2h:\n" + "\n".join(lines)
-            + "\n\nVào AI Follow-Up xử lý kẻo nguội lead!"
+            + "\n\nVào AI Follow-Up xử lý kẻo nguội lead!",
+            to_team=True,
         )
     except Exception as e:
         logger.error(f"[SLA] Lỗi: {e}")
@@ -214,7 +235,8 @@ async def check_reply_sla():
         await send_alert(
             kind,
             f"🔥 {len(waiting)} lead nóng đang chờ phản hồi >{threshold_min} phút:\n"
-            + "\n".join(lines) + "\n\nTrả lời NGAY kẻo nguội lead!"
+            + "\n".join(lines) + "\n\nTrả lời NGAY kẻo nguội lead!",
+            to_team=True,
         )
     except Exception as e:
         logger.error(f"[ReplySLA] Lỗi: {e}")

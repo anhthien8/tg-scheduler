@@ -727,6 +727,25 @@ async def send_code(account_id: int, phone: str) -> str:
         raise
 
 
+def _signed_in(account_id: int, user) -> dict:
+    """Refresh the auth/me caches after a successful sign-in.
+
+    The client was created (and is_authorized() cached False) before the OTP
+    was sent; without this, get_me() kept returning None after login, so the
+    account was never auto-named and the list showed the phone instead of
+    the Telegram name/username.
+    """
+    _auth_cache[account_id] = True
+    _me_cache[account_id] = {
+        "user_id": user.id,
+        "first_name": user.first_name or "",
+        "last_name": user.last_name or "",
+        "username": user.username or "",
+        "phone": getattr(user, "phone", "") or "",
+    }
+    return {"success": True, **{k: v for k, v in _me_cache[account_id].items() if k != "phone"}}
+
+
 async def sign_in(account_id: int, phone: str, code: str, phone_code_hash: str,
                   password: str | None = None) -> dict:
     """Sign in with OTP code."""
@@ -737,26 +756,20 @@ async def sign_in(account_id: int, phone: str, code: str, phone_code_hash: str,
     try:
         user = await client.sign_in(phone, code, phone_code_hash=phone_code_hash)
         logger.info(f"Account {account_id}: signed in as {user.first_name}")
-        return {
-            "success": True,
-            "user_id": user.id,
-            "first_name": user.first_name,
-            "last_name": user.last_name or "",
-            "username": user.username or ""
-        }
+        return _signed_in(account_id, user)
     except errors.SessionPasswordNeededError:
         if password:
-            user = await client.sign_in(password=password)
-            return {
-                "success": True,
-                "user_id": user.id,
-                "first_name": user.first_name,
-                "last_name": user.last_name or "",
-                "username": user.username or ""
-            }
+            try:
+                user = await client.sign_in(password=password)
+            except errors.PasswordHashInvalidError:
+                return {"success": False, "error": "Mật khẩu 2FA không đúng", "needs_password": True}
+            logger.info(f"Account {account_id}: signed in (2FA) as {user.first_name}")
+            return _signed_in(account_id, user)
         return {"success": False, "error": "2FA password required", "needs_password": True}
     except errors.PhoneCodeInvalidError:
         return {"success": False, "error": "Mã OTP không đúng"}
+    except errors.PhoneCodeExpiredError:
+        return {"success": False, "error": "Mã OTP đã hết hạn", "code_expired": True}
     except Exception as e:
         logger.error(f"Account {account_id}: sign in error: {e}")
         return {"success": False, "error": str(e)}
@@ -936,14 +949,24 @@ async def check_accounts_in_groups(account_ids: list[int], group_ids: list[int])
 async def leave_channel(account_id: int, chat_id: int) -> dict:
     """Leave (and optionally delete history of) a group, channel, or stop/delete a bot."""
     client = _clients.get(account_id)
-    if not client:
-        return {"success": False, "error": "Account not found"}
+    if not client or not client.is_connected():
+        return {"success": False, "error": "Tài khoản chưa kết nối — thử lại sau vài giây"}
     try:
         from telethon.tl.functions.channels import LeaveChannelRequest
         from telethon.tl.functions.messages import DeleteHistoryRequest
         from telethon.tl.types import Channel, User
 
-        entity = await client.get_entity(chat_id)
+        try:
+            entity = await client.get_entity(chat_id)
+        except ValueError:
+            # Not in the session cache yet — resolve it from the dialog list.
+            entity = None
+            async for d in client.iter_dialogs(limit=300):
+                if d.entity.id == chat_id:
+                    entity = d.entity
+                    break
+            if entity is None:
+                return {"success": False, "error": "Không tìm thấy cuộc trò chuyện (có thể đã rời trước đó)"}
 
         if isinstance(entity, Channel):
             await client(LeaveChannelRequest(entity))
@@ -956,13 +979,20 @@ async def leave_channel(account_id: int, chat_id: int) -> dict:
                 logger.warning(f"Failed to block bot {chat_id}: {e}")
             
             # Delete bot history
-            await client(DeleteHistoryRequest(peer=entity, max_id=0, revoke=True))
+            try:
+                await client(DeleteHistoryRequest(peer=entity, max_id=0, revoke=True))
+            except Exception:
+                await client(DeleteHistoryRequest(peer=entity, max_id=0, just_clear=False))
         else:
             # Regular group
             from telethon.tl.functions.messages import DeleteChatUserRequest
             me = await client.get_me()
             await client(DeleteChatUserRequest(chat_id=chat_id, user_id=me))
 
+        # Drop the cached dialog so a reload doesn't bring the chat back.
+        cached = _dialogs_cache.get(account_id)
+        if cached:
+            _dialogs_cache[account_id] = (cached[0], [c for c in cached[1] if c["chat_id"] != chat_id])
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -1631,7 +1661,7 @@ async def deep_crawl_similar_channels(
 
 
 
-async def check_spam_status(account_id: int) -> dict:
+async def _check_spam_status_raw(account_id: int) -> dict:
     """Check account spam status by messaging @SpamBot.
 
     Returns dict with keys:
@@ -1652,8 +1682,16 @@ async def check_spam_status(account_id: int) -> dict:
         # Resolve @SpamBot entity
         spam_bot = await client.get_entity("SpamBot")
 
-        # Send /start command
-        await client.send_message(spam_bot, "/start")
+        # Send /start command (unblock @SpamBot first if this account blocked it)
+        try:
+            await client.send_message(spam_bot, "/start")
+        except Exception as send_err:
+            if "blocked" not in str(send_err).lower():
+                raise
+            from telethon.tl.functions.contacts import UnblockRequest
+            await client(UnblockRequest(id=spam_bot))
+            logger.info(f"[SpamCheck] Account {account_id}: unblocked @SpamBot")
+            await client.send_message(spam_bot, "/start")
 
         # Wait for response (SpamBot replies within seconds)
         await asyncio.sleep(3)
@@ -1704,6 +1742,55 @@ async def check_spam_status(account_id: int) -> dict:
             "message": f"Lỗi kiểm tra: {str(e)[:200]}",
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
+
+
+async def get_cached_spam_status(account_id: int, max_age_hours: float = 24) -> dict | None:
+    """Last @SpamBot result if it is recent and conclusive, else None."""
+    try:
+        import json as _json
+        import database as _db
+        from datetime import datetime, timezone
+        cache = _json.loads(await _db.get_setting("spam_status_cache", "{}") or "{}")
+        entry = cache.get(str(account_id)) or {}
+        if entry.get("status") not in ("free", "limited") or not entry.get("checked_at"):
+            return None
+        checked = datetime.fromisoformat(entry["checked_at"])
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - checked).total_seconds() < max_age_hours * 3600:
+            return {**entry, "cached": True}
+    except Exception as e:
+        logger.debug(f"[SpamCheck] Cache read failed for {account_id}: {e}")
+    return None
+
+
+async def check_spam_status(account_id: int, max_age_hours: float = 0) -> dict:
+    """Check @SpamBot and remember the result so the Accounts page can show it.
+
+    max_age_hours > 0 reuses a cached result younger than that instead of
+    messaging @SpamBot again (campaign starts use 24h: at most one check a day).
+    """
+    if max_age_hours > 0:
+        cached = await get_cached_spam_status(account_id, max_age_hours)
+        if cached:
+            return cached
+    result = await _check_spam_status_raw(account_id)
+    try:
+        import json as _json
+        import database as _db
+        cache = _json.loads(await _db.get_setting("spam_status_cache", "{}") or "{}")
+        cache[str(account_id)] = {k: result.get(k) for k in ("status", "message", "checked_at")}
+        await _db.set_setting("spam_status_cache", _json.dumps(cache, ensure_ascii=False))
+        # PeerFlood auto-pauses the whole account; once SpamBot says it is clean
+        # again, turn it back on so DMs and the AI Agent resume by themselves.
+        if result.get("status") == "free":
+            acc = await _db.get_account(account_id)
+            if acc and acc.get("is_paused") and str(acc.get("pause_reason") or "").startswith("PeerFlood"):
+                await _db.unpause_account(account_id)
+                logger.info(f"[SpamCheck] Account {account_id} is free again — auto-unpaused (was PeerFlood)")
+    except Exception as e:
+        logger.debug(f"[SpamCheck] Could not cache result for {account_id}: {e}")
+    return result
 
 
 async def invite_to_channel(account_id: int, channel, users) -> dict:

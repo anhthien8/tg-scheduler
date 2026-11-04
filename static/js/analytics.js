@@ -87,9 +87,9 @@ const Analytics = {
       ctx.fillText(Math.round(maxVal * (4 - i) / 4), pad.left - 8, y + 4);
     }
 
-    drawLine('sent', 'rgba(99,102,241,1)');
-    drawLine('replies', 'rgba(34,197,94,1)');
-    drawLine('failed', 'rgba(239,68,68,1)');
+    drawLine('sent', 'rgba(255,136,0,1)');
+    drawLine('replies', 'rgba(15,204,113,1)');
+    drawLine('failed', 'rgba(241,60,84,1)');
 
     // X labels
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
@@ -105,9 +105,9 @@ const Analytics = {
 
     // Legend
     const legends = [
-      { label: 'Sent', color: '#6366f1' },
-      { label: 'Replies', color: '#22c55e' },
-      { label: 'Failed', color: '#ef4444' },
+      { label: 'Sent', color: '#ff8800' },
+      { label: 'Replies', color: '#0fcc71' },
+      { label: 'Failed', color: '#f13c54' },
     ];
     let lx = pad.left;
     legends.forEach(l => {
@@ -358,7 +358,7 @@ const AutoReply = {
       const accIds = typeof r.account_ids === 'string' ? JSON.parse(r.account_ids) : (r.account_ids || []);
       const active = r.is_active;
 
-      let accLabel = '<span style="color:#a78bfa">T\u1EA5t c\u1EA3 t\u00E0i kho\u1EA3n</span>';
+      let accLabel = '<span style="color:#ffa033">T\u1EA5t c\u1EA3 t\u00E0i kho\u1EA3n</span>';
       if (accIds.length > 0) {
         const names = accIds.map(id => {
           const a = accounts.find(x => x.id === id);

@@ -1709,6 +1709,16 @@ async def check_account_spam(account_id: int):
     return {"account_id": account_id, **result}
 
 
+@router.get("/accounts/spam-status")
+async def get_spam_status_cache():
+    """Last known @SpamBot result per account (from manual checks and campaign pre-checks)."""
+    import json as _json
+    try:
+        return {"statuses": _json.loads(await db.get_setting("spam_status_cache", "{}") or "{}")}
+    except Exception:
+        return {"statuses": {}}
+
+
 @router.post("/accounts/spam-check-all")
 async def check_all_accounts_spam():
     """Check spam status of all connected accounts via @SpamBot."""
@@ -1845,6 +1855,12 @@ async def _run_campaign(campaign_id: int):
         # Get already-sent user IDs for this campaign
         existing_logs = await db.get_dm_campaign_logs(campaign_id, limit=50000)
         sent_user_ids = {log["target_user_id"] for log in existing_logs if log["status"] == "success"}
+        # Skips that won't change on a resume: don't re-log or re-count them.
+        _permanent_skip = ("Trong blacklist", "Tài khoản là Telegram Bot", "Là tài khoản nội bộ",
+                           "Đã từng nhận DM")
+        perm_skipped_ids = {log["target_user_id"] for log in existing_logs
+                            if log["status"] == "skipped" and log["target_user_id"]
+                            and (log.get("error_message") or "").startswith(_permanent_skip)}
 
         # ── Cross-campaign / watcher dedup pre-loading ──
         exclude_previous_dms = bool(campaign.get("exclude_previous_dms", 1))
@@ -1970,13 +1986,15 @@ async def _run_campaign(campaign_id: int):
         # Automatically exclude accounts that are currently spam-limited
         for sid in [s for s in sender_ids if s not in dead_senders]:
             try:
-                spam_result = await tg.check_spam_status(sid)
+                # At most one @SpamBot check per account per day, shared by all campaigns.
+                spam_result = await tg.check_spam_status(sid, max_age_hours=24)
                 if spam_result["status"] == "limited":
                     logger.warning(f"[Campaign {campaign_id}] ⚠️ Account {sid} is spam-limited, excluding from senders")
                     flooded_accounts[sid] = float('inf')
                     await db.add_dm_campaign_log(campaign_id, sid, 0, None, "skipped",
                                                 f"SpamBot: tài khoản đang bị giới hạn — {spam_result['message'][:80]}")
-                await asyncio.sleep(2)  # Delay between SpamBot checks
+                if not spam_result.get("cached"):
+                    await asyncio.sleep(2)  # Delay between SpamBot checks
             except Exception as e:
                 logger.warning(f"[Campaign {campaign_id}] SpamBot check failed for {sid}: {e}")
 
@@ -2072,6 +2090,8 @@ async def _run_campaign(campaign_id: int):
 
             user_id = member["user_id"]
             username = member.get("username")
+            if user_id in perm_skipped_ids:
+                continue
 
             # ── Bot filter: Layer 1 (pre-send username / is_bot check) ──
             if member.get("is_bot") or tg.is_bot_account(None, username):
@@ -2092,8 +2112,8 @@ async def _run_campaign(campaign_id: int):
                 skipped += 1
                 continue
 
-            # Skip already sent in current campaign
-            if user_id in sent_user_ids:
+            # Skip already sent (or permanently skipped) in current campaign
+            if user_id in sent_user_ids or user_id in perm_skipped_ids:
                 continue
 
             # Skip previously sent in other campaigns/watchers if exclude_previous_dms is True
@@ -2222,15 +2242,24 @@ async def _run_campaign(campaign_id: int):
                         peer = await client.get_entity(username)
                     else:
                         peer = await client.get_entity(user_id)
-                except Exception:
+                except Exception as pe1:
                     try:
                         from telethon.tl.types import PeerUser
                         peer = await client.get_entity(PeerUser(user_id))
                     except Exception as pe2:
                         skipped += 1
-                        await db.finish_dm_campaign_reservation(campaign_id, user_id, "failed", str(pe2)[:80])
+                        reason = str(pe1 if username else pe2)[:80]
+                        # A username that no longer exists will never resolve: record it as
+                        # done so auto-resume stops retrying the same dead target forever.
+                        gone = bool(username) and any(k in str(pe1) for k in (
+                            "No user has", "Nobody is using", "UsernameNotOccupied",
+                            "UsernameInvalid", "Cannot find any entity"))
+                        await db.finish_dm_campaign_reservation(
+                            campaign_id, user_id, "sent" if gone else "failed",
+                            ("unresolvable: " if gone else "") + reason)
                         await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username,
-                                                    "skipped", f"Không resolve được: {str(pe2)[:80]}")
+                                                    "skipped", f"Không resolve được: {reason}"
+                                                    + (" (username không tồn tại — bỏ qua vĩnh viễn)" if gone else ""))
                         await asyncio.sleep(base_delay)  # Always respect delay to avoid FloodWait
                         continue
 
@@ -2270,18 +2299,16 @@ async def _run_campaign(campaign_id: int):
                         if ai_provider and ai_keys:
                             try:
                                 auto_native = bool(campaign.get("auto_translate_native", 1))
-                                campaign_hint = str(campaign.get("name", ""))
-                                # Word-boundary match — tránh false positive kiểu "Trust" chứa "rus"
-                                _hint_words = re.findall(r"[a-zа-яё]+", campaign_hint.lower())
-                                campaign_lang = "ru" if any(w in ("rus", "russian", "russia", "nga", "ru") or w.startswith("рос") or w.startswith("рус") for w in _hint_words) else ""
                                 mem_info = {
                                     "first_name": member.get("first_name"),
                                     "last_name": member.get("last_name"),
                                     "username": username,
                                     "lang_code": member.get("lang_code"),
-                                    "likely_language": campaign_lang,
+                                    "phone": member.get("phone"),
                                     "community_hint": member.get("group_title", "")
                                 }
+                                if not mem_info.get('lang_code') and not mem_info.get('phone'):
+                                    mem_info.update(await ai_rmx.fetch_profile_hints(client, peer))
                                 remixed_content = await ai_rmx.remix_message(
                                     original_text=content,
                                     provider=ai_provider,

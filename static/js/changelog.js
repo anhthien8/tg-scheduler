@@ -63,7 +63,7 @@ const Changelog = {
 
       const isLatest = release.is_latest;
       const badgeStyle = isLatest
-        ? 'background:linear-gradient(135deg, #8b5cf6, #ec4899);color:#fff;font-weight:700'
+        ? 'background:var(--accent);color:var(--bg);font-weight:700'
         : 'background:var(--bg3);color:var(--text2)';
 
       html += `
@@ -72,7 +72,7 @@ const Changelog = {
           <div style="position:absolute;left:-31px;top:4px;width:14px;height:14px;border-radius:50%;background:${isLatest ? 'var(--primary)' : 'var(--border)'};border:3px solid var(--bg2);box-shadow:${isLatest ? '0 0 10px var(--primary)' : 'none'}"></div>
 
           <!-- Header Card -->
-          <div class="card" style="padding:20px;border-radius:14px;border:${isLatest ? '1px solid rgba(139,92,246,0.4)' : '1px solid var(--border)'};background:${isLatest ? 'linear-gradient(180deg, rgba(139,92,246,0.06) 0%, var(--bg2) 100%)' : 'var(--bg2)'}">
+          <div class="card" style="padding:20px;border-radius:14px;border:${isLatest ? '1px solid rgba(255,136,0,0.4)' : '1px solid var(--border)'};background:${isLatest ? 'linear-gradient(180deg, rgba(255,136,0,0.06) 0%, var(--bg2) 100%)' : 'var(--bg2)'}">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:12px">
               <div>
                 <span style="font-size:12px;padding:3px 10px;border-radius:20px;${badgeStyle}">${release.badge}</span>
@@ -90,17 +90,17 @@ const Changelog = {
 
       for (const item of filteredChanges) {
         let typeBadge = '⚡ Cải tiến';
-        let typeClass = 'background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3)';
+        let typeClass = 'background:color-mix(in srgb, var(--purple) 15%, transparent);color:var(--purple);border:1px solid color-mix(in srgb, var(--purple) 30%, transparent)';
         if (item.type === 'feature') {
           typeBadge = '🚀 Feature';
-          typeClass = 'background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3)';
+          typeClass = 'background:color-mix(in srgb, var(--accent) 15%, transparent);color:var(--accent-text);border:1px solid color-mix(in srgb, var(--accent) 30%, transparent)';
         } else if (item.type === 'fix') {
           typeBadge = '🐞 Fix';
-          typeClass = 'background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3)';
+          typeClass = 'background:color-mix(in srgb, var(--red) 15%, transparent);color:var(--red);border:1px solid color-mix(in srgb, var(--red) 30%, transparent)';
         }
 
         html += `
-          <div style="display:flex;align-items:flex-start;gap:12px;padding:12px;background:var(--bg3);border-radius:10px;border:1px solid rgba(255,255,255,0.03)">
+          <div style="display:flex;align-items:flex-start;gap:12px;padding:12px;background:var(--bg3);border-radius:10px;border:1px solid color-mix(in srgb, var(--text) 3%, transparent)">
             <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;white-space:nowrap;margin-top:2px;${typeClass}">${typeBadge}</span>
             <div style="flex:1">
               <div style="font-weight:600;font-size:14px;color:var(--text1);margin-bottom:2px">${this._esc(item.title)}</div>

@@ -209,25 +209,32 @@ async def start_engines() -> asyncio.Task:
     from apscheduler.triggers.interval import IntervalTrigger
     sch.get_scheduler().add_job(
         alerts.check_lead_sla,
-        trigger=IntervalTrigger(minutes=30),
+        trigger=CronTrigger(hour=9, minute=0, timezone=sch.TZ),
         id="lead_sla_check",
         name="Lead SLA Check",
         replace_existing=True,
     )
-    logger.info("Lead SLA check scheduled every 30 min")
+    logger.info("Lead SLA check scheduled daily at 09:00")
 
     # Speed-to-reply SLA: ping when a hot lead has waited too long for OUR reply.
     sch.get_scheduler().add_job(
         alerts.check_reply_sla,
-        trigger=IntervalTrigger(minutes=10),
+        trigger=CronTrigger(hour=9, minute=1, timezone=sch.TZ),
         id="reply_sla_check",
         name="Speed-to-Reply SLA Check",
         replace_existing=True,
     )
-    logger.info("Speed-to-reply SLA check scheduled every 10 min")
+    logger.info("Speed-to-reply SLA check scheduled daily at 09:01")
 
     # Message queue worker
     mq.start_worker()
+
+    # Zalo outreach worker (bridge itself is spawned lazily on first use)
+    try:
+        import zalo_outreach
+        await zalo_outreach.start()
+    except Exception as e:
+        logger.warning("Zalo outreach startup error: %s", e)
 
     # Background connect task
     connect_task = asyncio.create_task(_connect_accounts_and_watchers())
@@ -344,6 +351,11 @@ async def stop_engines(connect_task: asyncio.Task | None) -> None:
             pass
 
     mq.stop_worker()
+    try:
+        import zalo_outreach
+        await zalo_outreach.stop()
+    except Exception as e:
+        logger.warning("Zalo outreach stop error: %s", e)
     sch.stop_scheduler()
     await rw.stop_all()
     await drt.stop_reply_tracker()

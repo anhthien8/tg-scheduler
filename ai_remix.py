@@ -2,6 +2,7 @@
 AI Remix Module - Supports Gemini, DeepSeek, OpenAI, Groq, and OpenAI-Compatible APIs.
 Round-robin rotation across multiple API keys per provider to avoid rate limits.
 """
+import asyncio
 import json
 import logging
 import re
@@ -31,6 +32,77 @@ def _cf_access_headers(url: str) -> dict:
     if (urlsplit(url).hostname or "").lower() != host:
         return {}
     return {"CF-Access-Client-Id": cid, "CF-Access-Client-Secret": secret}
+
+
+LOCAL_AI_ROUTER = os.getenv("AI_LOCAL_FALLBACK_URL", "http://127.0.0.1:20128")
+
+
+def _local_fallback_url(url: str) -> str | None:
+    """Same path on the local 9router, or None if url is already local."""
+    parts = urlsplit(url)
+    if (parts.hostname or "") in ("127.0.0.1", "localhost", "::1"):
+        return None
+    base = urlsplit(LOCAL_AI_ROUTER)
+    return parts._replace(scheme=base.scheme, netloc=base.netloc).geturl()
+
+
+def _should_fallback(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        r = exc.response
+        return r.status_code in (401, 403, 502, 503, 530) and (
+            "cloudflare" in r.text[:2000].lower() or r.status_code >= 502)
+    return False
+
+
+_local_up_cache = {"t": 0.0, "up": False}
+
+
+async def _local_router_up() -> bool:
+    """Cached (60s) check that the local 9router answers."""
+    now = time.time()
+    if now - _local_up_cache["t"] < 60:
+        return _local_up_cache["up"]
+    try:
+        async with httpx.AsyncClient(timeout=2) as c:
+            r = await c.get(LOCAL_AI_ROUTER.rstrip("/") + "/v1/models")
+            up = r.status_code < 500
+    except Exception:
+        up = False
+    _local_up_cache.update(t=now, up=up)
+    return up
+
+
+async def ai_request(client: httpx.AsyncClient, method: str, url: str, **kw) -> httpx.Response:
+    """HTTP call to an OpenAI-compatible router; if a remote router is blocked
+    (Cloudflare Access 403, tunnel down) retry the same path on localhost.
+
+    When the router also runs on this machine, call it directly: going out
+    through the tunnel only to be blocked by Cloudflare wastes a round trip."""
+    alt = _local_fallback_url(url)
+    if alt and await _local_router_up():
+        try:
+            resp = await client.request(method, alt, **kw)
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            # Local router hiccup: try the public endpoint as before.
+            if isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout)):
+                _local_up_cache["t"] = 0.0
+            logger.warning("[AI] local %s failed (%s) — trying %s", alt, type(e).__name__, url)
+    try:
+        resp = await client.request(method, url, **kw)
+        resp.raise_for_status()
+        return resp
+    except Exception as e:
+        alt = _local_fallback_url(url) if _should_fallback(e) else None
+        if not alt:
+            raise
+        logger.warning("[AI] %s failed (%s) — falling back to %s", url, type(e).__name__, alt)
+        resp = await client.request(method, alt, **kw)
+        resp.raise_for_status()
+        return resp
 
 
 def _parse_openai_compatible_json(raw: str) -> dict:
@@ -109,15 +181,21 @@ def _mark_key_failed(provider, idx):
     _key_cooldown[(provider, idx)] = time.time()
 
 
+# gemini-2.0-flash was retired by Google (404); thinking is disabled so the
+# output budget is spent on the reply itself.
+GEMINI_MODEL = "gemini-2.5-flash"
+
+
 async def _call_gemini(api_key, prompt):
-    url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-           "gemini-2.0-flash:generateContent?key=" + api_key)
+    # Key goes in a header, not the URL, so it never lands in httpx/error logs.
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.9, "maxOutputTokens": 1024}
+        "generationConfig": {"temperature": 0.9, "maxOutputTokens": 1024,
+                             "thinkingConfig": {"thinkingBudget": 0}}
     }
     async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.post(url, json=payload)
+        resp = await client.post(url, json=payload, headers={"x-goog-api-key": api_key})
         resp.raise_for_status()
         data = resp.json()
         return data["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -159,6 +237,17 @@ async def _call_openai(api_key, prompt):
         return data["choices"][0]["message"]["content"].strip()
 
 
+GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
+
+
+async def _groq_model() -> str:
+    try:
+        import database as db
+        return (await db.get_setting("ai_groq_model", "") or "").strip() or GROQ_DEFAULT_MODEL
+    except Exception:
+        return GROQ_DEFAULT_MODEL
+
+
 async def _call_groq(api_key, prompt):
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -166,7 +255,7 @@ async def _call_groq(api_key, prompt):
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "llama-3.3-70b-versatile",
+        "model": await _groq_model(),
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.85,
         "max_tokens": 1500
@@ -259,8 +348,7 @@ async def _call_openai_compatible(api_key, prompt, base_url, model):
         "max_tokens": 1500
     }
     async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
+        resp = await ai_request(client, "POST", url, headers=headers, json=payload)
         # Some local APIs (LM Studio, Ollama, vLLM) may return extra data after JSON
         # Use strict=False and handle partial JSON
         raw = resp.text
@@ -301,6 +389,174 @@ async def _try_call(provider, api_key, prompt, **kwargs):
         raise ValueError("Unknown provider: " + provider)
 
 
+_KEY_TERM_RE = re.compile(
+    r"No[ -][A-Z]{2,}"                                  # No KYC
+    r"|\b[A-Z][a-z]+[A-Z][A-Za-z]*(?: \d+)?"            # MetaTrader 5, TradingView
+    r"|\b[A-Z]{2,}[A-Za-z0-9]*(?: \d+)?\b"              # API, HFT, USDT, MT5
+    r"|\d+(?:[.,]\d+)?\s*(?:[-–]\s*\d+(?:[.,]\d+)?\s*)?%"  # 50-80%
+)
+
+
+def _key_terms(text):
+    """Selling-point tokens a remix must keep: acronyms, CamelCase product names,
+    'No KYC'-style claims and percentages."""
+    seen, out = set(), []
+    for m in _KEY_TERM_RE.finditer(text or ""):
+        t = m.group(0).strip()
+        if t.lower() in seen or any(t.lower() in o.lower() for o in out):
+            continue
+        seen.add(t.lower())
+        out.append(t)
+    return out[:20]
+
+
+def _key_points_rule(original_text):
+    terms = _key_terms(original_text)
+    if not terms:
+        return ""
+    return ("11. MUST-KEEP KEY POINTS (each must appear in the output as the same Latin term): "
+            + ", ".join(terms) + "\n")
+
+
+LANGUAGE_NAMES = {
+    "en": "English", "ru": "Russian", "uk": "Ukrainian", "zh": "Chinese", "ja": "Japanese",
+    "ko": "Korean", "vi": "Vietnamese", "th": "Thai", "ar": "Arabic", "fa": "Persian",
+    "he": "Hebrew", "hi": "Hindi", "tr": "Turkish", "es": "Spanish", "pt": "Portuguese",
+    "fr": "French", "de": "German", "it": "Italian", "id": "Indonesian", "ms": "Malay",
+    "pl": "Polish", "nl": "Dutch", "bn": "Bengali", "ur": "Urdu",
+}
+
+# Phone country code -> language (only used when Telegram exposes the number).
+_PHONE_LANG = [
+    ("380", "uk"), ("375", "ru"), ("998", "ru"), ("996", "ru"), ("992", "ru"), ("994", "tr"),
+    ("971", "ar"), ("966", "ar"), ("965", "ar"), ("974", "ar"), ("973", "ar"), ("968", "ar"),
+    ("962", "ar"), ("961", "ar"), ("964", "ar"), ("963", "ar"), ("972", "he"), ("880", "bn"),
+    ("852", "zh"), ("853", "zh"), ("886", "zh"), ("351", "pt"),
+    ("84", "vi"), ("86", "zh"), ("81", "ja"), ("82", "ko"), ("66", "th"), ("62", "id"),
+    ("60", "ms"), ("90", "tr"), ("98", "fa"), ("91", "hi"), ("92", "ur"), ("20", "ar"),
+    ("55", "pt"), ("34", "es"), ("52", "es"), ("54", "es"), ("57", "es"), ("56", "es"),
+    ("51", "es"), ("58", "es"), ("33", "fr"), ("49", "de"), ("43", "de"), ("39", "it"),
+    ("48", "pl"), ("31", "nl"), ("7", "ru"),
+]
+
+_VI_CHARS = set("ăâđêôơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ")
+
+
+# Script ranges (code points) -> language. Kana is checked before Han so Japanese wins.
+_SCRIPTS = [
+    (0x3040, 0x30FF, "ja", 1), (0x0400, 0x04FF, "ru", 2), (0x4E00, 0x9FFF, "zh", 2),
+    (0xAC00, 0xD7AF, "ko", 2), (0x0E00, 0x0E7F, "th", 2), (0x0600, 0x06FF, "ar", 2),
+    (0x0750, 0x077F, "ar", 2), (0x0590, 0x05FF, "he", 2), (0x0900, 0x097F, "hi", 2),
+]
+
+# Latin-script place / language words found in Telegram location, bio or channel titles.
+_PLACE_WORDS = {
+    "ru": ["russia", "moscow", "moskva", "saint petersburg", "st. petersburg", "kazakhstan", "almaty", "astana",
+           "belarus", "minsk", "uzbekistan", "tashkent", "kyrgyzstan", "bishkek", "russian"],
+    "uk": ["ukraine", "kyiv", "kiev", "kharkiv", "odesa", "odessa", "lviv", "ukrainian"],
+    "vi": ["vietnam", "viet nam", "hanoi", "ha noi", "ho chi minh", "saigon", "sai gon", "da nang", "vietnamese"],
+    "zh": ["china", "beijing", "shanghai", "shenzhen", "guangzhou", "hong kong", "taiwan", "taipei", "chinese"],
+    "ja": ["japan", "tokyo", "osaka", "japanese"],
+    "ko": ["korea", "seoul", "busan", "korean"],
+    "th": ["thailand", "bangkok", "thai"],
+    "id": ["indonesia", "jakarta", "bali", "surabaya", "indonesian", "bahasa"],
+    "ms": ["malaysia", "kuala lumpur", "malay"],
+    "tr": ["turkey", "turkiye", "türkiye", "istanbul", "ankara", "turkish"],
+    "fa": ["iran", "tehran", "persian", "farsi"],
+    "ar": ["uae", "dubai", "abu dhabi", "saudi", "riyadh", "egypt", "cairo", "qatar", "doha", "kuwait", "arabic"],
+    "hi": ["india", "mumbai", "delhi", "bangalore", "bengaluru", "hindi"],
+    "ur": ["pakistan", "karachi", "lahore", "islamabad", "urdu"],
+    "bn": ["bangladesh", "dhaka", "bengali", "bangla"],
+    "pt": ["brazil", "brasil", "são paulo", "sao paulo", "rio de janeiro", "portugal", "lisbon", "lisboa", "portuguese"],
+    "es": ["spain", "españa", "madrid", "barcelona", "mexico", "méxico", "argentina", "buenos aires", "colombia",
+           "bogota", "bogotá", "chile", "peru", "perú", "venezuela", "spanish", "español"],
+    "fr": ["france", "paris", "french", "français"],
+    "de": ["germany", "deutschland", "berlin", "munich", "münchen", "austria", "german", "deutsch"],
+    "it": ["italy", "italia", "rome", "roma", "milan", "milano", "italian"],
+    "pl": ["poland", "polska", "warsaw", "warszawa", "polish"],
+    "nl": ["netherlands", "amsterdam", "dutch"],
+    "he": ["israel", "tel aviv", "hebrew"],
+}
+
+
+def _text_lang(text: str) -> str:
+    """Language suggested by one free-text field, or '' if it tells us nothing."""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    for lo, hi, code, need in _SCRIPTS:
+        if sum(1 for ch in t if lo <= ord(ch) <= hi) >= need:
+            return code
+    low = t.lower()
+    if any(ch in _VI_CHARS for ch in low):
+        return "vi"
+    import re as _re
+    for code, words in _PLACE_WORDS.items():
+        for w in words:
+            if _re.search(r"(?<![a-zà-ỹ])" + _re.escape(w) + r"(?![a-zà-ỹ])", low):
+                return code
+    return ""
+
+
+def detect_user_language(member_info: dict | None, with_source: bool = False):
+    """Pick the recipient's language from their own profile. Falls back to English.
+
+    Order: Telegram lang_code, phone country code, Telegram location, bio,
+    display name, personal channel, then the source group as the weakest hint.
+    Campaign names are deliberately ignored (a Russian-named campaign used to
+    force Russian on English speakers).
+    """
+    mi = member_info or {}
+    def done(code, src):
+        return (code, src) if with_source else code
+    lc = str(mi.get("lang_code") or "").strip().lower().replace("_", "-")
+    if lc and lc.split("-")[0] in LANGUAGE_NAMES:
+        return done(lc.split("-")[0], "lang_code")
+    phone = "".join(ch for ch in str(mi.get("phone") or "") if ch.isdigit())
+    if phone:
+        for pre, code in _PHONE_LANG:
+            if phone.startswith(pre):
+                return done(code, "phone")
+    name = f"{mi.get('first_name') or ''} {mi.get('last_name') or ''}".strip()
+    for field, val in (("location", mi.get("location")), ("bio", mi.get("bio")), ("name", name),
+                       ("channel", mi.get("channel_title")), ("group", mi.get("community_hint"))):
+        code = _text_lang(val or "")
+        if code:
+            return done(code, field)
+    return done("en", "default")
+
+
+async def fetch_profile_hints(client, peer) -> dict:
+    """Location, bio and personal channel title from the user's full profile (best effort)."""
+    uid = getattr(peer, "id", None)
+    if not uid:
+        return {}
+    if uid in _PROFILE_HINT_CACHE:
+        return _PROFILE_HINT_CACHE[uid]
+    hints = {}
+    try:
+        from telethon.tl.functions.users import GetFullUserRequest
+        full = await asyncio.wait_for(client(GetFullUserRequest(peer)), timeout=8)
+        fu = full.full_user
+        hints["bio"] = fu.about or ""
+        loc = getattr(fu, "business_location", None)
+        hints["location"] = getattr(loc, "address", "") or ""
+        ch_id = getattr(fu, "personal_channel_id", None)
+        if ch_id:
+            for ch in full.chats or []:
+                if ch.id == ch_id:
+                    hints["channel_title"] = getattr(ch, "title", "") or ""
+    except Exception as ex:
+        logger.debug("[Lang] Full profile fetch failed for %s: %s", uid, ex)
+    if len(_PROFILE_HINT_CACHE) > 5000:
+        _PROFILE_HINT_CACHE.clear()
+    _PROFILE_HINT_CACHE[uid] = hints
+    return hints
+
+
+_PROFILE_HINT_CACHE: dict = {}
+
+
 def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto_translate_native=False, member_info=None):
     name_hint = ""
     if sender_name:
@@ -317,44 +573,13 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
         )
 
     if auto_translate_native:
-        mem_info = member_info or {}
-        lang_code = mem_info.get("lang_code", "") or ""
-        first_name = mem_info.get("first_name", "") or ""
-        last_name = mem_info.get("last_name", "") or ""
-        username = mem_info.get("username", "") or ""
-        likely_language = mem_info.get("likely_language", "") or ""
-        community_hint = mem_info.get("community_hint", "") or ""
-        # Heuristic language detection from name when lang_code is unavailable
-        detected_lang = lang_code
-        if not detected_lang and likely_language:
-            detected_lang = likely_language
-        if not detected_lang:
-            # Prioritize display name; usernames often add Latin noise (e.g. Chinese user @alex123).
-            display_name = f"{first_name} {last_name}".strip() or username
-            # Cyrillic → Russian; CJK → Chinese; Hangul → Korean; Arabic/Persian script
-            cyrillic = sum(1 for c in display_name if '\u0400' <= c <= '\u04ff')
-            cjk = sum(1 for c in display_name if '\u4e00' <= c <= '\u9fff')
-            hangul = sum(1 for c in display_name if '\uac00' <= c <= '\ud7af')
-            arabic = sum(1 for c in display_name if '\u0600' <= c <= '\u06ff' or '\u0750' <= c <= '\u077f')
-            # Require at least two script characters to avoid guessing from one symbol.
-            if cyrillic >= 2:
-                detected_lang = "ru"
-            elif cjk >= 2:
-                detected_lang = "zh"
-            elif hangul >= 2:
-                detected_lang = "ko"
-            elif arabic >= 2:
-                detected_lang = "ar"
+        code, src = detect_user_language(member_info, with_source=True)
+        logger.info("[Lang] Recipient language=%s (from %s)", code, src)
+        lang_name = LANGUAGE_NAMES.get(code, "English")
         lang_rule = (
-            f"\n3. AUTO-LOCALIZATION / NATIVE LANGUAGE RULE:\n"
-            f"   - Target recipient Telegram lang_code: '{lang_code}'\n"
-            f"   - Heuristic detected language: '{detected_lang}'\n"
-            + (f"   - Source community language hint: '{community_hint}'\n" if community_hint else "")
-            + f"   - Target recipient name: '{first_name} {last_name}', username: @{username}\n"
-            f"   - DETECT the recipient's likely native language based on: (a) lang_code '{lang_code}', (b) heuristic detection '{detected_lang}', (c) community hint, (d) name script analysis.\n"
-            f"     (e.g., 'vi' -> Vietnamese, 'zh'/'zh-hans'/'zh-hant' -> Chinese, 'ru' -> Russian, 'tr' -> Turkish, 'fa'/'ar' -> Persian/Arabic, 'ko' -> Korean, 'ja' -> Japanese, 'es' -> Spanish, 'de' -> German, 'fr' -> French, 'en' -> English).\n"
-            f"   - TRANSLATE and rephrase the outreach message into their native language naturally, engagingly, and authentically.\n"
-            f"   - If ALL signals are unavailable or ambiguous, check name character script (Hanzi, Cyrillic, Arabic script). If still ambiguous, write in natural English.\n"
+            f"\n3. LANGUAGE (mandatory): write the whole message in {lang_name}. "
+            "This was decided from the recipient's own Telegram profile, so do not guess another language "
+            "from the community, the campaign or the original text. Translate naturally, like a native speaker.\n"
         )
     else:
         lang_rule = "\n3. Keep the SAME language as the original - do NOT translate.\n"
@@ -371,10 +596,14 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
         "6. Write naturally like a real person texting a colleague or collaborator: casual, friendly, authentic, peer-to-peer. Avoid robotic sales pitches or corporate jargon.\n"
         "7. STRUCTURE AS A SINGLE COHESIVE MESSAGE (3-Act Flow):\n"
         "   - Hook / Warm greeting with context\n"
-        "   - Clear, concise core value (1-2 sentences)\n"
+        "   - Core value: carry over EVERY concrete selling point from the original (features, product names, numbers, percentages, terms).\n"
+        "     If there are 3+ points, list them compactly (a short list or one tight sentence) instead of summarizing them away.\n"
         "   - End with a low-friction, polite open-ended question to invite genuine dialogue.\n"
+        "10. NEVER shorten by dropping selling points. Aim for roughly the same length as the original (80-120%).\n"
+        "    Keep technical/brand terms in their original Latin form even when translating (e.g. No KYC, API, HFT, MetaTrader 5, USDT).\n"
         "8. Output ONLY the rephrased message. No intro, no quotes, no explanation, no multiple message splits.\n"
-        "9. FORMAT for visual breathing room: separate thoughts with a blank line between paragraphs (double newline). Never output a dense wall of text.\n"
+        "9. FORMAT for visual breathing room: greeting on its own line, then short paragraphs of 1-2 sentences each, separated by a blank line (double newline). The closing question is its own paragraph. Never output a dense wall of text.\n"
+        + _key_points_rule(original_text)
         + instruction_addon
         + name_hint
         + "\n\nOriginal message:\n---\n"
@@ -466,19 +695,21 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
     )
     if not api_keys:
         logger.warning("[AI Remix] No keys for active provider '%s' — trying fallbacks", provider)
-        return await _auto_fallback_remix(provider, prompt) or original_text
+        fb = await _auto_fallback_remix(provider, prompt)
+        return ensure_paragraphs(humanize_text(fb)) if fb else original_text
     idx, key = _next_key(api_keys, provider)
 
     try:
         result = await _try_call(provider, key, prompt, **kwargs)
         if not result or not result.strip():
             logger.warning("[AI Remix] %s key[%d] returned empty — trying fallbacks", provider, idx)
-            return await _auto_fallback_remix(provider, prompt) or original_text
+            fb = await _auto_fallback_remix(provider, prompt)
+            return ensure_paragraphs(humanize_text(fb)) if fb else original_text
         logger.info(
             "[AI Remix] %s key[%d] OK - %dc -> %dc",
             provider, idx, len(original_text), len(result)
         )
-        return result
+        return ensure_paragraphs(humanize_text(result))
 
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
@@ -496,14 +727,14 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
                     result2 = await _try_call(provider, key2, prompt, **kwargs)
                     if result2:
                         logger.info("[AI Remix] Retry key[%d] succeeded", idx2)
-                        return result2
+                        return ensure_paragraphs(humanize_text(result2))
             except Exception as e2:
                 logger.warning("[AI Remix] Retry failed: %s", e2)
         
         # Auto fallback to other providers
         fb = await _auto_fallback_remix(provider, prompt)
         if fb:
-            return fb
+            return ensure_paragraphs(humanize_text(fb))
         return original_text
 
     except Exception as e:
@@ -511,7 +742,7 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
         logger.warning("[AI Remix] %s key[%d] error: %s", provider, idx, e)
         fb = await _auto_fallback_remix(provider, prompt)
         if fb:
-            return fb
+            return ensure_paragraphs(humanize_text(fb))
         return original_text
 
 
@@ -543,7 +774,66 @@ async def generate_response(prompt: str, provider: str, api_keys: list[str], **k
         return None
 
 
-async def generate_chat_response(
+_HUMAN_STYLE_RULE = (
+    "\n\nWRITING STYLE (anti AI-detection, mandatory): write like a real person texting on Telegram. "
+    "NEVER use semicolons (;), em dashes (—), en dashes as separators, or bullet-like structure in casual chat. "
+    "Use short sentences, commas and periods only. No 'Furthermore/Moreover/Additionally', no perfectly balanced clauses."
+    "\n\nFACT CHECK (mandatory): when the user asks about a message you sent (its language, wording, meaning), "
+    "look at your earlier messages in the history and any [Quoting ...] text, and answer from that. "
+    "If an earlier message was in another language, admit it naturally (e.g. 'oh sorry, that one went out in Russian by mistake') "
+    "and restate it in the user's language. If an image is attached to the latest message you can see it, read it carefully "
+    "and answer from what it really shows. Images from earlier messages are NOT visible to you: never describe them, "
+    "ask the user to resend or type the part they mean. Never invent facts you cannot see."
+)
+
+
+def ensure_paragraphs(text, max_chars=220):
+    """Break dense paragraphs into short ones (blank line between) so the DM is
+    easy to read on a phone. The model often ignores the formatting rule and
+    returns one wall of text, so this enforces it after the fact."""
+    if not text:
+        return text
+    out = []
+    for para in re.split(r"\n\s*\n", text.strip()):
+        para = para.strip()
+        if len(para) <= max_chars or "\n" in para:
+            out.append(para)
+            continue
+        sentences = re.split(r"(?<=[.!?])\s+(?=[A-ZÀ-ỹЀ-ӿ\"'(])", para)
+        chunk = ""
+        for sent in sentences:
+            if chunk and len(chunk) + len(sent) + 1 > max_chars:
+                out.append(chunk)
+                chunk = sent
+            else:
+                chunk = f"{chunk} {sent}".strip()
+        if chunk:
+            out.append(chunk)
+    return "\n\n".join(out)
+
+
+def humanize_text(text):
+    """Strip punctuation that gives away AI writing (';', em/en dashes used as separators)."""
+    if not text:
+        return text
+    t = re.sub(r"[ \t]*;[ \t]*(?=\S)", ", ", text)
+    t = re.sub(r"[ \t]*;[ \t]*$", ".", t, flags=re.M)
+    t = re.sub(r"[ \t]+[—–][ \t]+", ", ", t)
+    t = re.sub(r"(?<=\w)—(?=\w)", ", ", t)
+    return t
+
+
+async def generate_chat_response(*args, **kwargs):
+    """Chat reply with anti AI-slop style rule + punctuation cleanup."""
+    if len(args) >= 2:
+        args = (args[0], (args[1] or "") + _HUMAN_STYLE_RULE) + tuple(args[2:])
+    elif "system_prompt" in kwargs:
+        kwargs["system_prompt"] = (kwargs["system_prompt"] or "") + _HUMAN_STYLE_RULE
+    res = await _generate_chat_response_raw(*args, **kwargs)
+    return humanize_text(res) if res else res
+
+
+async def _generate_chat_response_raw(
     messages_history: list[dict],
     system_prompt: str,
     provider: str,
@@ -621,7 +911,7 @@ async def generate_chat_response(
             alt_keys = [k.strip() for k in alt_keys if k and str(k).strip()]
             if not alt_keys:
                 continue
-            alt_kwargs = {}
+            alt_kwargs = {"images": kwargs.get("images")} if kwargs.get("images") else {}
             if alt_prov == "openai_compatible":
                 alt_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
                 alt_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
@@ -648,7 +938,39 @@ async def generate_chat_response(
     return None
 
 
+_VISION_PROVIDERS = ("openai", "openai_compatible")
+
+
+def _attach_images(messages: list[dict], images: list[str]) -> list[dict]:
+    """Return a copy where the last user message carries the images (OpenAI vision format)."""
+    out = [dict(m) for m in messages]
+    for m in reversed(out):
+        if m.get("role") == "user":
+            parts = [{"type": "text", "text": m.get("content") or ""}]
+            parts += [{"type": "image_url", "image_url": {"url": u}} for u in images]
+            m["content"] = parts
+            break
+    return out
+
+
+import contextvars as _cv
+_LAST_MODEL = _cv.ContextVar("ai_last_model", default="")
+
+
+def _record_model(used: str) -> None:
+    _LAST_MODEL.set(used)
+    logger.info("[AI] Reply generated by %s", used)
+
+
+def last_model_used() -> str:
+    """'model @ host' of the last successful chat call in this task ('' if unknown)."""
+    return _LAST_MODEL.get()
+
+
 async def _call_chat_provider(provider: str, api_key: str, messages: list[dict], **kwargs) -> str | None:
+    images = kwargs.pop("images", None)
+    if images and provider in _VISION_PROVIDERS:
+        messages = _attach_images(messages, images)
     if provider == "openai":
         url = "https://api.openai.com/v1/chat/completions"
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -661,7 +983,9 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
         async with httpx.AsyncClient(timeout=25) as client:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"].strip()
+            data = resp.json()
+            _record_model(f"{data.get('model') or payload['model']} @ {resp.url.host}")
+            return data["choices"][0]["message"]["content"].strip()
 
     elif provider == "chatgpt_oauth":
         base_url = (kwargs.get("base_url") or "").strip()
@@ -690,10 +1014,10 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             "max_tokens": 1500
         }
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
+            resp = await ai_request(client, "POST", url, headers=headers, json=payload)
             raw = resp.text
             data = _parse_openai_compatible_json(raw)
+            _record_model(f"{data.get('model') or model} @ {resp.url.host}")
             return data["choices"][0]["message"]["content"].strip()
 
     elif provider == "deepseek":
@@ -708,13 +1032,15 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
         async with httpx.AsyncClient(timeout=25) as client:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"].strip()
+            data = resp.json()
+            _record_model(f"{data.get('model') or payload['model']} @ {resp.url.host}")
+            return data["choices"][0]["message"]["content"].strip()
 
     elif provider == "groq":
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
-            "model": "llama-3.3-70b-versatile",
+            "model": await _groq_model(),
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 1500
@@ -722,10 +1048,12 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
         async with httpx.AsyncClient(timeout=25) as client:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"].strip()
+            data = resp.json()
+            _record_model(f"{data.get('model') or payload['model']} @ {resp.url.host}")
+            return data["choices"][0]["message"]["content"].strip()
 
     elif provider == "gemini":
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
         sys_prompt = messages[0]["content"] if (messages and messages[0]["role"] == "system") else ""
         raw_msgs = messages[1:] if (messages and messages[0]["role"] == "system") else messages
 
@@ -751,14 +1079,16 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
         payload = {
             "contents": merged_contents,
             "systemInstruction": {"parts": [{"text": sys_prompt}]} if sys_prompt else None,
-            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1000}
+            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1000,
+                                 "thinkingConfig": {"thinkingBudget": 0}}
         }
         payload = {k: v for k, v in payload.items() if v is not None}
 
         async with httpx.AsyncClient(timeout=25) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, json=payload, headers={"x-goog-api-key": api_key})
             resp.raise_for_status()
             data = resp.json()
+            _record_model(f"{data.get('modelVersion') or GEMINI_MODEL} @ {resp.url.host}")
             return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
     elif provider == "openai_compatible":
@@ -774,10 +1104,10 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             "max_tokens": 1500
         }
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
+            resp = await ai_request(client, "POST", url, headers=headers, json=payload)
             raw = resp.text
             data = _parse_openai_compatible_json(raw)
+            _record_model(f"{data.get('model') or model} @ {resp.url.host}")
             return data["choices"][0]["message"]["content"].strip()
 
     prompt_str = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in messages])

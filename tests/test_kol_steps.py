@@ -286,3 +286,40 @@ async def test_migration_mirrors_legacy_profile_json_into_columns():
     async with db.get_db() as conn:
         cur = await conn.execute("SELECT weex_uid, vip_code FROM kol_profiles WHERE account_id = ? AND user_id = ?", (A, U))
         assert tuple(await cur.fetchone()) == ("909090", "WILL10")
+
+
+async def test_supported_kols_lists_current_and_past(client):
+    await _lead(U + 200)
+    await _lead(U + 201)
+    await _lead(U + 202)
+    await db.set_kol_step(A, U + 200, "uid_received", actor="admin:web", reason="t")
+    await db.set_kol_step(A, U + 201, "dormant", actor="admin:web", reason="t")
+    r = client.get("/api/ai-followup/supported-kols")
+    assert r.status_code == 200
+    by_uid = {k["user_id"]: k for k in r.json()["kols"]}
+    assert by_uid[U + 200]["support_state"] == "current" and by_uid[U + 200]["deal_at"]
+    assert by_uid[U + 201]["support_state"] == "past"
+    assert U + 202 not in by_uid
+
+
+def test_uid_from_pinned_text():
+    import dm_reply_tracker as drt
+    assert drt.uid_from_pinned_text("4285105609") == "4285105609"
+    assert drt.uid_from_pinned_text("UID: 12345678") == "12345678"
+    assert drt.uid_from_pinned_text("see you at 10am") == ""
+
+
+async def test_pinned_uid_saves_and_advances():
+    from types import SimpleNamespace
+    from datetime import datetime
+    import dm_reply_tracker as drt
+    uid = await _lead(U + 300)
+
+    class FakeClient:
+        async def get_messages(self, *a, **k):
+            return [SimpleNamespace(message="4285105609", date=datetime(2026, 11, 1))]
+
+    assert await drt.sync_pinned_uid(A, uid, FakeClient()) == "4285105609"
+    assert (await db.get_kol_profile(A, uid))["weex_uid"] == "4285105609"
+    assert await db.get_kol_step(A, uid) == "uid_received"
+    assert await drt.sync_pinned_uid(A, uid, FakeClient()) == ""

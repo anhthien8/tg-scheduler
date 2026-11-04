@@ -34,6 +34,10 @@ class AIFollowUpSettings(BaseModel):
     # Outreach nudge: delay hours before nudging and max nudge count.
     outreach_nudge_delay_hours: int = 24
     outreach_nudge_max: int = 1
+    # Monthly KOL care (None = keep current value, e.g. quick toggle).
+    kol_care_enabled: Optional[bool] = None
+    kol_care_interval_days: Optional[int] = None
+    kol_care_daily_cap: Optional[int] = None
 
 
 class UpdateChatStatusRequest(BaseModel):
@@ -85,7 +89,7 @@ async def get_kol_profile(account_id: int, user_id: int):
 async def update_kol_profile(account_id: int, user_id: int, req: KOLProfileRequest):
     if not await db.get_account(account_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy account")
-    data = req.dict(exclude_unset=True)
+    data = req.model_dump(exclude_unset=True)
     await db.upsert_kol_profile(account_id, user_id, data)
     try:
         # Admin typed the UID by hand → that is a confirmed UID: advance deal_agreed → uid_received.
@@ -339,6 +343,9 @@ async def get_settings():
     except (ValueError, TypeError):
         nudge_max = 1
 
+    from dm_reply_tracker import _kol_care_settings
+    care_enabled, care_days, care_cap = await _kol_care_settings()
+
     return {
         "enabled": enabled_str.lower() in ("true", "1"),
         "system_prompt": default_prompt if sys_prompt is None else sys_prompt,
@@ -351,6 +358,9 @@ async def get_settings():
         "drip_cadence_tier_c": tier_c,
         "outreach_nudge_delay_hours": nudge_delay,
         "outreach_nudge_max": nudge_max,
+        "kol_care_enabled": care_enabled,
+        "kol_care_interval_days": care_days,
+        "kol_care_daily_cap": care_cap,
     }
 
 
@@ -365,6 +375,12 @@ async def save_settings(req: AIFollowUpSettings):
     # Outreach nudge settings
     await db.set_setting("outreach_nudge_delay_hours", str(max(1, req.outreach_nudge_delay_hours)))
     await db.set_setting("outreach_nudge_max", str(max(0, req.outreach_nudge_max)))
+    if req.kol_care_enabled is not None:
+        await db.set_setting("kol_care_enabled", "1" if req.kol_care_enabled else "0")
+    if req.kol_care_interval_days is not None:
+        await db.set_setting("kol_care_interval_days", str(req.kol_care_interval_days if req.kol_care_interval_days in (30, 45, 60) else 30))
+    if req.kol_care_daily_cap is not None:
+        await db.set_setting("kol_care_daily_cap", str(min(50, max(0, req.kol_care_daily_cap))))
     # Validate + persist the drip cadences (hours, increasing, positive).
     cadence = _parse_cadence_or_default(req.drip_cadence_hours, [24, 72, 168])
     tier_a = _parse_cadence_or_default(req.drip_cadence_tier_a, [12, 24, 48, 96])
@@ -389,10 +405,25 @@ async def get_stats():
             "step_counts": step_counts}
 
 
+@router.post("/scan-pinned-uids")
+async def scan_pinned_uids():
+    """Read pinned messages in all KOL DMs now and save any UID found."""
+    import dm_reply_tracker as drt
+    return await drt.process_pinned_uids(force=True)
+
+
+@router.get("/supported-kols")
+async def get_supported_kols():
+    """KOLs that closed a deal: currently supported + formerly supported (dormant)."""
+    kols = await db.get_supported_kols()
+    return {"kols": kols, "current": sum(k["support_state"] == "current" for k in kols),
+            "past": sum(k["support_state"] == "past" for k in kols)}
+
+
 @router.get("/chats")
 async def get_chats(
     status: Optional[str] = Query(None, description="Filter status: active, paused_admin, onboarded, needs_human"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=2000),
     offset: int = Query(0, ge=0),
     include_history: bool = Query(False, description="Include chat history (heavy)")
 ):
@@ -420,10 +451,44 @@ async def update_chat_status(account_id: int, user_id: int, req: UpdateChatStatu
         await db.update_followup_chat_status(account_id, user_id, "paused_admin")
         return {"status": "ok", "message": "Đã chuyển sang bước 'Đã gắn link' và tạm dừng AI"}
 
-    ok = await db.update_followup_chat_status(account_id, user_id, req.status)
+    if req.status == "active":
+        # Turning AI back on must also clear the human-takeover stamp, otherwise
+        # the 12h "admin is chatting" guard keeps the AI silent.
+        ok = await db.resume_ai_for_user(account_id, user_id)
+    else:
+        ok = await db.update_followup_chat_status(account_id, user_id, req.status)
     if not ok:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    if req.status == "active":
+        # Answer a lead message that arrived while the AI was off.
+        chat = await db.get_followup_chat(account_id, user_id)
+        try:
+            hist = json.loads((chat or {}).get("history_json") or "[]")
+        except Exception:
+            hist = []
+        if hist and hist[-1].get("role") == "user":
+            asyncio.create_task(trigger_ai_reply(account_id, user_id))
+            return {"status": "ok", "message": "Đã bật AI — đang trả lời tin nhắn đang chờ"}
     return {"status": "ok", "message": f"Đã chuyển trạng thái sang '{req.status}'"}
+
+
+@router.post("/chats/{account_id}/{user_id}/ai-reply")
+async def trigger_ai_reply(account_id: int, user_id: int):
+    """Make the AI answer the lead's last message now (e.g. one missed while AI was off)."""
+    import dm_reply_tracker as drt
+    chat = await db.get_followup_chat(account_id, user_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    uname = chat.get("username")
+    log = (await db.find_running_campaign_log_for_user(user_id, uname)
+           or await db.find_campaign_log_for_user(user_id, uname))
+    wlog = await db.find_watcher_log_for_user(user_id, uname)
+    sent = await drt.generate_and_send_ai_reply_for_chat(
+        account_id=account_id, user_id=user_id, sender_username=uname, sender_name=chat.get("name"),
+        target_campaign_id=(log or {}).get("campaign_id") or chat.get("campaign_id"),
+        watcher_id=(wlog or {}).get("watcher_id") or chat.get("watcher_id"),
+    )
+    return {"success": bool(sent)}
 
 
 @router.post("/trigger-drip")
@@ -475,12 +540,12 @@ async def send_chat_message(account_id: int, user_id: int, req: SendChatMessageR
 
 
 @router.get("/chats/{account_id}/{user_id}/history")
-async def get_chat_history(account_id: int, user_id: int):
-    """Get full message history for a single chat (lazy-loaded by modal)."""
+async def get_chat_history(account_id: int, user_id: int, limit: int = Query(200, ge=1, le=5000)):
+    """Last `limit` messages of a chat (lazy-loaded by modal)."""
     chat = await db.get_followup_chat(account_id, user_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
-    return {"history": chat.get("history", []), "summary": chat.get("summary", ""), "lead_tier": chat.get("lead_tier", "Tier C"), "intent_score": chat.get("intent_score", 0)}
+    return {"history": (chat.get("history") or [])[-limit:], "summary": chat.get("summary", ""), "lead_tier": chat.get("lead_tier", "Tier C"), "intent_score": chat.get("intent_score", 0)}
 
 
 @router.get("/chats/{account_id}/{user_id}/summary")

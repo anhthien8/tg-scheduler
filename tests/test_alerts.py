@@ -231,7 +231,7 @@ async def test_reply_sla_new_lead_not_suppressed_by_prior_alert(fake_db, monkeyp
     fake_db.get_db = lambda: _FakeConn([_row(minutes_ago=90)])
     sent_kinds = []
 
-    async def capture(kind, text):
+    async def capture(kind, text, **kw):
         sent_kinds.append(kind)
     monkeypatch.setattr(alerts, "send_alert", capture)
 

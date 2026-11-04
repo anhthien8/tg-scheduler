@@ -31,6 +31,7 @@ async def test_live_config_reloads_admin_allowlist(monkeypatch):
     async def setting(key, default=None): return settings.get(key, default)
     monkeypatch.setattr(cb.db, 'get_setting', setting)
     monkeypatch.setattr(cb, '_admin_ids', {9})
+    monkeypatch.delenv('COMMAND_BOT_ADMIN_IDS', raising=False)  # .env leaks into os.environ; test targets the settings fallback
     assert (await cb._load_forum_config()).admin_ids == {10}
 
 

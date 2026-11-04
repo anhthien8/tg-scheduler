@@ -201,11 +201,27 @@ async def load_all_jobs():
 # ── Auto-resume: periodically check paused_auto campaigns ────────────────────
 
 _AUTO_RESUME_JOB_ID = "dm_campaign_auto_resume"
-_AUTO_RESUME_INTERVAL_MINUTES = 15
+_AUTO_RESUME_INTERVAL_MINUTES = 150
+
+
+async def _auto_unpause_flooded_accounts():
+    """Re-check PeerFlood-paused accounts; check_spam_status unpauses the clean ones."""
+    import telegram_client as tg
+    for acc in await db.get_all_accounts():
+        if not acc.get("is_paused") or not str(acc.get("pause_reason") or "").startswith("PeerFlood"):
+            continue
+        client = tg.get_client(acc["id"])
+        if not client or not client.is_connected():
+            continue
+        try:
+            await tg.check_spam_status(acc["id"])
+        except Exception as e:
+            logger.warning(f"[AutoUnpause] SpamBot check failed for {acc['id']}: {e}")
 
 
 async def _auto_resume_campaigns():
     """Check paused_auto campaigns and restart if any sender account is available."""
+    await _auto_unpause_flooded_accounts()
     campaigns = await db.get_auto_resume_dm_campaigns()
     if not campaigns:
         return
