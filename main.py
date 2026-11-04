@@ -385,6 +385,8 @@ if TG_RUNTIME_MODE == "combined":
     app.include_router(ai_followup.router, dependencies=_auth_dep)
     app.include_router(engagement_routes.router, dependencies=_auth_dep)
     app.include_router(referral_routes.router, dependencies=_auth_dep)
+    from routes import zalo as zalo_routes
+    app.include_router(zalo_routes.router, dependencies=_auth_dep)
 else:
     def _split_runtime_pending(route_name: str):
         async def endpoint():

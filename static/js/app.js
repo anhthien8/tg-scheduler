@@ -139,6 +139,14 @@ if(page==='discord'){
   return;
 }
 
+// Zalo Outreach Page
+if(page==='zalo'){
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('view-zalo')?.classList.remove('hidden');
+  if(window.Zalo) Zalo.init();
+  return;
+}
+
 // Community Engagement Page
 if(page==='engagement'){
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));

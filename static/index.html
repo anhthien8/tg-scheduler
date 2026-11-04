@@ -189,6 +189,12 @@
           🎮 Discord
         </button>
 
+        <!-- Zalo Group -->
+        <div class="nav-section">Zalo</div>
+        <button type="button" class="nav-item" data-page="zalo" onclick="App.navigate('zalo')">
+          💙 Zalo Outreach
+        </button>
+
         <!-- System Group -->
         <div class="nav-section">Hệ thống</div>
         <button type="button" class="nav-item" data-page="logs" onclick="App.navigate('logs')">
@@ -1060,6 +1066,62 @@
         </div>
       </div>
       <!-- ══ Community Engagement Page ══════════════════════════════════ -->
+      <div id="view-zalo" class="hidden" data-page="zalo">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">💙 Zalo Outreach</h2>
+          <button class="btn btn-ghost btn-sm" onclick="Zalo.init()" title="Tải lại">🔄 Làm mới</button>
+        </div>
+        <p style="color:var(--text2);margin-bottom:1rem;font-size:.9rem">
+          Lấy danh sách thành viên nhóm Zalo và người xác nhận tham gia sự kiện, sau đó tự gửi lời mời kết bạn và tin chào khi họ đồng ý.
+        </p>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <h3 style="margin:0 0 .75rem;font-size:1rem;color:var(--accent)">👤 Tài khoản Zalo</h3>
+          <div id="zalo-account"><div class="empty-state">Đang tải...</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+            <h3 style="margin:0;font-size:1rem;color:var(--accent)">👥 Nhóm & sự kiện
+              <span class="info-i" tabindex="0" data-tip="Quét thành viên: lấy toàn bộ người trong nhóm. Sự kiện: lấy những người bấm 'Tham gia' trong nhắc hẹn/sự kiện của nhóm.">i</span></h3>
+            <button class="btn btn-secondary btn-sm" onclick="Zalo.loadGroups()">Tải danh sách nhóm</button>
+          </div>
+          <div id="zalo-groups"><div class="empty-state">Bấm "Tải danh sách nhóm" sau khi đăng nhập.</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <h3 style="margin:0 0 .75rem;font-size:1rem;color:var(--accent)">📥 Nguồn đã quét</h3>
+          <div id="zalo-sources"><div class="empty-state">Chưa quét nguồn nào.</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+            <h3 style="margin:0;font-size:1rem;color:var(--accent)">🚀 Chiến dịch kết bạn</h3>
+            <button class="btn btn-primary btn-sm" onclick="Zalo.openCampaign()">+ Tạo chiến dịch</button>
+          </div>
+          <div id="zalo-campaign-form" class="hidden"></div>
+          <div id="zalo-campaigns"><div class="empty-state">Chưa có chiến dịch.</div></div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;gap:8px;flex-wrap:wrap">
+            <h3 style="margin:0;font-size:1rem;color:var(--accent)">📇 Danh bạ</h3>
+            <div style="display:flex;gap:6px">
+              <input class="form-input" id="zalo-contact-q" placeholder="Tìm tên..." style="width:160px" onkeydown="if(event.key==='Enter')Zalo.loadContacts()">
+              <select class="form-input" id="zalo-contact-status" style="width:150px" onchange="Zalo.loadContacts()">
+                <option value="">Tất cả trạng thái</option>
+                <option value="new">Chưa liên hệ</option>
+                <option value="requested">Đã gửi lời mời</option>
+                <option value="friend">Đã là bạn</option>
+                <option value="greeted">Đã chào</option>
+                <option value="failed">Lỗi</option>
+              </select>
+            </div>
+          </div>
+          <div id="zalo-contacts"><div class="empty-state">Đang tải...</div></div>
+        </div>
+      </div>
+
       <div id="view-engagement" class="hidden" data-page="engagement">
         <div class="toolbar">
           <h2 class="page-title" style="margin-bottom:0">🌐 Cộng Đồng (Engagement)</h2>
@@ -2051,6 +2113,7 @@
   <script defer src="/static/js/polling.js?v=492"></script>
   <script defer src="/static/js/api.js?v=492"></script>
   <script defer src="/static/js/discord.js?v=492"></script>
+  <script defer src="/static/js/zalo.js?v=492"></script>
   <script defer src="/static/js/members.js?v=492"></script>
   <script defer src="/static/js/analytics.js?v=492"></script>
   <script defer src="/static/js/ai_agents.js?v=492"></script>
@@ -2058,7 +2121,7 @@
   <script defer src="/static/js/changelog.js?v=492"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=492"></script>
-  <script defer src="/static/js/app.js?v=492"></script>
+  <script defer src="/static/js/app.js?v=499"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

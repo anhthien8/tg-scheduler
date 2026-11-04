@@ -229,6 +229,13 @@ async def start_engines() -> asyncio.Task:
     # Message queue worker
     mq.start_worker()
 
+    # Zalo outreach worker (bridge itself is spawned lazily on first use)
+    try:
+        import zalo_outreach
+        await zalo_outreach.start()
+    except Exception as e:
+        logger.warning("Zalo outreach startup error: %s", e)
+
     # Background connect task
     connect_task = asyncio.create_task(_connect_accounts_and_watchers())
     return connect_task
@@ -344,6 +351,11 @@ async def stop_engines(connect_task: asyncio.Task | None) -> None:
             pass
 
     mq.stop_worker()
+    try:
+        import zalo_outreach
+        await zalo_outreach.stop()
+    except Exception as e:
+        logger.warning("Zalo outreach stop error: %s", e)
     sch.stop_scheduler()
     await rw.stop_all()
     await drt.stop_reply_tracker()
