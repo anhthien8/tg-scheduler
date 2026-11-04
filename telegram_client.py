@@ -727,6 +727,25 @@ async def send_code(account_id: int, phone: str) -> str:
         raise
 
 
+def _signed_in(account_id: int, user) -> dict:
+    """Refresh the auth/me caches after a successful sign-in.
+
+    The client was created (and is_authorized() cached False) before the OTP
+    was sent; without this, get_me() kept returning None after login, so the
+    account was never auto-named and the list showed the phone instead of
+    the Telegram name/username.
+    """
+    _auth_cache[account_id] = True
+    _me_cache[account_id] = {
+        "user_id": user.id,
+        "first_name": user.first_name or "",
+        "last_name": user.last_name or "",
+        "username": user.username or "",
+        "phone": getattr(user, "phone", "") or "",
+    }
+    return {"success": True, **{k: v for k, v in _me_cache[account_id].items() if k != "phone"}}
+
+
 async def sign_in(account_id: int, phone: str, code: str, phone_code_hash: str,
                   password: str | None = None) -> dict:
     """Sign in with OTP code."""
@@ -737,26 +756,15 @@ async def sign_in(account_id: int, phone: str, code: str, phone_code_hash: str,
     try:
         user = await client.sign_in(phone, code, phone_code_hash=phone_code_hash)
         logger.info(f"Account {account_id}: signed in as {user.first_name}")
-        return {
-            "success": True,
-            "user_id": user.id,
-            "first_name": user.first_name,
-            "last_name": user.last_name or "",
-            "username": user.username or ""
-        }
+        return _signed_in(account_id, user)
     except errors.SessionPasswordNeededError:
         if password:
             try:
                 user = await client.sign_in(password=password)
             except errors.PasswordHashInvalidError:
                 return {"success": False, "error": "Mật khẩu 2FA không đúng", "needs_password": True}
-            return {
-                "success": True,
-                "user_id": user.id,
-                "first_name": user.first_name,
-                "last_name": user.last_name or "",
-                "username": user.username or ""
-            }
+            logger.info(f"Account {account_id}: signed in (2FA) as {user.first_name}")
+            return _signed_in(account_id, user)
         return {"success": False, "error": "2FA password required", "needs_password": True}
     except errors.PhoneCodeInvalidError:
         return {"success": False, "error": "Mã OTP không đúng"}

@@ -164,11 +164,15 @@ async def verify_code(req: VerifyCodeRequest):
         try:
             acc = await db.get_account(req.account_id) or {}
             cur_name = (acc.get("name") or "").strip()
-            me = await tg.get_me(req.account_id) if cur_name in ("", (acc.get("phone") or "").strip()) else None
-            if me:
-                real_name = " ".join(filter(None, [me.get("first_name",""), me.get("last_name","")])).strip()
+            if cur_name in ("", (acc.get("phone") or "").strip()):
+                # sign_in already returns the profile — no extra get_me round-trip
+                me = result if result.get("first_name") or result.get("last_name") else await tg.get_me(req.account_id)
+                real_name = " ".join(filter(None, [(me or {}).get("first_name") or "",
+                                                   (me or {}).get("last_name") or ""])).strip()
                 if real_name:
                     await db.update_account_name(req.account_id, real_name)
+            if result.get("user_id"):
+                await db.update_account_telegram_user_id(req.account_id, result["user_id"])
         except Exception as _e:
             logger.debug(f"Could not auto-name account {req.account_id}: {_e}")
 

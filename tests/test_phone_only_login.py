@@ -188,3 +188,26 @@ async def test_real_sign_in_2fa_flow(real_tg):
     ok = await real_tg.sign_in(2, PHONE, "12345", h, password="secret")
     assert ok["success"] and ok["user_id"] == 42
     assert fake.calls[-1] == ("sign_in", None, None, None, "secret")
+
+
+async def test_real_sign_in_refreshes_stale_auth_cache(real_tg):
+    """Client created before OTP caches is_authorized=False; after sign-in
+    get_me() must return the profile (else the account stays named by phone)."""
+    fake = FakeTelethon()
+    real_tg._clients[3] = fake
+    real_tg._auth_cache[3] = False  # cached when the client first connected
+    h = await real_tg.send_code(3, PHONE)
+    await real_tg.sign_in(3, PHONE, "12345", h)
+    me = await real_tg.get_me(3)
+    assert me and me["first_name"] == "Thien" and me["user_id"] == 42
+
+
+async def test_verify_stores_name_and_tg_user_id(client, fake_tg, monkeypatch):
+    async def no_get_me(*a, **k):
+        return None  # route must not depend on get_me — sign_in result is enough
+    monkeypatch.setattr(tg, "get_me", no_get_me)
+    acc_id, h = await _add_and_send(client)
+    client.post("/api/auth/verify", json={"phone": PHONE, "code": "12345",
+                                          "phone_code_hash": h, "account_id": acc_id})
+    acc = await db.get_account(acc_id)
+    assert acc["name"] == "Thien Nguyen" and acc["telegram_user_id"] == 1
