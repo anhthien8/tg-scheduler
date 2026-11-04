@@ -1798,6 +1798,9 @@ async def _run_campaign(campaign_id: int):
 
             if ai_provider:
                 ai_keys = _provider_keys(ai_provider)
+                if not ai_keys and ai_provider == "openai_compatible":
+                    # Keyless self-hosted router (9Router) stays the active provider.
+                    ai_keys, _ = await ai_rmx.get_provider_config(ai_provider)
 
             if not ai_keys:
                 for alt_prov in all_providers:
