@@ -53,31 +53,48 @@ this._setUserInfo();
 
 this.navigate('dashboard');document.querySelectorAll('.day-btn').forEach(b=>b.addEventListener('click',()=>b.classList.toggle('active')))},
 
-async addFirstAccount(){const name=(document.getElementById('setup-name')?.value || "").trim();const apiId=(document.getElementById('setup-api-id')?.value || "").trim();const apiHash=(document.getElementById('setup-api-hash')?.value || "").trim();const phone=(document.getElementById('setup-phone')?.value || "").trim();
+_firstStep(step){['setup','otp','2fa'].forEach(k=>document.getElementById(`login-step-${k}`)?.classList.toggle('hidden',k!==step));const f={setup:'setup-phone',otp:'login-code','2fa':'login-password'}[step];setTimeout(()=>document.getElementById(f)?.focus(),0)},
 
-if(!name||!apiId||!apiHash||!phone)return this.toast('Điền đầy đủ thông tin','error');
+_busy(id,on,label){const b=document.getElementById(id);if(!b)return;b.disabled=on;if(label)b.textContent=label},
 
-const btn=document.getElementById('btn-add-account');if(btn){btn.disabled=true;btn.textContent='Đang xử lý...';}
+// First-account login: phone (+ optional 2FA, name) → OTP → (2FA if needed) → dashboard.
+// api_id/api_hash come from the backend default (TG_DEFAULT_API_ID/HASH or Telegram Desktop).
+async addFirstAccount(){const phone=(document.getElementById('setup-phone')?.value||'').replace(/[\s.()-]/g,'');const name=(document.getElementById('setup-name')?.value||'').trim();
+if(!phone)return this.toast('Nhập số điện thoại','error');if(!/^\+?\d{7,15}$/.test(phone))return this.toast('Số điện thoại không hợp lệ (ví dụ +84912345678)','error');
+this._first2fa=document.getElementById('setup-2fa')?.value||'';
+this._busy('btn-add-account',true,'Đang gửi mã...');
+try{
+  // Retrying with the same phone reuses the account row created on the first try.
+  if(this.loginAccountId&&this._firstPhone&&this._firstPhone!==phone){try{await API.deleteAccount(this.loginAccountId)}catch(_){}this.loginAccountId=null}
+  if(!this.loginAccountId){const r=await API.addAccount({phone,name:name||null});this.loginAccountId=r.account_id}
+  this.loginPhone=this._firstPhone=phone;
+  const c=await API.sendCode(phone,this.loginAccountId);this.phoneCodeHash=c.phone_code_hash;
+  const ph=document.getElementById('login-otp-phone');if(ph)ph.textContent=`(${phone})`;
+  const ci=document.getElementById('login-code');if(ci)ci.value='';
+  this._firstStep('otp');this.toast('Mã OTP đã gửi vào app Telegram','success')
+}catch(e){this.toast(e.message||String(e),'error')}
+this._busy('btn-add-account',false,'Gửi mã OTP')},
 
-try{const r=await API.addAccount({name,phone,api_id:apiId,api_hash:apiHash});this.loginAccountId=r.account_id;this.loginPhone=phone;
+async resendFirstCode(){try{const c=await API.sendCode(this.loginPhone,this.loginAccountId);this.phoneCodeHash=c.phone_code_hash;const ci=document.getElementById('login-code');if(ci)ci.value='';this.toast('Đã gửi mã mới','success')}catch(e){this.toast(e.message||String(e),'error')}},
 
-const c=await API.sendCode(phone,r.account_id);this.phoneCodeHash=c.phone_code_hash;
+resetFirstAccount(){this._firstStep('setup')},
 
-(document.getElementById('login-step-setup')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('login-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');document.getElementById('login-code')?.focus();this.toast('Mã OTP đã gửi','success')}catch(e){this.toast(e.message,'error')}
+async _finishFirstLogin(code,pw,btnId){this._busy(btnId,true);
+try{const r=await API.verify(this.loginPhone,code,this.phoneCodeHash,this.loginAccountId,pw||undefined);
+  if(r.needs_password){this._firstStep('2fa');return}
+  this.loginAccountId=null;this._firstPhone=null;this._first2fa='';
+  this.toast('Đăng nhập thành công!','success');this.showDashboard(r)
+}catch(e){const m=e.message||String(e);
+  if(m.includes('hết hạn')){await this.resendFirstCode();this.toast('Mã OTP đã hết hạn — đã gửi mã mới, nhập lại nhé','info');this._firstStep('otp')}
+  else if(m.includes('2FA')){this._firstStep('2fa');this.toast(m,'error')}
+  else this.toast(m,'error')}
+finally{this._busy(btnId,false)}},
 
-btn.disabled=false;btn.textContent='Thêm tài khoản'},
+async verifyFirstAccount(){const code=(document.getElementById('login-code')?.value||'').trim();if(!code)return this.toast('Nhập mã OTP','error');
+await this._finishFirstLogin(code,this._first2fa,'btn-verify')},
 
-async verifyFirstAccount(){const code=(document.getElementById('login-code')?.value || "").trim();if(!code)return this.toast('Nhập mã OTP','error');
-
-try{const r=await API.verify(this.loginPhone,code,this.phoneCodeHash,this.loginAccountId);
-
-if(r.needs_password){(document.getElementById('login-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('login-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');return}
-
-this.toast('Đăng nhập thành công!','success');this.showDashboard(r)}catch(e){
-
-if(e.message.includes('2FA')){(document.getElementById('login-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('login-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden')}else this.toast(e.message,'error')}},
-
-async verify2FAFirst(){const pw=document.getElementById('login-password')?.value;try{const r=await API.verify(this.loginPhone,(document.getElementById('login-code')?.value || "").trim(),this.phoneCodeHash,this.loginAccountId,pw);this.toast('Đăng nhập thành công!','success');this.showDashboard(r)}catch(e){this.toast(e.message,'error')}},
+async verify2FAFirst(){const pw=document.getElementById('login-password')?.value||'';if(!pw)return this.toast('Nhập mật khẩu 2FA','error');
+await this._finishFirstLogin((document.getElementById('login-code')?.value||'').trim(),pw,'btn-verify-2fa')},
 
 navigate(page){this.currentPage=page;try{if(page==='channels'){this._populateChAccountSelect();}}catch(e){console.error('channels populate error:',e);}try{if(page==='members'){Members.populateAccounts();}}catch(e){console.error('members populate error:',e);}document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
 // Close sidebar on mobile after navigation

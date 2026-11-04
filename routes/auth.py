@@ -16,10 +16,23 @@ from models import AccountCreate, SendCodeRequest, VerifyCodeRequest
 logger = logging.getLogger("tg-scheduler")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-# Default Telegram Desktop credentials (safe official client creds)
-# Users can override per-account, but these work for 99% of cases
-_DEFAULT_API_ID   = 2040
-_DEFAULT_API_HASH = "b18441a1ff607e10a989891a5462e627"
+# Default app credentials used when an account is added with only a phone number.
+# Override with TG_DEFAULT_API_ID / TG_DEFAULT_API_HASH (legacy API_ID / API_HASH
+# from .env also accepted). Falls back to the official Telegram Desktop creds,
+# which work for 99% of cases.
+_TG_DESKTOP_API_ID   = 2040
+_TG_DESKTOP_API_HASH = "b18441a1ff607e10a989891a5462e627"
+
+
+def _default_api_creds() -> tuple[int, str]:
+    """(api_id, api_hash) from env, or the Telegram Desktop pair. Placeholder or
+    half-set values (e.g. "your_api_id", id without hash) are ignored."""
+    for id_key, hash_key in (("TG_DEFAULT_API_ID", "TG_DEFAULT_API_HASH"), ("API_ID", "API_HASH")):
+        api_id = (os.getenv(id_key) or "").strip()
+        api_hash = (os.getenv(hash_key) or "").strip()
+        if api_id.isdigit() and len(api_hash) == 32:
+            return int(api_id), api_hash
+    return _TG_DESKTOP_API_ID, _TG_DESKTOP_API_HASH
 
 
 # ── Account CRUD ──
@@ -70,9 +83,11 @@ async def add_account(req: AccountCreate):
     session_name = f"account_{req.phone.replace('+', '').replace(' ', '')}"
 
     # Use provided API creds or fall back to TG Desktop defaults
-    api_id   = int(req.api_id)   if req.api_id   else _DEFAULT_API_ID
-    api_hash = req.api_hash      if req.api_hash  else _DEFAULT_API_HASH
-    name     = req.name          if req.name      else req.phone  # will be updated after login
+    if req.api_id and req.api_hash:
+        api_id, api_hash = int(req.api_id), req.api_hash.strip()
+    else:
+        api_id, api_hash = _default_api_creds()
+    name     = (req.name or "").strip() or req.phone  # phone = placeholder, replaced by TG name after login
     proxy_url = req.proxy_url or None
 
     account_id = await db.create_account({
@@ -144,9 +159,12 @@ async def verify_code(req: VerifyCodeRequest):
     result = await tg.sign_in(req.account_id, req.phone, req.code,
                               req.phone_code_hash, req.password)
     if result.get("success"):
-        # Auto-update name from real TG profile
+        # Auto-name from the real TG profile, unless the user typed a name
+        # when adding (name still equal to the phone = placeholder).
         try:
-            me = await tg.get_me(req.account_id)
+            acc = await db.get_account(req.account_id) or {}
+            cur_name = (acc.get("name") or "").strip()
+            me = await tg.get_me(req.account_id) if cur_name in ("", (acc.get("phone") or "").strip()) else None
             if me:
                 real_name = " ".join(filter(None, [me.get("first_name",""), me.get("last_name","")])).strip()
                 if real_name:

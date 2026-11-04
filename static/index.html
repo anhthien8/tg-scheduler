@@ -65,52 +65,49 @@
         </form>
       </div>
       <div id="login-step-setup">
-        <div class="form-group">
-          <label class="form-label" for="setup-name">Tên tài khoản</label>
-          <input type="text" class="form-input" id="setup-name" placeholder="Ví dụ: Main, Bot1...">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="setup-api-id">API ID</label>
-          <input type="text" class="form-input" id="setup-api-id" placeholder="Ví dụ: 12345678">
-          <p class="form-hint">Số nguyên từ my.telegram.org</p>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="setup-api-hash">API Hash</label>
-          <input type="text" class="form-input" id="setup-api-hash" placeholder="Ví dụ: 0123456789abcdef...">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="setup-phone">Số điện thoại</label>
-          <input type="tel" class="form-input" id="setup-phone" placeholder="+84912345678">
-        </div>
-        <button class="btn btn-primary btn-full" id="btn-add-account" onclick="App.addFirstAccount()">
-          Thêm tài khoản
-        </button>
-        <p class="form-hint" style="margin-top:12px;text-align:center">
-          <a href="https://my.telegram.org" target="_blank">👉 Lấy API ID & Hash tại my.telegram.org</a>
-        </p>
+        <form onsubmit="event.preventDefault();App.addFirstAccount()">
+          <div class="form-group">
+            <label class="form-label" for="setup-phone">Số điện thoại <span class="hint-badge" tabindex="0" data-tooltip="Số Telegram theo định dạng quốc tế, ví dụ +84912345678. Telegram sẽ gửi mã OTP vào app Telegram của số này">?</span></label>
+            <input type="tel" class="form-input" id="setup-phone" placeholder="+84912345678" autocomplete="tel" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="setup-2fa">Mật khẩu 2FA (nếu có) <span class="hint-badge" tabindex="0" data-tooltip="Chỉ cần nếu tài khoản bật Xác minh 2 bước (Cài đặt → Quyền riêng tư → Xác minh 2 bước). Để trống nếu không có — app sẽ hỏi sau nếu cần">?</span></label>
+            <input type="password" class="form-input" id="setup-2fa" placeholder="Để trống nếu không bật" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="setup-name">Tên tài khoản (tuỳ chọn) <span class="hint-badge" tabindex="0" data-tooltip="Tên hiển thị trong dashboard. Để trống = tự lấy tên Telegram của tài khoản sau khi đăng nhập">?</span></label>
+            <input type="text" class="form-input" id="setup-name" placeholder="Để trống = tên Telegram">
+          </div>
+          <button type="submit" class="btn btn-primary btn-full" id="btn-add-account">Gửi mã OTP</button>
+        </form>
       </div>
 
       <!-- Step 1: OTP -->
       <div id="login-step-otp" class="hidden">
-        <div class="form-group">
-          <label class="form-label" for="login-code">Mã OTP</label>
-          <input type="text" class="form-input" id="login-code" placeholder="12345" maxlength="6">
-          <p class="form-hint">Nhập mã OTP đã gửi đến Telegram</p>
-        </div>
-        <button class="btn btn-primary btn-full" id="btn-verify" onclick="App.verifyFirstAccount()">
-          Xác nhận
-        </button>
+        <form onsubmit="event.preventDefault();App.verifyFirstAccount()">
+          <div class="form-group">
+            <label class="form-label" for="login-code">Mã OTP <span id="login-otp-phone" class="form-hint"></span></label>
+            <input type="text" class="form-input" id="login-code" placeholder="12345" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
+            <p class="form-hint">Nhập mã Telegram vừa gửi vào app Telegram (tin nhắn từ "Telegram")</p>
+          </div>
+          <button type="submit" class="btn btn-primary btn-full" id="btn-verify">Xác nhận</button>
+        </form>
+        <p class="form-hint" style="margin-top:12px;text-align:center">
+          <a href="#" onclick="event.preventDefault();App.resendFirstCode()">Gửi lại mã</a> ·
+          <a href="#" onclick="event.preventDefault();App.resetFirstAccount()">Đổi số điện thoại</a>
+        </p>
       </div>
 
       <!-- Step 2: 2FA -->
       <div id="login-step-2fa" class="hidden">
-        <div class="form-group">
-          <label class="form-label" for="login-password">Mật khẩu 2FA</label>
-          <input type="password" class="form-input" id="login-password" placeholder="Mật khẩu xác thực 2 bước">
-        </div>
-        <button class="btn btn-primary btn-full" onclick="App.verify2FAFirst()">
-          Xác nhận
-        </button>
+        <form onsubmit="event.preventDefault();App.verify2FAFirst()">
+          <div class="form-group">
+            <label class="form-label" for="login-password">Mật khẩu 2FA</label>
+            <input type="password" class="form-input" id="login-password" placeholder="Mật khẩu xác minh 2 bước">
+            <p class="form-hint">Tài khoản này bật xác minh 2 bước — nhập mật khẩu để hoàn tất</p>
+          </div>
+          <button type="submit" class="btn btn-primary btn-full" id="btn-verify-2fa">Xác nhận</button>
+        </form>
       </div>
     </div>
   </div>
