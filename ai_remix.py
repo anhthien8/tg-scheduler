@@ -655,6 +655,32 @@ async def get_provider_config(provider: str) -> tuple[list[str], dict]:
     return keys, kwargs
 
 
+async def check_providers(primary: str | None, timeout: float = 25.0) -> list[dict]:
+    """Ping the active provider then every configured fallback with a tiny prompt.
+    Used as a preflight before a campaign so a dead 9Router is caught up front."""
+    import asyncio
+    order = ([primary] if primary else []) + [p for p in await get_fallback_order() if p != primary]
+    results = []
+    for prov in order:
+        keys, kwargs = await get_provider_config(prov)
+        if not keys:
+            continue
+        t0 = time.time()
+        entry = {"provider": prov, "model": kwargs.get("model") or "", "primary": prov == primary}
+        try:
+            reply = await asyncio.wait_for(
+                _try_call(prov, keys[0], "Reply with exactly one word: OK", **kwargs), timeout)
+            entry["ok"] = bool(reply and reply.strip())
+            if not entry["ok"]:
+                entry["error"] = "empty reply"
+        except Exception as e:
+            entry["ok"] = False
+            entry["error"] = (str(e) or type(e).__name__)[:200]
+        entry["latency_ms"] = int((time.time() - t0) * 1000)
+        results.append(entry)
+    return results
+
+
 async def _auto_fallback_remix(failed_provider, prompt):
     """Fallback across alternative configured providers if primary provider fails (e.g. 429 quota, auth error)."""
     try:

@@ -1557,6 +1557,22 @@ async def get_campaign(campaign_id: int):
     return {"campaign": campaign}
 
 
+@router.get("/campaigns/{campaign_id}/ai-check")
+async def campaign_ai_check(campaign_id: int):
+    """Preflight: is any AI model reachable for this campaign's remix?"""
+    campaign = await db.get_dm_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign không tồn tại")
+    if not campaign.get("use_ai_remix"):
+        return {"needs_ai": False, "ok": True, "primary_ok": True, "providers": []}
+    primary = await db.get_setting("ai_provider", None)
+    providers = await ai_rmx.check_providers(primary)
+    ok = any(p["ok"] for p in providers)
+    primary_ok = any(p["ok"] and p["primary"] for p in providers)
+    return {"needs_ai": True, "ok": ok, "primary": primary, "primary_ok": primary_ok,
+            "providers": providers}
+
+
 @router.post("/campaigns/{campaign_id}/start")
 async def start_campaign(campaign_id: int, background_tasks: BackgroundTasks):
     """Start running a DM campaign."""
