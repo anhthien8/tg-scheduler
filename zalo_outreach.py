@@ -267,14 +267,41 @@ async def _check_accepts(logged_in: set[str]):
         await asyncio.sleep(random.uniform(3, 8))
 
 
+async def _watch_joins(watches: list[dict], logged_in: set[str]):
+    """Keep the watching nicks listening, then queue new group members (ahead of everyone)."""
+    for aid in {w["account_id"] for w in watches}:
+        if aid and aid not in logged_in:
+            continue
+        try:
+            await call("POST", "/listen", account=aid)
+        except BridgeError as e:
+            logger.debug("Zalo listen failed for %s: %s", aid, e)
+    by_group = {w["group_id"]: w for w in watches}
+    for ev in await call("GET", "/joins") or []:
+        w = by_group.get(str(ev.get("group_id")))
+        members = ev.get("members") or []
+        if not w or not members:
+            continue
+        name = w.get("group_name") or ev.get("group_name") or w["group_id"]
+        await store.upsert_contacts(members, "join", w["group_id"], f"🆕 Mới vào · {name}", priority=1)
+        await store.record_join(w["group_id"], len(members))
+        c = await store.get_campaign(w["campaign_id"]) if w.get("campaign_id") else None
+        if c and c["status"] == "done":  # ran out of contacts earlier → wake it up (paused stays paused)
+            await store.set_campaign_state(c["id"], status="running", last_error=None)
+        logger.info("Zalo: %d new member(s) in %s queued", len(members), name)
+
+
 async def tick(check_accepts: bool) -> None:
     """One worker iteration (exposed for tests)."""
-    if not await store.list_campaigns("running") and not (
+    watches = await store.list_watches(enabled_only=True)
+    if not watches and not await store.list_campaigns("running") and not (
             check_accepts and await store.contacts_awaiting_accept(limit=1)):
         return
     logged_in = await _logged_in_accounts()
     if not logged_in:
         return
+    if watches:
+        await _watch_joins(watches, logged_in)
     await _send_round(logged_in)
     if check_accepts:
         await _check_accepts(logged_in)

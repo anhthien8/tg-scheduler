@@ -40,7 +40,7 @@ async def ensure_schema():
             CREATE INDEX IF NOT EXISTS idx_zalo_contacts_status ON zalo_contacts(status);
             CREATE TABLE IF NOT EXISTS zalo_contact_sources (
                 uid TEXT NOT NULL,
-                source_type TEXT NOT NULL,      -- 'group' | 'event'
+                source_type TEXT NOT NULL,      -- 'group' | 'event' | 'active' | 'join'
                 source_id TEXT NOT NULL,
                 source_name TEXT DEFAULT '',
                 added_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -89,8 +89,19 @@ async def ensure_schema():
                 last_error TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS zalo_watches (
+                group_id TEXT PRIMARY KEY,            -- new members of this group get invited
+                group_name TEXT DEFAULT '',
+                account_id TEXT,                      -- nick inside the group that listens for joins
+                campaign_id INTEGER,                  -- whose messages / pacing are used
+                enabled INTEGER DEFAULT 1,
+                joined_count INTEGER DEFAULT 0,
+                last_join_at TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
         """)
         for table, col, ddl in (("zalo_contacts", "account_id", "TEXT"),
+                                ("zalo_contacts", "priority", "INTEGER DEFAULT 0"),
                                 ("zalo_campaign_logs", "account_id", "TEXT"),
                                 ("zalo_campaigns", "accounts", "TEXT NOT NULL DEFAULT '[]'")):
             cur = await conn.execute(f"PRAGMA table_info({table})")
@@ -110,8 +121,10 @@ def _rows(cur_rows) -> list[dict]:
 
 # ── Contacts ──────────────────────────────────────────────────────────────────
 
-async def upsert_contacts(members: list[dict], source_type: str, source_id: str, source_name: str) -> dict:
-    """Insert scraped members; returns {'total', 'new'} where 'new' = never seen before."""
+async def upsert_contacts(members: list[dict], source_type: str, source_id: str, source_name: str,
+                          priority: int = 0) -> dict:
+    """Insert scraped members; returns {'total', 'new'} where 'new' = never seen before.
+    priority > 0 moves them ahead of the queue (new group joiners)."""
     await ensure_schema()
     new = 0
     async with db.get_db() as conn:
@@ -131,6 +144,9 @@ async def upsert_contacts(members: list[dict], source_type: str, source_id: str,
                     "UPDATE zalo_contacts SET name = ?, avatar = ? WHERE uid = ?",
                     (m["name"], m.get("avatar") or "", uid),
                 )
+            if priority:
+                await conn.execute("UPDATE zalo_contacts SET priority = MAX(COALESCE(priority, 0), ?) WHERE uid = ?",
+                                   (priority, uid))
             await conn.execute(
                 "INSERT OR REPLACE INTO zalo_contact_sources (uid, source_type, source_id, source_name) VALUES (?, ?, ?, ?)",
                 (uid, source_type, source_id, source_name),
@@ -242,7 +258,7 @@ async def next_new_contact(sources: list[str]) -> dict | None:
     where = "status = 'new'" + (f" AND {clause}" if clause else "")
     async with db.get_db() as conn:
         conn.row_factory = aiosqlite.Row
-        cur = await conn.execute(f"SELECT * FROM zalo_contacts WHERE {where} ORDER BY first_seen LIMIT 1", params)
+        cur = await conn.execute(f"SELECT * FROM zalo_contacts WHERE {where} ORDER BY COALESCE(priority, 0) DESC, first_seen LIMIT 1", params)
         row = await cur.fetchone()
         return dict(row) if row else None
 
@@ -457,4 +473,43 @@ async def set_account_state(acc_id: str, **fields):
 async def delete_account(acc_id: str):
     async with db.get_db() as conn:
         await conn.execute("DELETE FROM zalo_accounts WHERE id = ?", (acc_id,))
+        await conn.commit()
+
+
+# ── New-member watches ────────────────────────────────────────────────────────
+
+async def list_watches(enabled_only: bool = False) -> list[dict]:
+    await ensure_schema()
+    async with db.get_db() as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute(
+            "SELECT w.*, c.name AS campaign_name, c.status AS campaign_status FROM zalo_watches w "
+            "LEFT JOIN zalo_campaigns c ON c.id = w.campaign_id"
+            + (" WHERE w.enabled = 1" if enabled_only else "") + " ORDER BY w.created_at")
+        return _rows(await cur.fetchall())
+
+
+async def save_watch(group_id: str, group_name: str, account_id: str | None, campaign_id: int, enabled: bool = True):
+    await ensure_schema()
+    async with db.get_db() as conn:
+        await conn.execute(
+            "INSERT INTO zalo_watches (group_id, group_name, account_id, campaign_id, enabled) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(group_id) DO UPDATE SET group_name = excluded.group_name, account_id = excluded.account_id, "
+            "campaign_id = excluded.campaign_id, enabled = excluded.enabled",
+            (group_id, group_name, account_id, campaign_id, int(enabled)),
+        )
+        await conn.commit()
+
+
+async def delete_watch(group_id: str):
+    await ensure_schema()
+    async with db.get_db() as conn:
+        await conn.execute("DELETE FROM zalo_watches WHERE group_id = ?", (group_id,))
+        await conn.commit()
+
+
+async def record_join(group_id: str, n: int):
+    async with db.get_db() as conn:
+        await conn.execute("UPDATE zalo_watches SET joined_count = joined_count + ?, last_join_at = ? WHERE group_id = ?",
+                           (n, _now(), group_id))
         await conn.commit()

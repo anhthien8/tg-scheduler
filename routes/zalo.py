@@ -120,6 +120,62 @@ async def scrape_group(group_id: str, body: GroupScrape):
             "partial": bool(total and counts["total"] + counts["admins_skipped"] < total - 1)}
 
 
+class ActiveScrape(BaseModel):
+    group_name: str = ""
+    account: str = ""
+    count: int = Field(1000, ge=50, le=2000)
+
+
+@router.post("/groups/{group_id}/scrape-active")
+async def scrape_active(group_id: str, body: ActiveScrape):
+    """Members who posted in the group's last `count` messages (admins dropped)."""
+    res = await _bridge("GET", f"/groups/{group_id}/active?count={body.count}", timeout=600, account=body.account)
+    name = body.group_name or group_id
+    counts = await store.upsert_contacts(res["members"], "active", group_id, f"🔥 Active · {name}")
+    counts["admins_skipped"] = len(res.get("admins") or [])
+    await store.skip_admins(res.get("admins") or [])
+    return {**counts, "messages_scanned": res.get("messages_scanned") or 0, "oldest_ts": res.get("oldest_ts")}
+
+
+class WatchPayload(BaseModel):
+    group_name: str = ""
+    account: str = ""
+    campaign_id: int
+    enabled: bool = True
+
+
+@router.get("/watches")
+async def list_watches():
+    rows = await store.list_watches()
+    try:
+        accs = {a["id"]: a for a in (await _bridge("GET", "/status")).get("accounts") or []}
+    except HTTPException:
+        accs = {}
+    for w in rows:
+        a = accs.get(w["account_id"]) if w["account_id"] else next(iter(accs.values()), None)
+        w["listening"] = bool(a and a.get("listening"))
+        w["listen_error"] = (a or {}).get("listen_error") or (None if a and a.get("logged_in") else "Nick chưa đăng nhập")
+    return rows
+
+
+@router.put("/watches/{group_id}")
+async def save_watch(group_id: str, body: WatchPayload):
+    c = await store.get_campaign(body.campaign_id)
+    if not c:
+        raise HTTPException(404, "Không tìm thấy chiến dịch")
+    await store.save_watch(group_id, body.group_name, body.account or None, body.campaign_id, body.enabled)
+    # a campaign limited to some sources must also include this group's newcomers
+    if c["sources"] and f"join:{group_id}" not in c["sources"]:
+        await store.update_campaign(c["id"], {**c, "sources": c["sources"] + [f"join:{group_id}"]})
+    return {"ok": True}
+
+
+@router.delete("/watches/{group_id}")
+async def delete_watch(group_id: str):
+    await store.delete_watch(group_id)
+    return {"ok": True}
+
+
 class EventScrape(BaseModel):
     title: str = ""
     group_name: str = ""

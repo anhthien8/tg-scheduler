@@ -10,6 +10,8 @@ const Zalo = (() => {
   let _groups = [];
   let _editingId = null;
   let _accounts = [];
+  let _campaigns = [];
+  let _watches = [];
 
   const STATUS_LABEL = {
     new: ['Chưa liên hệ', ''],
@@ -32,6 +34,7 @@ const Zalo = (() => {
   async function init() {
     await loadAccounts();
     await Promise.all([loadSources(), loadCampaigns(), loadContacts()]);
+    loadWatches();
   }
 
   // ── Nicks ──
@@ -205,7 +208,7 @@ const Zalo = (() => {
     }
     box.innerHTML = `<input class="form-input" placeholder="Lọc nhóm..." style="margin-bottom:8px" oninput="Zalo.filterGroups(this.value)">
       <div style="max-height:420px;overflow:auto"><table class="data-table" style="width:100%"><thead><tr>
-      <th>Nhóm</th><th style="width:90px">Thành viên</th><th style="width:250px"></th></tr></thead>
+      <th>Nhóm</th><th style="width:90px">Thành viên</th><th style="width:430px"></th></tr></thead>
       <tbody id="zalo-group-rows">${_groups.map(groupRow).join('')}</tbody></table></div>`;
   }
 
@@ -213,6 +216,8 @@ const Zalo = (() => {
     return `<tr data-name="${esc((g.name || '').toLowerCase())}"><td>${esc(g.name)}</td><td>${g.total}</td>
       <td style="text-align:right;white-space:nowrap">
         <button class="btn btn-secondary btn-sm" onclick="Zalo.scrapeGroup('${esc(g.id)}', this)">Quét thành viên</button>
+        <button class="btn btn-secondary btn-sm" title="Chỉ lấy những người đã nhắn tin trong 1000 tin gần nhất của nhóm" onclick="Zalo.scrapeActive('${esc(g.id)}', this)">🔥 Quét active</button>
+        <button class="btn btn-ghost btn-sm" onclick="Zalo.openWatch('${esc(g.id)}')">${_watches.some((w) => w.group_id === g.id) ? '👁 Đang theo dõi' : '👁 Theo dõi người mới'}</button>
         <button class="btn btn-ghost btn-sm" onclick="Zalo.toggleEvents('${esc(g.id)}', this)">Sự kiện ▾</button></td></tr>
       <tr class="hidden" id="zalo-ev-${esc(g.id)}"><td colspan="3"></td></tr>`;
   }
@@ -245,6 +250,115 @@ const Zalo = (() => {
       btn.disabled = false;
       btn.textContent = 'Quét thành viên';
     }
+  }
+
+  async function scrapeActive(id, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Đang đọc 1000 tin...';
+    try {
+      const r = await apiPost(`/api/zalo/groups/${id}/scrape-active`, { group_name: groupName(id), account: groupAccount(), count: 1000 });
+      const since = r.oldest_ts ? ` (từ ${new Date(+r.oldest_ts).toLocaleString('vi-VN')})` : '';
+      toast(`Đọc ${r.messages_scanned} tin${since}: ${r.total} người đang active (${r.new} mới, đã loại ${r.admins_skipped || 0} ban quản trị)`,
+        r.messages_scanned < 1000 ? 'warning' : 'success');
+      loadSources();
+      loadContacts();
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔥 Quét active';
+    }
+  }
+
+  // ── New-member watch ──
+  async function openWatch(id) {
+    const row = el(`zalo-ev-${id}`);
+    row.classList.remove('hidden');
+    if (!_campaigns.length) {
+      try { _campaigns = await apiGet('/api/zalo/campaigns'); } catch { /* shown below */ }
+    }
+    const w = _watches.find((x) => x.group_id === id);
+    const acc = w ? (w.account_id || '') : groupAccount();
+    const nicks = _accounts.filter((a) => !a.pending && (a.uid || a.logged_in));
+    row.firstElementChild.innerHTML = !_campaigns.length
+      ? '<div class="empty-state">Tạo một chiến dịch trước (lời mời + tin chào), rồi quay lại bật theo dõi.</div>'
+      : `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:4px 0">
+        <span>👁 Người mới vào nhóm sẽ được mời kết bạn bằng
+          <span class="info-i" tabindex="0" data-tip="Nick được chọn phải đang ở trong nhóm và đang online để 'nghe' sự kiện có người vào nhóm. Người mới được xếp lên đầu hàng chờ của chiến dịch và gửi theo nhịp / giới hạn của chiến dịch đó. Lưu ý: nếu nick đang mở Zalo Web/PC ở nơi khác, việc theo dõi có thể tạm ngắt 10 phút.">i</span></span>
+        <select class="form-input" id="zw-camp-${esc(id)}" style="width:200px">${_campaigns.map((c) =>
+          `<option value="${c.id}" ${w && w.campaign_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+        <span>nghe bằng nick</span>
+        <select class="form-input" id="zw-acc-${esc(id)}" style="width:170px">${nicks.map((a) =>
+          `<option value="${esc(a.id)}" ${a.id === acc ? 'selected' : ''}>${esc(nickName(a.id))}</option>`).join('')}</select>
+        <button class="btn btn-primary btn-sm" onclick="Zalo.saveWatch('${esc(id)}')">${w ? 'Lưu' : 'Bật theo dõi'}</button>
+        ${w ? `<button class="btn btn-ghost btn-sm" onclick="Zalo.deleteWatch('${esc(id)}')">Bỏ theo dõi</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="this.closest('tr').classList.add('hidden')">Đóng</button></div>`;
+  }
+
+  async function saveWatch(id) {
+    try {
+      await apiPut(`/api/zalo/watches/${id}`, {
+        group_name: groupName(id) || (_watches.find((w) => w.group_id === id) || {}).group_name || '',
+        account: el(`zw-acc-${id}`)?.value || '',
+        campaign_id: +el(`zw-camp-${id}`).value,
+        enabled: true,
+      });
+      toast('Đã bật theo dõi người mới vào nhóm', 'success');
+      el(`zalo-ev-${id}`)?.classList.add('hidden');
+      await loadWatches();
+      loadCampaigns();
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+
+  async function deleteWatch(id) {
+    if (!confirm('Bỏ theo dõi người mới của nhóm này?')) return;
+    await apiDelete(`/api/zalo/watches/${id}`);
+    el(`zalo-ev-${id}`)?.classList.add('hidden');
+    loadWatches();
+  }
+
+  async function toggleWatch(id, enabled) {
+    const w = _watches.find((x) => x.group_id === id);
+    if (!w) return;
+    await apiPut(`/api/zalo/watches/${id}`, { group_name: w.group_name, account: w.account_id || '', campaign_id: w.campaign_id, enabled });
+    loadWatches();
+  }
+
+  async function loadWatches() {
+    const box = el('zalo-watches');
+    try {
+      _watches = await apiGet('/api/zalo/watches');
+    } catch (e) {
+      if (box) box.innerHTML = `<div class="empty-state">⚠️ ${esc(e.message)}</div>`;
+      return;
+    }
+    _groups.forEach((g) => {  // refresh the watch buttons in the group table
+      const btn = document.querySelector(`#zalo-group-rows button[onclick="Zalo.openWatch('${g.id}')"]`);
+      if (btn) btn.textContent = _watches.some((w) => w.group_id === g.id) ? '👁 Đang theo dõi' : '👁 Theo dõi người mới';
+    });
+    if (!box) return;
+    if (!_watches.length) {
+      box.innerHTML = '<div class="empty-state">Chưa theo dõi nhóm nào. Bấm "👁 Theo dõi người mới" ở một nhóm phía trên.</div>';
+      return;
+    }
+    box.innerHTML = `<table class="data-table" style="width:100%"><thead><tr><th>Nhóm</th><th>Chiến dịch</th><th>Nick nghe</th>
+      <th>Trạng thái</th><th>Người mới <span class="info-i" tabindex="0" data-tip="Tổng số người mới vào nhóm đã được đưa vào hàng chờ mời kết bạn kể từ khi bật theo dõi">i</span></th><th></th></tr></thead><tbody>
+      ${_watches.map((w) => {
+        const st = !w.enabled ? '<span class="badge">Tắt</span>'
+          : w.listening && !w.listen_error ? '<span class="badge badge-green">Đang nghe</span>'
+          : `<span class="badge badge-red" title="${esc(w.listen_error || '')}">Chưa nghe được</span>`;
+        const camp = w.campaign_name
+          ? `${esc(w.campaign_name)}${w.campaign_status === 'paused' ? ' <span style="color:var(--text2);font-size:.8rem">(đang tạm dừng)</span>' : ''}`
+          : '<span style="color:var(--red)">Chiến dịch đã xoá</span>';
+        return `<tr><td><b>${esc(w.group_name || w.group_id)}</b>${w.listen_error && w.enabled ? `<div style="font-size:.8rem;color:var(--text2)">${esc(w.listen_error)}</div>` : ''}</td>
+          <td>${camp}</td><td>${esc(w.account_id ? nickName(w.account_id) : 'Nick mặc định')}</td><td>${st}</td>
+          <td>${w.joined_count || 0}${w.last_join_at ? `<div style="font-size:.8rem;color:var(--text2)">gần nhất ${esc(w.last_join_at)}</div>` : ''}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <label class="toggle" title="Bật/tắt theo dõi"><input type="checkbox" ${w.enabled ? 'checked' : ''} onchange="Zalo.toggleWatch('${esc(w.group_id)}', this.checked)"><span class="toggle-slider"></span></label>
+            <button class="btn btn-ghost btn-sm" onclick="Zalo.deleteWatch('${esc(w.group_id)}')">Xoá</button></td></tr>`;
+      }).join('')}</tbody></table>`;
   }
 
   async function toggleEvents(id, btn) {
@@ -371,6 +485,7 @@ const Zalo = (() => {
     let list;
     try {
       list = await apiGet('/api/zalo/campaigns');
+      _campaigns = list;
     } catch (e) {
       box.innerHTML = `<div class="empty-state">⚠️ ${esc(e.message)}</div>`;
       return;
@@ -521,7 +636,8 @@ const Zalo = (() => {
   }
 
   return {
-    init, addAccount, relogin, removeAccount, toggleAccount, editCap, resumeAccount, blockContact, loadGroups, filterGroups, scrapeGroup, toggleEvents, scrapeEvent,
+    init, addAccount, relogin, removeAccount, toggleAccount, editCap, resumeAccount, blockContact, loadGroups, filterGroups, scrapeGroup, scrapeActive, toggleEvents, scrapeEvent,
+    openWatch, saveWatch, deleteWatch, toggleWatch, loadWatches,
     loadContacts, filterSource, openCampaign, closeCampaign, saveCampaign,
     startCampaign, pauseCampaign, deleteCampaign, showLogs,
   };

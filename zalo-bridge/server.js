@@ -39,7 +39,7 @@ function slot(id) {
 
 function dropSlot(id) {
   const a = accounts.get(id);
-  try { a?.api?.listener?.stop?.(); } catch { /* not started */ }
+  try { if (a?.listening) a.api.listener.stop(); } catch { /* not started */ }
   accounts.delete(id);
   if (fs.existsSync(sessionFile(id))) fs.unlinkSync(sessionFile(id));
 }
@@ -112,7 +112,46 @@ function startQrLogin(a) {
     });
 }
 
-const publicAccount = (a) => ({ id: a.id, logged_in: !!a.api, me: a.me, login: a.login });
+const publicAccount = (a) => ({ id: a.id, logged_in: !!a.api, me: a.me, login: a.login,
+                                 listening: !!a.listening, listen_error: a.listenError || null });
+
+// ── New-member watch ── join events from every listening nick, drained by Python.
+const joinQueue = [];
+const JOIN_QUEUE_MAX = 5000;
+
+const RELISTEN_AFTER_MS = 10 * 60 * 1000;
+
+function startListener(a) {
+  if (a.listening || !a.api) return;
+  // Closed (e.g. Zalo Web opened elsewhere for this nick) → wait before taking the socket back.
+  if (a.closedAt && Date.now() - a.closedAt < RELISTEN_AFTER_MS) return;
+  const l = a.api.listener;
+  if (a.listenerWired) { l.start({ retryOnClose: true }); a.listening = true; return; }
+  a.listenerWired = true;
+  l.on("group_event", (ev) => {
+    if (ev.type !== "join" || ev.isSelf) return;
+    const d = ev.data || {};
+    const members = (d.updateMembers || [])
+      .filter((m) => m?.id && String(m.id) !== a.me?.uid)
+      .map((m) => ({ uid: String(m.id), name: m.dName || "", avatar: m.avatar || "" }));
+    if (!members.length) return;
+    joinQueue.push({ account: a.id, group_id: String(ev.threadId || d.groupId), group_name: d.groupName || "",
+                     members, time: Date.now() });
+    if (joinQueue.length > JOIN_QUEUE_MAX) joinQueue.splice(0, joinQueue.length - JOIN_QUEUE_MAX);
+    console.log(`[${a.id}] ${members.length} joined group ${d.groupName || ev.threadId}`);
+  });
+  l.on("connected", () => { a.listenError = null; });
+  l.on("closed", (code, reason) => {
+    a.listening = false;
+    a.closedAt = Date.now();
+    a.listenError = code === 3000 || code === 3003
+      ? "Nick đang mở Zalo Web/PC ở nơi khác — tạm dừng theo dõi 10 phút"
+      : `Mất kết nối nhận sự kiện (${code}) ${reason || ""}`.trim();
+  });
+  l.on("error", (e) => { a.listenError = String(e?.message || e); });
+  l.start({ retryOnClose: true });
+  a.listening = true;
+}
 
 // Zalo throws for a single unknown uid inside a batch; fetch profiles in chunks.
 async function fetchProfiles(api, uids) {
@@ -212,6 +251,50 @@ app.get("/groups/:id/members", needLogin, wrap(async (req, res) => {
   res.json({ group: { id: req.params.id, name: g.name, total: g.totalMember },
              members: await fetchProfiles(req.api, uids), admins: [...admins] });
 }));
+
+// Members who posted in the group's recent history (= active), newest first.
+// Zalo may cap a single history call, so fall back to smaller counts.
+app.get("/groups/:id/active", needLogin, wrap(async (req, res) => {
+  const want = Math.min(parseInt(req.query.count || "1000", 10) || 1000, 2000);
+  let msgs = null, lastErr = null;
+  for (const n of [want, 500, 200, 50].filter((n, i, arr) => n <= want && arr.indexOf(n) === i)) {
+    try {
+      msgs = (await req.api.getGroupChatHistory(req.params.id, n)).groupMsgs || [];
+      if (msgs.length) break;
+    } catch (e) { lastErr = e; }
+  }
+  if (msgs === null) throw lastErr || new Error("Không đọc được lịch sử nhóm");
+  const admins = await groupAdmins(req.api, req.params.id);
+  const seen = new Map();
+  let oldest = null;
+  for (const m of msgs) {
+    const d = m.data || {};
+    const ts = parseInt(d.ts, 10) || 0;
+    if (ts && (oldest === null || ts < oldest)) oldest = ts;
+    const uid = String(d.uidFrom || "");
+    if (!uid || uid === "0" || m.isSelf || uid === req.me?.uid || admins.has(uid)) continue;
+    const cur = seen.get(uid) || { uid, name: d.dName || "", count: 0, last_ts: 0 };
+    cur.count += 1;
+    cur.last_ts = Math.max(cur.last_ts, ts);
+    seen.set(uid, cur);
+  }
+  const active = [...seen.values()].sort((x, y) => y.last_ts - x.last_ts);
+  const profiles = await fetchProfiles(req.api, active.map((x) => x.uid));
+  const members = active.map((x, i) => ({ ...x, name: profiles[i].name || x.name, avatar: profiles[i].avatar }));
+  res.json({ members, messages_scanned: msgs.length, oldest_ts: oldest, admins: [...admins] });
+}));
+
+// Start receiving group events (new members) on this nick. Idempotent.
+app.post("/listen", needLogin, (req, res) => {
+  const a = [...accounts.values()].find((x) => x.api === req.api);
+  startListener(a);
+  res.json({ ok: true, listening: !!a.listening });
+});
+
+// Drain buffered join events.
+app.get("/joins", (req, res) => {
+  res.json(joinQueue.splice(0, joinQueue.length));
+});
 
 app.get("/groups/:id/events", needLogin, wrap(async (req, res) => {
   const items = [];

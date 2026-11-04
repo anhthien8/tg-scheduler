@@ -29,6 +29,12 @@ def fake_bridge(monkeypatch):
             return {"ok": True}
         if path == "/send":
             return {"ok": True}
+        if path == "/listen":
+            state.setdefault("listening", set()).add(account)
+            return {"ok": True, "listening": True}
+        if path == "/joins":
+            q, state["joins"] = state.get("joins", []), []
+            return q
         raise AssertionError(path)
 
     monkeypatch.setattr(zo, "call", fake_call)
@@ -224,4 +230,55 @@ def test_skip_admins_only_touches_uncontacted(fake_bridge):
         # campaigns never pick a skipped admin
         nxt = await store.next_new_contact([])
         assert nxt["uid"] == "m1"
+    asyncio.run(run())
+
+
+def test_join_watch_queues_newcomers_first_and_wakes_done_campaign(fake_bridge):
+    calls, state = fake_bridge
+    state["nicks"] = {"n1": True}
+
+    async def run():
+        await _contacts(3)  # older scraped contacts already waiting
+        cid = await _running(sources=["group:g1"])
+        await store.set_campaign_state(cid, status="done")
+        await store.save_watch("g9", "Nhóm 9", "n1", cid)
+        # route behaviour: a source-limited campaign gets the newcomers source
+        c = await store.get_campaign(cid)
+        await store.update_campaign(cid, {**c, "sources": c["sources"] + ["join:g9"]})
+
+        state["joins"] = [{"account": "n1", "group_id": "g9", "group_name": "Nhóm 9",
+                           "members": [{"uid": "new1", "name": "Người mới"}]},
+                          {"account": "n1", "group_id": "other", "members": [{"uid": "x", "name": "X"}]}]
+        await zo.tick(check_accepts=False)
+
+        assert "n1" in state["listening"]
+        assert (await store.get_campaign(cid))["status"] == "running"
+        req = _requests(calls)
+        assert len(req) == 1 and req[0][2]["uid"] == "new1"   # newcomer jumps the queue
+        w = (await store.list_watches())[0]
+        assert w["joined_count"] == 1 and w["last_join_at"]
+        uids = {c["uid"] for c in (await store.list_contacts())["items"]}
+        assert "x" not in uids                                  # unwatched group ignored
+
+        # paused campaigns are left alone
+        await store.set_campaign_state(cid, status="paused")
+        state["joins"] = [{"group_id": "g9", "members": [{"uid": "new2", "name": "B"}]}]
+        await zo.tick(check_accepts=False)
+        assert (await store.get_campaign(cid))["status"] == "paused"
+    asyncio.run(run())
+
+
+def test_watch_alone_keeps_worker_listening(fake_bridge):
+    calls, state = fake_bridge
+    state["nicks"] = {"n1": True}
+
+    async def run():
+        cid = await store.create_campaign(_campaign())  # never started
+        await store.save_watch("g9", "Nhóm 9", None, cid)
+        await zo.tick(check_accepts=False)
+        assert any(c[1] == "/listen" for c in calls) and any(c[1] == "/joins" for c in calls)
+        await store.save_watch("g9", "Nhóm 9", None, cid, enabled=False)
+        calls.clear()
+        await zo.tick(check_accepts=False)
+        assert not any(c[1] in ("/listen", "/joins") for c in calls)
     asyncio.run(run())

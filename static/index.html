@@ -1087,13 +1087,22 @@
         <div class="card" style="margin-bottom:1.25rem">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
             <h3 style="margin:0;font-size:1rem;color:var(--accent)">👥 Nhóm & sự kiện
-              <span class="info-i" tabindex="0" data-tip="Quét thành viên: lấy toàn bộ người trong nhóm. Sự kiện: lấy những người bấm 'Tham gia' trong nhắc hẹn/sự kiện của nhóm.">i</span></h3>
+              <span class="info-i" tabindex="0" data-tip="Quét thành viên: lấy toàn bộ người trong nhóm. 🔥 Quét active: chỉ lấy những người đã nhắn tin trong 1000 tin gần nhất (người đang tương tác, dễ đồng ý kết bạn hơn). 👁 Theo dõi người mới: ai mới vào nhóm sẽ tự được mời kết bạn. Sự kiện: lấy những người bấm 'Tham gia' trong nhắc hẹn/sự kiện của nhóm.">i</span></h3>
             <div style="display:flex;gap:6px;align-items:center">
               <select class="form-input" id="zalo-group-account" style="width:170px" title="Nick dùng để đọc nhóm" onchange="Zalo.loadGroups()"></select>
               <button class="btn btn-secondary btn-sm" onclick="Zalo.loadGroups()">Tải danh sách nhóm</button>
             </div>
           </div>
           <div id="zalo-groups"><div class="empty-state">Bấm "Tải danh sách nhóm" sau khi đăng nhập.</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+            <h3 style="margin:0;font-size:1rem;color:var(--accent)">👁 Theo dõi thành viên mới vào nhóm
+              <span class="info-i" tabindex="0" data-tip="Giống 'Thành viên mới join' bên Telegram: khi có người vào nhóm đang theo dõi, họ được xếp lên đầu hàng chờ của chiến dịch đã chọn và nhận lời mời kết bạn kèm tin nhắn. Chiến dịch đã 'Hết danh sách' sẽ tự chạy lại khi có người mới; chiến dịch bạn tạm dừng thì vẫn giữ nguyên.">i</span></h3>
+            <button class="btn btn-ghost btn-sm" onclick="Zalo.loadWatches()">↻</button>
+          </div>
+          <div id="zalo-watches"><div class="empty-state">Đang tải...</div></div>
         </div>
 
         <div class="card" style="margin-bottom:1.25rem">
@@ -2121,7 +2130,7 @@
   <script defer src="/static/js/polling.js?v=492"></script>
   <script defer src="/static/js/api.js?v=492"></script>
   <script defer src="/static/js/discord.js?v=492"></script>
-  <script defer src="/static/js/zalo.js?v=494"></script>
+  <script defer src="/static/js/zalo.js?v=495"></script>
   <script defer src="/static/js/members.js?v=498"></script>
   <script defer src="/static/js/analytics.js?v=492"></script>
   <script defer src="/static/js/ai_agents.js?v=492"></script>
