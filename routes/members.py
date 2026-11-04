@@ -2473,6 +2473,8 @@ async def _run_campaign(campaign_id: int):
                     "USER_ID_INVALID",
                     "CHAT_SEND_PLAIN_FORBIDDEN",
                     "CHAT_GUEST_SEND_FORBIDDEN",
+                    # Recipient charges Telegram Stars per incoming message.
+                    "ALLOW_PAYMENT_REQUIRED",
                 ]
                 if any(p.lower() in err_lower for p in skip_patterns):
                     skipped += 1
