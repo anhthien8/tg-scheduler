@@ -925,6 +925,11 @@ async def import_contacts(req: ImportContactsRequest):
                 skipped_bots += 1
                 continue
 
+            # Obvious group/channel usernames (e.g. @Scriner_group) never accept DMs.
+            if _GROUPLIKE_USERNAME_RE.search(username):
+                skipped_bots += 1
+                continue
+
             # Cross-campaign dedup check
             if username.lower() in already_dmd:
                 skipped_count += 1
@@ -1017,6 +1022,10 @@ async def _load_deep_crawl_snapshot():
             _deep_crawl_queue = json.loads(raw_queue)
     except Exception as e:
         logger.debug(f"[DeepCrawl] Error loading snapshot: {e}")
+
+
+_GROUPLIKE_USERNAME_RE = re.compile(r"(?:_|^)(?:group|chat|channel|news|community)s?$|(?:group|chat|channel)$",
+                                    re.IGNORECASE)
 
 
 @router.post("/deep-crawl")
@@ -2284,6 +2293,27 @@ async def _run_campaign(campaign_id: int):
                     skipped += 1
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped",
                                                 "Tài khoản là Telegram Bot (xác nhận qua API)")
+                    continue
+
+                # ── Not DM-able: group/channel usernames, or users who charge Stars
+                # per message. Detected from the resolved peer, so no DM is spent;
+                # blacklisted and closed for good so auto-resume never retries them.
+                from telethon.tl.types import User as _TgUser
+                if not isinstance(peer, _TgUser):
+                    _why = "Username là nhóm/kênh, không phải người dùng"
+                elif getattr(peer, "send_paid_messages_stars", None):
+                    _why = f"Người nhận bật nhắn tin trả phí ({peer.send_paid_messages_stars} Stars)"
+                else:
+                    _why = None
+                if _why:
+                    skipped += 1
+                    try:
+                        await db.add_to_dm_blacklist(user_id, username, f"Auto: {_why}")
+                    except Exception:
+                        pass
+                    await db.finish_dm_campaign_reservation(campaign_id, user_id, "sent", "not_dmable: " + _why)
+                    _reservation_done = True
+                    await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped", _why)
                     continue
 
                 # ── Smart Template Rotation: select variant ──
