@@ -3231,6 +3231,21 @@ async def unflag_account(account_id: int):
         await db.commit()
 
 
+# In-memory set of paused account ids. Loaded once, then kept in sync by
+# pause_account / unpause_account, so every engine can check "is this
+# account paused?" on each action without touching the DB.
+_paused_ids: set[int] | None = None
+
+
+async def get_paused_account_ids() -> set[int]:
+    global _paused_ids
+    if _paused_ids is None:
+        async with get_db() as db:
+            rows = await (await db.execute("SELECT id FROM accounts WHERE is_paused=1")).fetchall()
+        _paused_ids = {int(r[0]) for r in rows}
+    return _paused_ids
+
+
 async def pause_account(account_id: int, reason: str):
     """Auto-pause an account due to critical error."""
     async with get_db() as db:
@@ -3239,6 +3254,7 @@ async def pause_account(account_id: int, reason: str):
             (reason, account_id)
         )
         await db.commit()
+    (await get_paused_account_ids()).add(int(account_id))
 
 
 async def unpause_account(account_id: int):
@@ -3249,15 +3265,15 @@ async def unpause_account(account_id: int):
             (account_id,)
         )
         await db.commit()
+    (await get_paused_account_ids()).discard(int(account_id))
 
 
 async def is_account_paused(account_id: int) -> bool:
-    """Check if an account is currently paused."""
-    async with get_db() as db:
-        row = await (await db.execute(
-            "SELECT is_paused FROM accounts WHERE id=?", (account_id,)
-        )).fetchone()
-        return bool(row and row[0])
+    """Check if an account is currently paused (memory, no DB hit)."""
+    try:
+        return int(account_id) in await get_paused_account_ids()
+    except (TypeError, ValueError):
+        return False
 
 
 async def set_account_ai_agent(account_id: int, ai_agent_id: int | None):

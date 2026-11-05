@@ -186,6 +186,9 @@ async def join_channel(target: dict) -> dict:
     results: dict[int, str] = {}
 
     for acc_id in account_ids:
+        if await db.is_account_paused(acc_id):
+            results[acc_id] = "paused"
+            continue
         client = tg.get_client(acc_id)
         if not client or not client.is_connected():
             results[acc_id] = "client_not_connected"
@@ -284,6 +287,8 @@ async def _react_all_accounts(target: dict, msg_id: int, channel_link: str) -> N
         client = tg.get_client(acc_id)
         if not client or not client.is_connected():
             continue
+        if await db.is_account_paused(acc_id):
+            continue  # "Tạm dừng" means no actions at all
 
         # Apply delay between accounts (skip wait for first)
         if i > 0:

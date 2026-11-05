@@ -1955,6 +1955,13 @@ async def _run_campaign(campaign_id: int):
         # Telethon's reconnect loop — the campaign sat at 0/N with no log.
         dead_senders = []
         for sid in list(sender_ids):
+            if await db.is_account_paused(sid):
+                dead_senders.append(sid)
+                flooded_accounts[sid] = float('inf')
+                logger.info(f"[Campaign {campaign_id}] Account {sid} đang tạm dừng — loại khỏi danh sách gửi")
+                await db.add_dm_campaign_log(campaign_id, sid, 0, None, "skipped",
+                                             f"Account {sid}: đang tạm dừng — không gửi")
+                continue
             c = tg.get_client(sid)
             try:
                 ok = bool(c) and await asyncio.wait_for(c.is_user_authorized(), timeout=15)

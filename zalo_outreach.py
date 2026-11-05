@@ -173,6 +173,11 @@ async def _record_account_error(acc: dict, c: dict, err: str):
     await store.set_account_state(acc["id"], **fields)
 
 
+async def _own_uids() -> set[str]:
+    """Zalo uids of our own nicks: they must never invite or greet each other."""
+    return {str(a.get("uid")) for a in await store.list_accounts() if a.get("uid")}
+
+
 async def _send_one(c: dict, acc: dict) -> bool:
     """One friend request from nick `acc` for campaign `c`. False = campaign has nobody left."""
     contact = await store.next_new_contact(c["sources"])
@@ -180,6 +185,10 @@ async def _send_one(c: dict, acc: dict) -> bool:
         await store.set_campaign_state(c["id"], status="done", last_error=None)
         return False
     uid, name, aid = contact["uid"], contact.get("name") or "", acc["id"]
+    if str(uid) in await _own_uids():
+        await store.set_contact_status(uid, "skipped", campaign_id=c["id"], error="Nick nội bộ", account_id=aid)
+        await store.add_log(c["id"], uid, name, "skip", True, "Nick nội bộ — không tự nhắn nhau", account_id=aid)
+        return True
 
     try:
         st = await call("GET", f"/friend-status/{uid}", account=aid)
@@ -240,9 +249,13 @@ async def _send_round(logged_in: set[str]):
 
 
 async def _check_accepts(logged_in: set[str]):
+    own = await _own_uids()
     for contact in await store.contacts_awaiting_accept():
         c = await store.get_campaign(contact["campaign_id"])
         uid, name = contact["uid"], contact.get("name") or ""
+        if str(uid) in own:
+            await store.set_contact_status(uid, "skipped", error="Nick nội bộ")
+            continue
         aid = contact.get("account_id")  # None = invited before multi-nick → default nick
         if aid and aid not in logged_in:
             await store.touch_contact(uid)

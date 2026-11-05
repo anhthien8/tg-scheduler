@@ -3361,14 +3361,39 @@ const Members = {
   // SPAM CHECK
   // ═══════════════════════════════════════════════════════════════════════════
 
-  _spamBadgeHtml(status, message) {
+  // SpamBot result badge. A result is only a snapshot: older than 12h it is
+  // shown faded with its age ("Sạch · 1 ngày trước") so it is not mistaken
+  // for the current state. Click = re-check this account now.
+  _spamBadgeHtml(status, message, checkedAt, accountId) {
     const map = {
-      free: { text: '✅ Sạch', bg: 'color-mix(in srgb, var(--green) 18%, transparent)', border: 'color-mix(in srgb, var(--green) 50%, transparent)', color: 'var(--green)' },
-      limited: { text: '🚫 Bị giới hạn', bg: 'color-mix(in srgb, var(--red) 18%, transparent)', border: 'color-mix(in srgb, var(--red) 50%, transparent)', color: 'var(--red)' },
-      unknown: { text: '⚠️ Không rõ', bg: 'color-mix(in srgb, var(--orange) 18%, transparent)', border: 'color-mix(in srgb, var(--orange) 50%, transparent)', color: 'var(--orange)' },
+      free: { text: '✅ Sạch', c: 'var(--green)' },
+      limited: { text: '🚫 Bị giới hạn', c: 'var(--red)' },
+      unknown: { text: '⚠️ Không rõ', c: 'var(--orange)' },
     };
     const info = map[status] || map.unknown;
-    return `<span style="background:${info.bg};border:1px solid ${info.border};border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:${info.color}" title="${esc(message || '')}">${info.text}</span>`;
+    const ts = checkedAt ? new Date(checkedAt).getTime() : 0;
+    const ageH = ts ? (Date.now() - ts) / 3600000 : null;
+    const stale = ageH !== null && ageH > 12;
+    const ago = ageH === null ? '' : ageH < 1 ? 'vừa xong' : ageH < 24 ? `${Math.floor(ageH)} giờ trước` : `${Math.floor(ageH / 24)} ngày trước`;
+    const c = stale ? 'var(--text3)' : info.c;
+    const tip = `SpamBot lúc ${ts ? new Date(ts).toLocaleString('vi-VN') : '?'}${message ? ' — ' + message : ''}${accountId ? ' · Bấm để kiểm tra lại ngay' : ''}`;
+    const click = accountId ? ` onclick="event.stopPropagation();Members.recheckSpam(${accountId},this)" ` : ' ';
+    return `<span${click}style="cursor:${accountId ? 'pointer' : 'default'};background:color-mix(in srgb, ${c} 16%, transparent);border:1px ${stale ? 'dashed' : 'solid'} color-mix(in srgb, ${c} 50%, transparent);border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:${c}" title="${esc(tip)}">${info.text}${stale ? ` <span style="font-weight:400">· ${ago}</span>` : ''}</span>`;
+  },
+
+  async recheckSpam(accountId, el) {
+    if (el) { el.style.opacity = '.5'; el.textContent = '⏳ Đang kiểm tra'; }
+    try {
+      const res = await fetch(`/api/members/accounts/${accountId}/spam-check`, { method: 'POST', headers: API.getHeaders() });
+      const r = await res.json();
+      if (!res.ok) throw new Error(r.detail || `HTTP ${res.status}`);
+      App._spamStatus = App._spamStatus || {};
+      App._spamStatus[accountId] = r;
+      if (el) el.outerHTML = this._spamBadgeHtml(r.status, r.message, r.checked_at, accountId);
+    } catch (e) {
+      App.toast('Lỗi kiểm tra spam: ' + (e.message || e), 'error');
+      if (el) el.style.opacity = '';
+    }
   },
 
   async checkAllAccountsSpam() {
@@ -3393,7 +3418,7 @@ const Members = {
         const card = document.querySelector(`.account-card[data-account-id="${r.account_id}"]`);
         if (!card) return;
         const slot = card.querySelector('.spam-badge-slot');
-        if (slot) slot.innerHTML = this._spamBadgeHtml(r.status, r.message);
+        if (slot) slot.innerHTML = this._spamBadgeHtml(r.status, r.message, r.checked_at, r.account_id);
         App._spamStatus = App._spamStatus || {};
         App._spamStatus[r.account_id] = r;
       });

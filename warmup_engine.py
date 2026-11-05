@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 from datetime import datetime, timezone
 
 import database as db
@@ -19,6 +20,28 @@ from ai_remix import remix_message
 logger = logging.getLogger("tg-scheduler.warmup")
 
 _active_jobs: dict[int, bool] = {}  # job_id -> running flag
+
+
+def _unsafe_reason(acc: dict | None) -> str | None:
+    """Why an account must not do warmup actions right now (None = OK).
+
+    Flagged / PeerFlood accounts that keep acting in groups get scored as
+    spam harder, so warmup rests them instead of making things worse.
+    """
+    if not acc:
+        return "not found"
+    if acc.get("session_error"):
+        return "session error"
+    if acc.get("is_paused"):
+        return "paused"
+    if acc.get("is_flagged"):
+        return "flagged"
+    try:
+        if float(acc.get("peerflood_until") or 0) > time.time():
+            return "PeerFlood"
+    except (TypeError, ValueError):
+        pass
+    return None
 
 # ── Behavior Weights by Stage ────────────────────────────────────────
 
@@ -241,6 +264,7 @@ async def run_warmup_job(job_id: int):
         account_index = 0
         script_index = 0
         consecutive_errors: dict[int, int] = {}  # acc_id -> error count
+        unsafe_skips = 0  # consecutive skips for unsafe accounts
         has_v2_progress = hasattr(db, "get_warmup_progress")
 
         while _active_jobs.get(job_id, False):
@@ -264,13 +288,30 @@ async def run_warmup_job(job_id: int):
             acc_id = account_ids[account_index % len(account_ids)]
             account_index += 1
 
+            # One DB read per turn, shared by the active-hours and safety checks.
+            _acc_data = await db.get_account(acc_id) if hasattr(db, "get_account") else None
+
             # C3: Skip accounts outside active hours
-            if hasattr(db, "get_account") and hasattr(db, "check_account_active_hours"):
-                _acc_data = await db.get_account(acc_id)
+            if _acc_data is not None and hasattr(db, "check_account_active_hours"):
                 if not db.check_account_active_hours(_acc_data):
                     logger.debug("[Warmup] Job %d: Account %d outside active hours", job_id, acc_id)
                     await asyncio.sleep(300)
                     continue
+
+            # Rest flagged / PeerFlood / paused accounts; nap if all of them are.
+            if hasattr(db, "get_account"):
+                _why = _unsafe_reason(_acc_data)
+                if _why:
+                    unsafe_skips += 1
+                    logger.info("[Warmup] Job %d: skip account %d (%s)", job_id, acc_id, _why)
+                    if unsafe_skips >= len(account_ids):
+                        logger.warning("[Warmup] Job %d: all accounts unsafe, waiting 15 min", job_id)
+                        unsafe_skips = 0
+                        await asyncio.sleep(900)
+                    else:
+                        await asyncio.sleep(5)
+                    continue
+                unsafe_skips = 0
 
             # Skip accounts with too many consecutive errors
             if consecutive_errors.get(acc_id, 0) >= 5:

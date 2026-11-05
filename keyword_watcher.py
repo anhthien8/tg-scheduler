@@ -157,7 +157,7 @@ _user_dm_in_progress: set = set()
 # Cached user_ids of our OWN accounts (used to skip users added by invite_engine)
 _self_user_ids: set[int] = set()
 _self_user_ids_loaded_at: float = 0.0
-_SELF_IDS_TTL_SECS = 60 * 60  # refresh hourly
+_SELF_IDS_TTL_SECS = 600  # refresh every 10 min (DB load is cheap but not free)
 
 
 async def _get_self_user_ids() -> set:

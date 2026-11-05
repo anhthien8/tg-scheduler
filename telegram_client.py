@@ -1713,17 +1713,16 @@ async def _check_spam_status_raw(account_id: int) -> dict:
         #   "Good news, no limits..."  → free
         #   "Your account is limited..." → limited
         #   "Unfortunately, ..." → limited
-        if any(kw in reply_lower for kw in [
-            "no limits", "good news", "free",
-            "не ограничен", "нет ограничений",
-            "không bị giới hạn",
-        ]):
+        # Only SpamBot's explicit "no limits" sentence counts as clean. Loose
+        # words like "free"/"good news" also appear in temporary-limit replies
+        # ("...will be automatically released / free on 12 Nov"), so limits win.
+        _free = ("no limits are currently applied", "free as a bird",
+                 "нет ограничений", "не ограничен", "không bị giới hạn", "không có giới hạn")
+        _limited = ("limited", "restrict", "released", "spam", "until",
+                    "ограничен", "спам", "giới hạn", "bị hạn chế")
+        if any(kw in reply_lower for kw in _free):
             status = "free"
-        elif any(kw in reply_lower for kw in [
-            "limited", "restrict", "spam",
-            "ограничен", "спам",
-            "giới hạn", "bị hạn chế",
-        ]):
+        elif any(kw in reply_lower for kw in _limited):
             status = "limited"
         else:
             status = "unknown"

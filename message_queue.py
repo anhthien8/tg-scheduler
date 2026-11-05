@@ -305,6 +305,11 @@ async def queue_worker():
             chat_id = target["chat_id"]
             chat_title = target.get("chat_title", str(chat_id))
 
+            if await db.is_account_paused(account_id):
+                await db.add_send_log(schedule_id, account_id, msg.get("id"),
+                                      chat_id, chat_title, "skipped", "Tài khoản đang tạm dừng")
+                continue
+
             try:
                 success = await _send_single_message(account_id, msg, chat_id)
                 if success:

@@ -710,91 +710,109 @@ if(page==='autoreply'){
 if(page==='warmup'){
   if(!document.getElementById('view-warmup')){
     const html = `<div id="view-warmup">
-      <h2 class="page-title">Warmup Nhom</h2>
+      <style>
+        .wu-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+        .wu-head h2{margin:0}
+        .wu-guide{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px;background:color-mix(in srgb,var(--accent) 5%,transparent)}
+        .wu-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:8px}
+        .wu-step{display:flex;gap:8px;font-size:.82rem;color:var(--text2);line-height:1.45}
+        .wu-step b.n{flex:none;display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#000;font-size:11px}
+        .wu-step strong{color:var(--text)}
+        .wu-stats{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+        .wu-stats .stat-card{display:flex;align-items:baseline;gap:6px;padding:6px 12px;min-height:0;border-radius:16px}
+        .wu-stats .stat-label{font-size:.75rem;margin:0}
+        .wu-stats .stat-value{font-size:1rem}
+        .wu-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+        .wu-sec-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+        .wu-sec-h h3{margin:0;font-size:1rem;display:flex;align-items:center;gap:6px}
+        .wu-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin:20px 0 10px}
+        .wu-tab{background:none;border:none;border-bottom:2px solid transparent;padding:6px 12px;color:var(--text2);cursor:pointer;font-weight:600}
+        .wu-tab.on{color:var(--accent);border-bottom-color:var(--accent)}
+        #view-warmup .empty-state{padding:14px}
+        @media(max-width:900px){.wu-cols,.wu-steps{grid-template-columns:1fr}}
+      </style>
+      <div class="wu-head">
+        <h2 class="page-title">Warmup Nhóm</h2>
+        <span class="info-i" tabindex="0" data-tip="Warmup = cho account mới hoạt động tự nhiên trong các nhóm public (đọc tin, thả react, xem profile, chat nhẹ) để Telegram tin tưởng trước khi đem đi outreach.">i</span>
+        <button class="btn btn-sm" style="margin-left:auto" onclick="Warmup.toggleGuide()">📖 Hướng dẫn</button>
+      </div>
 
-      <!-- Safety Warning Banner -->
-      <div class="card" style="background:color-mix(in srgb, var(--orange) 10%, transparent);border:1px solid color-mix(in srgb, var(--orange) 40%, transparent);padding:16px;margin-bottom:20px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:1.5rem">⚠️</span>
-          <div>
-            <strong style="color:var(--orange)">Lưu ý An toàn</strong>
-            <p style="margin:4px 0 0;font-size:.85rem;color:var(--text2)">Chỉ thêm nhóm PUBLIC dùng cho mục đích warmup. KHÔNG thêm nhóm private hoặc nhóm có khách hàng tiềm năng (KOL) để tránh lộ bot.</p>
+      <div class="wu-guide" id="warmup-guide">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <strong style="font-size:.9rem">Cách dùng — 3 bước</strong>
+          <button class="btn btn-sm" style="padding:2px 8px" onclick="Warmup.toggleGuide(false)">Ẩn</button>
+        </div>
+        <div class="wu-steps">
+          <div class="wu-step"><b class="n">1</b><div><strong>Thêm nhóm</strong> — bấm “+ Thêm nhóm”, chỉ cần dán link (t.me/… hoặc @username). Hệ thống tự lấy ID và tự join.</div></div>
+          <div class="wu-step"><b class="n">2</b><div><strong>Tạo job</strong> — chọn nhóm + các account cần warmup, khung giờ và giới hạn/ngày. Job tự chạy ngẫu nhiên trong khung giờ.</div></div>
+          <div class="wu-step"><b class="n">3</b><div><strong>Theo dõi</strong> — tab Tiến độ cho thấy mỗi account đang ở giai đoạn nào: Passive → Warming → Active → <b>Ready 🎓</b> (dùng outreach được).</div></div>
+        </div>
+        <div style="margin-top:8px;font-size:.78rem;color:var(--orange)">⚠️ Chỉ dùng nhóm PUBLIC. Không thêm nhóm private hoặc nhóm có KOL/khách tiềm năng để tránh lộ bot.</div>
+      </div>
+
+      <div class="wu-stats stats-grid" id="warmup-stats"></div>
+
+      <div class="wu-cols">
+        <div>
+          <div class="wu-sec-h"><h3>Nhóm <span class="info-i" tabindex="0" data-tip="Các nhóm public mà account sẽ hoạt động. Bấm vào 1 nhóm để thêm script (câu chat mẫu) cho nhóm đó.">i</span></h3>
+            <button class="btn btn-primary btn-sm" onclick="Warmup.openAddGroup()">+ Thêm nhóm</button></div>
+          <div id="warmup-group-list"></div>
+          <div id="warmup-scripts-section" class="hidden" style="margin-top:14px">
+            <div class="wu-sec-h"><h3 id="warmup-scripts-title">Scripts</h3>
+              <button class="btn btn-primary btn-sm" onclick="Warmup.openAddScript()">+ Thêm script</button></div>
+            <div id="warmup-script-list"></div>
           </div>
         </div>
-      </div>
-
-      <!-- Stats (Enhanced) -->
-      <div class="stats-grid" id="warmup-stats" style="margin-bottom:20px"></div>
-
-      <!-- Groups -->
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h3 style="margin:0">Nhom</h3>
-        <button class="btn btn-primary btn-sm" onclick="Warmup.openAddGroup()">+ Them nhom</button>
-      </div>
-      <div id="warmup-group-list"></div>
-
-      <!-- Scripts (shown after selecting group) -->
-      <div id="warmup-scripts-section" class="hidden" style="margin-top:24px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h3 style="margin:0" id="warmup-scripts-title">Scripts</h3>
-          <button class="btn btn-primary btn-sm" onclick="Warmup.openAddScript()">+ Them script</button>
+        <div>
+          <div class="wu-sec-h"><h3>Jobs <span class="info-i" tabindex="0" data-tip="Mỗi job = 1 nhóm + danh sách account + lịch chạy. Cần có ít nhất 1 nhóm trước khi tạo job.">i</span></h3>
+            <button class="btn btn-primary btn-sm" onclick="Warmup.openAddJob()">+ Tạo job</button></div>
+          <div id="warmup-job-list"></div>
         </div>
-        <div id="warmup-script-list"></div>
       </div>
 
-      <!-- Jobs -->
-      <div style="margin-top:24px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h3 style="margin:0">Jobs</h3>
-          <button class="btn btn-primary btn-sm" onclick="Warmup.openAddJob()">+ Tao job</button>
-        </div>
-        <div id="warmup-job-list"></div>
+      <div class="wu-tabs">
+        <button class="wu-tab on" data-wtab="progress" onclick="Warmup.showTab('progress')">📊 Tiến độ account</button>
+        <button class="wu-tab" data-wtab="actions" onclick="Warmup.showTab('actions')">📋 Nhật ký hành động</button>
+        <button class="wu-tab" data-wtab="joblogs" onclick="Warmup.showTab('joblogs')">🗂 Log job (cũ)</button>
       </div>
 
-      <!-- Account Warmup Progress Panel -->
-      <div style="margin-top:24px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h3 style="margin:0">📊 Account Progress</h3>
-          <button class="btn btn-sm" style="background:color-mix(in srgb, var(--accent) 15%, transparent);color:var(--accent-text);border:1px solid color-mix(in srgb, var(--accent) 30%, transparent)" onclick="Warmup.loadProgress()">↻ Refresh</button>
+      <div data-wpane="progress">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+          <button class="btn btn-sm" onclick="Warmup.loadProgress()">↻ Refresh</button>
         </div>
         <div id="warmup-progress-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px"></div>
       </div>
 
-      <!-- Action Logs v2 -->
-      <div style="margin-top:24px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <h3 style="margin:0">📋 Action Logs</h3>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <select id="warmup-log-filter-account" class="form-select" style="width:auto;min-width:140px;padding:4px 8px;font-size:.82rem" onchange="Warmup.loadActionLogs()">
-              <option value="">Tat ca accounts</option>
-            </select>
-            <select id="warmup-log-filter-status" class="form-select" style="width:auto;min-width:120px;padding:4px 8px;font-size:.82rem" onchange="Warmup.loadActionLogs()">
-              <option value="">Tat ca status</option>
-              <option value="success">✅ Success</option>
-              <option value="error">❌ Error</option>
-              <option value="flood">🟠 Flood</option>
-            </select>
-            <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;color:var(--text2)">
-              <input type="checkbox" id="warmup-log-autorefresh" onchange="Warmup.toggleAutoRefresh()"> Auto-refresh
-            </label>
-          </div>
+      <div data-wpane="actions" class="hidden">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;margin-bottom:8px">
+          <select id="warmup-log-filter-account" class="form-select" style="width:auto;min-width:140px;padding:4px 8px;font-size:.82rem" onchange="Warmup.loadActionLogs()">
+            <option value="">Tất cả accounts</option>
+          </select>
+          <select id="warmup-log-filter-status" class="form-select" style="width:auto;min-width:120px;padding:4px 8px;font-size:.82rem" onchange="Warmup.loadActionLogs()">
+            <option value="">Tất cả status</option>
+            <option value="success">✅ Success</option>
+            <option value="error">❌ Error</option>
+            <option value="flood">🟠 Flood</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer;color:var(--text2)">
+            <input type="checkbox" id="warmup-log-autorefresh" onchange="Warmup.toggleAutoRefresh()"> Auto-refresh
+          </label>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap" style="max-height:420px;overflow:auto">
           <table class="data-table"><thead><tr>
-            <th>Thoi gian</th><th>Account</th><th>Action</th><th>Target Chat</th><th>Status</th><th>Error</th>
+            <th>Thời gian</th><th>Account</th><th>Action</th><th>Target Chat</th><th>Status</th><th>Error</th>
           </tr></thead><tbody id="warmup-action-log-body"></tbody></table>
         </div>
       </div>
 
-      <!-- Legacy Logs (kept for compatibility) -->
-      <div style="margin-top:24px">
-        <h3>Logs gan day (Jobs)</h3>
-        <div class="table-wrap">
+      <div data-wpane="joblogs" class="hidden">
+        <div class="table-wrap" style="max-height:420px;overflow:auto">
           <table class="data-table"><thead><tr>
-            <th>Thoi gian</th><th>Job</th><th>Account</th><th>Noi dung</th><th>Trang thai</th>
+            <th>Thời gian</th><th>Job</th><th>Account</th><th>Nội dung</th><th>Trạng thái</th>
           </tr></thead><tbody id="warmup-log-body"></tbody></table>
         </div>
       </div>
+
 
       <!-- Add Group Modal -->
       <div id="warmup-group-modal" class="modal-overlay">
@@ -826,21 +844,23 @@ if(page==='warmup'){
       <!-- Add Job Modal -->
       <div id="warmup-job-modal" class="modal-overlay">
         <div class="modal">
-          <div class="modal-header"><h3 class="modal-title">Tao warmup job</h3><button class="modal-close" onclick="(document.getElementById('warmup-job-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
+          <div class="modal-header"><h3 class="modal-title">Tạo warmup job</h3><button class="modal-close" onclick="(document.getElementById('warmup-job-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
           <div class="modal-body">
-            <div class="form-group"><label class="form-label">Nhom</label><select id="wj-group" class="form-select"></select></div>
-            <div class="form-group"><label class="form-label">Tai khoan</label><div id="wj-accounts" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"></div></div>
+            <div class="form-group"><label class="form-label">Nhóm</label><select id="wj-group" class="form-select"></select></div>
+            <div class="form-group"><label class="form-label">Tài khoản <span class="info-i" tabindex="0" data-tip="Chỉ nên warmup account Hoạt động. Account Bị flag / PeerFlood / Tạm dừng nếu vẫn chạy sẽ bị chấm spam nặng hơn → engine tự bỏ qua chúng, kể cả khi lỡ tick.">i</span> <span id="wj-acc-count" style="font-weight:400;color:var(--text3);font-size:.8em"></span></label>
+              <div id="wj-quick" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px"></div>
+              <div id="wj-accounts" style="display:flex;flex-wrap:wrap;gap:6px;max-height:190px;overflow:auto"></div></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-              <div class="form-group"><label class="form-label">Interval min (phut)</label><input type="number" id="wj-interval-min" class="form-input" value="30"></div>
-              <div class="form-group"><label class="form-label">Interval max (phut)</label><input type="number" id="wj-interval-max" class="form-input" value="120"></div>
+              <div class="form-group"><label class="form-label">Giãn cách tối thiểu (phút)</label><input type="number" id="wj-interval-min" class="form-input" value="30"></div>
+              <div class="form-group"><label class="form-label">Giãn cách tối đa (phút)</label><input type="number" id="wj-interval-max" class="form-input" value="120"></div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-              <div class="form-group"><label class="form-label">Bat dau</label><input type="time" id="wj-start" class="form-input" value="09:00"></div>
-              <div class="form-group"><label class="form-label">Ket thuc</label><input type="time" id="wj-end" class="form-input" value="22:00"></div>
+              <div class="form-group"><label class="form-label">Bắt đầu</label><input type="time" id="wj-start" class="form-input" value="09:00"></div>
+              <div class="form-group"><label class="form-label">Kết thúc</label><input type="time" id="wj-end" class="form-input" value="22:00"></div>
             </div>
-            <div class="form-group"><label class="form-label">Gioi han/ngay</label><input type="number" id="wj-daily-limit" class="form-input" value="10"></div>
+            <div class="form-group"><label class="form-label">Giới hạn hành động/ngày</label><input type="number" id="wj-daily-limit" class="form-input" value="10"></div>
           </div>
-          <div class="modal-footer"><button class="btn btn-primary" onclick="Warmup.saveJob()">Tao</button></div>
+          <div class="modal-footer"><button class="btn btn-primary" onclick="Warmup.saveJob()">Tạo job</button></div>
         </div>
       </div>
 
@@ -1179,7 +1199,7 @@ renderAccounts(){
 </div>`}).join('');
 },
 
-_spamBadge(id){const r=(this._spamStatus||{})[id];if(!r||typeof Members==='undefined')return '';const when=r.checked_at?new Date(r.checked_at).toLocaleString('vi-VN'):'';return Members._spamBadgeHtml(r.status,`Kiểm tra lúc ${when}${r.message?' — '+r.message:''}`)},
+_spamBadge(id){const r=(this._spamStatus||{})[id];if(!r||typeof Members==='undefined')return '';return Members._spamBadgeHtml(r.status,r.message,r.checked_at,id)},
 
 openAddAccountModal(){this._bulkQueue=null;document.getElementById('acc-step-parallel')?.classList.add('hidden');document.getElementById('acc-step-relogin')?.classList.add('hidden');this._bulkDone=[];this._bulkFailed=[];(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-phone') || me_dummy).value = '';const proxyEl=document.getElementById('acc-proxy');if(proxyEl)proxyEl.value='';const bulk=document.getElementById('acc-bulk-input');if(bulk)bulk.value='';document.getElementById('acc-bulk-progress')?.classList.add('hidden');document.getElementById('acc-bulk-skip')?.classList.add('hidden');this.setAccountAddMode('single');(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
 
@@ -4895,6 +4915,21 @@ const Warmup = {
 
   async init() {
     await Promise.all([this.loadGroups(), this.loadJobs().then(() => this.loadRecentLogs()), this.loadProgress(), this.loadActionLogs(), this.loadActionLogSummary()]);
+    // Guide stays open until the user hides it, and always shows while there is nothing set up yet.
+    this.toggleGuide(!this._groups.length || localStorage.getItem('warmupGuideHidden') !== '1');
+  },
+
+  toggleGuide(show) {
+    const el = document.getElementById('warmup-guide');
+    if (!el) return;
+    if (show === undefined) show = el.classList.contains('hidden');
+    el.classList.toggle('hidden', !show);
+    localStorage.setItem('warmupGuideHidden', show ? '0' : '1');
+  },
+
+  showTab(name) {
+    document.querySelectorAll('#view-warmup [data-wtab]').forEach(b => b.classList.toggle('on', b.dataset.wtab === name));
+    document.querySelectorAll('#view-warmup [data-wpane]').forEach(p => p.classList.toggle('hidden', p.dataset.wpane !== name));
   },
 
   cleanup() {
@@ -4911,7 +4946,7 @@ const Warmup = {
       this._groups = data.groups || [];
       const el = document.getElementById('warmup-group-list');
       if (!this._groups.length) {
-        el.innerHTML = '<div class="empty-state"><p class="empty-state-text">Chua co nhom nao</p></div>';
+        el.innerHTML = '<div style="color:var(--text2);padding:12px;border:1px dashed var(--border);border-radius:8px;font-size:.85rem">Chưa có nhóm. Bấm <b>+ Thêm nhóm</b> và dán link t.me/… để bắt đầu.</div>';
         return;
       }
       el.innerHTML = this._groups.map(g => {
@@ -5035,7 +5070,7 @@ const Warmup = {
       this._jobs = data.jobs || [];
       const el = document.getElementById('warmup-job-list');
       if (!this._jobs.length) {
-        el.innerHTML = '<div style="color:var(--text2);padding:12px">Chua co job nao.</div>';
+        el.innerHTML = '<div style="color:var(--text2);padding:12px;border:1px dashed var(--border);border-radius:8px;font-size:.85rem">Chưa có job. Thêm nhóm trước, rồi bấm <b>+ Tạo job</b>.</div>';
 
         // Update stats (enhanced)
         this._renderStats(0, 0);
@@ -5086,20 +5121,34 @@ const Warmup = {
     const sel = document.getElementById('wj-group');
     sel.innerHTML = this._groups.map(g => `<option value="${g.id}">${this._esc(g.name)}</option>`).join('');
 
-    // Populate accounts
+    // Populate accounts with health status; unsafe ones are dimmed and unticked.
     const accEl = document.getElementById('wj-accounts');
+    const quickEl = document.getElementById('wj-quick');
     try {
       const d = await API.getAccounts();
-      const accounts = d.accounts || [];
-      accEl.innerHTML = accounts.filter(a => a.is_logged_in).map(a => {
-        const name = a.user_info ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ') : a.name;
-        return `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:.85rem">
-          <input type="checkbox" value="${a.id}" class="wj-acc-cb"> ${this._esc(name)}
+      const accounts = (d.accounts || []).filter(a => a && a.id);
+      const St = Engagement._accStatus.bind(Engagement), Br = Engagement._accBrand.bind(Engagement);
+      accounts.sort((a, b) => St(b).ok - St(a).ok);
+      accEl.innerHTML = accounts.map(a => {
+        const st = St(a), brand = Br(a);
+        const name = a.user_info ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ') || a.name : a.name;
+        const tip = st.detail ? ` title="${this._esc(st.label + ': ' + st.detail)}"` : '';
+        return `<label class="wj-acc" data-ok="${st.ok ? 1 : 0}" data-brand="${this._esc(brand)}"${tip}
+            style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:.82rem;padding:3px 8px;border:1px solid var(--border);border-radius:6px;${st.ok ? '' : 'opacity:.55'}">
+          <input type="checkbox" value="${a.id}" class="wj-acc-cb" ${a.is_logged_in ? '' : 'disabled'} onchange="Warmup._accCount()">
+          <span style="width:7px;height:7px;border-radius:50%;background:${st.color};flex:none"></span>
+          ${this._esc(name)}${st.ok ? '' : ` <span style="color:${st.color};font-size:.85em">· ${st.label}</span>`}
         </label>`;
-      }).join('');
+      }).join('') || '<span style="color:var(--text3)">Chưa có tài khoản</span>';
+      const okN = accounts.filter(a => St(a).ok).length;
+      const brands = [...new Set(accounts.filter(a => St(a).ok).map(Br).filter(Boolean))];
+      const chip = (sel, label) => `<button type="button" class="btn btn-sm btn-secondary" style="padding:2px 9px;font-size:.78rem" onclick="Warmup._quickPick('${sel}')">${label}</button>`;
+      quickEl.innerHTML = chip('ok', `✅ Account khỏe (${okN})`) + brands.map(b => chip('brand:' + b, '#' + this._esc(b))).join('') + chip('none', '✕ Bỏ chọn');
     } catch(e) {
-      accEl.innerHTML = '<span style="color:var(--red)">Loi tai tai khoan</span>';
+      accEl.innerHTML = '<span style="color:var(--red)">Lỗi tải tài khoản</span>';
+      quickEl.innerHTML = '';
     }
+    this._accCount();
 
     (document.getElementById('wj-interval-min') || me_dummy).value = '30';
     (document.getElementById('wj-interval-max') || me_dummy).value = '120';
@@ -5109,11 +5158,29 @@ const Warmup = {
     (document.getElementById('warmup-job-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
+  _quickPick(sel) {
+    document.querySelectorAll('#wj-accounts .wj-acc').forEach(l => {
+      const cb = l.querySelector('input');
+      if (cb.disabled) return;
+      cb.checked = sel === 'none' ? false
+        : sel === 'ok' ? l.dataset.ok === '1'
+        : l.dataset.ok === '1' && l.dataset.brand === sel.slice(6);
+    });
+    this._accCount();
+  },
+
+  _accCount() {
+    const on = [...document.querySelectorAll('#wj-accounts .wj-acc')].filter(l => l.querySelector('input').checked);
+    const bad = on.filter(l => l.dataset.ok !== '1').length;
+    const el = document.getElementById('wj-acc-count');
+    if (el) el.innerHTML = on.length ? `— đã chọn ${on.length}` + (bad ? ` <span style="color:#d29922">(${bad} account không khỏe sẽ bị bỏ qua)</span>` : '') : '';
+  },
+
   async saveJob() {
     const groupId = parseInt(document.getElementById('wj-group')?.value);
-    if (!groupId) { App.toast('Chon nhom', 'error'); return; }
+    if (!groupId) { App.toast('Chọn nhóm', 'error'); return; }
     const accIds = Array.from(document.querySelectorAll('.wj-acc-cb:checked')).map(cb => parseInt(cb.value));
-    if (!accIds.length) { App.toast('Chon it nhat 1 tai khoan', 'error'); return; }
+    if (!accIds.length) { App.toast('Chọn ít nhất 1 tài khoản', 'error'); return; }
     try {
       await API.post('/api/warmup/jobs', {
         group_id: groupId,
@@ -5221,13 +5288,13 @@ const Warmup = {
     const statsEl = document.getElementById('warmup-stats');
     const s = this._actionLogSummary || {};
     statsEl.innerHTML = `
-      <div class="stat-card"><div class="stat-label">Nhom</div><div class="stat-value accent">${this._groups.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Nhóm</div><div class="stat-value accent">${this._groups.length}</div></div>
       <div class="stat-card"><div class="stat-label">Jobs</div><div class="stat-value">${jobCount}</div></div>
-      <div class="stat-card"><div class="stat-label">Dang chay</div><div class="stat-value green">${runningCount}</div></div>
-      <div class="stat-card"><div class="stat-label">Actions (hom nay)</div><div class="stat-value">${s.total_today || 0}</div></div>
-      <div class="stat-card"><div class="stat-label">Dang warmup</div><div class="stat-value" style="color:var(--purple)">${s.accounts_active || 0}</div></div>
+      <div class="stat-card"><div class="stat-label">Đang chạy</div><div class="stat-value green">${runningCount}</div></div>
+      <div class="stat-card"><div class="stat-label">Hành động hôm nay</div><div class="stat-value">${s.total_today || 0}</div></div>
+      <div class="stat-card"><div class="stat-label">Đang warmup</div><div class="stat-value" style="color:var(--purple)">${s.accounts_active || 0}</div></div>
       <div class="stat-card"><div class="stat-label">🎓 Graduated</div><div class="stat-value green">${s.accounts_graduated || 0}</div></div>
-      <div class="stat-card"><div class="stat-label">⚠️ Flood (3 ngay)</div><div class="stat-value" style="color:var(--orange)">${s.flood_events_3d || 0}</div></div>
+      <div class="stat-card"><div class="stat-label">⚠️ Flood 3 ngày</div><div class="stat-value" style="color:var(--orange)">${s.flood_events_3d || 0}</div></div>
     `;
   },
 
@@ -5239,7 +5306,7 @@ const Warmup = {
       const el = document.getElementById('warmup-progress-list');
       if (!el) return;
       if (!progress.length) {
-        el.innerHTML = '<div style="color:var(--text2);padding:12px">Chua co account nao trong warmup.</div>';
+        el.innerHTML = '<div style="color:var(--text2);padding:12px">Chưa có account nào đang warmup — tạo job để bắt đầu.</div>';
         return;
       }
 

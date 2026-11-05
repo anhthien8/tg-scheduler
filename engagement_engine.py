@@ -66,20 +66,24 @@ def _get_engagement_send_lock():
 # ── Helper: self user IDs ─────────────────────────────────────────────────────
 
 async def _get_self_user_ids() -> set:
-    """Return cached set of our own Telegram user IDs."""
+    """Return cached set of our own Telegram user IDs.
+
+    Hard rule: AI never talks to our own accounts. Refresh from DB every 10 min (so a
+    newly added account is covered quickly) and always merge the live
+    me_cache; callers treat an empty set as "unknown" and skip (fail closed).
+    """
     global _self_ids_loaded_at
     now = _time.time()
-    if _self_user_ids and now - _self_ids_loaded_at < 3600:
-        return _self_user_ids
-    try:
-        db_ids = await db.get_all_internal_telegram_user_ids()
-        _self_user_ids.update(int(x) for x in db_ids if x)
-    except Exception:
-        pass
+    if now - _self_ids_loaded_at >= 600:
+        _self_ids_loaded_at = now  # also on failure: no DB retry storm per message
+        try:
+            db_ids = await db.get_all_internal_telegram_user_ids()
+            _self_user_ids.update(int(x) for x in db_ids if x)
+        except Exception as e:
+            logger.warning("[Engagement] internal ids load failed: %s", e)
     for me in getattr(tg, "_me_cache", {}).values():
         if me and me.get("user_id"):
             _self_user_ids.add(int(me["user_id"]))
-    _self_ids_loaded_at = now
     return _self_user_ids
 
 
@@ -499,8 +503,8 @@ def _make_engagement_handler(campaign: dict):
 
             # 6. L2: Filter out own accounts
             self_ids = await _get_self_user_ids()
-            if sender_id in self_ids:
-                return
+            if not self_ids or int(sender_id) in self_ids:
+                return  # own account, or identity unknown → fail closed
 
             # 7. Filter bots
             sender_username = ""
@@ -549,7 +553,7 @@ def _make_engagement_handler(campaign: dict):
             candidates = []
             now = _time.time()
             for acc_id in reply_account_ids:
-                if account_busy.is_busy(acc_id):
+                if account_busy.is_busy(acc_id) or await db.is_account_paused(acc_id):
                     continue
                 try:
                     from keyword_watcher import _is_peerflood_blocked
