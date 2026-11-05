@@ -30,6 +30,7 @@ from telethon.tl.functions.messages import SendReactionRequest
 from telethon.tl.types import ReactionEmoji
 
 import ai_remix as ai_rmx
+import kb_select
 import database as db
 import kol_offer
 import telegram_client as tg
@@ -1232,7 +1233,11 @@ async def generate_and_send_ai_reply_for_chat(
     )
     combined_prompt = sys_prompt + format_rules
     if kb and kb.strip():
-        combined_prompt += "\n\n--- KNOWLEDGE BASE ---\n" + kb.strip()
+        # Only the passages relevant to the lead's recent messages (perf: the
+        # full KB is 20k+ chars and was sent on every turn).
+        _recent_user = " ".join(m.get("content", "") or "" for m in full_history[-6:]
+                                if m.get("role") == "user")
+        combined_prompt += "\n\n--- KNOWLEDGE BASE ---\n" + kb_select.select_kb(kb, _recent_user)
 
     kol_prof = await db.get_kol_profile(account_id, user_id) or {}
     # Official commission ladder (spec A2): generated from the kol_offer_ladder
@@ -2134,10 +2139,16 @@ async def _resolve_ai_provider(agent_config: dict | None) -> tuple[str | None, l
         if agent_keys:
             ai_provider = agent_config.get("provider", "gemini")
             ai_keys = agent_keys
+        elif agent_config.get("provider") == "openai_compatible" and agent_config.get("base_url") \
+                and agent_config.get("model"):
+            # Agent pinned to a keyless 9Router.
+            ai_provider, ai_keys = "openai_compatible", [""]
 
     if not ai_keys:
         ai_provider = await db.get_setting("ai_provider", "gemini")
         ai_keys = await _load_provider_keys(ai_provider)
+        if not ai_keys and ai_provider == "openai_compatible":
+            ai_keys, _ = await ai_rmx.get_provider_config(ai_provider)
         if not ai_keys:
             for alt_prov in ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]:
                 alt_keys = await _load_provider_keys(alt_prov)
