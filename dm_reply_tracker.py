@@ -413,6 +413,33 @@ def _normalize_uid(value) -> str:
     return re.sub(r"\D", "", str(value or ""))
 
 
+_BRACKET_TAG_RE = re.compile(r"\[[^\]]*\]")
+
+
+async def _media_only_reply_language(account_id: int, sender_id: int, sender) -> str:
+    """Language name for a reply to a message with no words (sticker, photo...).
+
+    Uses the person's last real text in this chat first, then their profile
+    (lang_code, phone prefix, name). Returns '' when nothing points anywhere,
+    so the prompt's normal rule still applies.
+    """
+    chat = await db.get_followup_chat(account_id, sender_id)
+    for m in reversed((chat or {}).get("history") or []):
+        if m.get("role") != "user":
+            continue
+        text = _BRACKET_TAG_RE.sub(" ", m.get("content") or "").strip()
+        if re.search(r"[^\W\d_]", text):
+            code = "vi" if _VN_CHARS_RE.search(text) else ai_rmx.detect_user_language({"bio": text})
+            return ai_rmx.LANGUAGE_NAMES.get(code, "")
+    code, src = ai_rmx.detect_user_language({
+        "lang_code": getattr(sender, "lang_code", None),
+        "phone": getattr(sender, "phone", None),
+        "first_name": getattr(sender, "first_name", "") or "",
+        "last_name": getattr(sender, "last_name", "") or "",
+    }, with_source=True)
+    return "" if src == "default" else ai_rmx.LANGUAGE_NAMES.get(code, "")
+
+
 def _detect_reply_lang(history: list[dict] | None) -> str:
     """'vi' if the KOL's latest message contains Vietnamese diacritics, else 'en'."""
     for m in reversed(history or []):
@@ -1589,6 +1616,15 @@ def _make_handler(account_id: int):
             media_tag = "[Attached Document Proof]"
 
         message_text = f"{raw_msg} {media_tag}".strip() if media_tag else raw_msg
+        # A sticker/photo has no words to match the language rule against, and the
+        # media tags are English, so the AI defaulted to English. Pin the language.
+        if not re.search(r"[^\W\d_]", raw_msg or ""):
+            try:
+                lang_name = await _media_only_reply_language(account_id, sender_id, sender)
+                if lang_name:
+                    message_text = f"{message_text}\n[No text in this message — reply in {lang_name}]".strip()
+            except Exception as _lang_err:
+                logger.debug("[Inbox] Media-only language hint error: %s", _lang_err)
 
         # Keep the quoted message: "Which language is this?" is meaningless without it.
         try:

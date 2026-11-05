@@ -315,6 +315,7 @@ async def fetch_chatgpt_models(payload: FetchChatgptModelsPayload):
     }
 
     models = []
+    auth_failed = False  # 401/403 from every endpoint = token expired/invalid
 
     try:
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
@@ -324,6 +325,7 @@ async def fetch_chatgpt_models(payload: FetchChatgptModelsPayload):
                     "https://chatgpt.com/backend-api/models",
                     headers=chatgpt_headers,
                 )
+                auth_failed = resp.status_code in (401, 403)
                 if resp.status_code == 200:
                     data = resp.json()
                     # ChatGPT returns {"models": [{"slug": "gpt-4o", "title": "GPT-4o", ...}, ...]}
@@ -346,6 +348,7 @@ async def fetch_chatgpt_models(payload: FetchChatgptModelsPayload):
             models_url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
             try:
                 resp = await client.get(models_url, headers=api_headers)
+                auth_failed = auth_failed and resp.status_code in (401, 403)
                 if resp.status_code == 200:
                     data = resp.json()
                     raw = data.get("data", [])
@@ -381,7 +384,10 @@ async def fetch_chatgpt_models(payload: FetchChatgptModelsPayload):
         {"id": "o4-mini", "name": "o4-mini"},
         {"id": "o3-mini", "name": "o3-mini"},
     ]
-    return {"success": True, "models": fallback, "source": "fallback"}
+    result = {"success": True, "models": fallback, "source": "fallback"}
+    if auth_failed:
+        result["error"] = "Token ChatGPT đã hết hạn hoặc không hợp lệ (401). Bấm \"Đăng nhập & Tự động lấy Token\" để lấy token mới."
+    return result
 
 
 # ── OpenAI OAuth PKCE Flow ──────────────────────────────────────

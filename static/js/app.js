@@ -2859,8 +2859,13 @@ App.loadChatgptModels = async function(tokenOverride) {
         if (found) selectEl.value = currentVal;
       }
 
-      var source = data.source === 'chatgpt_backend' ? 'ChatGPT' : data.source === 'openai_api' ? 'OpenAI API' : 'mặc định';
-      App.toast('Đã tải ' + data.models.length + ' models từ ' + source, 'success');
+      if (data.source === 'fallback') {
+        // Live lookup failed: say why instead of passing the built-in list off as loaded.
+        App.toast(data.error || 'Không tải được models từ ChatGPT, đang hiện danh sách mặc định có sẵn.', 'error');
+      } else {
+        var source = data.source === 'chatgpt_backend' ? 'ChatGPT' : 'OpenAI API';
+        App.toast('Đã tải ' + data.models.length + ' models từ ' + source, 'success');
+      }
     } else {
       selectEl.innerHTML = '<option value="gpt-4o">gpt-4o</option>';
       App.toast('Không thể tải models. Đang dùng mặc định.', 'error');
