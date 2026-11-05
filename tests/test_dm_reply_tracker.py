@@ -265,6 +265,8 @@ async def test_incoming_user_message_triggers_reply(mock_ai_reply):
     mock_event.message.video = None
     mock_event.message.video_note = None
     mock_event.message.gif = None
+    mock_event.message.sticker = None
+    mock_event.message.dice = None
     mock_event.message.photo = None
     mock_event.message.document = None
     mock_event.sender_id = 999
@@ -377,28 +379,28 @@ async def test_async_distill_human_rule_success(mock_distill):
     await db.get_or_create_followup_chat(
         account_id=1, user_id=202, username="lead", name="Lead User"
     )
-    await db.append_followup_chat_message(1, 202, "user", "what is pricing?")
+    await db.append_followup_chat_message(1, 202, "user", "how do I get my referral link?")
     
     mock_distill.return_value = {
-        "question": "what is pricing?",
-        "answer": "pricing is 50 usd"
+        "question": "how do I get my referral link?",
+        "answer": "Send me your UID and the team will create your referral link today"
     }
     
     await tracker._async_distill_human_rule(
         account_id=1,
         user_id=202,
-        message_text="pricing is 50 usd"
+        message_text="Send me your UID and the team will create your referral link today"
     )
     
     mock_distill.assert_called_once()
     args, kwargs = mock_distill.call_args
-    assert kwargs["human_reply"] == "pricing is 50 usd"
+    assert kwargs["human_reply"] == "Send me your UID and the team will create your referral link today"
     assert len(kwargs["history"]) == 1
     
     rules = await db.get_learned_knowledge_for_agent(agent_id)
     assert len(rules) == 1
-    assert rules[0]["question_pattern"] == "what is pricing?"
-    assert rules[0]["learned_answer"] == "pricing is 50 usd"
+    assert rules[0]["question_pattern"] == "how do I get my referral link?"
+    assert rules[0]["learned_answer"] == "Send me your UID and the team will create your referral link today"
 
 
 

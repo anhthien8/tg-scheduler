@@ -71,10 +71,12 @@ async def test_cancellation_no_permit_leak():
         # Yield to let the task start and yield during connect
         await asyncio.sleep(0.01)
         
-        # Cancel the task
+        # Cancel the task. On a fast machine acquire() may already have
+        # finished; then it owns a connection that must be released.
         task.cancel()
         try:
-            await task
+            got = await task
+            await pool.release(got)
         except asyncio.CancelledError:
             pass
             
