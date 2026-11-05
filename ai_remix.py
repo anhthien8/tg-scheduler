@@ -184,21 +184,47 @@ def _mark_key_failed(provider, idx):
 # gemini-2.0-flash was retired by Google (404); thinking is disabled so the
 # output budget is spent on the reply itself.
 GEMINI_MODEL = "gemini-2.5-flash"
+# Tried in order; on 404/429/5xx/timeout the next model is used (tested 2026-11-02).
+GEMINI_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite"]
+
+
+async def _gemini_post(api_key, payload, timeout):
+    """POST to Gemini, falling through GEMINI_MODELS on retryable errors.
+    Returns (data, model). Key goes in a header so it never lands in logs."""
+    last_exc = None
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for model in GEMINI_MODELS:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            try:
+                resp = await client.post(url, json=payload, headers={"x-goog-api-key": api_key})
+                if resp.status_code in (404, 429) or resp.status_code >= 500:
+                    logger.warning(f"Gemini {model} HTTP {resp.status_code}, trying next model")
+                    last_exc = httpx.HTTPStatusError(f"{model} HTTP {resp.status_code}",
+                                                     request=resp.request, response=resp)
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                if not data["candidates"][0]["content"]["parts"][0].get("text", "").strip():
+                    logger.warning(f"Gemini {model} returned empty text, trying next model")
+                    continue
+                return data, model
+            except httpx.TimeoutException as e:
+                logger.warning(f"Gemini {model} timeout, trying next model")
+                last_exc = e
+            except (KeyError, IndexError) as e:
+                logger.warning(f"Gemini {model} bad response, trying next model")
+                last_exc = e
+    raise last_exc or RuntimeError("All Gemini models failed")
 
 
 async def _call_gemini(api_key, prompt):
-    # Key goes in a header, not the URL, so it never lands in httpx/error logs.
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.9, "maxOutputTokens": 1024,
                              "thinkingConfig": {"thinkingBudget": 0}}
     }
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.post(url, json=payload, headers={"x-goog-api-key": api_key})
-        resp.raise_for_status()
-        data = resp.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    data, _ = await _gemini_post(api_key, payload, 20)
+    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
 async def _call_deepseek(api_key, prompt):
@@ -1020,7 +1046,6 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
             return data["choices"][0]["message"]["content"].strip()
 
     elif provider == "gemini":
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
         sys_prompt = messages[0]["content"] if (messages and messages[0]["role"] == "system") else ""
         raw_msgs = messages[1:] if (messages and messages[0]["role"] == "system") else messages
 
@@ -1051,12 +1076,9 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
         }
         payload = {k: v for k, v in payload.items() if v is not None}
 
-        async with httpx.AsyncClient(timeout=25) as client:
-            resp = await client.post(url, json=payload, headers={"x-goog-api-key": api_key})
-            resp.raise_for_status()
-            data = resp.json()
-            _record_model(f"{data.get('modelVersion') or GEMINI_MODEL} @ {resp.url.host}")
-            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        data, model = await _gemini_post(api_key, payload, 25)
+        _record_model(f"{data.get('modelVersion') or model} @ generativelanguage.googleapis.com")
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
     elif provider == "openai_compatible":
         base_url = kwargs.get("base_url") or "https://api.openai.com/v1"
