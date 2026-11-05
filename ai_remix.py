@@ -363,7 +363,7 @@ async def _call_openai_compatible(api_key, prompt, base_url, model):
     """Call any OpenAI-compatible API endpoint."""
     url = base_url.rstrip('/') + '/chat/completions'
     headers = {
-        "Authorization": "Bearer " + api_key,
+        "Authorization": "Bearer " + (api_key or "none"),  # keyless 9Router
         "Content-Type": "application/json",
         **_cf_access_headers(url),
     }
@@ -639,29 +639,84 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
     return prompt
 
 
+# Fallback after the active provider. Override with the `ai_fallback_order`
+# setting (JSON list) — e.g. to put a new free provider ahead of the paid ones.
+DEFAULT_FALLBACK_ORDER = ["chatgpt_oauth", "gemini", "groq", "openai_compatible", "openai", "deepseek"]
+
+
+async def get_fallback_order() -> list[str]:
+    import database as db
+    try:
+        raw = await db.get_setting("ai_fallback_order", "")
+        order = json.loads(raw) if raw else []
+        if isinstance(order, list) and order:
+            known = set(DEFAULT_FALLBACK_ORDER)
+            return [p for p in order if p in known] + [p for p in DEFAULT_FALLBACK_ORDER if p not in order]
+    except Exception:
+        pass
+    return list(DEFAULT_FALLBACK_ORDER)
+
+
+async def get_provider_config(provider: str) -> tuple[list[str], dict]:
+    """(keys, kwargs) for a provider. A self-hosted openai_compatible router
+    (9Router) with base_url + model counts as configured even without a key."""
+    import database as db
+    raw = await db.get_setting(f"ai_keys_{provider}", "[]")
+    try:
+        keys = json.loads(raw) if raw else []
+    except Exception:
+        keys = []
+    if not keys:
+        legacy_k = await db.get_setting(f"{provider}_api_key", "")
+        if legacy_k and legacy_k.strip():
+            keys = [legacy_k.strip()]
+    keys = [k.strip() for k in keys if k and str(k).strip()]
+    kwargs = {}
+    if provider in ("openai_compatible", "chatgpt_oauth"):
+        prefix = "oai_compat" if provider == "openai_compatible" else "chatgpt_oauth"
+        kwargs["base_url"] = (await db.get_setting(f"ai_{prefix}_base_url", "") or "").strip()
+        kwargs["model"] = (await db.get_setting(f"ai_{prefix}_model", "") or "").strip()
+        if provider == "openai_compatible" and not keys and kwargs["base_url"] and kwargs["model"]:
+            keys = [""]
+    return keys, kwargs
+
+
+async def check_providers(primary: str | None, timeout: float = 25.0) -> list[dict]:
+    """Ping the active provider then every configured fallback with a tiny prompt.
+    Used as a preflight before a campaign so a dead 9Router is caught up front."""
+    import asyncio
+    order = ([primary] if primary else []) + [p for p in await get_fallback_order() if p != primary]
+    async def _ping(prov):
+        keys, kwargs = await get_provider_config(prov)
+        if not keys:
+            return None
+        t0 = time.time()
+        entry = {"provider": prov, "model": kwargs.get("model") or "", "primary": prov == primary}
+        try:
+            reply = await asyncio.wait_for(
+                _try_call(prov, keys[0], "Reply with exactly one word: OK", **kwargs), timeout)
+            entry["ok"] = bool(reply and reply.strip())
+            if not entry["ok"]:
+                entry["error"] = "empty reply"
+        except Exception as e:
+            entry["ok"] = False
+            entry["error"] = (str(e) or type(e).__name__)[:200]
+        entry["latency_ms"] = int((time.time() - t0) * 1000)
+        return entry
+
+    # Ping in parallel: a dead 9Router no longer delays the others by `timeout`.
+    results = await asyncio.gather(*(_ping(p) for p in order))
+    return [r for r in results if r]
+
+
 async def _auto_fallback_remix(failed_provider, prompt):
     """Fallback across alternative configured providers if primary provider fails (e.g. 429 quota, auth error)."""
     try:
-        import database as db
-        fallback_order = ["chatgpt_oauth", "gemini", "groq", "openai_compatible", "openai", "deepseek"]
-        for alt_prov in fallback_order:
+        for alt_prov in await get_fallback_order():
             if alt_prov == failed_provider:
                 continue
-            alt_raw = await db.get_setting(f"ai_keys_{alt_prov}", "[]")
-            alt_keys = json.loads(alt_raw) if alt_raw else []
-            if not alt_keys and alt_prov == "gemini":
-                legacy_k = await db.get_setting("gemini_api_key", "")
-                if legacy_k and legacy_k.strip():
-                    alt_keys = [legacy_k.strip()]
-            alt_keys = [k.strip() for k in alt_keys if k and str(k).strip()]
+            alt_keys, alt_kwargs = await get_provider_config(alt_prov)
             if alt_keys:
-                alt_kwargs = {}
-                if alt_prov == "openai_compatible":
-                    alt_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
-                    alt_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
-                elif alt_prov == "chatgpt_oauth":
-                    alt_kwargs["base_url"] = await db.get_setting("ai_chatgpt_oauth_base_url", "")
-                    alt_kwargs["model"] = await db.get_setting("ai_chatgpt_oauth_model", "")
                 logger.info("[AI Remix] 🔄 Auto-fallback from '%s' to '%s' (%d keys available)...", failed_provider, alt_prov, len(alt_keys))
                 for a_key in alt_keys:
                     try:
@@ -684,8 +739,6 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
     """
     if not original_text or not original_text.strip():
         return original_text
-    if not api_keys:
-        return original_text
 
     prompt = _build_prompt(
         original_text,
@@ -694,15 +747,23 @@ async def remix_message(original_text, provider, api_keys, sender_name=None, cus
         auto_translate_native=auto_translate_native,
         member_info=member_info
     )
+    if not api_keys:
+        logger.warning("[AI Remix] No keys for active provider '%s' — trying fallbacks", provider)
+        fb = await _auto_fallback_remix(provider, prompt)
+        return ensure_paragraphs(humanize_text(fb)) if fb else original_text
     idx, key = _next_key(api_keys, provider)
 
     try:
         result = await _try_call(provider, key, prompt, **kwargs)
+        if not result or not result.strip():
+            logger.warning("[AI Remix] %s key[%d] returned empty — trying fallbacks", provider, idx)
+            fb = await _auto_fallback_remix(provider, prompt)
+            return ensure_paragraphs(humanize_text(fb)) if fb else original_text
         logger.info(
             "[AI Remix] %s key[%d] OK - %dc -> %dc",
             provider, idx, len(original_text), len(result)
         )
-        return ensure_paragraphs(humanize_text(result)) if result else original_text
+        return ensure_paragraphs(humanize_text(result))
 
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
@@ -838,8 +899,13 @@ async def _generate_chat_response_raw(
     `messages_history`: list of dicts [{"role": "user"|"assistant", "content": "..."}, ...]
     `system_prompt`: Sales Persona + Knowledge Base + Onboarding CTA
     """
-    if not api_keys or not provider:
-        return None
+    api_keys = list(api_keys or [])
+    if not api_keys and provider:
+        # Keyless 9Router or missing keys: still try the active provider's
+        # stored config, then the fallback chain.
+        api_keys, _cfg_kw = await get_provider_config(provider)
+        for k, v in _cfg_kw.items():
+            kwargs.setdefault(k, v)
 
     # Construct unified message list with system prompt
     formatted_messages = [{"role": "system", "content": system_prompt}]
@@ -849,22 +915,24 @@ async def _generate_chat_response_raw(
         if content:
             formatted_messages.append({"role": role, "content": content})
 
-    idx, key = _next_key(api_keys, provider)
-    try:
-        res = await _call_chat_provider(provider, key, formatted_messages, **kwargs)
-        if res:
-            logger.info("[AI Chat] %s key[%d] generated %dc response", provider, idx, len(res))
-            return res
-        logger.warning("[AI Chat] %s key[%d] returned an empty response", provider, idx)
-        _mark_key_failed(provider, idx)
-    except Exception as e:
-        logger.warning("[AI Chat] %s key[%d] failed: %s", provider, idx, e)
-        _mark_key_failed(provider, idx)
+    idx = -1
+    if api_keys and provider:
+        idx, key = _next_key(api_keys, provider)
+        try:
+            res = await _call_chat_provider(provider, key, formatted_messages, **kwargs)
+            if res:
+                logger.info("[AI Chat] %s key[%d] generated %dc response", provider, idx, len(res))
+                return res
+            logger.warning("[AI Chat] %s key[%d] returned an empty response", provider, idx)
+            _mark_key_failed(provider, idx)
+        except Exception as e:
+            logger.warning("[AI Chat] %s key[%d] failed: %s", provider, idx, e)
+            _mark_key_failed(provider, idx)
 
     # Try the provider's remaining keys before giving up on the whole provider.
     # NOTE: never `return` from inside this loop — a failing retry used to short-circuit
     # the fallback block below and surface as an empty reply in the UI.
-    for i in range(len(api_keys)):
+    for i in range(len(api_keys) if provider else 0):
         idx2, key2 = _next_key(api_keys, provider)
         if idx2 == idx or not key2:
             continue
@@ -882,35 +950,17 @@ async def _generate_chat_response_raw(
     # ── Automatic Fallback to alternative providers if primary fails ──
     # Ensure the provider we actually failed on is tried again with its own keys
     # (it may have more than one) before moving down the chain.
+    # The active provider's own keys were tried above; walk the shared,
+    # configurable fallback order (same as AI Remix).
     try:
-        import database as db
-        fallback_order = [provider, "chatgpt_oauth", "openai_compatible", "gemini", "groq", "openai", "deepseek"]
-        seen = set()
-        for alt_prov in fallback_order:
-            if not alt_prov or alt_prov in seen:
+        for alt_prov in await get_fallback_order():
+            if not alt_prov or alt_prov == provider:
                 continue
-            seen.add(alt_prov)
-            alt_raw = await db.get_setting(f"ai_keys_{alt_prov}", "[]")
-            try:
-                alt_keys = json.loads(alt_raw) if alt_raw else []
-            except (json.JSONDecodeError, TypeError):
-                alt_keys = []
-            # Only consult the legacy single-key setting when nothing is saved for
-            # this provider at all — never as a silent replacement for a real list.
-            if not alt_keys:
-                legacy_k = await db.get_setting(f"{alt_prov}_api_key", "")
-                if legacy_k and legacy_k.strip():
-                    alt_keys = [legacy_k.strip()]
-            alt_keys = [k.strip() for k in alt_keys if k and str(k).strip()]
+            alt_keys, alt_kwargs = await get_provider_config(alt_prov)
             if not alt_keys:
                 continue
-            alt_kwargs = {"images": kwargs.get("images")} if kwargs.get("images") else {}
-            if alt_prov == "openai_compatible":
-                alt_kwargs["base_url"] = await db.get_setting("ai_oai_compat_base_url", "")
-                alt_kwargs["model"] = await db.get_setting("ai_oai_compat_model", "")
-            elif alt_prov == "chatgpt_oauth":
-                alt_kwargs["base_url"] = await db.get_setting("ai_chatgpt_oauth_base_url", "")
-                alt_kwargs["model"] = await db.get_setting("ai_chatgpt_oauth_model", "")
+            if kwargs.get("images"):
+                alt_kwargs["images"] = kwargs.get("images")
             logger.info("[AI Chat] 🔄 Trying provider '%s' (%d keys)...", alt_prov, len(alt_keys))
             for a_key in alt_keys:
                 try:

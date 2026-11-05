@@ -733,6 +733,29 @@ const Members = {
   // ── Campaign Actions ──
   async startCampaign(id) {
     try {
+      // Preflight: make sure an AI model answers before burning DM quota.
+      let chk = null;
+      try {
+        App.toast('Đang kiểm tra AI model…', 'info');
+        chk = await apiGet(`/api/members/campaigns/${id}/ai-check`);
+      } catch (e) {
+        if (!confirm('Không kiểm tra được AI model (' + e.message + '). Vẫn chạy campaign?')) return;
+      }
+      if (chk && chk.needs_ai) {
+        const lines = (chk.providers || []).map(p =>
+          `${p.ok ? '✅' : '❌'} ${p.provider}${p.model ? ' (' + p.model + ')' : ''}${p.primary ? ' — đang chọn' : ''}` +
+          (p.ok ? ` ${p.latency_ms}ms` : ` — ${p.error || 'lỗi'}`));
+        if (!chk.ok) {
+          alert('❌ Không có AI model nào hoạt động — campaign KHÔNG được chạy.\n\n' +
+                (lines.join('\n') || 'Chưa cấu hình nhà cung cấp AI nào.') +
+                '\n\nKiểm tra 9Router / API key rồi thử lại.');
+          return;
+        }
+        if (!chk.primary_ok &&
+            !confirm('⚠️ Model đang chọn (' + (chk.primary || '?') + ') không phản hồi, AI sẽ dùng model dự phòng.\n\n' +
+                     lines.join('\n') + '\n\nVẫn chạy campaign?')) return;
+        if (chk.primary_ok) App.toast('AI model OK: ' + lines.find(l => l.includes('đang chọn')), 'success');
+      }
       const r = await API.startCampaignRuntime(id);
       if (r.status === 'queued') {
         App.toast('Lệnh đã được xếp hàng — worker sẽ chạy campaign', 'info');

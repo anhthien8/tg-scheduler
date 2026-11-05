@@ -7,6 +7,7 @@ import contextvars
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -342,6 +343,7 @@ async def get_db():
 
 async def close_db():
     global _pool
+    clear_settings_cache()
     if _pool is not None:
         await _pool.close_all()
         _pool = None
@@ -349,6 +351,7 @@ async def close_db():
 
 async def init_db():
     """Initialize database and create tables."""
+    clear_settings_cache()
     os.makedirs(DB_DIR, exist_ok=True)
     global _pool
     if _pool is None:
@@ -2726,12 +2729,29 @@ async def get_watcher_log_stats() -> dict:
         }
 
 
+# Settings are read many times per incoming DM; cache them briefly. Writes
+# through set_setting(s) invalidate at once. In split runtime the other process
+# sees a change within _SETTINGS_TTL seconds.
+_SETTINGS_TTL = 20.0
+_settings_cache: dict[str, tuple[float, object]] = {}
+_MISSING = object()
+
+
+def clear_settings_cache() -> None:
+    _settings_cache.clear()
+
+
 async def get_setting(key: str, default=None):
     """Retrieve a setting value by key."""
+    hit = _settings_cache.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < _SETTINGS_TTL:
+        return default if hit[1] is _MISSING else hit[1]
     async with get_db() as db:
         cursor = await db.execute("SELECT value FROM settings WHERE key=?", (key,))
         row = await cursor.fetchone()
-        return row[0] if row else default
+    _settings_cache[key] = (now, row[0] if row else _MISSING)
+    return row[0] if row else default
 
 
 async def get_settings_bulk(keys: dict):
@@ -2760,6 +2780,7 @@ async def set_settings_bulk(values: dict):
     """Persist many settings in ONE connection + ONE commit."""
     if not values:
         return
+    clear_settings_cache()
     async with get_db() as db:
         await db.executemany(
             """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
@@ -2771,6 +2792,7 @@ async def set_settings_bulk(values: dict):
 
 async def set_setting(key: str, value: str):
     """Insert or update a setting."""
+    clear_settings_cache()
     async with get_db() as db:
         await db.execute(
             """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))

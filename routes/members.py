@@ -925,6 +925,11 @@ async def import_contacts(req: ImportContactsRequest):
                 skipped_bots += 1
                 continue
 
+            # Obvious group/channel usernames (e.g. @Scriner_group) never accept DMs.
+            if _GROUPLIKE_USERNAME_RE.search(username):
+                skipped_bots += 1
+                continue
+
             # Cross-campaign dedup check
             if username.lower() in already_dmd:
                 skipped_count += 1
@@ -1017,6 +1022,10 @@ async def _load_deep_crawl_snapshot():
             _deep_crawl_queue = json.loads(raw_queue)
     except Exception as e:
         logger.debug(f"[DeepCrawl] Error loading snapshot: {e}")
+
+
+_GROUPLIKE_USERNAME_RE = re.compile(r"(?:_|^)(?:group|chat|channel|news|community)s?$|(?:group|chat|channel)$",
+                                    re.IGNORECASE)
 
 
 @router.post("/deep-crawl")
@@ -1557,6 +1566,22 @@ async def get_campaign(campaign_id: int):
     return {"campaign": campaign}
 
 
+@router.get("/campaigns/{campaign_id}/ai-check")
+async def campaign_ai_check(campaign_id: int):
+    """Preflight: is any AI model reachable for this campaign's remix?"""
+    campaign = await db.get_dm_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign không tồn tại")
+    if not campaign.get("use_ai_remix"):
+        return {"needs_ai": False, "ok": True, "primary_ok": True, "providers": []}
+    primary = await db.get_setting("ai_provider", None)
+    providers = await ai_rmx.check_providers(primary)
+    ok = any(p["ok"] for p in providers)
+    primary_ok = any(p["ok"] and p["primary"] for p in providers)
+    return {"needs_ai": True, "ok": ok, "primary": primary, "primary_ok": primary_ok,
+            "providers": providers}
+
+
 @router.post("/campaigns/{campaign_id}/start")
 async def start_campaign(campaign_id: int, background_tasks: BackgroundTasks):
     """Start running a DM campaign."""
@@ -1808,6 +1833,9 @@ async def _run_campaign(campaign_id: int):
 
             if ai_provider:
                 ai_keys = _provider_keys(ai_provider)
+                if not ai_keys and ai_provider == "openai_compatible":
+                    # Keyless self-hosted router (9Router) stays the active provider.
+                    ai_keys, _ = await ai_rmx.get_provider_config(ai_provider)
 
             if not ai_keys:
                 for alt_prov in all_providers:
@@ -2038,11 +2066,22 @@ async def _run_campaign(campaign_id: int):
                     **ai_remix_kwargs
                 )
                 if not test_res or test_res.strip() == test_sample.strip():
+                    # Say which models were tried and why, instead of a generic
+                    # "API key error" — usually 9Router is simply offline.
+                    try:
+                        _diag = await ai_rmx.check_providers(ai_provider, timeout=15)
+                        _diag_txt = "; ".join(
+                            f"{d['provider']}: {'OK' if d['ok'] else (d.get('error') or 'lỗi')[:60]}" for d in _diag
+                        ) or "chưa cấu hình model dự phòng nào"
+                    except Exception as _de:
+                        _diag_txt = f"không chẩn đoán được ({_de})"
+                    await db.add_dm_campaign_log(campaign_id, None, 0, None, "skipped",
+                                                f"🔎 Chi tiết model AI: {_diag_txt}"[:500])
                     logger.error(f"[Campaign {campaign_id}] 🛑 AI Remix ({ai_provider}) kiểm tra thất bại: API không phản hồi hoặc trả về nội dung rỗng. Tạm dừng để tránh lãng phí DM limit!")
                     await db.update_dm_campaign_status(campaign_id, "paused",
                                                         sent=sent, failed=failed, skipped=skipped)
                     await db.add_dm_campaign_log(campaign_id, None, 0, None, "skipped",
-                                                f"🛑 AI Remix ({ai_provider}) kiểm tra thất bại (API Key lỗi hoặc hết quota). Tạm dừng chiến dịch để bảo vệ limit DM!")
+                                                f"🛑 AI Remix ({ai_provider}) và mọi model dự phòng đều không phản hồi (9Router tắt/mất kết nối, API key lỗi hoặc hết quota — xem dòng 'Chi tiết model AI'). Tạm dừng chiến dịch để bảo vệ limit DM!")
                     _active_campaigns.pop(campaign_id, None)
                     return
                 logger.info(f"[Campaign {campaign_id}] ✅ AI Remix ({ai_provider}) kiểm tra thành công! Bắt đầu chạy chiến dịch.")
@@ -2272,6 +2311,27 @@ async def _run_campaign(campaign_id: int):
                     skipped += 1
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped",
                                                 "Tài khoản là Telegram Bot (xác nhận qua API)")
+                    continue
+
+                # ── Not DM-able: group/channel usernames, or users who charge Stars
+                # per message. Detected from the resolved peer, so no DM is spent;
+                # blacklisted and closed for good so auto-resume never retries them.
+                from telethon.tl.types import User as _TgUser
+                if not isinstance(peer, _TgUser):
+                    _why = "Username là nhóm/kênh, không phải người dùng"
+                elif getattr(peer, "send_paid_messages_stars", None):
+                    _why = f"Người nhận bật nhắn tin trả phí ({peer.send_paid_messages_stars} Stars)"
+                else:
+                    _why = None
+                if _why:
+                    skipped += 1
+                    try:
+                        await db.add_to_dm_blacklist(user_id, username, f"Auto: {_why}")
+                    except Exception:
+                        pass
+                    await db.finish_dm_campaign_reservation(campaign_id, user_id, "sent", "not_dmable: " + _why)
+                    _reservation_done = True
+                    await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped", _why)
                     continue
 
                 # ── Smart Template Rotation: select variant ──
@@ -2507,6 +2567,8 @@ async def _run_campaign(campaign_id: int):
                     "USER_ID_INVALID",
                     "CHAT_SEND_PLAIN_FORBIDDEN",
                     "CHAT_GUEST_SEND_FORBIDDEN",
+                    # Recipient charges Telegram Stars per incoming message.
+                    "ALLOW_PAYMENT_REQUIRED",
                 ]
                 if any(p.lower() in err_lower for p in skip_patterns):
                     skipped += 1

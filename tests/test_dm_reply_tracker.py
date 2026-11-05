@@ -108,6 +108,69 @@ async def test_ai_disclosure_blocked_and_replaced(mock_send, mock_chat):
     assert chat["status"] == "needs_human"
 
 
+async def _setup_agent_chat(user_msg: str):
+    agent_id = await db.create_ai_agent({"name": "Agent", "provider": "gemini", "api_keys_json": ["key"]})
+    await db.create_account({
+        "id": 1, "name": "BD Acc", "phone": "+84123456", "api_id": "api",
+        "api_hash": "hash", "session_name": "bd_acc", "ai_agent_id": agent_id,
+    })
+    await db.set_account_ai_agent(1, agent_id)
+    await db.get_or_create_followup_chat(account_id=1, user_id=202, username="lead")
+    await db.append_followup_chat_message(1, 202, "user", user_msg)
+
+
+@patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
+@patch("telegram_client.send_text_message", new_callable=AsyncMock)
+async def test_decline_tags_only_sends_polite_closing(mock_send, mock_chat):
+    await _setup_agent_chat("Добрый день, спасибо, но у нас нет такого формата сотрудничества.")
+    mock_chat.return_value = '[STOP]\n[METRICS: {"intent_score": 0, "lead_tier": "Tier C", "summary": "Declined"}]'
+
+    with patch("dm_reply_tracker._notify_main_account_handover", new_callable=AsyncMock):
+        res = await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
+
+    assert res is True
+    sent = mock_send.call_args[0][2]
+    assert sent == tracker.get_decline_closing_reply([{"role": "user", "content": "нет"}])
+    assert "Спасибо" in sent
+    chat = await db.get_followup_chat(1, 202)
+    assert chat["status"] == "needs_human"
+    assert await db.get_kol_step(1, 202) == "declined"
+
+
+@patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
+@patch("telegram_client.send_text_message", new_callable=AsyncMock)
+async def test_tags_only_reply_without_decline_is_logged_not_sent(mock_send, mock_chat, caplog):
+    await _setup_agent_chat("Help me")
+    mock_chat.return_value = "[HANDOVER_REQUIRED]"
+
+    with patch("dm_reply_tracker._notify_main_account_handover", new_callable=AsyncMock):
+        res = await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
+
+    assert res is False
+    mock_send.assert_not_called()
+    assert "empty after stripping tags" in caplog.text
+
+
+@patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
+@patch("telegram_client.send_text_message", new_callable=AsyncMock)
+async def test_prompt_includes_broker_program(mock_send, mock_chat):
+    await _setup_agent_chat("We are a fintech platform looking for an exchange partner")
+    mock_chat.return_value = "Sounds great"
+    await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
+    prompt = mock_chat.call_args_list[0][0][1]
+    assert "COMPANY/PLATFORM" in prompt and "Broker / B2B partnership model" in prompt
+    assert "neobank" in prompt
+
+
+async def test_decline_closing_reply_language():
+    vi = tracker.get_decline_closing_reply([{"role": "user", "content": "Cảm ơn, bên mình không hợp tác"}])
+    en = tracker.get_decline_closing_reply([{"role": "user", "content": "Not interested, thanks"}])
+    assert vi.startswith("Cảm ơn") and en.startswith("Thanks")
+    for text in (vi, en):
+        assert "%" not in text and "$" not in text  # never quotes figures
+        assert not tracker.contains_ai_disclosure(text)
+
+
 # ── 2. AI Reply pipeline ──────────────────────────────────────────────────────
 
 @patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
@@ -202,6 +265,8 @@ async def test_incoming_user_message_triggers_reply(mock_ai_reply):
     mock_event.message.video = None
     mock_event.message.video_note = None
     mock_event.message.gif = None
+    mock_event.message.sticker = None
+    mock_event.message.dice = None
     mock_event.message.photo = None
     mock_event.message.document = None
     mock_event.sender_id = 999
@@ -314,25 +379,63 @@ async def test_async_distill_human_rule_success(mock_distill):
     await db.get_or_create_followup_chat(
         account_id=1, user_id=202, username="lead", name="Lead User"
     )
-    await db.append_followup_chat_message(1, 202, "user", "what is pricing?")
+    await db.append_followup_chat_message(1, 202, "user", "how do I get my referral link?")
     
     mock_distill.return_value = {
-        "question": "what is pricing?",
-        "answer": "pricing is 50 usd"
+        "question": "how do I get my referral link?",
+        "answer": "Send me your UID and the team will create your referral link today"
     }
     
     await tracker._async_distill_human_rule(
         account_id=1,
         user_id=202,
-        message_text="pricing is 50 usd"
+        message_text="Send me your UID and the team will create your referral link today"
     )
     
     mock_distill.assert_called_once()
     args, kwargs = mock_distill.call_args
-    assert kwargs["human_reply"] == "pricing is 50 usd"
+    assert kwargs["human_reply"] == "Send me your UID and the team will create your referral link today"
     assert len(kwargs["history"]) == 1
     
     rules = await db.get_learned_knowledge_for_agent(agent_id)
     assert len(rules) == 1
-    assert rules[0]["question_pattern"] == "what is pricing?"
-    assert rules[0]["learned_answer"] == "pricing is 50 usd"
+    assert rules[0]["question_pattern"] == "how do I get my referral link?"
+    assert rules[0]["learned_answer"] == "Send me your UID and the team will create your referral link today"
+
+
+
+async def test_source_leak_detected_and_replaced():
+    leaks = [
+        "According to the supplied DOCX the campaign ends soon",
+        "Source C01 shows the August campaigns",
+        "Theo tài liệu được cung cấp thì chương trình đã hết hạn",
+        "My knowledge base says the cap is 200 USD",
+        "That's an owner-supplied ceiling",
+    ]
+    for text in leaks:
+        assert tracker.contains_ai_disclosure(text), text
+    for text in ("WEEX supports up to 80% revshare and daily settlement",
+                 "Ủa đúng rồi, mình người Việt nè",
+                 "The documented process is in the app under Services",
+                 "Can you share your PDF deck?",
+                 "Thanks for the provided data bro"):
+        assert not tracker.contains_source_leak(text), text
+    safe = tracker.get_safe_fallback_reply(leaks[0])
+    assert "check" in safe.lower() and "bot" not in safe.lower()
+    assert "team" in tracker.get_safe_fallback_reply(leaks[2])
+
+
+
+@patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
+@patch("telegram_client.send_text_message", new_callable=AsyncMock)
+async def test_decline_with_off_ladder_figure_sends_closing_not_number_check(mock_send, mock_chat):
+    await _setup_agent_chat("Hi not interested")
+    mock_chat.return_value = "No worries! Our 85% offer stays open anytime 🙏\n[STOP]"
+
+    with patch("dm_reply_tracker._notify_main_account_handover", new_callable=AsyncMock):
+        res = await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
+
+    assert res is True
+    sent = mock_send.call_args[0][2]
+    assert sent == tracker.get_decline_closing_reply([{"role": "user", "content": "Hi not interested"}])
+    assert "double-check" not in sent and "%" not in sent
