@@ -2059,11 +2059,22 @@ async def _run_campaign(campaign_id: int):
                     **ai_remix_kwargs
                 )
                 if not test_res or test_res.strip() == test_sample.strip():
+                    # Say which models were tried and why, instead of a generic
+                    # "API key error" — usually 9Router is simply offline.
+                    try:
+                        _diag = await ai_rmx.check_providers(ai_provider, timeout=15)
+                        _diag_txt = "; ".join(
+                            f"{d['provider']}: {'OK' if d['ok'] else (d.get('error') or 'lỗi')[:60]}" for d in _diag
+                        ) or "chưa cấu hình model dự phòng nào"
+                    except Exception as _de:
+                        _diag_txt = f"không chẩn đoán được ({_de})"
+                    await db.add_dm_campaign_log(campaign_id, None, 0, None, "skipped",
+                                                f"🔎 Chi tiết model AI: {_diag_txt}"[:500])
                     logger.error(f"[Campaign {campaign_id}] 🛑 AI Remix ({ai_provider}) kiểm tra thất bại: API không phản hồi hoặc trả về nội dung rỗng. Tạm dừng để tránh lãng phí DM limit!")
                     await db.update_dm_campaign_status(campaign_id, "paused",
                                                         sent=sent, failed=failed, skipped=skipped)
                     await db.add_dm_campaign_log(campaign_id, None, 0, None, "skipped",
-                                                f"🛑 AI Remix ({ai_provider}) kiểm tra thất bại (API Key lỗi hoặc hết quota). Tạm dừng chiến dịch để bảo vệ limit DM!")
+                                                f"🛑 AI Remix ({ai_provider}) và mọi model dự phòng đều không phản hồi (9Router tắt/mất kết nối, API key lỗi hoặc hết quota — xem dòng 'Chi tiết model AI'). Tạm dừng chiến dịch để bảo vệ limit DM!")
                     _active_campaigns.pop(campaign_id, None)
                     return
                 logger.info(f"[Campaign {campaign_id}] ✅ AI Remix ({ai_provider}) kiểm tra thành công! Bắt đầu chạy chiến dịch.")
