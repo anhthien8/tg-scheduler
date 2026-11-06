@@ -831,7 +831,10 @@ if(page==='warmup'){
         <div class="modal">
           <div class="modal-header"><h3 class="modal-title">Them script</h3><button class="modal-close" onclick="(document.getElementById('warmup-script-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
           <div class="modal-body">
-            <div class="form-group"><label class="form-label">Noi dung</label><textarea id="ws-content" class="form-textarea" rows="5" placeholder="Noi dung tin nhan warmup..."></textarea></div>
+            <div class="form-group"><label class="form-label">Mẫu 1 click <span style="font-weight:400;color:var(--text3);font-size:.8em">(bấm để thêm cả gói câu vào ô bên dưới)</span></label>
+              <div id="ws-presets" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Nội dung <span style="font-weight:400;color:var(--text3);font-size:.8em">— mỗi dòng là 1 script</span></label><textarea id="ws-content" class="form-textarea" rows="8" placeholder="Mỗi dòng 1 câu chat warmup..."></textarea></div>
             <div class="form-group" style="display:flex;align-items:center;gap:8px">
               <input type="checkbox" id="ws-ai-remix" checked>
               <label for="ws-ai-remix" style="cursor:pointer">AI Remix</label>
@@ -5038,23 +5041,70 @@ const Warmup = {
     } catch(e) { App.toast(e.message, 'error'); }
   },
 
+  // One-click warmup script packs. Neutral market chat only — never mention an
+  // exchange or a referral, warmup groups are public and often a rival's.
+  _SCRIPT_PRESETS: {
+    '🇻🇳 Thị trường': [
+      'BTC hôm nay đi ngang nhỉ', 'ai có kèo ETH không ae', 'sáng nay funding cao ghê',
+      'tuần này chắc sideway tiếp quá', 'altcoin dạo này yếu thật', 'ae giữ lệnh qua đêm không',
+      'vol hôm nay thấp nhỉ', 'chờ tin CPI tối nay đã', 'BTC giữ được vùng này là đẹp',
+      'thị trường đỏ quá ae ơi', 'hôm nay ai lời không', 'nến ngày đẹp phết'
+    ],
+    '🇬🇧 Market': [
+      'BTC looking pretty flat today', 'anyone got a good ETH setup?', 'funding is crazy high this morning',
+      'feels like another sideways week', 'alts are so weak lately', 'holding anything overnight?',
+      'volume is really low today', 'waiting for CPI first', 'if BTC holds this level it looks good',
+      'rough day in the market', 'anyone in profit today?', 'nice daily candle'
+    ],
+    '🇷🇺 Рынок': [
+      'биток сегодня во флэте', 'есть у кого сетап по эфиру?', 'фандинг утром высокий',
+      'похоже ещё неделя боковика', 'альты сейчас слабые', 'кто держит позиции на ночь?',
+      'объёмы сегодня низкие', 'жду сначала CPI', 'если удержим этот уровень — будет хорошо',
+      'рынок сегодня красный', 'кто сегодня в плюсе?', 'красивая дневная свеча'
+    ],
+    '☕ Chào hỏi': [
+      'chào ae buổi sáng', 'gm all ☕', 'tối nay ae trade gì', 'cuối tuần vui vẻ ae',
+      'mới vào nhóm, chào mọi người', 'gm gm', 'chúc ae một ngày xanh', 'good evening traders'
+    ],
+  },
+
+  _renderScriptPresets() {
+    const box = document.getElementById('ws-presets');
+    if (!box) return;
+    box.innerHTML = Object.keys(this._SCRIPT_PRESETS).map(k =>
+      `<button type="button" class="btn btn-ghost btn-sm" onclick="Warmup.applyScriptPreset(${JSON.stringify(k).replace(/"/g, '&quot;')})">${k} (${this._SCRIPT_PRESETS[k].length})</button>`
+    ).join('');
+  },
+
+  applyScriptPreset(name) {
+    const ta = document.getElementById('ws-content');
+    if (!ta) return;
+    const have = new Set(ta.value.split('\n').map(x => x.trim()).filter(Boolean));
+    const add = (this._SCRIPT_PRESETS[name] || []).filter(x => !have.has(x));
+    ta.value = [...have, ...add].join('\n');
+    App.toast(`Đã thêm ${add.length} câu — bấm Lưu`, 'success');
+  },
+
   openAddScript() {
     if (!this._selectedGroupId) { App.toast('Chon nhom truoc', 'error'); return; }
+    this._renderScriptPresets();
     (document.getElementById('ws-content') || me_dummy).value = '';
     (document.getElementById('ws-ai-remix') || me_dummy).checked = true;
     (document.getElementById('warmup-script-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
   async saveScript() {
-    const content = (document.getElementById('ws-content')?.value || "").trim();
-    if (!content) { App.toast('Nhap noi dung', 'error'); return; }
+    // One script per non-empty line, so a whole preset pack saves in one click.
+    const lines = [...new Set((document.getElementById('ws-content')?.value || "")
+      .split('\n').map(x => x.trim()).filter(Boolean))];
+    if (!lines.length) { App.toast('Nhap noi dung', 'error'); return; }
+    const use_ai_remix = document.getElementById('ws-ai-remix')?.checked ? 1 : 0;
     try {
-      await API.post('/api/warmup/groups/' + this._selectedGroupId + '/scripts', {
-        content,
-        use_ai_remix: document.getElementById('ws-ai-remix')?.checked ? 1 : 0
-      });
+      for (const content of lines) {
+        await API.post('/api/warmup/groups/' + this._selectedGroupId + '/scripts', { content, use_ai_remix });
+      }
       (document.getElementById('warmup-script-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
-      App.toast('Da them script', 'success');
+      App.toast(`Da them ${lines.length} script`, 'success');
       this.loadScripts();
     } catch(e) { App.toast(e.message, 'error'); }
   },
