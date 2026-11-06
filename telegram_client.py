@@ -1093,6 +1093,15 @@ async def join_channel(account_id: int, channel_link: str | int) -> dict:
         from telethon.tl.types import PeerChannel, PeerChat
         
         target = channel_link
+        # Private invite links (t.me/+HASH, t.me/joinchat/HASH) need ImportChatInvite.
+        if isinstance(target, str):
+            import re as _re
+            _m = _re.search(r"(?:t\.me/\+|t\.me/joinchat/|^\+)([\w-]{8,})", target.strip())
+            if _m:
+                from telethon.tl.functions.messages import ImportChatInviteRequest
+                upd = await client(ImportChatInviteRequest(_m.group(1)))
+                chats = getattr(upd, "chats", None) or []
+                return {"success": True, "title": getattr(chats[0], "title", target) if chats else target}
         if isinstance(target, str) and (target.isdigit() or target.startswith("-100") or (target.startswith("-") and target[1:].isdigit())):
             try:
                 target = int(target)
@@ -1124,17 +1133,62 @@ async def join_channel(account_id: int, channel_link: str | int) -> dict:
         return {"success": False, "error": err_msg}
 
 
+async def _joinable_ref_for_group(group_id, exclude: int | None = None) -> str | None:
+    """@username of a public group, or an invite link a member account can export."""
+    from telethon.tl.functions.messages import ExportChatInviteRequest
+    from telethon.tl.types import PeerChannel
+    gid = int(group_id)
+    raw = abs(gid)
+    if str(raw).startswith("100") and len(str(raw)) > 10:
+        raw = int(str(raw)[3:])
+    for acc_id, client in list(_clients.items()):
+        if acc_id == exclude or not client or not client.is_connected():
+            continue
+        try:
+            try:
+                entity = await client.get_entity(gid)
+            except Exception:
+                entity = await client.get_entity(PeerChannel(raw))
+        except Exception:
+            continue
+        username = getattr(entity, "username", None)
+        if username:
+            return "@" + username
+        try:
+            inv = await client(ExportChatInviteRequest(entity))
+            link = getattr(inv, "link", None)
+            if link:
+                return link
+        except Exception:
+            pass  # not admin: cannot export an invite link
+    return None
+
+
 async def auto_join_accounts_to_groups(account_ids: list[int], group_ids: list[int]) -> dict:
     """
     Auto-join all specified accounts into the specified groups.
     """
     results = []
+    refs: dict = {}
     for acc_id in account_ids:
         client = _clients.get(acc_id)
         if not client or not client.is_connected():
             continue
         for gid in group_ids:
             res = await join_channel(acc_id, gid)
+            if not res.get("success"):
+                # A bare numeric ID only resolves for accounts that already saw
+                # the group. Borrow a joinable @username / invite link from any
+                # connected account that is in it, and join through that.
+                if gid not in refs:
+                    refs[gid] = await _joinable_ref_for_group(gid, exclude=acc_id)
+                ref = refs[gid]
+                if ref:
+                    res = await join_channel(acc_id, ref)
+                elif res.get("error"):
+                    res["error"] = ("Không join được bằng ID nhóm và không nick nào trong nhóm lấy được "
+                                    "@username/link mời (nhóm riêng tư?). Hãy join tay bằng link mời. "
+                                    "Chi tiết: " + str(res["error"])[:120])
             results.append({
                 "account_id": acc_id,
                 "group_id": gid,
