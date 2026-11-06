@@ -453,7 +453,7 @@ async def test_human_admin_tag_never_reaches_lead(mock_send, mock_call):
     with patch("dm_reply_tracker._notify_main_account_handover", new_callable=AsyncMock):
         await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
 
-    sent_history = mock_call.call_args[0][2]
+    sent_history = mock_call.call_args_list[0][0][2]  # the reply call, not later profile extraction
     assert all("[Human Admin" not in (m.get("content") or "") for m in sent_history)
     sent = mock_send.call_args[0][2]
     assert "[Human Admin" not in sent and sent.startswith("Ừ để anh")
