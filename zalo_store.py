@@ -23,6 +23,13 @@ async def ensure_schema():
         return
     async with db.get_db() as conn:
         conn.row_factory = aiosqlite.Row
+        # An old Zalo prototype left a zalo_accounts table (phone/display_name/
+        # session_data) in some DBs; CREATE IF NOT EXISTS would keep it and every
+        # nick sync then fails with "no column named uid". Move it aside.
+        cur = await conn.execute("PRAGMA table_info(zalo_accounts)")
+        cols = {r[1] for r in await cur.fetchall()}
+        if cols and "uid" not in cols:
+            await conn.execute("ALTER TABLE zalo_accounts RENAME TO zalo_accounts_legacy")
         await conn.executescript("""
             CREATE TABLE IF NOT EXISTS zalo_contacts (
                 uid TEXT PRIMARY KEY,

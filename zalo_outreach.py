@@ -37,7 +37,32 @@ logger = logging.getLogger("tg-scheduler.zalo")
 _BRIDGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zalo-bridge")
 _PORT = int(os.getenv("ZALO_BRIDGE_PORT", "8897"))
 _URL = os.getenv("ZALO_BRIDGE_URL", f"http://127.0.0.1:{_PORT}")
-_SECRET = os.getenv("ZALO_BRIDGE_SECRET") or secrets.token_urlsafe(24)
+_SECRET_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "zalo_bridge.secret")
+
+
+def _load_secret() -> str:
+    """Stable secret kept in data/: a hard-killed server leaves its bridge running,
+    and a fresh random secret on restart would make that bridge answer 403."""
+    if os.getenv("ZALO_BRIDGE_SECRET"):
+        return os.environ["ZALO_BRIDGE_SECRET"]
+    try:
+        with open(_SECRET_FILE, encoding="utf-8") as f:
+            s = f.read().strip()
+        if s:
+            return s
+    except OSError:
+        pass
+    s = secrets.token_urlsafe(24)
+    try:
+        os.makedirs(os.path.dirname(_SECRET_FILE), exist_ok=True)
+        with open(_SECRET_FILE, "w", encoding="utf-8") as f:
+            f.write(s)
+    except OSError:
+        logger.warning("Could not persist zalo-bridge secret; restarts may need a bridge restart")
+    return s
+
+
+_SECRET = _load_secret()
 _proc: subprocess.Popen | None = None
 _worker: asyncio.Task | None = None
 _ACCEPT_CHECK_EVERY = timedelta(minutes=5)

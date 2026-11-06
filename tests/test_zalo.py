@@ -282,3 +282,22 @@ def test_watch_alone_keeps_worker_listening(fake_bridge):
         await zo.tick(check_accepts=False)
         assert not any(c[1] in ("/listen", "/joins") for c in calls)
     asyncio.run(run())
+
+
+@pytest.mark.asyncio
+async def test_legacy_zalo_accounts_table_is_moved_aside():
+    """Old prototype DBs have zalo_accounts(phone, display_name, session_data);
+    syncing nicks must not 500 with 'no column named uid'."""
+    import database as db
+    async with db.get_db() as conn:
+        await conn.execute("DROP TABLE IF EXISTS zalo_accounts")
+        await conn.execute("CREATE TABLE zalo_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                           "phone TEXT UNIQUE NOT NULL, display_name TEXT DEFAULT '', session_data TEXT DEFAULT '')")
+        await conn.commit()
+    store._schema_ready = False
+    await store.sync_accounts([{"id": "n1", "me": {"uid": "u1", "name": "Nick 1"}}])
+    accs = await store.list_accounts()
+    assert [(a["id"], a["uid"]) for a in accs] == [("n1", "u1")]
+    async with db.get_db() as conn:
+        cur = await conn.execute("SELECT name FROM sqlite_master WHERE name = 'zalo_accounts_legacy'")
+        assert await cur.fetchone()
