@@ -162,7 +162,7 @@ async def test_step_prompt_lists_have_and_missing():
                                        "volume_claimed": "12M"})
     text = await tracker.render_kol_step_prompt(A, U)
     assert "CURRENT STEP: 3/5" in text
-    assert "weex_uid=12345678" in text
+    assert "WEEX UID=12345678" in text  # column weex_uid shown with the lead's exchange
     assert "selected_campaign" in text and "first_post_link" in text
     assert "PREDICTED TIER" in text and "tier 2" in text
     assert "[STOP]" in text

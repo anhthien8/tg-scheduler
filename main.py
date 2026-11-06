@@ -14,6 +14,13 @@ if sys.stdout is None:
     sys.stdout = open(os.devnull, "w", encoding="utf-8", errors="ignore")
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8", errors="ignore")
+# Redirected to data/server_*.log the streams default to cp1252 on Windows, which turns
+# Vietnamese into ạ escapes and "?" — force UTF-8 so logs stay readable.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 from contextlib import asynccontextmanager
 

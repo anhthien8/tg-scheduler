@@ -619,6 +619,7 @@
                 <label class="form-label" style="font-size:13px">ChatGPT Subscription Access Tokens / OAuth Tokens (Round-Robin)</label>
                 <p style="font-size:12px;color:var(--text2);margin-bottom:8px">Thêm 1 hoặc nhiều Access Token (OAuth token):</p>
                 <div id="chatgpt_oauth-keys-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+                <div id="chatgpt-token-expiry" style="font-size:12px;margin-bottom:8px"></div>
                 <button class="btn btn-ghost btn-sm" onclick="App.addAiKeyRow('chatgpt_oauth')">+ Thêm ChatGPT Access Token</button>
               </div>
             </div>
@@ -1306,6 +1307,7 @@
         <div class="tab-bar" style="margin-bottom:16px">
           <button class="tab-btn active" id="members-tab-scrape" onclick="Members.switchSubTab('scrape')">Cào Group & Chiến dịch</button>
           <button class="tab-btn"        id="members-tab-similar" onclick="Members.switchSubTab('similar')">Quét Kênh Tương Tự (Leads)</button>
+          <button class="tab-btn"        id="members-tab-kol" onclick="Members.switchSubTab('kol')">📇 Danh bạ KOL</button>
         </div>
 
         <div id="members-subview-scrape">
@@ -1362,7 +1364,7 @@
                 <thead>
                   <tr>
                     <th>#</th>
-                    <th>Group</th>
+                    <th>Group <button class="btn btn-ghost btn-sm" style="padding:0 6px;font-size:11px;margin-left:4px" onclick="Members.tidyScrapeJobTitles()" title="Đổi tên các danh sách Deep Crawl cũ kiểu 'Deep Crawl Contacts (deep_https___t_me_xxx)' thành 'xxx · Deep Crawl'">✨ Đặt tên gọn</button></th>
                     <th>Members</th>
                     <th>Ngày cào</th>
                     <th>Hành động</th>
@@ -1439,7 +1441,14 @@
 
             <!-- Row 2: Premium accounts multi-select checkboxes -->
             <div style="margin-bottom:16px">
-              <label class="form-label">Tài khoản Premium (xoay vòng anti-ban)</label>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+                <label class="form-label">Tài khoản Premium (xoay vòng anti-ban) <span class="info-i" tabindex="0" data-tip="Tài khoản đang tạm dừng không được dùng. Tài khoản bị flag/PeerFlood nhưng không tạm dừng vẫn cào được: các giới hạn đó chỉ chặn nhắn tin người lạ, còn cào kênh chỉ đọc dữ liệu công khai. Mô tả kênh và loại @contact được đọc từ trang t.me công khai, nên gần như không tốn lượt tra username (dễ bị Telegram giới hạn tới ~24h).">i</span></label>
+                <label class="form-label" style="display:flex;align-items:center;gap:5px;cursor:pointer;font-weight:normal;color:var(--text-muted)">
+                  <input type="checkbox" id="sim-pf-crawl" onchange="Members.togglePeerFloodCrawl(this.checked)">
+                  Cho cả tài khoản tạm dừng vì PeerFlood
+                  <span class="info-i" tabindex="0" data-tip="Bật: tài khoản bị tự tạm dừng vì PeerFlood vẫn được dùng để cào kênh (chỉ đọc: gợi ý kênh, mô tả, tra @contact). Chúng vẫn không nhắn tin, không chạy campaign, AI hay warm-up, và vẫn được tự bật lại sau khi SpamBot báo sạch. Tài khoản tắt thủ công, tạm dừng vì FloodWait hoặc bị ban thì không bao giờ được dùng. Mặc định tắt.">i</span>
+                </label>
+              </div>
               <div id="sim-premium-checkboxes" style="display:flex;gap:12px;flex-wrap:wrap;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
                 <span style="color:var(--text-muted);font-size:13px">Đang tải...</span>
               </div>
@@ -1448,7 +1457,7 @@
             <!-- Crawl history: past runs + runs/queue interrupted by a server restart -->
             <details id="sim-history" style="margin-bottom:16px" ontoggle="if(this.open) Members.loadCrawlHistory()">
               <summary style="cursor:pointer;font-weight:600;font-size:13px">🕘 Lịch sử cào <span id="sim-history-badge" style="font-weight:400;color:var(--text-muted)"></span>
-                <span class="info-i" tabindex="0" data-tip="Các lần cào gần đây. Lần nào bị ngắt vì server dừng (đang chạy hoặc còn trong hàng đợi) hiện nhãn 'Bị ngắt' — bấm ▶ để chạy lại với cùng kênh và cài đặt.">i</span></summary>
+                <span class="info-i" tabindex="0" data-tip="Các lần cào gần đây (tối đa 50). Kết quả của từng lần được lưu riêng: bấm 👁 hoặc bấm vào dòng để xem lại, cào lần mới không ghi đè. Đang có lần cào chạy thì nút Bắt đầu thành 'Thêm vào hàng đợi' — link mới tự chạy khi lần hiện tại xong. Lần bị ngắt vì server dừng hiện 'Bị ngắt' — bấm ▶ để chạy lại.">i</span></summary>
               <div id="sim-history-list" style="margin-top:8px;display:flex;flex-direction:column;gap:4px;max-height:260px;overflow-y:auto"></div>
             </details>
 
@@ -1478,6 +1487,9 @@
               <div id="sim-progress-errors" class="hidden" style="margin-top:10px;max-height:80px;overflow-y:auto;font-size:11px;color:var(--text-muted);background:var(--bg1);padding:8px;border-radius:6px"></div>
             </div>
 
+            <!-- What the table shows: an older run opened from history / the previous run while the next one crawls -->
+            <div id="sim-view-banner" class="hidden" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:16px 0 0;padding:6px 10px;border-radius:8px;font-size:12px;background:color-mix(in srgb, var(--accent) 10%, transparent);border:1px solid color-mix(in srgb, var(--accent) 35%, transparent)"></div>
+
             <!-- Results Container -->
             <div id="sim-results-container" class="hidden">
               <div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px;flex-wrap:wrap;gap:12px">
@@ -1486,7 +1498,8 @@
                   <button class="btn btn-sm" onclick="Members.selectOnlyTradingContacts(60)" style="background:linear-gradient(135deg,var(--green),#059669);color:#fff;border:none;font-weight:600;display:flex;align-items:center;gap:5px" title="Chỉ chọn các contact thuộc kênh trading đạt từ 60 điểm trở lên">
                     <span>⚡</span> <span>Chọn nhanh Trading (≥60đ)</span>
                   </button>
-                  <input type="text" id="sim-import-job-id" class="form-input" style="width:200px;padding:6px 12px;font-size:13px" placeholder="Tên Scrape Job (e.g. leads_weex)">
+                  <input type="text" id="sim-import-job-id" class="form-input" style="width:240px;padding:6px 12px;font-size:13px" placeholder="Tên danh sách" oninput="Members._jobNameTouched = !!this.value.trim()">
+                  <span class="info-i" tabindex="0" data-tip="Tên tự đặt theo kênh nguồn + tab đang xem + ngày (vd H2Capitalchannel_Trading_0611). Sửa tay thì giữ tên của bạn. Khi lưu, contact đã có trong danh sách khác hoặc đã DM/đang trò chuyện sẽ tự bị bỏ qua.">i</span>
                   <button class="btn btn-green btn-sm" onclick="Members.importCheckedContacts()">📥 Import Contact Đã Chọn</button>
                   <button class="btn btn-ghost btn-sm" onclick="Members.clearDeepCrawlResults()" style="color:var(--red);border-color:color-mix(in srgb, var(--red) 30%, transparent)" title="Xóa toàn bộ kết quả trên bảng">🗑️ Xóa bảng</button>
                 </div>
@@ -1529,6 +1542,47 @@
               <div class="empty-state-icon">📢</div>
               <p class="empty-state-text">Nhập kênh nguồn và chọn độ sâu để tìm hàng trăm kênh tương tự và trích xuất contact ban quản trị.</p>
             </div>
+          </div>
+        </div>
+
+        <div id="members-subview-kol" class="hidden">
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+              <h3 style="margin:0;display:flex;align-items:center;gap:6px">📇 Danh bạ KOL / Kênh
+                <span class="info-i" tabindex="0" data-tip="Các kênh tìm được qua Deep Crawl: tên, link, subscribers, Trading Score, contact admin. Tự cập nhật khi cào xong và khi bạn lưu contact. Dùng để booking quảng cáo: ghi trạng thái, giá, ghi chú; xuất CSV theo bộ lọc hiện tại.">i</span>
+                <span id="kol-total" style="font-size:12px;font-weight:400;color:var(--text2)"></span>
+              </h3>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="btn btn-ghost btn-sm" onclick="Members.kolSync()" title="Nạp các kênh có contact từ kết quả Deep Crawl gần nhất">🔄 Đồng bộ từ Deep Crawl</button>
+                <button class="btn btn-ghost btn-sm" onclick="Members.kolCopyContacts()" title="Copy các @contact ở trang đang xem">📋 Copy contact</button>
+                <button class="btn btn-green btn-sm" onclick="Members.kolExport()" title="Xuất toàn bộ kênh khớp bộ lọc ra CSV (mở được bằng Excel/Google Sheets)">📤 Xuất CSV</button>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+              <input type="text" class="form-input" style="width:220px;padding:6px 10px;font-size:13px" placeholder="🔍 Tên kênh, @username, contact, ghi chú" oninput="Members.kolSet('q', this.value)">
+              <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px;white-space:nowrap">Score ≥
+                <select class="form-input" style="padding:4px 6px;font-size:12px" onchange="Members.kolSet('minScore', +this.value)">
+                  <option value="0">Tất cả</option><option value="45">45 (BD)</option><option value="60">60 (Trading)</option><option value="80">80 (VIP)</option>
+                </select></label>
+              <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px;white-space:nowrap">Sắp xếp
+                <select class="form-input" style="padding:4px 6px;font-size:12px" onchange="Members.kolSet('sort', this.value)">
+                  <option value="score">Trading Score</option><option value="subs">Subscribers</option><option value="recent">Mới thấy</option><option value="updated">Mới cập nhật</option><option value="title">Tên A→Z</option>
+                </select></label>
+              <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px;cursor:pointer">
+                <input type="checkbox" checked onchange="Members.kolSet('hasContact', this.checked ? 1 : 0)"> Chỉ kênh có contact</label>
+            </div>
+            <div id="kol-status-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
+            <div class="table-wrap" style="overflow-x:auto">
+              <table>
+                <thead><tr>
+                  <th>Kênh</th><th style="text-align:right">Subs</th><th>Score</th><th>Phân loại</th><th>Contact</th>
+                  <th style="white-space:nowrap">Trạng thái <span class="info-i" tabindex="0" data-tip="Tiến độ booking quảng cáo với kênh: Mới → Đã liên hệ → Đang thương lượng → Đã book / Từ chối.">i</span></th>
+                  <th>Giá</th><th>Ghi chú</th><th></th>
+                </tr></thead>
+                <tbody id="kol-tbody"></tbody>
+              </table>
+            </div>
+            <div id="kol-pagination" style="margin-top:12px;display:flex;justify-content:center;align-items:center"></div>
           </div>
         </div>
       </div>
@@ -2142,14 +2196,14 @@
   <script defer src="/static/js/api.js?v=492"></script>
   <script defer src="/static/js/discord.js?v=492"></script>
   <script defer src="/static/js/zalo.js?v=495"></script>
-  <script defer src="/static/js/members.js?v=501"></script>
+  <script defer src="/static/js/members.js?v=507"></script>
   <script defer src="/static/js/analytics.js?v=492"></script>
   <script defer src="/static/js/ai_agents.js?v=492"></script>
-  <script defer src="/static/js/ai_followup.js?v=496"></script>
+  <script defer src="/static/js/ai_followup.js?v=498"></script>
   <script defer src="/static/js/changelog.js?v=492"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=506"></script>
-  <script defer src="/static/js/app.js?v=506"></script>
+  <script defer src="/static/js/app.js?v=512"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

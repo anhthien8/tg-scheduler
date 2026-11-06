@@ -24,12 +24,18 @@ import json
 import logging
 import re
 from datetime import date
+from functools import lru_cache
 
 import database as db
 
 logger = logging.getLogger("kol_offer")
 
 LADDER_SETTING_KEY = "kol_offer_ladder"
+
+# The ladder below is WEEX's. Chats run by another exchange's agent (BloFin,
+# Bitget, PU Prime...) quote only the terms written in that agent's own
+# instructions / knowledge base (see offer_block_for / find_off_offer_figures).
+LADDER_EXCHANGE = "WEEX"
 
 # Founder-approved ladder (2026-10-21). Applies to every KOL, every region.
 DEFAULT_LADDER: dict = {
@@ -321,15 +327,18 @@ def allowed_figures(ladder: dict | None = None) -> tuple[set[float], set[float]]
     return pcts, dollars
 
 
-def find_off_ladder_figures(text: str, ladder: dict | None = None) -> list[str]:
+def find_off_ladder_figures(text: str, ladder: dict | None = None,
+                            allowed: tuple[set[float], set[float]] | None = None) -> list[str]:
     """Return every %/$ figure (and banned phrase) in `text` that the ladder does not allow.
 
+    `allowed` = (percents, dollars) replaces the ladder's figures (non-WEEX agents);
+    banned phrases still come from the ladder rules.
     An empty list means the reply is safe to send.
     """
     if not text:
         return []
     ladder = _normalize_ladder(ladder or DEFAULT_LADDER)
-    pcts_ok, dollars_ok = allowed_figures(ladder)
+    pcts_ok, dollars_ok = allowed if allowed is not None else allowed_figures(ladder)
     bad: list[str] = []
 
     def _pct_bad(v: float) -> bool:
@@ -363,6 +372,86 @@ def find_off_ladder_figures(text: str, ladder: dict | None = None) -> list[str]:
             seen.add(b)
             out.append(b)
     return out
+
+
+# ── Exchange-aware offer (non-WEEX agents) ──────────────────────────────────
+
+# '100% organic' style wording and 'per 1M volume' are fine for any exchange.
+_ANY_AGENT_PERCENTS = frozenset({100.0})
+_ANY_AGENT_DOLLARS = frozenset({1_000_000.0})
+
+
+def uses_ladder(exchange: str | None) -> bool:
+    """True when the chat sells WEEX (the ladder applies); unknown = WEEX (historic default)."""
+    return (exchange or LADDER_EXCHANGE) == LADDER_EXCHANGE
+
+
+@lru_cache(maxsize=32)
+def _figures_cached(text: str) -> tuple[frozenset, frozenset]:
+    pcts: set[float] = set()
+    dollars: set[float] = set()
+    for m in _PCT_RANGE_RE.finditer(text):
+        pcts.add(float(m.group(1)))
+        pcts.add(float(m.group(2)))
+    for m in _PCT_RE.finditer(text):
+        pcts.add(float(m.group(1)))
+    for m in _DOLLAR_RE.finditer(text):
+        dollars.add(_to_number(m.group(1), m.group(2)))
+    for m in _USD_SUFFIX_RE.finditer(text):
+        dollars.add(_to_number(m.group(1), m.group(2)))
+    return frozenset(pcts), frozenset(dollars)
+
+
+def figures_in(text: str | None) -> tuple[set[float], set[float]]:
+    """(percents, dollar amounts) written in `text`, parsed exactly like the guard parses replies."""
+    if not text:
+        return set(), set()
+    pcts, dollars = _figures_cached(text)
+    return set(pcts), set(dollars)
+
+
+def agent_figures(agent: dict | None) -> tuple[set[float], set[float]]:
+    """Figures a non-WEEX agent may quote: the ones in its own system prompt + knowledge base."""
+    a = agent or {}
+    pcts, dollars = figures_in(f"{a.get('system_prompt') or ''}\n{a.get('knowledge_base') or ''}")
+    return pcts | _ANY_AGENT_PERCENTS, dollars | _ANY_AGENT_DOLLARS
+
+
+def find_off_offer_figures(text: str, exchange: str | None = None, agent: dict | None = None,
+                           ladder: dict | None = None) -> list[str]:
+    """Off-offer guard for the exchange the chat sells: the WEEX ladder for WEEX,
+    the replying agent's own figures for any other exchange."""
+    if uses_ladder(exchange):
+        return find_off_ladder_figures(text, ladder)
+    return find_off_ladder_figures(text, ladder, allowed=agent_figures(agent))
+
+
+def render_agent_offer_prompt(exchange: str) -> str:
+    """Offer block for a non-WEEX chat: the terms live in the agent's own instructions / KB."""
+    ex = exchange or LADDER_EXCHANGE
+    return "\n".join([
+        f"--- OFFICIAL {ex} KOL COMMISSION TERMS ---",
+        f"This chat is about {ex}. The ONLY commission terms, tiers, rewards, thresholds and links you may quote are the ones "
+        "written in YOUR OWN instructions and knowledge base above. Lead with the starting offer they define and explain "
+        "the tiers only when the KOL asks for details.",
+        "Other exchanges' ladders, campaigns, links and committees do NOT apply to this chat — never quote or borrow them.",
+        "If the KOL asks for a tier, %, bonus, threshold, fee or exception your instructions do not cover, say you will "
+        "confirm the exact numbers with the team and end your reply with [HANDOVER_REQUIRED].",
+        "TIER PREDICTION: only when your instructions define the volume thresholds AND the KOL stated their monthly volume; "
+        "otherwise do not predict a tier.",
+        "NEVER use the phrase \"B-book\" or any variant.",
+        UPFRONT_PROOF_RULE,
+        "NEVER quote any % or $ figure that is not written in your own instructions / knowledge base "
+        "(no internal estimates, no new 'total payout' maths beyond the examples given there).",
+    ])
+
+
+async def offer_block_for(exchange: str | None, volume_claimed=None) -> tuple[str, dict | None]:
+    """(prompt block, ladder or None) for the exchange the chat sells."""
+    if uses_ladder(exchange):
+        ladder = await get_ladder()
+        return render_offer_ladder_prompt(ladder, volume_claimed), ladder
+    return render_agent_offer_prompt(exchange), None
 
 
 def get_safe_offer_fallback_reply(lang: str = "en") -> str:

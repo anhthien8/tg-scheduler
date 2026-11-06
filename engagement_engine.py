@@ -304,6 +304,7 @@ async def _send_group_message(
             except tg_errors.FloodWaitError as e:
                 # AC3: FloodWait → mark peerflood
                 _mark_peerflood(account_id)
+                await alerts.flood_wait_guard(account_id, e.seconds, "engagement")
                 return {"ok": False, "msg_id": None, "error": str(e), "kind": "peerflood"}
             except (tg_errors.ChatWriteForbiddenError,
                     tg_errors.UserBannedInChannelError) as e:
@@ -380,19 +381,18 @@ async def _generate_engagement_reply(
         context_text = "\n".join(f"- {m}" for m in context_messages[-5:])
         user_msg = f"5 tin gần nhất trong nhóm:\n{context_text}\n\nCâu hỏi cần trả lời:\n{trigger_text}"
 
-    # Call AI
+    # Call AI. Same provider resolution as the DM agent: the agent's own keys,
+    # then the global AI provider, then any provider that has keys (plus the
+    # model/base_url kwargs). Signature: (history, system_prompt, provider, keys).
     try:
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_msg},
-        ]
-        provider = agent.get("provider", "")
-        api_keys = agent.get("api_keys_json", "[]")
-        if isinstance(api_keys, str):
-            import json
-            api_keys = json.loads(api_keys)
+        from dm_reply_tracker import _resolve_ai_provider
+        provider, api_keys, kwargs = await _resolve_ai_provider(agent)
+        if not api_keys:
+            logger.warning("[Engagement] No AI provider/keys configured (agent %s)", agent_id)
+            return None
+        messages = [{"role": "user", "content": user_msg}]
 
-        reply = await ai_rmx.generate_chat_response(messages, provider, api_keys)
+        reply = await ai_rmx.generate_chat_response(messages, system_prompt, provider, api_keys, **kwargs)
         if not reply:
             return None
 
@@ -410,8 +410,8 @@ async def _generate_engagement_reply(
         if _contains_shill(reply):
             logger.warning("[Engagement] AI output contains shill content, retrying...")
             # One retry
-            reply2 = await ai_rmx.generate_chat_response(messages, provider, api_keys)
-            if not reply2 or "<SKIP>" in reply2 or _contains_shill(reply2):
+            reply2 = await ai_rmx.generate_chat_response(messages, system_prompt, provider, api_keys, **kwargs)
+            if not reply2 or "<skip>" in reply2.lower() or _contains_shill(reply2):
                 return None
             reply = reply2.strip()
 

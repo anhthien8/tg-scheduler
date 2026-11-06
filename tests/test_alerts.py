@@ -257,3 +257,71 @@ async def test_flood_guard_rotates_proxy_when_enabled(fake_db, monkeypatch):
         paused = await alerts.flood_guard(5)
     assert paused is True
     rotate.assert_awaited_once()
+
+
+# ── flood_wait_guard ────────────────────────────────────────────────────────
+
+def _flood_settings(**over):
+    vals = {"flood_autopause_enabled": "1", "flood_autopause_single_secs": "600",
+            "flood_autopause_count": "3", **over}
+    return AsyncMock(side_effect=lambda k, d=None: vals.get(k, d))
+
+
+@pytest.fixture
+def flood_db(fake_db, monkeypatch):
+    monkeypatch.setattr(alerts, "db", fake_db)
+    monkeypatch.setattr(alerts, "_flood_waits", {})
+    fake_db.get_setting = _flood_settings()
+    fake_db.is_account_paused = AsyncMock(return_value=False)
+    fake_db.get_all_accounts = AsyncMock(return_value=[{"id": 7, "name": "nick"}])
+    return fake_db
+
+
+async def test_flood_wait_guard_pauses_on_long_single_wait(flood_db):
+    with patch.object(alerts, "send_alert", AsyncMock()) as sa:
+        assert await alerts.flood_wait_guard(7, 900, "campaign #1") is True
+    flood_db.pause_account.assert_awaited_once()
+    assert flood_db.pause_account.await_args.args[1].startswith("FloodWait")
+    sa.assert_awaited_once()
+
+
+async def test_flood_wait_guard_pauses_on_third_wait_in_24h(flood_db):
+    with patch.object(alerts, "send_alert", AsyncMock()):
+        assert await alerts.flood_wait_guard(7, 120) is False
+        assert await alerts.flood_wait_guard(7, 30) is False   # short waits don't count
+        assert await alerts.flood_wait_guard(7, 120) is False
+        assert await alerts.flood_wait_guard(7, 120) is True
+    flood_db.pause_account.assert_awaited_once()
+
+
+async def test_flood_wait_guard_respects_disable_and_already_paused(flood_db):
+    flood_db.get_setting = _flood_settings(flood_autopause_enabled="0")
+    assert await alerts.flood_wait_guard(7, 5000) is False
+    flood_db.get_setting = _flood_settings()
+    flood_db.is_account_paused = AsyncMock(return_value=True)
+    assert await alerts.flood_wait_guard(7, 5000) is False
+    flood_db.pause_account.assert_not_awaited()
+
+
+# ── check_chatgpt_token_expiry ─────────────────────────────────────────────
+
+def _jwt(exp):
+    import base64
+    import json
+    body = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).decode().rstrip("=")
+    return f"h.{body}.s"
+
+
+async def test_chatgpt_token_expiry_alerts_only_when_close(fake_db, monkeypatch):
+    import json
+    import time
+    monkeypatch.setattr(alerts, "db", fake_db)
+    assert alerts.jwt_exp(_jwt(123)) == 123 and alerts.jwt_exp("not-a-jwt") == 0
+    fake_db.get_setting = AsyncMock(return_value=json.dumps([_jwt(int(time.time()) + 9 * 86400)]))
+    with patch.object(alerts, "send_alert", AsyncMock()) as sa:
+        await alerts.check_chatgpt_token_expiry()
+    sa.assert_not_awaited()
+    fake_db.get_setting = AsyncMock(return_value=json.dumps([_jwt(int(time.time()) + 86400)]))
+    with patch.object(alerts, "send_alert", AsyncMock()) as sa:
+        await alerts.check_chatgpt_token_expiry()
+    sa.assert_awaited_once()

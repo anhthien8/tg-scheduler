@@ -118,6 +118,103 @@ async def flood_guard(account_id: int) -> bool:
         return False
 
 
+_flood_waits: dict[int, list[float]] = {}  # account_id -> timestamps of significant FloodWaits
+FLOOD_WINDOW_SECS = 24 * 3600
+FLOOD_COUNT_MIN_SECS = 60  # short waits (<60s) are routine and don't count
+
+
+async def flood_wait_guard(account_id: int, seconds: int, source: str = "") -> bool:
+    """FloodWait trên tác vụ gửi/ghi -> đếm theo account; account "mệt" thì tạm dừng hẳn.
+
+    Tạm dừng khi 1 lần chờ >= flood_autopause_single_secs (mặc định 600s) hoặc
+    >= flood_autopause_count lần (mặc định 3) chờ >= 60s trong 24h. Không tự bật lại
+    (tạm dừng = dừng hẳn) — lý do pause ghi giờ gợi ý bật lại. Returns True nếu vừa pause.
+    Setting flood_autopause_enabled = "0" để tắt.
+    """
+    try:
+        if await db.get_setting("flood_autopause_enabled", "1") != "1":
+            return False
+        now = time.time()
+        if seconds >= FLOOD_COUNT_MIN_SECS:
+            hits = [t for t in _flood_waits.get(account_id, []) if now - t < FLOOD_WINDOW_SECS]
+            hits.append(now)
+            _flood_waits[account_id] = hits
+        else:
+            hits = [t for t in _flood_waits.get(account_id, []) if now - t < FLOOD_WINDOW_SECS]
+        single_max = int(await db.get_setting("flood_autopause_single_secs", "600") or 600)
+        count_max = int(await db.get_setting("flood_autopause_count", "3") or 3)
+        too_long = seconds >= single_max
+        too_many = len(hits) >= count_max
+        if not (too_long or too_many):
+            return False
+        if await db.is_account_paused(account_id):
+            return False
+
+        resume_at = datetime.fromtimestamp(now + max(seconds, 6 * 3600)).strftime("%H:%M %d/%m")
+        why = f"chờ {seconds}s" if too_long else f"{len(hits)} lần FloodWait/24h (lần cuối {seconds}s)"
+        src = f", {source}" if source else ""
+        await db.pause_account(account_id, f"FloodWait — {why}{src}. Gợi ý bật lại sau {resume_at}")
+        _flood_waits.pop(account_id, None)
+        logger.warning(f"[FloodGuard] Account {account_id} AUTO-PAUSED: {why}{src}")
+
+        accounts = await db.get_all_accounts()
+        acc = next((a for a in accounts if a["id"] == account_id), None)
+        name = (acc.get("name") or f"#{account_id}") if acc else f"#{account_id}"
+        await send_alert(
+            f"floodwait_{account_id}",
+            f"😮‍💨 Tài khoản {name} (ID {account_id}) bị FloodWait nhiều ({why}{src}) — "
+            f"ĐÃ TỰ TẠM DỪNG để nghỉ. Gợi ý bật lại sau {resume_at} (bật thủ công trong UI)."
+        )
+        return True
+    except Exception as e:
+        logger.error(f"[FloodGuard] flood_wait_guard lỗi: {e}")
+        return False
+
+
+def jwt_exp(token: str) -> int:
+    """`exp` (unix seconds) of a JWT, or 0 if the token isn't a decodable JWT."""
+    import base64
+    import json
+    parts = (token or "").split(".")
+    if len(parts) != 3:
+        return 0
+    try:
+        seg = parts[1] + "=" * (-len(parts[1]) % 4)
+        return int(json.loads(base64.urlsafe_b64decode(seg)).get("exp") or 0)
+    except Exception:
+        return 0
+
+
+async def check_chatgpt_token_expiry(warn_days: float = 3):
+    """Daily: nhắc khi Access Token ChatGPT còn <= warn_days ngày hoặc đã hết hạn.
+    Token hết hạn âm thầm làm AI trả lời fallback sang provider khác / lỗi."""
+    import json
+    try:
+        try:
+            keys = json.loads(await db.get_setting("ai_keys_chatgpt_oauth", "[]") or "[]")
+        except Exception:
+            keys = []
+        now = time.time()
+        notes = []
+        for i, k in enumerate(keys, 1):
+            exp = jwt_exp(str(k))
+            if not exp:
+                continue
+            days = (exp - now) / 86400
+            if days <= warn_days:
+                when = datetime.fromtimestamp(exp).strftime("%H:%M %d/%m")
+                notes.append(f"Token #{i}: " + ("ĐÃ HẾT HẠN" if days < 0 else f"còn {max(days, 0):.1f} ngày")
+                             + f" ({when})")
+        if notes:
+            await send_alert(
+                "chatgpt_token_expiry",
+                "🔑 Token ChatGPT sắp hết hạn:\n" + "\n".join(notes)
+                + "\nMở chatgpt.com/api/auth/session để lấy token mới rồi dán vào Cài đặt AI."
+            )
+    except Exception as e:
+        logger.error(f"[Alert] check_chatgpt_token_expiry lỗi: {e}")
+
+
 async def check_lead_sla():
     """Tier A/B leads stuck in needs_human > 2h → ping. Dedup per lead per 6h."""
     try:

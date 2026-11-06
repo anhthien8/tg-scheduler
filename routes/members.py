@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from telethon import errors as tg_errors
 
 import ai_remix as ai_rmx
@@ -114,6 +114,12 @@ class ImportContactsRequest(BaseModel):
     scrape_job_id: str
     group_title: str
     contacts: list[dict]
+    # Skip usernames already saved in another list (default on — avoids double DMs)
+    skip_existing: bool = True
+    # Channels whose contacts are being saved → upserted into the KOL directory
+    channels: list[dict] = []
+    # Crawl source of those channels (set when saving from an older crawl opened from history)
+    source: str = ""
 
 
 class DeepCrawlRequest(BaseModel):
@@ -125,7 +131,7 @@ class DeepCrawlRequest(BaseModel):
 
 class TranslateDescriptionsRequest(BaseModel):
     texts: list[str]
-    target_lang: str = "en"
+    target_lang: str = Field("en", pattern=r"^[A-Za-z]{2,3}(-[A-Za-z]{2,4})?$")
 
 
 # ── Deep Crawl State (module-level for progress polling) ──
@@ -620,6 +626,27 @@ async def delete_scrape_job(scrape_job_id: str):
         raise HTTPException(status_code=500, detail=f"Lỗi xóa scrape job: {str(e)}")
 
 
+class RenameJobRequest(BaseModel):
+    group_title: str
+
+
+@router.post("/scrape-jobs/{scrape_job_id}/rename")
+async def rename_scrape_job(scrape_job_id: str, req: RenameJobRequest):
+    """Change the display name of a list. The job id stays the same, so campaigns
+    that already point at this list keep working."""
+    title = req.group_title.strip()[:120]
+    if not title:
+        raise HTTPException(status_code=400, detail="Tên không được để trống")
+    from database import get_db
+    async with get_db() as conn:
+        cur = await conn.execute("UPDATE scraped_members SET group_title = ? WHERE scrape_job_id = ?",
+                                 (title, scrape_job_id))
+        await conn.commit()
+    if not cur.rowcount:
+        raise HTTPException(status_code=404, detail="Không tìm thấy danh sách")
+    return {"success": True, "rows": cur.rowcount}
+
+
 class ScrapeSubsetRequest(BaseModel):
     keep_user_ids: list[int]
     group_title: Optional[str] = None
@@ -963,16 +990,31 @@ async def import_contacts(req: ImportContactsRequest):
             for row in await cursor.fetchall():
                 already_dmd.add(row[0])
 
+        # People already chatting with one of our accounts (AI chats, inbound DMs)
+        already_dmd |= (await db.get_existing_conversation_sets())[1]
+
+        # Usernames already saved in some list (this job included)
+        wanted = [str(c.get("username", "")).strip().lstrip("@") for c in req.contacts]
+        saved_in = await db.find_saved_usernames(wanted) if req.skip_existing else {}
+
         # ── Step 2: Build members list, filtering out bots and already-DM'd ──
         members_list = []
         skipped_count = 0
         skipped_bots = 0
+        skipped_existing = 0
+        skipped_dupe = 0
+        existing_jobs: dict[str, int] = {}
+        seen_in_req: set[str] = set()
         for c in req.contacts:
             username = c.get("username", "").strip()
             if username.startswith("@"):
                 username = username[1:]
             if not username:
                 continue
+            if username.lower() in seen_in_req:
+                skipped_dupe += 1
+                continue
+            seen_in_req.add(username.lower())
 
             # Bot account check
             if tg.is_bot_account(None, username):
@@ -987,6 +1029,13 @@ async def import_contacts(req: ImportContactsRequest):
             # Cross-campaign dedup check
             if username.lower() in already_dmd:
                 skipped_count += 1
+                continue
+
+            # Already saved in a list (any job) — saving again only creates double DMs
+            job_hit = saved_in.get(username.lower())
+            if job_hit:
+                skipped_existing += 1
+                existing_jobs[job_hit] = existing_jobs.get(job_hit, 0) + 1
                 continue
 
             # Generate deterministic negative ID based on username hash to satisfy UNIQUE(scrape_job_id, user_id)
@@ -1017,9 +1066,20 @@ async def import_contacts(req: ImportContactsRequest):
                 members=members_list
             )
 
+        kol_upserted = 0
+        if req.channels:
+            try:
+                kol_upserted = await db.upsert_kol_channels(
+                    req.channels, source=req.source or _deep_crawl_state.get("source_url") or "",
+                    saved_job=req.scrape_job_id if members_list else None)
+            except Exception as e:
+                logger.warning(f"[KOL] upsert on import failed: {e}")
+
         details = []
         if skipped_count:
             details.append(f"bỏ qua {skipped_count} đã DM trước đó")
+        if skipped_existing:
+            details.append(f"bỏ qua {skipped_existing} đã có trong danh sách khác")
         if skipped_bots:
             details.append(f"lọc {skipped_bots} tài khoản bot")
         detail_msg = f" ({', '.join(details)})" if details else ""
@@ -1029,6 +1089,10 @@ async def import_contacts(req: ImportContactsRequest):
             "count": len(members_list),
             "skipped_dmd": skipped_count,
             "skipped_bots": skipped_bots,
+            "skipped_existing": skipped_existing,
+            "skipped_dupe": skipped_dupe,
+            "existing_jobs": sorted(existing_jobs.items(), key=lambda x: -x[1])[:5],
+            "kol_upserted": kol_upserted,
             "message": f"Imported {len(members_list)} contacts{detail_msg}"
         }
     except Exception as e:
@@ -1050,6 +1114,100 @@ async def _save_deep_crawl_snapshot():
 _HISTORY_KEY = "deep_crawl_history"
 _HISTORY_MAX = 50
 
+# Each finished/stopped/interrupted crawl keeps its leads in data/deep_crawl_runs/<id>.json.gz
+# so a later crawl does not overwrite them: the history opens them again. gzip makes a
+# 2.8k-lead run ~370 KB; files live only as long as their history entry (max 50).
+_RUNS_DIRNAME = "deep_crawl_runs"
+_HID_RE = re.compile(r"^[0-9a-f]{6,32}$")
+_viewed_run: dict = {"hid": None, "run": None}  # one opened run, so its pages share one list
+
+
+def _run_path(hid: str | None) -> str | None:
+    import os
+    if not hid or not _HID_RE.match(str(hid)):
+        return None
+    return os.path.join(db.DB_DIR, _RUNS_DIRNAME, f"{hid}.json.gz")
+
+
+async def _save_run_results(hid: str | None, results: list | None, meta: dict) -> bool:
+    """Store one crawl's leads under its history id. True when something was written."""
+    import gzip
+    import os
+    path = _run_path(hid)
+    if not path or not results:
+        return False
+    # Serialise on the loop (the list is not touched concurrently here); compress + write
+    # in a thread so a large run does not stall other requests.
+    body = json.dumps({"meta": meta, "results": results}, ensure_ascii=False).encode("utf-8")
+
+    def _write():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(gzip.compress(body, 5))
+        os.replace(tmp, path)
+
+    try:
+        await asyncio.to_thread(_write)
+        if _viewed_run["hid"] == hid:
+            _viewed_run.update(hid=None, run=None)
+        return True
+    except Exception as e:
+        logger.warning(f"[DeepCrawl] saving results of run {hid} failed: {e}")
+        return False
+
+
+async def _load_run(hid: str) -> dict | None:
+    """The stored run {"meta", "results"}; the last opened one stays in memory."""
+    import gzip
+    import os
+    if _viewed_run["hid"] == hid and _viewed_run["run"] is not None:
+        return _viewed_run["run"]
+    path = _run_path(hid)
+    if not path or not os.path.exists(path):
+        return None
+
+    def _read():
+        with open(path, "rb") as f:
+            return json.loads(gzip.decompress(f.read()).decode("utf-8"))
+
+    try:
+        run = await asyncio.to_thread(_read)
+    except Exception as e:
+        logger.warning(f"[DeepCrawl] reading results of run {hid} failed: {e}")
+        return None
+    if not isinstance(run.get("results"), list):
+        return None
+    _viewed_run.update(hid=hid, run=run)
+    return run
+
+
+def _prune_run_files(keep_ids: set):
+    """Drop result files whose history entry is gone (trimmed or deleted)."""
+    import os
+    d = os.path.join(db.DB_DIR, _RUNS_DIRNAME)
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return
+    for name in names:
+        if name.split(".", 1)[0] not in keep_ids:
+            try:
+                os.remove(os.path.join(d, name))
+            except OSError:
+                pass
+    if _viewed_run["hid"] and _viewed_run["hid"] not in keep_ids:
+        _viewed_run.update(hid=None, run=None)
+
+
+def _run_meta(h: dict, state: dict) -> dict:
+    return {"channel_link": h.get("channel_link") or state.get("source_url") or "",
+            "max_depth": h.get("max_depth", state.get("max_depth")),
+            "status": h.get("status") or state.get("status"),
+            "ended_at": h.get("ended_at") or datetime.now().isoformat(timespec="seconds"),
+            "channels_found": len(state.get("results") or []),
+            "contacts_found": state.get("contacts_found", 0)}
+
 
 async def _history_load() -> list[dict]:
     try:
@@ -1064,7 +1222,9 @@ async def _history_add(item: dict) -> str:
     item = {"id": uuid.uuid4().hex[:10], "started_at": datetime.now().isoformat(timespec="seconds"),
             "channels_found": 0, "contacts_found": 0, "note": "", **item}
     hist.insert(0, item)
-    await db.set_setting(_HISTORY_KEY, json.dumps(hist[:_HISTORY_MAX], ensure_ascii=False))
+    hist = hist[:_HISTORY_MAX]
+    await db.set_setting(_HISTORY_KEY, json.dumps(hist, ensure_ascii=False))
+    _prune_run_files({h.get("id") for h in hist})
     return item["id"]
 
 
@@ -1087,19 +1247,19 @@ async def _recover_after_restart(state: dict):
     now = datetime.now().isoformat(timespec="seconds")
     if state.get("status") in ("running", "flood_wait"):
         running = [h for h in hist if h.get("status") == "running"]
-        if running:
-            for h in running:
-                h.update(status="interrupted", ended_at=now,
-                         channels_found=len(state.get("results") or []),
-                         contacts_found=state.get("contacts_found", 0),
-                         note="Server dừng khi đang chạy — kết quả dở dang đã được giữ lại")
-        elif state.get("source_url"):
-            hist.insert(0, {"id": __import__("uuid").uuid4().hex[:10], "channel_link": state["source_url"],
-                            "max_depth": state.get("max_depth", 2), "account_ids": state.get("account_ids", []),
-                            "status": "interrupted", "started_at": "", "ended_at": now,
-                            "channels_found": len(state.get("results") or []),
-                            "contacts_found": state.get("contacts_found", 0),
-                            "note": "Server dừng khi đang chạy — kết quả dở dang đã được giữ lại"})
+        if not running and state.get("source_url"):
+            running = [{"id": __import__("uuid").uuid4().hex[:10], "channel_link": state["source_url"],
+                        "max_depth": state.get("max_depth", 2), "account_ids": state.get("account_ids", []),
+                        "started_at": ""}]
+            hist.insert(0, running[0])
+        for h in running:
+            h.update(status="interrupted", ended_at=now,
+                     channels_found=len(state.get("results") or []),
+                     contacts_found=state.get("contacts_found", 0),
+                     note="Server dừng khi đang chạy — kết quả dở dang đã được giữ lại")
+        if running and await _save_run_results(running[0]["id"], state.get("results"),
+                                               _run_meta(running[0], state)):
+            running[0]["has_results"] = True
     for q in _deep_crawl_queue:
         hist.insert(0, {"id": __import__("uuid").uuid4().hex[:10], "channel_link": q.get("channel_link", ""),
                         "max_depth": q.get("max_depth", 2), "account_ids": q.get("account_ids", []),
@@ -1111,7 +1271,28 @@ async def _recover_after_restart(state: dict):
         logger.info(f"[DeepCrawl] Restart recovery: moved {len(_deep_crawl_queue)} queued item(s) to history")
         _deep_crawl_queue = []
         await db.set_setting("deep_crawl_queue", "[]")
-    await db.set_setting(_HISTORY_KEY, json.dumps(hist[:_HISTORY_MAX], ensure_ascii=False))
+    hist = hist[:_HISTORY_MAX]
+    await db.set_setting(_HISTORY_KEY, json.dumps(hist, ensure_ascii=False))
+    _prune_run_files({h.get("id") for h in hist})
+
+
+async def _adopt_state_results(state: dict):
+    """One-time upgrade: results kept only in the crawl snapshot (crawls finished before
+    per-run files existed) are stored under their history entry, so they stay viewable
+    after the next crawl replaces the snapshot."""
+    results = state.get("results") or []
+    src = state.get("source_url")
+    if not results or not src or state.get("status") in ("running", "flood_wait"):
+        return
+    hist = await _history_load()
+    h = next((x for x in hist if x.get("channel_link") == src and x.get("status") != "running"), None)
+    if not h or h.get("has_results"):
+        return
+    path = _run_path(h.get("id"))
+    if path and __import__("os").path.exists(path):
+        return
+    if await _save_run_results(h["id"], results, _run_meta(h, state)):
+        await _history_update(h["id"], has_results=True)
 
 
 async def _load_deep_crawl_snapshot():
@@ -1136,6 +1317,8 @@ async def _load_deep_crawl_snapshot():
                     s["status"] = "interrupted"
                     s.setdefault("errors", []).append("Server dừng khi đang chạy — xem Lịch sử cào để chạy lại.")
                     await db.set_setting("deep_crawl_state", json.dumps(s, ensure_ascii=False))
+                else:
+                    await _adopt_state_results(s)
             if s.get("status") == "running":
                 s["status"] = "stopped"
             if "results" in s and isinstance(s["results"], list):
@@ -1173,8 +1356,10 @@ async def start_deep_crawl(req: DeepCrawlRequest):
     if not _deep_crawl_recovered:
         await _load_deep_crawl_snapshot()  # record a crawl/queue interrupted by a restart first
 
-    # If a crawl is running, queue this request
-    if _deep_crawl_state.get("status") == "running":
+    # If a crawl is running — or its task is still alive (FloodWait wait, the short pause
+    # before the next queued crawl) — queue this request; it starts when that one ends.
+    busy = _deep_crawl_task is not None and not _deep_crawl_task.done()
+    if _deep_crawl_state.get("status") == "running" or busy:
         queue_item = {
             "account_ids": req.account_ids,
             "channel_link": req.channel_link,
@@ -1260,19 +1445,24 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
         if _deep_crawl_state["status"] != "stopped":
             _deep_crawl_state["status"] = "completed"
         await _save_deep_crawl_snapshot()
+        try:
+            n = await db.upsert_kol_channels(
+                [l for l in _scored_leads(results) if l.get("contacts")], source=channel_link)
+            logger.info(f"[KOL] Directory synced from crawl: {n} channels with contacts")
+        except Exception as e:
+            logger.warning(f"[KOL] directory sync after crawl failed: {e}")
         logger.info(f"[DeepCrawl] Background task complete. {len(results)} leads.")
     except Exception as e:
         err_str = str(e)
-        # Detect FloodWait-only failure — extract longest wait time
-        import re as _re
-        fw_seconds = _re.findall(r'FloodWait\s+(\d+)s', err_str)
-        if fw_seconds and "Không thể resolve" in err_str:
-            max_wait = max(int(s) for s in fw_seconds)
+        # Source channel blocked only by a Telegram limit: retry once it ends
+        retry_in = getattr(e, "retry_after", None)
+        if retry_in:
+            max_wait = int(retry_in)
             _floodwait_retry_after = max_wait + 30  # extra buffer
             _deep_crawl_state["status"] = "flood_wait"
             _deep_crawl_state["errors"] = [
-                f"⏳ FloodWait {max_wait}s — tự động thử lại sau {_floodwait_retry_after}s "
-                f"({int(_floodwait_retry_after/60)} phút {_floodwait_retry_after%60}s)"
+                f"⏳ Mọi tài khoản đang bị Telegram giới hạn tra username — tự động thử lại sau "
+                f"{int(_floodwait_retry_after/60)} phút {_floodwait_retry_after%60}s. {err_str[:160]}"
             ]
             logger.warning(f"[DeepCrawl] All accounts FloodWait. Scheduling auto-retry in {_floodwait_retry_after}s")
         else:
@@ -1283,12 +1473,18 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
 
     try:
         errs = _deep_crawl_state.get("errors") or []
+        ended = datetime.now().isoformat(timespec="seconds")
+        saved = await _save_run_results(
+            history_id, _deep_crawl_state.get("results"),
+            _run_meta({"channel_link": channel_link, "max_depth": max_depth,
+                       "status": _deep_crawl_state.get("status"), "ended_at": ended}, _deep_crawl_state))
         await _history_update(
             history_id, status=_deep_crawl_state.get("status"),
-            ended_at=datetime.now().isoformat(timespec="seconds"),
+            ended_at=ended,
             channels_found=len(_deep_crawl_state.get("results") or []),
             contacts_found=_deep_crawl_state.get("contacts_found", 0),
-            note=(errs[-1][:160] if errs and _deep_crawl_state.get("status") != "completed" else ""))
+            note=(errs[-1][:160] if errs and _deep_crawl_state.get("status") != "completed" else ""),
+            **({"has_results": True} if saved else {}))
         await db.set_setting("contact_kind_cache",
                              json.dumps(tg.export_contact_kind_cache(), ensure_ascii=False))
     except Exception as e:
@@ -1301,6 +1497,7 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
             "account_ids": account_ids,
             "channel_link": channel_link,
             "max_depth": max_depth,
+            "min_expand_score": min_expand_score,
             "retry_after": _time.time() + _floodwait_retry_after,
         }
         _deep_crawl_queue.insert(0, retry_item)  # put at front of queue
@@ -1352,6 +1549,89 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
         )
 
 
+def _scored_leads(leads: list[dict]) -> list[dict]:
+    """Fill trading_score/category for leads that do not have one yet."""
+    for lead in leads:
+        if lead.get("trading_score") is None:
+            lead.update(tg.score_community_trading(
+                title=lead.get("title", ""), description=lead.get("description", ""),
+                username=lead.get("username", ""), contacts=lead.get("contacts", []),
+                participants_count=lead.get("participants_count", 0)))
+    return leads
+
+
+# ── KOL directory (channels + contacts + trading score, for ad booking) ──────
+
+class KolUpdateRequest(BaseModel):
+    status: str | None = None
+    price: str | None = None
+    note: str | None = None
+
+
+class KolDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+@router.get("/kol-directory")
+async def kol_directory(q: str = "", status: str = "", min_score: int = 0, has_contact: int = 0,
+                        category: str = "", sort: str = "score", page: int = 0, limit: int = 50):
+    return await db.list_kol_channels(q=q, status=status, min_score=min_score, has_contact=bool(has_contact),
+                                      category=category, sort=sort, page=page, limit=limit)
+
+
+@router.post("/kol-directory/sync")
+async def kol_directory_sync(include_no_contact: int = 0):
+    """Pull every channel of the current Deep Crawl result into the directory."""
+    if not _deep_crawl_state.get("results"):
+        await _load_deep_crawl_snapshot()
+    leads = _scored_leads(_deep_crawl_state.get("results") or [])
+    if not include_no_contact:
+        leads = [l for l in leads if l.get("contacts")]
+    n = await db.upsert_kol_channels(leads, source=_deep_crawl_state.get("source_url") or "")
+    return {"success": True, "count": n}
+
+
+@router.patch("/kol-directory/{kid}")
+async def kol_directory_update(kid: int, req: KolUpdateRequest):
+    try:
+        ok = await db.update_kol_channel(kid, req.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=404, detail="Không tìm thấy kênh")
+    return {"success": True}
+
+
+@router.post("/kol-directory/delete")
+async def kol_directory_delete(req: KolDeleteRequest):
+    return {"success": True, "deleted": await db.delete_kol_channels(req.ids)}
+
+
+@router.get("/kol-directory/export.csv")
+async def kol_directory_export(q: str = "", status: str = "", min_score: int = 0, has_contact: int = 0,
+                               category: str = "", sort: str = "score"):
+    import csv
+    import io
+
+    from fastapi.responses import Response
+    data = await db.list_kol_channels(q=q, status=status, min_score=min_score, has_contact=bool(has_contact),
+                                      category=category, sort=sort, all_rows=True)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Kênh", "Link", "Subscribers", "Trading Score", "Phân loại", "Contact",
+                "Trạng thái", "Giá", "Ghi chú", "Kênh cha", "Nguồn cào", "Danh sách đã lưu", "Thấy lần cuối"])
+    for it in data["items"]:
+        link = f"https://t.me/{it['username']}" if it.get("username") else ""
+        w.writerow([it.get("title"), link, it.get("subscribers"), it.get("trading_score"),
+                    it.get("category_label") or it.get("category"), " ".join(it.get("contacts") or []),
+                    it.get("status"), it.get("price"), it.get("note"), it.get("parent_channel"),
+                    it.get("source"), it.get("saved_job") or "", it.get("last_seen")])
+    fname = f"kol_directory_{datetime.now():%Y%m%d_%H%M}.csv"
+    # BOM so Excel opens Vietnamese/Cyrillic text correctly
+    return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
 @router.get("/deep-crawl/status")
 async def get_deep_crawl_status():
     """Poll the current deep crawl progress + queue info."""
@@ -1362,10 +1642,15 @@ async def get_deep_crawl_status():
     state_copy = {k: v for k, v in _deep_crawl_state.items() if k != "results"}
     state_copy["results_count"] = len(_deep_crawl_state.get("results", []))
     state_copy["queue"] = [
-        {"channel_link": q["channel_link"], "max_depth": q["max_depth"], "added_at": q.get("added_at", "")}
+        {"channel_link": q["channel_link"], "max_depth": q["max_depth"], "added_at": q.get("added_at", ""),
+         "min_expand_score": q.get("min_expand_score"), "retry": bool(q.get("retry_after"))}
         for q in _deep_crawl_queue
     ]
     state_copy["queue_count"] = len(_deep_crawl_queue)
+    # history_id lets the UI notice the next queued run starting; busy covers the FloodWait
+    # sleep and the 3 s pause before a queued crawl, when status is no longer "running".
+    state_copy["history_id"] = _deep_crawl_history_id
+    state_copy["busy"] = _deep_crawl_task is not None and not _deep_crawl_task.done()
     return state_copy
 
 
@@ -1374,7 +1659,7 @@ _results_counts: dict = {}
 
 
 @router.get("/deep-crawl/results")
-async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50):
+async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50, hid: str = ""):
     """Get the full results of the last deep crawl with up-to-date trading scores.
 
     The set can hold thousands of leads and ~1 MB of description text, so the
@@ -1382,11 +1667,23 @@ async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50):
     only the leads on the current page, with long descriptions trimmed. The
     default (slim=0) keeps returning everything for callers that truly need it,
     but the list view should never pay for 4 MB it will not display.
+
+    `hid` opens the stored results of that history entry instead of the current crawl.
     """
     global _deep_crawl_state
-    if not _deep_crawl_state.get("results"):
-        await _load_deep_crawl_snapshot()
-    leads = _deep_crawl_state.get("results", [])
+    if hid:
+        run = await _load_run(hid)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Không còn kết quả của lần cào này")
+        leads = run["results"]
+        status = (run.get("meta") or {}).get("status")
+        source = (run.get("meta") or {}).get("channel_link") or ""
+    else:
+        if not _deep_crawl_state.get("results"):
+            await _load_deep_crawl_snapshot()
+        leads = _deep_crawl_state.get("results", [])
+        status = _deep_crawl_state.get("status")
+        source = _deep_crawl_state.get("source_url") or ""
     # The browser pulls the set in ~35 parallel pages; normalising + counting
     # all ~7k leads on every page request dominated the response time. The list
     # is only ever replaced wholesale (crawl done / snapshot load / clear), so
@@ -1399,7 +1696,8 @@ async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50):
     for lead in ([] if fresh else leads):
         if "contacts" in lead and isinstance(lead["contacts"], list):
             lead["contacts"] = [c for c in lead["contacts"] if not tg.is_bot_account(None, c)]
-        if "trading_score" not in lead or lead.get("trading_score") is None:
+        if True:
+            # Always rescore so saved snapshots pick up scoring rule changes (cheap, cached per list).
             score_info = tg.score_community_trading(
                 title=lead.get("title", ""),
                 description=lead.get("description", ""),
@@ -1411,9 +1709,10 @@ async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50):
 
     if not slim:
         return {
-            "status": _deep_crawl_state.get("status"),
+            "status": status,
             "leads": leads,
             "total": len(leads),
+            "source_url": source,
         }
 
     # ── Slim mode: counts for the filter tabs + one page of leads ──
@@ -1459,17 +1758,22 @@ async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50):
         trimmed.append(l)
 
     return {
-        "status": _deep_crawl_state.get("status"),
+        "status": status,
         "leads": trimmed,
         "total": len(leads),
         "page": page,
         "limit": limit,
         "counts": counts,
+        "source_url": source,
     }
 
 
 
+# "lang:text" -> translation, and the source language Google detected for it.
+# Only successful translations are cached, so a network error is retried next time.
+_TRANSLATION_CACHE_MAX = 20000
 _translation_cache: dict[str, str] = {}
+_translation_src_lang: dict[str, str] = {}
 _translate_executor = None
 _translate_semaphore = None
 
@@ -1492,12 +1796,18 @@ def _get_translate_semaphore():
 
 async def _translate_single_text(text: str, target_lang: str = "en") -> str:
     """Translate a single text string to target_lang using Google Translate with in-memory caching."""
+    return (await _translate_with_lang(text, target_lang))[0]
+
+
+async def _translate_with_lang(text: str, target_lang: str = "en") -> tuple[str, str]:
+    """Translate text, returning (translation, detected source language or "").
+    On failure the original text comes back with "" and nothing is cached."""
     if not text or not text.strip():
-        return text
+        return text, ""
     clean = text.strip()
     cache_key = f"{target_lang}:{clean}"
     if cache_key in _translation_cache:
-        return _translation_cache[cache_key]
+        return _translation_cache[cache_key], _translation_src_lang.get(cache_key, "")
 
     import asyncio
     import json
@@ -1512,20 +1822,24 @@ async def _translate_single_text(text: str, target_lang: str = "en") -> str:
                 res = json.loads(response.read().decode("utf-8"))
                 if res and isinstance(res, list) and res[0]:
                     translated = "".join([part[0] for part in res[0] if part and part[0]])
-                    return translated
+                    src = res[2] if len(res) > 2 and isinstance(res[2], str) else ""
+                    return translated, src
         except Exception as e:
             logger.debug(f"[Translation] Error: {e}")
-        return clean
+        return None
 
     sem = _get_translate_semaphore()
     async with sem:
         loop = asyncio.get_running_loop()
         res = await loop.run_in_executor(_get_translate_executor(), _do_http)
-    _translation_cache[cache_key] = res
-    # Cap cache at 5000 entries (FIFO eviction)
-    if len(_translation_cache) > 5000:
+    if res is None:
+        return clean, ""
+    _translation_cache[cache_key], _translation_src_lang[cache_key] = res
+    # FIFO eviction
+    while len(_translation_cache) > _TRANSLATION_CACHE_MAX:
         oldest = next(iter(_translation_cache))
         del _translation_cache[oldest]
+        _translation_src_lang.pop(oldest, None)
     return res
 
 
@@ -1543,15 +1857,16 @@ async def translate_descriptions(req: TranslateDescriptionsRequest):
             seen.add(clean)
             unique.append(clean)
 
-    tasks = [_translate_single_text(t, req.target_lang) for t in unique]
+    tasks = [_translate_with_lang(t, req.target_lang) for t in unique]
     translated_list = await asyncio.gather(*tasks, return_exceptions=True)
     translations = {}
-    for orig, trans in zip(unique, translated_list, strict=False):
-        if isinstance(trans, Exception):
-            translations[orig] = orig  # fallback to original on error
+    langs = {}  # detected source language per text ("" when unknown or failed)
+    for orig, res in zip(unique, translated_list, strict=False):
+        if isinstance(res, Exception):
+            translations[orig], langs[orig] = orig, ""  # fallback to original on error
         else:
-            translations[orig] = trans
-    return {"translations": translations}
+            translations[orig], langs[orig] = res
+    return {"translations": translations, "langs": langs}
 
 
 @router.post("/deep-crawl/clear")
@@ -1620,7 +1935,12 @@ async def get_deep_crawl_history():
     if not _deep_crawl_recovered:
         await _load_deep_crawl_snapshot()
     hist = await _history_load()
-    return {"history": [{k: v for k, v in h.items() if k != "account_ids"} for h in hist]}
+    out = [{k: v for k, v in h.items() if k != "account_ids"} for h in hist]
+    for h in out:
+        if h.get("status") == "running" and h.get("id") == _deep_crawl_history_id:
+            h["channels_found"] = _deep_crawl_state.get("channels_found", 0)
+            h["contacts_found"] = _deep_crawl_state.get("contacts_found", 0)
+    return {"history": out}
 
 
 @router.post("/deep-crawl/history/{hid}/rerun")
@@ -1646,6 +1966,7 @@ async def rerun_deep_crawl_history(hid: str):
 async def delete_deep_crawl_history(hid: str):
     hist = [h for h in await _history_load() if h.get("id") != hid]
     await db.set_setting(_HISTORY_KEY, json.dumps(hist, ensure_ascii=False))
+    _prune_run_files({h.get("id") for h in hist})
     return {"success": True}
 
 
@@ -2095,7 +2416,7 @@ async def _run_campaign(campaign_id: int):
         sent_user_ids = {log["target_user_id"] for log in existing_logs if log["status"] == "success"}
         # Skips that won't change on a resume: don't re-log or re-count them.
         _permanent_skip = ("Trong blacklist", "Tài khoản là Telegram Bot", "Là tài khoản nội bộ",
-                           "Đã từng nhận DM")
+                           "Đã từng nhận DM", "Đang trò chuyện với account")
         perm_skipped_ids = {log["target_user_id"] for log in existing_logs
                             if log["status"] == "skipped" and log["target_user_id"]
                             and (log.get("error_message") or "").startswith(_permanent_skip)}
@@ -2129,6 +2450,10 @@ async def _run_campaign(campaign_id: int):
                         all_previous_user_ids.add(row[0])
                     if row[1]:
                         all_previous_usernames.add(row[1])
+            # People already talking to one of our accounts (AI chats, KOLs, inbound DMs)
+            convo_user_ids, convo_usernames = await db.get_existing_conversation_sets()
+        else:
+            convo_user_ids, convo_usernames = set(), set()
 
         # ── Exclude members from source campaigns (clone exclusion) ──
         exclude_campaign_ids = campaign.get("exclude_campaign_ids", []) or []
@@ -2379,6 +2704,11 @@ async def _run_campaign(campaign_id: int):
                     skipped += 1
                     await db.add_dm_campaign_log(campaign_id, None, user_id, username, "skipped",
                                                 "Đã từng nhận DM ở chiến dịch/watcher khác")
+                    continue
+                if user_id in convo_user_ids or (uname_lower and uname_lower in convo_usernames):
+                    skipped += 1
+                    await db.add_dm_campaign_log(campaign_id, None, user_id, username, "skipped",
+                                                "Đang trò chuyện với account khác của mình (AI/KOL/đã nhắn mình)")
                     continue
 
             # Check daily limit across all sender accounts
@@ -2681,6 +3011,8 @@ async def _run_campaign(campaign_id: int):
                 await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
                                             f"FloodWait: chờ {wait_time}s")
                 flooded_accounts[acc_id] = time.time() + wait_time
+                if await alerts.flood_wait_guard(acc_id, e.seconds, f"campaign #{campaign_id}"):
+                    flooded_accounts[acc_id] = float('inf')  # account tired → paused, drop from rotation
                 failed += 1
                 consecutive_errors += 1
                 continue

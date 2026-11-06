@@ -212,7 +212,9 @@ async def bulk_send_kol_messages(req: KOLBulkSendRequest):
 # Aliases matching the Lead & AI Follow-Up frontend (chats/{account_id}/{user_id}/profile, bulk-send)
 @router.get("/chats/{account_id}/{user_id}/profile")
 async def get_chat_profile(account_id: int, user_id: int):
-    return await get_kol_profile(account_id, user_id)
+    prof = dict(await get_kol_profile(account_id, user_id) or {})
+    prof["exchange"] = await db.get_chat_exchange(account_id, user_id)
+    return prof
 
 
 @router.post("/chats/{account_id}/{user_id}/profile")

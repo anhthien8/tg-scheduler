@@ -397,6 +397,7 @@ const Members = {
         <td>
           <div class="btn-group">
             <button class="btn btn-ghost btn-sm" onclick="Members.viewMembers('${esc(j.scrape_job_id)}','${esc(j.group_title || '')}')" title="Xem">👁 Xem</button>
+            <button class="btn btn-ghost btn-sm" onclick="Members.renameScrapeJob('${esc(j.scrape_job_id)}')" title="Đổi tên hiển thị">✏️</button>
             <button class="btn btn-ghost btn-sm" onclick="window.open(AnalyticsAPI.exportMembers('${esc(j.scrape_job_id)}'),'_blank')" title="Export CSV">📥</button>
             <button class="btn btn-danger btn-sm" onclick="Members.deleteScrapeJob('${esc(j.scrape_job_id)}')">🗑</button>
           </div>
@@ -519,6 +520,196 @@ const Members = {
   },
 
   // ── Delete Scrape Job ──
+  // Old Deep Crawl lists were titled "Deep Crawl Contacts (deep_https___t_me_xxx)" → suggest "xxx · Deep Crawl"
+  _friendlyJobTitle(j) {
+    const t = String(j.group_title || j.scrape_job_id || '');
+    const m = t.match(/^Deep Crawl Contacts \((.*)\)(.*)$/);
+    if (!m) return t;
+    let inner = m[1].replace(/^deep_https?___t_me_/i, '').replace(/^deep_/i, '');
+    return `${inner} · Deep Crawl${m[2] ? ' ' + m[2].trim() : ''}`.trim();
+  },
+
+  async renameScrapeJob(jobId) {
+    const j = (this._scrapeJobs || []).find(x => x.scrape_job_id === jobId);
+    if (!j) return;
+    const name = prompt('Tên hiển thị mới cho danh sách:', this._friendlyJobTitle(j));
+    if (!name || !name.trim() || name.trim() === j.group_title) return;
+    try {
+      const r = await fetch(`/api/members/scrape-jobs/${encodeURIComponent(jobId)}/rename`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group_title: name.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || 'Không đổi tên được');
+      App.toast('✏️ Đã đổi tên danh sách', 'success');
+      this.loadScrapeJobs();
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  async tidyScrapeJobTitles() {
+    const todo = (this._scrapeJobs || []).filter(j => this._friendlyJobTitle(j) !== (j.group_title || ''));
+    if (!todo.length) { App.toast('Tên các danh sách đã gọn rồi', 'info'); return; }
+    if (!confirm(`Đổi tên ${todo.length} danh sách Deep Crawl cũ cho dễ đọc?\n\n` +
+      todo.slice(0, 6).map(j => `• ${j.group_title} → ${this._friendlyJobTitle(j)}`).join('\n') +
+      (todo.length > 6 ? `\n… và ${todo.length - 6} danh sách khác` : ''))) return;
+    let ok = 0;
+    for (const j of todo) {
+      const r = await fetch(`/api/members/scrape-jobs/${encodeURIComponent(j.scrape_job_id)}/rename`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group_title: this._friendlyJobTitle(j) }),
+      }).catch(() => null);
+      if (r && r.ok) ok++;
+    }
+    App.toast(`✏️ Đã đổi tên ${ok}/${todo.length} danh sách`, 'success');
+    this.loadScrapeJobs();
+  },
+
+  // ══ Danh bạ KOL: channels + contacts + trading score, for ad booking / export ══
+  _kol: { q: '', status: '', minScore: 0, hasContact: 1, sort: 'score', page: 0, limit: 50 },
+  _KOL_STATUS: {
+    new: ['Mới', 'var(--text3)'], contacted: ['Đã liên hệ', 'var(--accent)'],
+    negotiating: ['Đang thương lượng', 'var(--orange)'], booked: ['Đã book', 'var(--green)'],
+    rejected: ['Từ chối', 'var(--red)'],
+  },
+
+  _kolQuery(extra = {}) {
+    const k = { ...this._kol, ...extra };
+    const p = new URLSearchParams({ q: k.q, status: k.status, min_score: k.minScore || 0,
+      has_contact: k.hasContact ? 1 : 0, sort: k.sort, page: k.page, limit: k.limit });
+    return p.toString();
+  },
+
+  kolSet(field, value) {
+    this._kol[field] = value;
+    if (field !== 'page') this._kol.page = 0;
+    clearTimeout(this._kolTimer);
+    this._kolTimer = setTimeout(() => this.loadKolDirectory(), field === 'q' ? 300 : 0);
+  },
+
+  async loadKolDirectory() {
+    const tbody = document.getElementById('kol-tbody');
+    if (!tbody) return;
+    try {
+      const r = await fetch(`/api/members/kol-directory?${this._kolQuery()}`);
+      if (!r.ok) throw new Error('Không tải được danh bạ');
+      const d = await r.json();
+      this._kolItems = d.items || [];
+      if (!d.total && !this._kol.q && !this._kol.status && !this._kolAutoSynced) {
+        // First visit: fill the directory from the current Deep Crawl result once
+        this._kolAutoSynced = true;
+        const s = await fetch('/api/members/kol-directory/sync', { method: 'POST' }).then(x => x.json()).catch(() => null);
+        if (s && s.count) return this.loadKolDirectory();
+      }
+      this._renderKol(d);
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="9" style="color:var(--red)">${esc(e.message)}</td></tr>`;
+    }
+  },
+
+  _renderKol(d) {
+    const tbody = document.getElementById('kol-tbody');
+    const items = d.items || [];
+    const counts = d.counts || {};
+    const all = Object.values(counts).reduce((a, b) => a + b, 0);
+    const chips = document.getElementById('kol-status-chips');
+    if (chips) {
+      const chip = (key, label, n, col) => `<button class="tab-btn btn-sm ${this._kol.status === key ? 'active' : ''}" style="border-left:3px solid ${col}" onclick="Members.kolSet('status','${key}')">${label} (${n || 0})</button>`;
+      chips.innerHTML = chip('', 'Tất cả', all, 'var(--text3)') +
+        Object.entries(this._KOL_STATUS).map(([k, [l, c]]) => chip(k, l, counts[k], c)).join('');
+    }
+    (document.getElementById('kol-total') || me_dummy).textContent = `${d.total} kênh`;
+    if (!items.length) {
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:24px">Chưa có kênh nào khớp bộ lọc. Bấm “🔄 Đồng bộ từ Deep Crawl” để nạp kết quả cào gần nhất.</td></tr>`;
+    } else {
+      tbody.innerHTML = items.map(it => {
+        const score = it.trading_score || 0;
+        const sc = score >= 80 ? 'var(--green)' : score >= 60 ? 'var(--purple)' : score >= 45 ? 'var(--accent)' : 'var(--text3)';
+        const link = it.username ? `https://t.me/${encodeURIComponent(it.username)}` : '';
+        const contacts = (it.contacts || []).map(c => {
+          const u = String(c).replace(/^@/, '');
+          return `<a href="https://t.me/${encodeURIComponent(u)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px;white-space:nowrap">@${esc(u)}</a>`;
+        }).join(' ') || '<span style="color:var(--text-muted);font-size:12px">—</span>';
+        const opts = Object.entries(this._KOL_STATUS).map(([k, [l]]) => `<option value="${k}" ${it.status === k ? 'selected' : ''}>${l}</option>`).join('');
+        const stCol = (this._KOL_STATUS[it.status] || [0, 'var(--text3)'])[1];
+        return `<tr>
+          <td style="max-width:240px"><strong style="font-size:13px">${esc(it.title || it.username)}</strong><br>
+            ${link ? `<a href="${link}" target="_blank" rel="noopener" style="font-size:11.5px;color:var(--text-muted)">@${esc(it.username)}</a>` : `<small style="color:var(--text-muted)">id ${esc(it.channel_id)}</small>`}
+            ${it.saved_job ? `<span title="Contact đã lưu vào danh sách ${esc(it.saved_job)}" style="font-size:10px;margin-left:4px">📥</span>` : ''}</td>
+          <td style="text-align:right;font-size:12.5px">${(it.subscribers || 0).toLocaleString()}</td>
+          <td><span style="font-weight:700;color:${sc}">${score}</span></td>
+          <td style="font-size:11.5px;color:var(--text2);white-space:nowrap">${esc(it.category_label || it.category || '—')}</td>
+          <td style="max-width:200px">${contacts}</td>
+          <td><select class="form-input" style="min-width:140px;padding:3px 6px;font-size:12px;border-left:3px solid ${stCol}" onchange="Members.kolUpdate(${it.id},'status',this.value)">${opts}</select></td>
+          <td><input class="form-input" style="width:90px;padding:3px 6px;font-size:12px" value="${esc(it.price || '')}" placeholder="vd 150$" onchange="Members.kolUpdate(${it.id},'price',this.value)"></td>
+          <td><input class="form-input" style="width:160px;padding:3px 6px;font-size:12px" value="${esc(it.note || '')}" placeholder="Ghi chú…" onchange="Members.kolUpdate(${it.id},'note',this.value)"></td>
+          <td><button style="background:none;border:none;color:var(--text-muted);cursor:pointer" title="Xóa khỏi danh bạ" onclick="Members.kolDelete(${it.id})">✕</button></td>
+        </tr>`;
+      }).join('');
+    }
+    const pag = document.getElementById('kol-pagination');
+    if (pag) {
+      const pages = Math.ceil((d.total || 0) / this._kol.limit);
+      const p = this._kol.page;
+      pag.innerHTML = pages > 1
+        ? `<button class="btn btn-ghost btn-sm" ${p <= 0 ? 'disabled' : ''} onclick="Members.kolSet('page',${p - 1})">◀</button>
+           <span style="font-size:12px;color:var(--text2);margin:0 8px">Trang ${p + 1}/${pages}</span>
+           <button class="btn btn-ghost btn-sm" ${p >= pages - 1 ? 'disabled' : ''} onclick="Members.kolSet('page',${p + 1})">▶</button>`
+        : '';
+    }
+  },
+
+  async kolUpdate(id, field, value) {
+    try {
+      const r = await fetch(`/api/members/kol-directory/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [field]: value }),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || 'Lỗi lưu');
+      const it = (this._kolItems || []).find(x => x.id === id);
+      if (it) it[field] = value;
+      if (field === 'status') this.loadKolDirectory();
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  async kolDelete(id) {
+    if (!confirm('Xóa kênh này khỏi danh bạ KOL? (Lần đồng bộ sau có thể thêm lại)')) return;
+    await fetch('/api/members/kol-directory/delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id] }),
+    }).catch(() => {});
+    this.loadKolDirectory();
+  },
+
+  async kolSync() {
+    try {
+      const r = await fetch('/api/members/kol-directory/sync', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || 'Lỗi đồng bộ');
+      App.toast(`🔄 Đã đồng bộ ${d.count} kênh có contact từ kết quả Deep Crawl`, 'success');
+      this.loadKolDirectory();
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  async kolExport() {
+    try {
+      const r = await fetch(`/api/members/kol-directory/export.csv?${this._kolQuery()}`);
+      if (!r.ok) throw new Error('Không xuất được CSV');
+      const blob = await r.blob();
+      const cd = r.headers.get('Content-Disposition') || '';
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (cd.match(/filename="([^"]+)"/) || [0, 'kol_directory.csv'])[1];
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  kolCopyContacts() {
+    const list = [...new Set((this._kolItems || []).flatMap(it => it.contacts || []))];
+    if (!list.length) { App.toast('Trang hiện tại không có contact', 'info'); return; }
+    navigator.clipboard.writeText(list.join('\n')).then(
+      () => App.toast(`📋 Đã copy ${list.length} contact (trang hiện tại)`, 'success'),
+      () => App.toast('Không copy được', 'error'));
+  },
+
   async deleteScrapeJob(jobId) {
     if (!confirm('Xóa dữ liệu cào này?')) return;
     try {
@@ -1110,9 +1301,9 @@ const Members = {
   // CAMPAIGN MODAL
   // ═══════════════════════════════════════════════════════════════════════════
 
-  async openCampaignModal() {
+  async openCampaignModal(preselectJobId = null) {
     (document.getElementById('campaign-modal-title') || me_dummy).textContent = 'Tạo DM Campaign';
-    (document.getElementById('cmp-name') || me_dummy).value = '';
+    (document.getElementById('cmp-name') || me_dummy).value = preselectJobId ? `DM — ${preselectJobId}` : '';
     (document.getElementById('cmp-delay-min') || me_dummy).value = '30';
     (document.getElementById('cmp-delay-max') || me_dummy).value = '90';
     const limitInput = document.getElementById('cmp-daily-limit') || document.getElementById('cmp-daily-limit-premium');
@@ -1141,6 +1332,9 @@ const Members = {
       jobSel.innerHTML = this._scrapeJobs.map(j =>
         `<option value="${esc(j.scrape_job_id)}">${esc(j.group_title || j.group_id)} (${j.member_count} members)</option>`
       ).join('');
+      if (preselectJobId && this._scrapeJobs.some(j => j.scrape_job_id === preselectJobId)) {
+        jobSel.value = preselectJobId;
+      }
     } else {
       jobSel.innerHTML = '<option value="">Chưa có dữ liệu cào</option>';
     }
@@ -1589,6 +1783,18 @@ const Members = {
   },
 
   switchSubTab(tab) {
+    const kolTab = document.getElementById('members-tab-kol');
+    const kolView = document.getElementById('members-subview-kol');
+    if (kolTab) kolTab.classList.toggle('active', tab === 'kol');
+    if (kolView) kolView.classList.toggle('hidden', tab !== 'kol');
+    if (tab === 'kol') {
+      ['scrape', 'similar'].forEach(t => {
+        document.getElementById(`members-tab-${t}`)?.classList.remove('active');
+        document.getElementById(`members-subview-${t}`)?.classList.add('hidden');
+      });
+      this.loadKolDirectory();
+      return;
+    }
     const scrapeTab = document.getElementById('members-tab-scrape');
     const similarTab = document.getElementById('members-tab-similar');
     const scrapeView = document.getElementById('members-subview-scrape');
@@ -1623,14 +1829,20 @@ const Members = {
 
   // ── Crawl history (incl. runs/queue interrupted by a server restart) ──
   async loadCrawlHistory() {
-    const list = document.getElementById('sim-history-list');
-    if (!list) return;
-    let hist = [];
+    if (!document.getElementById('sim-history-list')) return;
     try {
       const r = await fetch('/api/members/deep-crawl/history');
       if (!r.ok) return;
-      hist = (await r.json()).history || [];
+      this._crawlHist = (await r.json()).history || [];
     } catch (e) { return; }
+    this._renderCrawlHistory();
+  },
+
+  // Rows with stored results open them (👁 or a click on the row); the one on screen is highlighted.
+  _renderCrawlHistory() {
+    const list = document.getElementById('sim-history-list');
+    if (!list) return;
+    const hist = this._crawlHist || [];
     const escH = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const interrupted = hist.filter(h => h.status === 'interrupted' && !h.rerun).length;
     const badge = document.getElementById('sim-history-badge');
@@ -1651,15 +1863,98 @@ const Members = {
       const [lbl, col] = st[h.status] || [h.status, 'var(--text2)'];
       const when = (h.ended_at || h.started_at || '').replace('T', ' ').slice(5, 16);
       const link = h.channel_link.length > 40 ? h.channel_link.slice(0, 40) + '…' : h.channel_link;
-      const canRerun = h.status !== 'running';
-      return `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:12px;background:color-mix(in srgb, var(--text) 4%, transparent)" title="${escH(h.note || '')}">
+      const live = h.status === 'running';
+      const canView = !!h.has_results && !live;
+      const viewing = canView && this._dcViewHid === h.id;
+      const tip = [h.note, canView ? 'Bấm để xem lại kết quả của lần cào này' : ''].filter(Boolean).join(' · ');
+      const bg = viewing ? 'color-mix(in srgb, var(--accent) 16%, transparent);box-shadow:inset 3px 0 0 var(--accent)'
+        : 'color-mix(in srgb, var(--text) 4%, transparent)';
+      return `<div${canView ? ` onclick="Members.viewCrawlRun('${h.id}')"` : ''} style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:12px;${canView ? 'cursor:pointer;' : ''}background:${bg}" title="${escH(tip)}">
         <span style="padding:1px 7px;border-radius:9px;background:${col};color:#fff;font-weight:600;white-space:nowrap">${lbl}</span>
-        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escH(link)} <span style="color:var(--text-muted)">· depth ${h.max_depth} · ${h.channels_found || 0} kênh · ${h.contacts_found || 0} contact${h.rerun ? ' · đã chạy lại' : ''}</span></span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escH(link)} <span style="color:var(--text-muted)">· depth ${h.max_depth} · <span${live ? ' id="sim-hist-live"' : ''}>${h.channels_found || 0} kênh · ${h.contacts_found || 0} contact</span>${h.rerun ? ' · đã chạy lại' : ''}</span></span>
         <span style="color:var(--text-muted);white-space:nowrap">${escH(when)}</span>
-        ${canRerun ? `<button class="btn btn-ghost btn-sm" style="padding:1px 8px" onclick="Members.rerunCrawl('${h.id}')" title="Chạy lại với cùng kênh và cài đặt">▶</button>` : ''}
-        <button style="background:none;border:none;color:var(--text-muted);cursor:pointer" onclick="Members.deleteCrawlHistory('${h.id}')" title="Xóa khỏi lịch sử">✕</button>
+        ${canView ? `<button class="btn btn-ghost btn-sm" style="padding:1px 8px" onclick="event.stopPropagation();Members.viewCrawlRun('${h.id}')" title="Xem lại kết quả của lần cào này">👁</button>` : ''}
+        ${!live ? `<button class="btn btn-ghost btn-sm" style="padding:1px 8px" onclick="event.stopPropagation();Members.rerunCrawl('${h.id}')" title="Chạy lại với cùng kênh và cài đặt (đang có lần cào chạy thì vào hàng đợi)">▶</button>` : ''}
+        <button style="background:none;border:none;color:var(--text-muted);cursor:pointer" onclick="event.stopPropagation();Members.deleteCrawlHistory('${h.id}')" title="Xóa khỏi lịch sử (kèm kết quả đã lưu)">✕</button>
       </div>`;
     }).join('');
+  },
+
+  // ── Open an earlier crawl's stored results from the history ──
+  async viewCrawlRun(id) {
+    const prev = [this._dcViewHid, this._dcViewMeta];
+    this._dcViewHid = id;
+    this._dcViewMeta = (this._crawlHist || []).find(h => h.id === id) || null;
+    this._renderCrawlHistory();
+    const ok = await this._fetchDeepCrawlResults();
+    if (ok === null) return;  // another view was opened meanwhile
+    if (!ok) {
+      [this._dcViewHid, this._dcViewMeta] = prev;
+      this.loadCrawlHistory();
+      this._updateViewBanner();
+      return;
+    }
+    document.getElementById('sim-view-banner')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  async exitCrawlView() {
+    this._dcViewHid = null;
+    this._dcViewMeta = null;
+    this._renderCrawlHistory();
+    await this._fetchDeepCrawlResults();
+    const s = this._dcLastStatus;
+    if (this._crawlLive(s) && !(this._similarLeads || []).length) this._showCrawlRunningEmpty(s);
+  },
+
+  // What the table shows: an older run opened from history, or the previous run's
+  // results while the next (queued) crawl is running.
+  _updateViewBanner() {
+    const el = document.getElementById('sim-view-banner');
+    if (!el) return;
+    const escH = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const short = (u) => { u = String(u || ''); return u.length > 48 ? u.slice(0, 48) + '…' : u; };
+    const s = this._dcLastStatus || {};
+    let html = '';
+    if (this._dcViewHid) {
+      const h = this._dcViewMeta || {};
+      const when = (h.ended_at || h.started_at || '').replace('T', ' ').slice(5, 16);
+      html = `<span>🕘 Đang xem kết quả cũ: <b>${escH(short(this._dcShownSource || h.channel_link))}</b>${h.max_depth ? ` · depth ${h.max_depth}` : ''}${when ? ` · ${escH(when)}` : ''}</span>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto;padding:1px 10px" onclick="Members.exitCrawlView()">↩ Về kết quả mới nhất</button>`;
+    } else if (this._crawlLive(s) && s.source_url && this._dcShownSource && this._dcShownSource !== s.source_url
+               && (this._similarLeads || []).length) {
+      html = `<span>Đang xem kết quả của <b>${escH(short(this._dcShownSource))}</b> · đang cào <b>${escH(short(s.source_url))}</b> — kết quả mới tự hiện khi xong.</span>`;
+    }
+    el.innerHTML = html;
+    el.classList.toggle('hidden', !html);
+  },
+
+  _showCrawlRunningEmpty(s) {
+    const empty = document.getElementById('sim-empty-state');
+    const p = empty && empty.querySelector('p');
+    if (!p) return;
+    empty.classList.remove('hidden');
+    p.textContent = `Đang chạy Deep Crawl cho "${(s && s.source_url) || ''}"... Kết quả sẽ tự hiển thị khi xong. Kết quả các lần trước: bấm 👁 trong "Lịch sử cào".`;
+  },
+
+  // A crawl is live while it runs, waits out a FloodWait, or pauses before the next queued link.
+  _crawlLive(s) { return !!s && (s.status === 'running' || !!s.busy); },
+
+  // The start button never locks while a crawl runs: it adds the link to the queue instead.
+  _setCrawlBtn(s) {
+    const btn = document.getElementById('sim-btn-search');
+    const stopBtn = document.getElementById('sim-btn-stop');
+    const q = (s && s.queue_count) || 0;
+    if (btn) {
+      btn.disabled = false;
+      if (this._crawlLive(s) || q) {
+        btn.textContent = `➕ Thêm vào hàng đợi${q ? ` (${q} đang chờ)` : ''}`;
+        btn.title = 'Đang có lần cào chạy — link mới vào hàng đợi và tự chạy khi lần hiện tại xong. Kết quả từng lần xem lại ở "Lịch sử cào".';
+      } else {
+        btn.textContent = '🚀 Bắt đầu Deep Crawl';
+        btn.title = '';
+      }
+    }
+    if (stopBtn) stopBtn.classList.toggle('hidden', !(s && (s.status === 'running' || s.status === 'flood_wait')));
   },
 
   async rerunCrawl(id) {
@@ -1668,69 +1963,42 @@ const Members = {
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || 'Không chạy lại được');
       App.toast(d.queued ? `📥 ${d.message}` : '🚀 Đã chạy lại Deep Crawl', 'success');
+      if (!d.queued) this._dcLastStatus = { ...(this._dcLastStatus || {}), status: 'running', busy: true };
+      document.getElementById('sim-progress-panel')?.classList.remove('hidden');
       this.loadCrawlHistory();
-      this._deepCrawlPollInterval = 3000;
-      this._deepCrawlPrevState = null;
-      if (!this._deepCrawlPolling) { this._deepCrawlPolling = true; this._pollDeepCrawlProgress(); }
-      this.restoreDeepCrawlState();
+      this._startCrawlPolling();
     } catch (e) { App.toast(e.message, 'error'); }
   },
 
   async deleteCrawlHistory(id) {
     await fetch(`/api/members/deep-crawl/history/${id}`, { method: 'DELETE' }).catch(() => {});
+    if (this._dcCaches) delete this._dcCaches[id];
+    if (this._dcViewHid === id) this.exitCrawlView();
     this.loadCrawlHistory();
   },
 
   _restoreDeepCrawlUI(s) {
     if (!s) return;
-    const btn = document.getElementById('sim-btn-search');
-    const stopBtn = document.getElementById('sim-btn-stop');
+    if (s.source_url) this._crawlSource = s.source_url;
     const progressPanel = document.getElementById('sim-progress-panel');
-
-    // 1. Always render queue panel if queue exists
+    this._dcLastStatus = s;
+    this._lastHistKey = this._histKey(s);
+    this._setCrawlBtn(s);
     this._renderQueuePanel(s.queue || [], s.queue_count || 0);
 
-    // 2. Handle Running State
-    if (s.status === 'running') {
-      this._deepCrawlPolling = true;
-      this._deepCrawlPollInterval = 3000;
-      this._deepCrawlPrevState = null;
-
-      // Clear stale table results from previous link while new crawl is active
-      if (this._similarLeads && this._similarLeads.length > 0) {
-        this._similarLeads = [];
-        this._selectedContacts.clear();
-        this._renderDeepCrawlResults([]);
-      }
-
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = '⏳ Đang Deep Crawl...';
-      }
-      if (stopBtn) stopBtn.classList.remove('hidden');
+    if (this._crawlLive(s)) {
       if (progressPanel) progressPanel.classList.remove('hidden');
-
       this._renderDeepCrawlProgressFromState(s);
-      this._pollDeepCrawlProgress();
+      // Keep what the table shows (an opened history run, or the previous run's results):
+      // the running crawl has no results yet.
+      if (this._dcViewHid) this._fetchDeepCrawlResults();
+      else if (!(this._similarLeads || []).length) this._showCrawlRunningEmpty(s);
+      this._updateViewBanner();
+      this._startCrawlPolling();
       return;
     }
 
-    // 3. Handle Completed / Stopped / Idle with results or queue
-    if (s.queue_count > 0) {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = `➕ Thêm Kênh Vào Queue (${s.queue_count} đang chờ)`;
-      }
-    } else {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = '🚀 Bắt đầu Deep Crawl';
-      }
-    }
-
-    if (stopBtn) stopBtn.classList.add('hidden');
-
-    if (s.results_count > 0 || s.status === 'completed' || s.status === 'stopped' || s.status === 'interrupted') {
+    if (s.results_count > 0 || this._dcViewHid || s.status === 'completed' || s.status === 'stopped' || s.status === 'interrupted') {
       if (progressPanel) progressPanel.classList.remove('hidden');
       this._renderDeepCrawlProgressFromState(s);
       this._fetchDeepCrawlResults();
@@ -1754,18 +2022,56 @@ const Members = {
       container.innerHTML = `<span style="color:var(--danger);font-size:13px">⚠️ Cần ít nhất 1 tài khoản Premium để sử dụng tính năng này</span>`;
       return;
     }
-    container.innerHTML = premiums.map(a => {
+    // Paused accounts never crawl ("tạm dừng = dừng hẳn"). Flagged/PeerFlood accounts that are
+    // not paused can: those limits only block messaging strangers, the crawl only reads.
+    // Opt-in: accounts paused only because of PeerFlood may crawl too (read-only).
+    if (this._pfCrawl === undefined) {
+      try {
+        const r = await fetch('/api/settings/deep_crawl_peerflood_paused');
+        this._pfCrawl = (await r.json()).value === '1';
+      } catch (e) { this._pfCrawl = false; }
+    }
+    const pfToggle = document.getElementById('sim-pf-crawl');
+    if (pfToggle) pfToggle.checked = this._pfCrawl;
+    const isPF = a => String(a.pause_reason || '').startsWith('PeerFlood');
+    const blocked = a => !!a.is_paused && !(this._pfCrawl && isPF(a));
+    const sorted = [...premiums].sort((a, b) => (+blocked(a)) - (+blocked(b)));
+    container.innerHTML = sorted.map(a => {
       const ui = a.user_info;
       const name = ui ? [ui.first_name, ui.last_name].filter(Boolean).join(' ') : a.name;
       const uname = ui && ui.username ? '@' + ui.username : (a.phone || '');
       const label = name ? `${name} (${uname})` : (uname || `ID ${a.id}`);
+      const paused = blocked(a);
+      const pfRead = !!a.is_paused && !paused;
+      const flagged = !a.is_paused && !!a.is_flagged;
+      const tip = paused ? `Đang tạm dừng${a.pause_reason ? ': ' + a.pause_reason : ''} — không dùng để cào`
+        : pfRead ? 'Tạm dừng vì PeerFlood — vẫn cào (chỉ đọc), không nhắn tin'
+        : flagged ? `Bị flag${a.flag_reason ? ': ' + a.flag_reason : ''} — vẫn cào được (chỉ đọc)` : '';
+      const tag = paused ? '<span style="font-size:11px;color:var(--text-muted)">⏸ tạm dừng</span>'
+        : pfRead ? '<span style="font-size:11px;color:var(--orange)">⏸ PeerFlood · chỉ đọc</span>'
+        : flagged ? '<span style="font-size:11px;color:var(--orange)">flag · chỉ đọc</span>' : '';
       return `
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:4px 8px;border-radius:6px;background:var(--bg1);border:1px solid var(--border)">
-          <input type="checkbox" class="sim-premium-cb" value="${a.id}" checked>
-          <span>⭐ ${esc(label)}</span>
+        <label title="${esc(tip)}" style="display:flex;align-items:center;gap:6px;cursor:${paused ? 'not-allowed' : 'pointer'};font-size:13px;padding:4px 8px;border-radius:6px;background:var(--bg1);border:1px solid var(--border)${paused ? ';opacity:.5' : ''}">
+          <input type="checkbox" class="sim-premium-cb" value="${a.id}" ${paused ? 'disabled' : 'checked'}>
+          <span>⭐ ${esc(label)}</span>${tag}
         </label>
       `;
     }).join('');
+  },
+
+  async togglePeerFloodCrawl(on) {
+    try {
+      const r = await fetch('/api/settings/deep_crawl_peerflood_paused', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: on ? '1' : '0' }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      this._pfCrawl = on;
+      App.toast(on ? 'Tài khoản tạm dừng vì PeerFlood sẽ được dùng để cào (chỉ đọc)' : 'Đã tắt: tài khoản tạm dừng không dùng để cào', 'success');
+    } catch (e) {
+      App.toast('Lưu tùy chọn thất bại: ' + e.message, 'error');
+    }
+    this.populatePremiumCheckboxes();
   },
 
   // ── Find Similar Channels (branches on depth) ──
@@ -1821,26 +2127,27 @@ const Members = {
         depth: 1,
         parent_channel: channelLink
       }));
+      this._dcViewHid = null;
+      this._dcViewMeta = null;
+      this._dcShownSource = channelLink;
       this._renderDeepCrawlResults(leads);
+      this._renderCrawlHistory();
+      this._updateViewBanner();
       App.toast(`Quét thành công! Tìm thấy ${leads.length} kênh tương tự.`, 'success');
     } catch (e) {
       App.toast(e.message, 'error');
     } finally {
-      btn.disabled = false;
-      btn.textContent = '🚀 Bắt đầu Deep Crawl';
+      this._setCrawlBtn(this._dcLastStatus);
     }
   },
 
   // ── Start Deep Crawl (depth 2-4) ──
   async startDeepCrawl(accountIds, channelLink, depth) {
     const btn = document.getElementById('sim-btn-search');
-    const stopBtn = document.getElementById('sim-btn-stop');
     const progressPanel = document.getElementById('sim-progress-panel');
 
     btn.disabled = true;
     btn.textContent = '⏳ Đang gửi...';
-    if (stopBtn) stopBtn.classList.remove('hidden');
-    if (progressPanel) progressPanel.classList.remove('hidden');
 
     try {
       const res = await fetch('/api/members/deep-crawl', {
@@ -1856,43 +2163,35 @@ const Members = {
       const d = await res.json();
       if (!res.ok) throw new Error(d.detail || 'Không thể bắt đầu deep crawl');
 
-      // Handle queued response
+      // Queued behind the running crawl: it starts on its own when that one ends.
       if (d.queued) {
         App.toast(`📥 ${d.message || 'Đã thêm link vào hàng chờ!'}`, 'success');
-        btn.disabled = false;
-        btn.textContent = '➕ Thêm Vào Queue';
-        // Immediately poll progress to update queue UI
-        this._deepCrawlPolling = true;
-        this._pollDeepCrawlProgress();
+        this._startCrawlPolling();  // refreshes the queue panel + button right away
         return;
       }
 
-      // Clear previous crawl table results so user only sees fresh results when ready
+      // A new crawl replaces the "latest" results: leave any history view and clear the
+      // table (the previous run stays openable from the history).
+      if (progressPanel) progressPanel.classList.remove('hidden');
+      this._dcViewHid = null;
+      this._dcViewMeta = null;
+      this._dcShownSource = '';
       this._similarLeads = [];
       this._selectedContacts.clear();
       this._renderDeepCrawlResults([]);
-      const empty = document.getElementById('sim-empty-state');
-      if (empty) {
-        empty.classList.remove('hidden');
-        empty.querySelector('p').textContent = `Đang chạy Deep Crawl cho "${channelLink}"... Kết quả sẽ tự động hiển thị khi hoàn thành.`;
-      }
+      this._showCrawlRunningEmpty({ source_url: channelLink });
+      this._renderCrawlHistory();
+      this._updateViewBanner();
 
       App.toast(d.message || '🚀 Đã bắt đầu Deep Crawl!', 'success');
-      btn.disabled = false;
-      btn.textContent = '➕ Thêm Vào Queue';
-
-      // Reset backoff state
-      this._deepCrawlPollInterval = 3000;
-      this._deepCrawlPrevState = null;
-      // Start polling progress
-      this._deepCrawlPolling = true;
-      this._pollDeepCrawlProgress();
+      // Remember a live crawl so the poll still reports it if it ends before the first tick.
+      this._dcLastStatus = { ...(this._dcLastStatus || {}), status: 'running', busy: true, source_url: channelLink };
+      this._setCrawlBtn(this._dcLastStatus);
+      this._startCrawlPolling();
     } catch (e) {
       App.toast(e.message, 'error');
-      btn.disabled = false;
-      btn.textContent = '🚀 Bắt đầu Deep Crawl';
-      if (stopBtn) stopBtn.classList.add('hidden');
-      if (progressPanel) progressPanel.classList.add('hidden');
+      this._setCrawlBtn(this._dcLastStatus);
+      if (progressPanel && !this._crawlLive(this._dcLastStatus) && !(this._similarLeads || []).length) progressPanel.classList.add('hidden');
     }
   },
 
@@ -1956,6 +2255,9 @@ const Members = {
 
     // ── Render Queue Panel ──
     this._renderQueuePanel(s.queue || [], s.queue_count || 0);
+    this._setCrawlBtn(s);
+    const histLive = document.getElementById('sim-hist-live');
+    if (histLive && s.status === 'running') histLive.textContent = `${s.channels_found || 0} kênh · ${s.contacts_found || 0} contact`;
   },
 
   _renderQueuePanel(queue, count) {
@@ -1982,7 +2284,7 @@ const Members = {
     panel.classList.remove('hidden');
 
     let html = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">`;
-    html += `<span style="font-weight:600; color:var(--text1)">📥 Hàng đợi chờ (${count})</span>`;
+    html += `<span style="font-weight:600; color:var(--text1)">📥 Hàng đợi chờ (${count}) <span style="font-weight:400;font-size:12px;color:var(--text-muted)">· tự chạy lần lượt khi lần hiện tại xong</span></span>`;
     if (count > 0) {
       html += `<button onclick="Members._clearQueue()" class="btn btn-small btn-danger" style="font-size:12px; padding:2px 10px;">Xóa tất cả</button>`;
     }
@@ -1991,9 +2293,11 @@ const Members = {
     if (queue && queue.length) {
       html += `<div style="display:flex; flex-direction:column; gap:6px;">`;
       queue.forEach((q, i) => {
-        const link = q.channel_link.length > 35 ? q.channel_link.substring(0, 35) + '...' : q.channel_link;
+        const raw = q.channel_link.length > 35 ? q.channel_link.substring(0, 35) + '...' : q.channel_link;
+        const link = raw.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const meta = [`depth ${q.max_depth}`, q.min_expand_score != null ? `≥${q.min_expand_score}đ` : '', q.retry ? 'chờ hết FloodWait' : ''].filter(Boolean).join(' · ');
         html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:color-mix(in srgb, var(--text) 4%, transparent); border-radius:6px; font-size:13px;">`;
-        html += `<span><span style="color:var(--accent); font-weight:600;">#${i + 1}</span> ${link} <span style="color:var(--text2);">(depth ${q.max_depth})</span></span>`;
+        html += `<span><span style="color:var(--accent); font-weight:600;">#${i + 1}</span> ${link} <span style="color:var(--text2);">(${meta})</span></span>`;
         html += `<button onclick="Members._removeQueueItem(${i})" style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:14px; padding:2px 6px;" title="Xóa">❌</button>`;
         html += `</div>`;
       });
@@ -2028,10 +2332,23 @@ const Members = {
     }
   },
 
-  // ── Poll Progress (every 3s) ──
+  // ── Poll Progress (3s, backing off to 30s while nothing changes) ──
+  // Exactly one loop: every start bumps the generation, so an older loop (tab re-open,
+  // queue add, rerun) ends at its next tick instead of doubling the requests.
   _deepCrawlPolling: false,
-  async _pollDeepCrawlProgress() {
-    if (!this._deepCrawlPolling) return;
+  _startCrawlPolling() {
+    this._dcPollGen = (this._dcPollGen || 0) + 1;
+    this._deepCrawlPolling = true;
+    this._deepCrawlPollInterval = 3000;
+    this._deepCrawlPrevState = null;
+    this._pollDeepCrawlProgress(this._dcPollGen);
+  },
+
+  _histKey(s) { return `${s.status}|${s.history_id || s.source_url || ''}`; },
+
+  async _pollDeepCrawlProgress(gen) {
+    if (!this._deepCrawlPolling || gen !== this._dcPollGen) return;
+    const again = (ms) => setTimeout(() => this._pollDeepCrawlProgress(gen), ms);
 
     try {
       const res = await fetch('/api/members/deep-crawl/status');
@@ -2039,48 +2356,54 @@ const Members = {
         throw new Error(`HTTP error! status: ${res.status}`);
       }
       const s = await res.json();
+      if (gen !== this._dcPollGen) return;
+      const prev = this._dcLastStatus;
+      this._dcLastStatus = s;
+      if (s.source_url) this._crawlSource = s.source_url;
 
       // Update progress UI using shared helper
       this._renderDeepCrawlProgressFromState(s);
 
+      // A run started or ended (incl. the next queued one) → refresh the history rows.
+      const histKey = this._histKey(s);
+      const changed = this._lastHistKey !== histKey;
+      if (changed) {
+        this._lastHistKey = histKey;
+        this.loadCrawlHistory();
+        this._updateViewBanner();
+      }
+
       // Check if done or idle
       if (s.status === 'completed' || s.status === 'stopped' || s.status === 'error' || s.status === 'idle' || s.status === 'interrupted') {
-        const histKey = `${s.status}|${s.source_url || ''}`;
-        if (this._lastHistKey !== histKey) { this._lastHistKey = histKey; this.loadCrawlHistory(); }
         const barEl = document.getElementById('sim-progress-bar');
         if (barEl) barEl.style.width = s.status === 'completed' ? '100%' : '0%';
 
-        // Fetch full results if it was a real execution
-        if (s.status === 'completed' || s.status === 'stopped') {
-          await this._fetchDeepCrawlResults();
-        }
-
-        if (s.status === 'completed') {
-          App.toast(`Deep Crawl hoàn thành! Tìm thấy ${s.channels_found} kênh, ${s.contacts_found} contacts.`, 'success');
-        } else if (s.status === 'stopped') {
-          App.toast(`Deep Crawl đã dừng. Thu thập được ${s.channels_found} kênh.`, 'warning');
-        }
-
-        // If queue has items, keep polling — backend will auto-start next
-        const queueCount = s.queue_count || 0;
-        if (queueCount > 0 && s.status !== 'idle') {
-          const btn = document.getElementById('sim-btn-search');
-          if (btn) {
-            btn.disabled = false;
-            btn.textContent = `➕ Thêm Kênh Vào Queue (${queueCount} đang chờ)`;
+        // Only on the tick that sees the run end — not on every tick of the pause
+        // before the next queued crawl.
+        if (changed && this._crawlLive(prev)) {
+          const viewingOld = !!this._dcViewHid;
+          if ((s.status === 'completed' || s.status === 'stopped') && !viewingOld) {
+            await this._fetchDeepCrawlResults();
+            if (gen !== this._dcPollGen) return;
           }
+          const tail = viewingOld ? ' — bấm "↩ Về kết quả mới nhất" để xem.' : '';
+          if (s.status === 'completed') {
+            App.toast(`Deep Crawl hoàn thành! Tìm thấy ${s.channels_found} kênh, ${s.contacts_found} contacts.${tail}`, 'success');
+          } else if (s.status === 'stopped') {
+            App.toast(`Deep Crawl đã dừng. Thu thập được ${s.channels_found} kênh.${tail}`, 'warning');
+          }
+        }
+
+        // Pause before the next queued crawl (or a FloodWait wait): keep polling.
+        if (this._crawlLive(s)) {
           this._deepCrawlPollInterval = 3000;
-          setTimeout(() => this._pollDeepCrawlProgress(), 3000);
+          again(3000);
           return;
         }
 
-        // All done — reset UI
+        // All done
         this._deepCrawlPolling = false;
-        const btn = document.getElementById('sim-btn-search');
-        const stopBtn = document.getElementById('sim-btn-stop');
         const progressPanel = document.getElementById('sim-progress-panel');
-        if (btn) { btn.disabled = false; btn.textContent = '🚀 Bắt đầu Deep Crawl'; }
-        if (stopBtn) stopBtn.classList.add('hidden');
         if (s.status === 'idle' && progressPanel) progressPanel.classList.add('hidden');
         return;
       }
@@ -2119,11 +2442,11 @@ const Members = {
         status: s.status
       };
 
-      setTimeout(() => this._pollDeepCrawlProgress(), this._deepCrawlPollInterval);
+      again(this._deepCrawlPollInterval);
     } catch (e) {
       // Back off on network or parsing error
       this._deepCrawlPollInterval = Math.min(30000, this._deepCrawlPollInterval * 1.5);
-      setTimeout(() => this._pollDeepCrawlProgress(), this._deepCrawlPollInterval);
+      again(this._deepCrawlPollInterval);
     }
   },
 
@@ -2131,24 +2454,49 @@ const Members = {
   // The result set can be thousands of leads (~4 MB). Fetch page 0 slim first so
   // the table paints immediately, then stream the remaining pages in the
   // background — the user never waits for data they are not looking at.
+  // Returns true when shown, false on error, null when a newer request took over.
   async _fetchDeepCrawlResults() {
     const PAGE = 100;
+    const hid = this._dcViewHid || '';
+    const hq = hid ? `&hid=${encodeURIComponent(hid)}` : '';
+    const tok = this._dcFetchTok = (this._dcFetchTok || 0) + 1;
+    const stale = () => tok !== this._dcFetchTok;
+    this._dcCaches = this._dcCaches || {};
     try {
+      // A stored run never changes: reopen it from memory without any request.
+      const hc = hid && this._dcCaches[hid];
+      if (hc) {
+        this._dcShownSource = hc.source;
+        this._renderDeepCrawlResults(hc.all, { counts: hc.counts, total: hc.total, keepPage: this._similarLeads === hc.all });
+        this._updateViewBanner();
+        return true;
+      }
+
       // 1) First page — fast paint.
-      const first = await fetch(`/api/members/deep-crawl/results?slim=1&page=0&limit=${PAGE}`);
+      const first = await fetch(`/api/members/deep-crawl/results?slim=1&page=0&limit=${PAGE}${hq}`);
       const d0 = await first.json();
+      if (stale()) return null;
+      if (!first.ok) throw new Error(d0.detail || 'Lỗi tải kết quả deep crawl');
+      this._dcShownSource = d0.source_url || '';
       const total = d0.total || 0;
-      if (!total) { this._dcCache = null; this._renderDeepCrawlResults([]); return; }
+      if (!total) {
+        delete this._dcCaches[hid];
+        this._renderDeepCrawlResults([]);
+        this._updateViewBanner();
+        return true;
+      }
 
       // Revisit with unchanged data: reuse the cached full set instead of
       // re-downloading every page (~1 MB, 30+ requests) on each navigation.
-      const c = this._dcCache;
+      const c = this._dcCaches[hid];
       if (c && c.total === total && c.firstId === (d0.leads || [])[0]?.id) {
-        this._renderDeepCrawlResults(c.all, { counts: d0.counts, total, keepPage: true });
-        return;
+        this._renderDeepCrawlResults(c.all, { counts: d0.counts, total, keepPage: this._similarLeads === c.all });
+        this._updateViewBanner();
+        return true;
       }
 
       this._renderDeepCrawlResults(d0.leads || [], { counts: d0.counts, total });
+      this._updateViewBanner();
 
       // 2) Remaining pages — hydrate the rest without blocking the UI.
       // Fetch them in parallel (bounded) at the server's max page size and
@@ -2160,9 +2508,10 @@ const Members = {
       const chunks = new Array(bigPages);
       let next = 0;
       const worker = async () => {
-        while (next < bigPages) {
+        while (next < bigPages && !stale()) {
           const p = next++;
-          const res = await fetch(`/api/members/deep-crawl/results?slim=1&page=${p}&limit=${BIG}`);
+          const res = await fetch(`/api/members/deep-crawl/results?slim=1&page=${p}&limit=${BIG}${hq}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const d = await res.json();
           chunks[p] = d.leads || [];
         }
@@ -2171,15 +2520,24 @@ const Members = {
         await Promise.all(Array.from({ length: Math.min(4, bigPages) }, worker));
       } catch (e) {
         console.warn('[DeepCrawl] page load error', e);
-        return;  // keep the first page on screen
+        return stale() ? null : true;  // keep the first page on screen
       }
+      if (stale()) return null;
       const all = chunks.flat();
-      this._dcCache = { total, firstId: (d0.leads || [])[0]?.id, all };
+      this._dcCaches[hid] = { total, firstId: (d0.leads || [])[0]?.id, all, counts: d0.counts, source: this._dcShownSource };
+      // Keep at most 3 sets in memory (latest + 2 opened history runs).
+      for (const k of Object.keys(this._dcCaches)) {
+        if (Object.keys(this._dcCaches).length <= 3) break;
+        if (k !== hid) delete this._dcCaches[k];
+      }
       if (all.length > skip) {
         this._renderDeepCrawlResults(all, { counts: d0.counts, total, keepPage: true });
       }
+      return true;
     } catch (e) {
-      App.toast('Lỗi tải kết quả deep crawl', 'error');
+      if (stale()) return null;
+      App.toast(e.message || 'Lỗi tải kết quả deep crawl', 'error');
+      return false;
     }
   },
 
@@ -2240,7 +2598,19 @@ const Members = {
     else if (subs >= 1000) score += 10;
 
     lead.trading_score = Math.min(100, Math.max(0, score));
-    if (lead.trading_score >= 80) {
+    // CEX BD only targets futures traders; airdrop / bonus hunters never qualify.
+    const futuresTerms = ["futures", "leverage", "margin", "scalp", "perp", "signal", "copy trading", "tp/sl", "đòn bẩy", "kèo", "tín hiệu", "合约", "带单", "跟单", "фьючерс", "сигнал", "скальп"];
+    const airdropTerms = ["airdrop", "giveaway", "bonus hunt", "free crypto", "free usdt", "retroactive", "testnet", "faucet", "galxe", "zealy", "săn airdrop", "săn bonus", "空投", "撸毛", "羊毛", "аирдроп", "раздача"];
+    const hasFutures = futuresTerms.some(k => text.includes(k));
+    const airdropHits = airdropTerms.filter(k => text.includes(k)).length;
+    const isAirdrop = airdropHits > 0 && (!hasFutures || airdropHits >= 2);
+    if (isAirdrop) lead.trading_score = Math.min(lead.trading_score, 25);
+    else if (!hasFutures) lead.trading_score = Math.min(lead.trading_score, 44);
+    if (isAirdrop) {
+      lead.category = "airdrop_bonus";
+      lead.category_label = "🪂 Airdrop / Bonus";
+      lead.badge_color = "var(--text3)";
+    } else if (lead.trading_score >= 80) {
       lead.category = "trading_signals";
       lead.category_label = "🔥 VIP Signals / KOL";
       lead.badge_color = "var(--green)";
@@ -2535,9 +2905,36 @@ const Members = {
       }
     }
 
-    const sourceInput = (document.getElementById('sim-channel-input')?.value || "").trim();
-    const cleanName = sourceInput.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-    (document.getElementById('sim-import-job-id') || me_dummy).value = `deep_${cleanName || 'leads'}`;
+    const jobInput = document.getElementById('sim-import-job-id');
+    if (jobInput && !this._jobNameTouched) jobInput.value = this._suggestLeadListName();
+  },
+
+  // Tab key → short tag used in list names / titles
+  _SIM_TAB_TAGS: {
+    has_contacts: ['Contacts', 'Tất cả có contact'], trading_vip: ['VIP', 'VIP Signals'],
+    trading_all: ['Trading', 'Trading & Scalping'], potential_bd: ['BD', 'Tiềm năng BD'],
+    news: ['News', 'Tin tức'], no_contacts: ['NoContact', 'Chưa có contact'], all: ['All', 'Tất cả'],
+  },
+
+  // "https://t.me/H2Capitalchannel" → "H2Capitalchannel"
+  _crawlSourceName() {
+    const raw = (this._dcShownSource || this._crawlSource || document.getElementById('sim-channel-input')?.value || '').trim();
+    const m = raw.match(/(?:t\.me\/|telegram\.me\/|@)(?:s\/)?([A-Za-z0-9_]{3,})/);
+    const name = (m ? m[1] : raw).replace(/[^A-Za-z0-9_]/g, '').slice(0, 28);
+    return name || 'DeepCrawl';
+  },
+
+  // e.g. "H2Capitalchannel_Trading_0611" (+ "_2" when that name already exists)
+  _suggestLeadListName() {
+    const tag = (this._SIM_TAB_TAGS[this._tradingFilter] || ['Leads'])[0];
+    const d = new Date();
+    const dd = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0');
+    const depth = this._depthFilter && this._depthFilter !== 'all' ? `_L${this._depthFilter}` : '';
+    const base = `${this._crawlSourceName()}_${tag}${depth}_${dd}`;
+    const taken = new Set((this._scrapeJobs || []).map(j => String(j.scrape_job_id).toLowerCase()));
+    let name = base, i = 2;
+    while (taken.has(name.toLowerCase())) name = `${base}_${i++}`;
+    return name;
   },
 
   // ── Batch Auto-Translate Visible Descriptions to English ──
@@ -2771,7 +3168,11 @@ const Members = {
       last_name: ''
     }));
 
-    const groupTitle = `Deep Crawl Contacts (${jobId})`;
+    const tabLbl = (this._SIM_TAB_TAGS[this._tradingFilter] || [null, 'Leads'])[1];
+    const d0 = new Date();
+    const groupTitle = this._jobNameTouched
+      ? jobId
+      : `${this._crawlSourceName()} · ${tabLbl} (${String(d0.getDate()).padStart(2, '0')}/${String(d0.getMonth() + 1).padStart(2, '0')})`;
 
     const picked = new Set(cleanContacts);
     const nCh = viewLeads.filter(l => (l.contacts || []).some(c => picked.has(c))).length;
@@ -2784,7 +3185,15 @@ const Members = {
         body: JSON.stringify({
           scrape_job_id: jobId,
           group_title: groupTitle,
-          contacts: contacts
+          contacts: contacts,
+          skip_existing: true,
+          source: this._dcShownSource || '',
+          channels: viewLeads.filter(l => (l.contacts || []).some(c => picked.has(c))).map(l => ({
+            channel_id: l.channel_id, username: l.username, title: l.title,
+            participants_count: l.participants_count, trading_score: l.trading_score,
+            category: l.category, category_label: l.category_label, contacts: l.contacts,
+            description: (l.description || '').slice(0, 600), parent_channel: l.parent_channel, depth: l.depth,
+          })),
         })
       });
       const d = await res.json();
@@ -2792,16 +3201,29 @@ const Members = {
         throw new Error(d.detail || 'Không thể import contact');
       }
 
-      let msg = `✅ Đã lưu ${d.count} contact vào job "${jobId}" thành công!`;
-      if (d.skipped_dmd > 0) {
-        msg += ` (Bỏ qua ${d.skipped_dmd} contact đã DM trước đó)`;
+      const skips = [];
+      if (d.skipped_existing > 0) {
+        const where = (d.existing_jobs || []).slice(0, 2).map(([j, n]) => `${j}: ${n}`).join(', ');
+        skips.push(`${d.skipped_existing} đã có trong danh sách khác${where ? ` (${where})` : ''}`);
       }
-      App.toast(msg, 'success');
-      this.loadScrapeJobs();
+      if (d.skipped_dmd > 0) skips.push(`${d.skipped_dmd} đã DM/đang trò chuyện`);
+      if (d.skipped_dupe > 0) skips.push(`${d.skipped_dupe} trùng trong lựa chọn`);
+      const msg = d.count > 0
+        ? `✅ Đã lưu ${d.count} contact mới vào "${groupTitle}"${skips.length ? ` · Bỏ qua ${skips.join(', ')}` : ''}`
+        : `ℹ️ Không có contact mới — tất cả đã có sẵn${skips.length ? `: ${skips.join(', ')}` : ''}`;
+      App.toast(msg, d.count > 0 ? 'success' : 'info');
+      if (d.kol_upserted) App.toast(`📇 Đã cập nhật ${d.kol_upserted} kênh vào Danh bạ KOL`, 'info');
+      this._jobNameTouched = false;
+      await this.loadScrapeJobs();
 
       // Reset selection but KEEP results so user can re-filter and save other tabs
       this._selectedContacts.clear();
       this._renderDeepCrawlResults(this._similarLeads);
+
+      // Shortcut: go straight from imported contacts to a DM campaign on that job
+      if (d.count > 0 && confirm(`Tạo DM campaign ngay cho ${d.count} contact trong job "${jobId}"?`)) {
+        this.openCampaignModal(jobId);
+      }
     } catch (e) {
       App.toast(e.message, 'error');
     }
@@ -2809,11 +3231,15 @@ const Members = {
 
   // ── Manually / Programmatically Clear Deep Crawl Table Results ──
   async clearDeepCrawlResults(showToast = true) {
+    if (this._dcViewHid) { await this.exitCrawlView(); return; }
     try {
       await fetch('/api/members/deep-crawl/clear', { method: 'POST' });
     } catch (e) {
       console.debug('Error calling deep-crawl/clear API:', e);
     }
+    if (this._dcCaches) delete this._dcCaches[''];
+    this._dcShownSource = '';
+    this._updateViewBanner();
     this._similarLeads = [];
     this._selectedContacts.clear();
     this._renderDeepCrawlResults([]);

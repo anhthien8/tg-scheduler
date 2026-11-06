@@ -1180,7 +1180,7 @@ async def extract_kol_profile(history: list[dict], provider: str, api_keys: list
         " - community_name: (explicit community/channel/group name, or empty string)\n"
         " - community_link: (Telegram/YouTube/Twitter/TikTok/community URL explicitly stated by the user, or empty string)\n"
         " - community_logo: (logo/avatar URL or empty string; never invent one)\n"
-        " - weex_uid: (explicit WEEX UID, or empty string)\n"
+        " - weex_uid: (the exchange UID the user explicitly gave us — WEEX, BloFin or any other exchange we onboard them to — or empty string)\n"
         " - selected_campaign: (exact campaign name the KOL selected, or empty string)\n"
         " - revshare_request: (e.g. 75% revshare, 5000$/mo, or empty string)\n"
         " - key_demands: (e.g. daily payout, no KYC, offline event support, or empty string)\n\n"

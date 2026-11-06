@@ -741,7 +741,8 @@ if(page==='warmup'){
       <div class="wu-head">
         <h2 class="page-title">Warmup Nhóm</h2>
         <span class="info-i" tabindex="0" data-tip="Warmup = cho account mới hoạt động tự nhiên trong các nhóm public (đọc tin, thả react, xem profile, chat nhẹ) để Telegram tin tưởng trước khi đem đi outreach.">i</span>
-        <button class="btn btn-sm" style="margin-left:auto" onclick="Warmup.toggleGuide()">📖 Hướng dẫn</button>
+        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="Warmup.openOneClick()">⚡ Warmup 1-click</button>
+        <button class="btn btn-sm" onclick="Warmup.toggleGuide()">📖 Hướng dẫn</button>
       </div>
 
       <div class="wu-guide" id="warmup-guide">
@@ -750,8 +751,8 @@ if(page==='warmup'){
           <button class="btn btn-sm" style="padding:2px 8px" onclick="Warmup.toggleGuide(false)">Ẩn</button>
         </div>
         <div class="wu-steps">
-          <div class="wu-step"><b class="n">1</b><div><strong>Thêm nhóm</strong> — bấm “+ Thêm nhóm”, chỉ cần dán link (t.me/… hoặc @username). Hệ thống tự lấy ID và tự join.</div></div>
-          <div class="wu-step"><b class="n">2</b><div><strong>Tạo job</strong> — chọn nhóm + các account cần warmup, khung giờ và giới hạn/ngày. Job tự chạy ngẫu nhiên trong khung giờ.</div></div>
+          <div class="wu-step"><b class="n">1</b><div><strong>⚡ Warmup 1-click</strong> — dán link nhóm (t.me/… hoặc @username) → <b>Bắt đầu</b>. Hệ thống tự thêm nhóm, chọn account khỏe, bật ✨ AI tự viết và chạy luôn. Nhóm đã có thì bấm ⚡ cạnh tên nhóm.</div></div>
+          <div class="wu-step"><b class="n">2</b><div><strong>Tự chạy</strong> — ngày 1–2 account chỉ đọc tin / thả cảm xúc; từ ngày 3 AI đọc tin người thật trong nhóm rồi viết 1 câu ngắn đúng chủ đề. Cần chỉnh tay thì dùng “+ Thêm nhóm” / “+ Tạo job”.</div></div>
           <div class="wu-step"><b class="n">3</b><div><strong>Theo dõi</strong> — tab Tiến độ cho thấy mỗi account đang ở giai đoạn nào: Passive → Warming → Active → <b>Ready 🎓</b> (dùng outreach được).</div></div>
         </div>
         <div style="margin-top:8px;font-size:.78rem;color:var(--orange)">⚠️ Chỉ dùng nhóm PUBLIC. Không thêm nhóm private hoặc nhóm có KOL/khách tiềm năng để tránh lộ bot.</div>
@@ -761,7 +762,7 @@ if(page==='warmup'){
 
       <div class="wu-cols">
         <div>
-          <div class="wu-sec-h"><h3>Nhóm <span class="info-i" tabindex="0" data-tip="Các nhóm public mà account sẽ hoạt động. Bấm vào 1 nhóm để thêm script (câu chat mẫu) cho nhóm đó.">i</span></h3>
+          <div class="wu-sec-h"><h3>Nhóm <span class="info-i" tabindex="0" data-tip="Các nhóm public mà account sẽ hoạt động. ⚡ = warmup 1-click nhóm đó. Bấm vào tên nhóm để thêm kịch bản (chỉ cần khi tắt ✨ AI tự viết).">i</span></h3>
             <button class="btn btn-primary btn-sm" onclick="Warmup.openAddGroup()">+ Thêm nhóm</button></div>
           <div id="warmup-group-list"></div>
           <div id="warmup-scripts-section" class="hidden" style="margin-top:14px">
@@ -785,7 +786,7 @@ if(page==='warmup'){
 
       <div data-wpane="progress">
         <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
-          <button class="btn btn-sm" onclick="Warmup.loadProgress()">↻ Refresh</button>
+          <button class="btn btn-sm" onclick="Warmup.loadJobs(); Warmup.loadProgress(); Warmup.loadActionLogSummary()">↻ Refresh</button>
         </div>
         <div id="warmup-progress-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px"></div>
       </div>
@@ -866,8 +867,31 @@ if(page==='warmup'){
               <div class="form-group"><label class="form-label">Kết thúc</label><input type="time" id="wj-end" class="form-input" value="22:00"></div>
             </div>
             <div class="form-group"><label class="form-label">Giới hạn hành động/ngày</label><input type="number" id="wj-daily-limit" class="form-input" value="10"></div>
+            <div class="form-group" style="display:flex;align-items:center;gap:8px">
+              <input type="checkbox" id="wj-ai-write" checked>
+              <label for="wj-ai-write" style="cursor:pointer">✨ AI tự viết tin</label>
+              <span class="info-i" tabindex="0" data-tip="AI đọc ~12 tin gần nhất của người thật trong nhóm (không đọc tin của account mình, không đọc bot) rồi viết 1 câu ngắn đúng chủ đề, đúng ngôn ngữ của nhóm. Tin có link, @, hashtag, quảng cáo hoặc gần giống tin cũ sẽ bị bỏ. Không có gì hợp để nói thì account chỉ đọc tin / thả cảm xúc lượt đó. Ngày 1–2 account chỉ đọc/react, từ ngày 3 mới đăng tin. Cần cấu hình AI ở Cài đặt → AI. Tắt đi thì job dùng kịch bản của nhóm.">i</span>
+            </div>
           </div>
           <div class="modal-footer"><button class="btn btn-primary" onclick="Warmup.saveJob()">Tạo job</button></div>
+        </div>
+      </div>
+
+      <!-- 1-click Modal -->
+      <div id="warmup-oneclick-modal" class="modal-overlay">
+        <div class="modal" style="max-width:560px">
+          <div class="modal-header"><h3 class="modal-title">⚡ Warmup 1-click</h3><button class="modal-close" onclick="(document.getElementById('warmup-oneclick-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
+          <div class="modal-body">
+            <div class="form-group"><label class="form-label">Link nhóm <span class="info-i" tabindex="0" data-tip="Dán link t.me/…, @username hoặc link mời t.me/+…. Nhóm đã có trong danh sách thì dùng lại nhóm và job cũ (không tạo trùng).">i</span></label>
+              <input type="text" id="woc-link" class="form-input" placeholder="t.me/cryptovn hoặc @cryptovn" onkeydown="if(event.key==='Enter')Warmup.oneClick()" oninput="Warmup._ocLinkChanged()"></div>
+            <div style="font-size:.8rem;color:var(--text2);margin:-4px 0 10px">Tự thêm nhóm → chọn account khỏe → bật ✨ AI tự viết → chạy (30–120 phút/lượt, 09:00–22:00, 10 hành động/ngày).</div>
+            <details id="woc-acc-box">
+              <summary style="cursor:pointer;font-size:.85rem">Account: <span id="woc-acc-sum">đang tải…</span>
+                <span class="info-i" tabindex="0" data-tip="Tự chọn tối đa 10 account khỏe đang kết nối, ưu tiên account cùng brand với nhóm. Account mang brand khác (vd. “Coy | Weex” trong nhóm BloFin) không được chọn sẵn để tránh bị admin kick. Mở ra để tick lại nếu muốn.">i</span></summary>
+              <div id="woc-accounts" style="display:flex;flex-wrap:wrap;gap:6px;max-height:210px;overflow:auto;margin-top:8px"></div>
+            </details>
+          </div>
+          <div class="modal-footer"><button class="btn btn-primary" id="woc-go" onclick="Warmup.oneClick()">⚡ Bắt đầu</button></div>
         </div>
       </div>
 
@@ -2573,6 +2597,7 @@ App.loadSettings = async function() {
     App.renderAiKeysList('groq',     groqKeys);
     App.renderAiKeysList('openai_compatible', oaiCompatKeys);
     App.renderAiKeysList('chatgpt_oauth', chatgptOauthKeys);
+    App.renderChatgptTokenExpiry(chatgptOauthKeys);
     (document.getElementById('oai-compat-base-url') || me_dummy).value = oaiCompatBaseUrl;
     (document.getElementById('oai-compat-model') || me_dummy).value = oaiCompatModel;
     (document.getElementById('chatgpt-oauth-base-url') || me_dummy).value = chatgptOauthBaseUrl;
@@ -4992,7 +5017,7 @@ const Warmup = {
       this._groups = data.groups || [];
       const el = document.getElementById('warmup-group-list');
       if (!this._groups.length) {
-        el.innerHTML = '<div style="color:var(--text2);padding:12px;border:1px dashed var(--border);border-radius:8px;font-size:.85rem">Chưa có nhóm. Bấm <b>+ Thêm nhóm</b> và dán link t.me/… để bắt đầu.</div>';
+        el.innerHTML = '<div style="color:var(--text2);padding:12px;border:1px dashed var(--border);border-radius:8px;font-size:.85rem">Chưa có nhóm. Bấm <b>⚡ Warmup 1-click</b>, dán link t.me/… là chạy luôn.</div>';
         return;
       }
       el.innerHTML = this._groups.map(g => {
@@ -5003,7 +5028,10 @@ const Warmup = {
               <span style="color:var(--text2);font-size:.85rem;margin-left:8px">${this._esc(g.chat_title || '')} ${g.chat_username ? '@' + g.chat_username : ''}</span>
               <span style="color:var(--text2);font-size:.78rem;margin-left:8px">ID: ${g.chat_id}</span>
             </div>
-            <button onclick="event.stopPropagation();Warmup.deleteGroup(${g.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoa</button>
+            <div style="display:flex;gap:6px;flex:none">
+              <button class="btn btn-primary btn-sm" style="padding:3px 10px;font-size:.78rem" title="Warmup 1-click: chọn account khỏe, bật ✨ AI tự viết và chạy" onclick="event.stopPropagation();Warmup.oneClick(${g.id})">⚡</button>
+              <button onclick="event.stopPropagation();Warmup.deleteGroup(${g.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoá</button>
+            </div>
           </div>
         </div>`;
       }).join('');
@@ -5061,7 +5089,7 @@ const Warmup = {
       const scripts = data.scripts || [];
       const el = document.getElementById('warmup-script-list');
       if (!scripts.length) {
-        el.innerHTML = '<div style="color:var(--text2);padding:12px">Chua co script nao. Them script de bat dau warmup.</div>';
+        el.innerHTML = '<div style="color:var(--text2);padding:12px;font-size:.85rem">Chưa có kịch bản. Không cần khi job bật ✨ AI tự viết; kịch bản chỉ dùng khi tắt AI hoặc AI chưa cấu hình.</div>';
         return;
       }
       el.innerHTML = scripts.map((s, i) => {
@@ -5116,43 +5144,60 @@ const Warmup = {
       this._jobs = data.jobs || [];
       const el = document.getElementById('warmup-job-list');
       if (!this._jobs.length) {
-        el.innerHTML = '<div style="color:var(--text2);padding:12px;border:1px dashed var(--border);border-radius:8px;font-size:.85rem">Chưa có job. Thêm nhóm trước, rồi bấm <b>+ Tạo job</b>.</div>';
+        el.innerHTML = '<div style="color:var(--text2);padding:12px;border:1px dashed var(--border);border-radius:8px;font-size:.85rem">Chưa có job. Bấm <b>⚡ Warmup 1-click</b> (hoặc ⚡ cạnh tên nhóm) để tạo và chạy luôn.</div>';
 
         // Update stats (enhanced)
         this._renderStats(0, 0);
         return;
       }
 
-      const running = this._jobs.filter(j => j.is_running || j.status === 'running').length;
+      const running = this._jobs.filter(j => j.is_running).length;
       this._renderStats(this._jobs.length, running);
 
       el.innerHTML = this._jobs.map(j => {
         const grp = this._groups.find(g => g.id === j.group_id);
         const grpName = grp ? grp.name : 'Nhom #' + j.group_id;
-        const isRunning = j.is_running || j.status === 'running';
+        // is_running = the engine task really exists (DB status alone can be stale).
+        const isRunning = !!j.is_running;
         const statusBadge = isRunning
-          ? '<span class="badge badge-green">Dang chay</span>'
+          ? '<span class="badge badge-green">Đang chạy</span>'
           : j.status === 'error'
-            ? '<span class="badge badge-red">Loi</span>'
-            : '<span class="badge">Dung</span>';
+            ? '<span class="badge badge-red">Lỗi</span>'
+            : '<span class="badge">Đã dừng</span>';
         const accIds = JSON.parse(j.account_ids || '[]');
-        const lastPost = j.last_post_at ? j.last_post_at.replace('T', ' ').slice(0, 16) : 'Chua co';
+        const lastPost = j.last_post_at ? j.last_post_at.replace('T', ' ').slice(0, 16) : 'chưa có';
+        const st = j.state || {};
+        const hm = ts => { const d = new Date(ts * 1000); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+        // Wake-ups past the window end do nothing — show when work really resumes.
+        const inWin = (t, a = '00:00', b = '23:59') => a <= b ? (a <= t && t <= b) : (t >= a || t <= b);  // same as engine in_window
+        const nextHm = st.next_at ? (inWin(hm(st.next_at), j.schedule_start, j.schedule_end) ? hm(st.next_at) : j.schedule_start) : '';
+        const stateLine = st.note
+          ? `<div style="font-size:.8rem;margin-top:3px;color:${/lỗi|Lỗi|FloodWait|Không account/.test(st.note) ? '#d29922' : 'var(--text)'}">
+              ${isRunning ? '⏱' : 'ℹ️'} ${this._esc(st.note)}${isRunning && nextHm ? ` · lượt kế ~${nextHm}` : ''}</div>`
+          : '';
+        const aiToggle = `<label style="cursor:pointer;white-space:nowrap;color:${j.ai_write ? 'var(--green)' : 'var(--text2)'}"><input type="checkbox" style="vertical-align:-2px" ${j.ai_write ? 'checked' : ''} onchange="Warmup.toggleAi(${j.id}, this.checked)"> ✨ AI tự viết</label> <span class="info-i" tabindex="0" data-tip="AI đọc ~12 tin gần nhất của người thật trong nhóm (không đọc tin của account mình, không đọc bot) rồi viết 1 câu ngắn đúng chủ đề, đúng ngôn ngữ của nhóm. Tin có link, @, hashtag, quảng cáo hoặc gần giống tin cũ sẽ bị bỏ. Không có gì hợp để nói thì account chỉ đọc tin / thả cảm xúc lượt đó. Ngày 1–2 account chỉ đọc/react, từ ngày 3 mới đăng tin. Cần cấu hình AI ở Cài đặt → AI. Tắt đi thì job dùng kịch bản của nhóm.">i</span>`;
+        const scriptsLine = j.ai_write
+          ? aiToggle
+          : (j.scripts_count
+            ? `Kịch bản: ${j.scripts_count}`
+            : `<span style="color:#d29922">Kịch bản: 0 — chỉ đọc/react, chưa đăng tin</span>`) + ' · ' + aiToggle;
 
         return `<div class="card" style="padding:12px;margin-bottom:8px">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div>
               <strong>${this._esc(grpName)}</strong> ${statusBadge}
               <div style="font-size:.82rem;color:var(--text2);margin-top:4px">
-                ${accIds.length} tai khoan | ${j.interval_min}-${j.interval_max} phut | ${j.schedule_start}-${j.schedule_end} | Limit: ${j.daily_post_limit}/ngay
+                ${accIds.length} tài khoản | ${j.interval_min}-${j.interval_max} phút | ${j.schedule_start}-${j.schedule_end} | Giới hạn: ${j.daily_post_limit} tin/ngày
               </div>
               <div style="font-size:.8rem;color:var(--text2)">
-                Hom nay: ${j.posts_today}/${j.daily_post_limit} | Lan cuoi: ${lastPost}
+                Hôm nay: ${j.posts_today}/${j.daily_post_limit} tin | Tin cuối: ${lastPost} | ${scriptsLine}
               </div>
+              ${stateLine}
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap">
               ${isRunning
-                ? '<button class="btn btn-danger btn-sm" onclick="Warmup.stopJob(' + j.id + ')">Dung</button>'
-                : '<button class="btn btn-primary btn-sm" onclick="Warmup.startJob(' + j.id + ')">Chay</button>'}
+                ? '<button class="btn btn-danger btn-sm" onclick="Warmup.stopJob(' + j.id + ')">Dừng</button>'
+                : '<button class="btn btn-primary btn-sm" onclick="Warmup.startJob(' + j.id + ')">Chạy</button>'}
               <button class="btn btn-sm" style="background:color-mix(in srgb, var(--accent) 15%, transparent);color:var(--accent-text);border:1px solid color-mix(in srgb, var(--accent) 30%, transparent)" onclick="Warmup.viewJobLogs(${j.id})">Logs</button>
               <button onclick="Warmup.deleteJob(${j.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoa</button>
             </div>
@@ -5201,6 +5246,7 @@ const Warmup = {
     (document.getElementById('wj-start') || me_dummy).value = '09:00';
     (document.getElementById('wj-end') || me_dummy).value = '22:00';
     (document.getElementById('wj-daily-limit') || me_dummy).value = '10';
+    (document.getElementById('wj-ai-write') || me_dummy).checked = true;
     (document.getElementById('warmup-job-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
   },
 
@@ -5235,19 +5281,113 @@ const Warmup = {
         interval_max: parseInt(document.getElementById('wj-interval-max')?.value) || 120,
         schedule_start: document.getElementById('wj-start')?.value || '09:00',
         schedule_end: document.getElementById('wj-end')?.value || '22:00',
-        daily_post_limit: parseInt(document.getElementById('wj-daily-limit')?.value) || 10
+        daily_post_limit: parseInt(document.getElementById('wj-daily-limit')?.value) || 10,
+        ai_write: !!document.getElementById('wj-ai-write')?.checked
       });
       (document.getElementById('warmup-job-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
-      App.toast('Da tao job', 'success');
+      App.toast('Đã tạo job', 'success');
       this.loadJobs();
     } catch(e) { App.toast(e.message, 'error'); }
   },
 
+  // ── ⚡ 1-click: link → group + job (✨ AI tự viết) → running ──
+  _ocTouched: false,
+  _ocTimer: null,
+  _ocJob: null,
+
+  openOneClick() {
+    this._ocTouched = false;
+    (document.getElementById('woc-link') || me_dummy).value = '';
+    const box = document.getElementById('woc-acc-box');
+    if (box) box.open = false;
+    (document.getElementById('warmup-oneclick-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
+    setTimeout(() => document.getElementById('woc-link')?.focus(), 50);
+    this._ocLoadAccounts();
+  },
+
+  _ocLinkChanged() {
+    // The picks depend on the group (brand match, existing job) — refresh unless the user ticked by hand.
+    if (this._ocTouched) return;
+    clearTimeout(this._ocTimer);
+    this._ocTimer = setTimeout(() => this._ocLoadAccounts(), 600);
+  },
+
+  async _ocLoadAccounts() {
+    const el = document.getElementById('woc-accounts');
+    const sum = document.getElementById('woc-acc-sum');
+    if (!el) return;
+    const link = (document.getElementById('woc-link')?.value || '').trim();
+    try {
+      const d = await API.get('/api/warmup/eligible-accounts?link=' + encodeURIComponent(link));
+      const accs = (d.accounts || []).slice().sort((a, b) => (b.pick - a.pick) || (b.ok - a.ok) || (a.id - b.id));
+      el.innerHTML = accs.map(a => {
+        const tag = !a.ok ? `<span style="color:var(--text3);font-size:.85em">· ${this._esc(a.why || '')}</span>`
+          : a.other_brand ? `<span style="color:#d29922;font-size:.85em">· brand khác</span>`
+          : a.brand_match ? `<span style="color:var(--green);font-size:.85em">· đúng brand</span>` : '';
+        return `<label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:.82rem;padding:3px 8px;border:1px solid var(--border);border-radius:6px;${a.ok ? '' : 'opacity:.5'}">
+          <input type="checkbox" value="${a.id}" ${a.pick ? 'checked' : ''} ${a.ok ? '' : 'disabled'} onchange="Warmup._ocTouch()">
+          ${this._esc(a.name)} ${tag}</label>`;
+      }).join('') || '<span style="color:var(--text3)">Chưa có tài khoản</span>';
+      this._ocJob = d.job_id || null;
+      this._ocSummary();
+    } catch(e) {
+      el.innerHTML = '<span style="color:var(--red)">Lỗi tải tài khoản</span>';
+      if (sum) sum.textContent = 'lỗi tải';
+    }
+  },
+
+  _ocTouch() { this._ocTouched = true; this._ocSummary(); },
+
+  _ocSummary() {
+    const sum = document.getElementById('woc-acc-sum');
+    const n = document.querySelectorAll('#woc-accounts input:checked').length;
+    if (sum) sum.innerHTML = n
+      ? `<b>${n}</b> account ${this._ocTouched ? 'đã chọn' : this._ocJob ? 'của job hiện tại (giữ nguyên)' : 'khỏe được chọn tự động'}`
+      : '<span style="color:#d29922">chưa có account khỏe nào đang kết nối</span>';
+  },
+
+  async oneClick(groupId) {
+    const body = {};
+    let btn = null;
+    if (groupId) {
+      body.group_id = groupId;
+    } else {
+      body.link = (document.getElementById('woc-link')?.value || '').trim();
+      if (!body.link) { App.toast('Dán link nhóm (t.me/… hoặc @username)', 'error'); return; }
+      if (this._ocTouched) {
+        body.account_ids = [...document.querySelectorAll('#woc-accounts input:checked')].map(cb => parseInt(cb.value));
+        if (!body.account_ids.length) { App.toast('Chọn ít nhất 1 account', 'error'); return; }
+      }
+      btn = document.getElementById('woc-go');
+      if (btn) { btn.disabled = true; btn.textContent = 'Đang xử lý…'; }
+    }
+    try {
+      const r = await API.post('/api/warmup/one-click', body);
+      if (!groupId) (document.getElementById('warmup-oneclick-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
+      App.toast('⚡ ' + (r.message || 'Đã bật warmup'), 'success');
+      const extra = [...(r.warnings || []), ...(r.skipped || []).map(s => `Bỏ qua ${s.name}: ${s.why}`)];
+      extra.forEach((w, i) => setTimeout(() => App.toast('⚠️ ' + w, 'info'), 400 * (i + 1)));
+      await this.loadGroups();
+      this.loadJobs();
+      setTimeout(() => this.loadJobs(), 2500);
+    } catch(e) { App.toast(e.message, 'error'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = '⚡ Bắt đầu'; } }
+  },
+
+  async toggleAi(id, on) {
+    try {
+      await API.patch('/api/warmup/jobs/' + id, { ai_write: !!on });
+      App.toast(on ? '✨ Đã bật AI tự viết (áp dụng từ lượt kế)' : 'Đã tắt AI tự viết → dùng kịch bản của nhóm', 'success');
+    } catch(e) { App.toast(e.message, 'error'); }
+    this.loadJobs();
+  },
+
   async startJob(id) {
     try {
-      await API.post('/api/warmup/jobs/' + id + '/start');
-      App.toast('Job da bat dau', 'success');
-      setTimeout(() => this.loadJobs(), 1000);
+      const r = await API.post('/api/warmup/jobs/' + id + '/start');
+      App.toast(r.message || 'Đã bật job warmup', 'success');
+      (r.warnings || []).forEach((w, i) => setTimeout(() => App.toast('⚠️ ' + w, 'info'), 400 * (i + 1)));
+      setTimeout(() => this.loadJobs(), 1500);
     } catch(e) { App.toast(e.message, 'error'); }
   },
 
@@ -5448,7 +5588,7 @@ const Warmup = {
       const data = await API.get('/api/warmup/action-logs/summary');
       this._actionLogSummary = data;
       // Re-render stats if jobs already loaded
-      const running = this._jobs.filter(j => j.is_running || j.status === 'running').length;
+      const running = this._jobs.filter(j => j.is_running).length;
       this._renderStats(this._jobs.length, running);
     } catch(e) { /* silent - endpoint may not exist yet */ }
   },
@@ -5611,3 +5751,25 @@ App.loadGroqModels = async function() {
     loaded = true; App.loadGroqModels();
   };
 })();
+
+// Show "còn N ngày" for each saved ChatGPT access token by decoding the JWT `exp`
+// locally (token never leaves the page). Tokens last ~10 days and expire silently.
+App.renderChatgptTokenExpiry = function (keys) {
+  var el = document.getElementById('chatgpt-token-expiry');
+  if (!el) return;
+  var rows = (keys || []).map(function (k, i) {
+    var exp = 0;
+    try {
+      var seg = String(k).split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      exp = JSON.parse(atob(seg + '==='.slice((seg.length + 3) % 4))).exp || 0;
+    } catch (e) { return ''; }
+    if (!exp) return '';
+    var days = (exp * 1000 - Date.now()) / 86400000;
+    var when = new Date(exp * 1000).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+    var color = days < 0 ? 'var(--danger,#e5484d)' : days <= 3 ? 'var(--warning,#f5a524)' : 'var(--success,#30a46c)';
+    var label = days < 0 ? 'đã hết hạn' : days < 1 ? 'còn ' + Math.max(1, Math.round(days * 24)) + ' giờ' : 'còn ' + Math.floor(days) + ' ngày';
+    return '<div style="color:' + color + '">Token #' + (i + 1) + ': ' + label + ' (' + when + ')</div>';
+  }).filter(Boolean);
+  el.innerHTML = rows.length ? rows.join('') +
+    ' <span class="info-i" tabindex="0" data-tip="Token ChatGPT hết hạn sau khoảng 10 ngày. Còn ≤ 3 ngày hệ thống sẽ nhắc qua Telegram lúc 9:02 mỗi sáng. Lấy token mới tại chatgpt.com/api/auth/session.">i</span>' : '';
+};

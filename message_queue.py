@@ -324,6 +324,11 @@ async def queue_worker():
                 # MUST actually wait e.seconds — sleeping a fixed 2.5s and
                 # re-queueing escalates FloodWait into PeerFlood/ban.
                 wait_time = min(e.seconds + random.randint(5, 15), 900)
+                if await alerts.flood_wait_guard(account_id, e.seconds, "lịch gửi nhóm"):
+                    # Account auto-paused: don't requeue or block the worker waiting for it
+                    await db.add_send_log(schedule_id, account_id, msg.get("id"), chat_id, chat_title,
+                                          "failed", translate_error(f"FloodWait {e.seconds}s"))
+                    continue
                 logger.warning(f"⏳ FloodWait: sleeping {wait_time}s for account {account_id} before retry.")
                 if retry_count < MAX_RETRIES:
                     item["retry_count"] = retry_count + 1

@@ -9,6 +9,7 @@ import random
 from telethon import errors
 from telethon.tl.types import PeerUser
 
+import alerts
 import database as db
 import telegram_client as tg
 
@@ -221,6 +222,8 @@ async def run_invite_campaign(campaign_id: int):
                 wait_time = e.seconds + random.randint(10, 30)
                 logger.warning(f"[Invite] FloodWait {e.seconds}s on account {acc_id}, waiting {wait_time}s")
                 flooded_accounts.add(acc_id)
+                if await alerts.flood_wait_guard(acc_id, e.seconds, f"invite #{campaign_id}"):
+                    continue  # paused → stays excluded, no need to wait for it
                 await asyncio.sleep(min(wait_time, 300))
                 flooded_accounts.discard(acc_id)
                 continue
@@ -228,6 +231,7 @@ async def run_invite_campaign(campaign_id: int):
             except errors.PeerFloodError:
                 logger.warning(f"[Invite] PeerFlood on account {acc_id}, excluding for this run")
                 flooded_accounts.add(acc_id)
+                await alerts.flood_guard(acc_id)  # auto-pause + cảnh báo Telegram
                 consecutive_errors += 1
                 await asyncio.sleep(random.uniform(120, 300))
                 continue

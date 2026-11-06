@@ -7,6 +7,7 @@ import contextvars
 import json
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -1579,6 +1580,8 @@ async def init_db():
         # ── Warmup Indexes ──
         await db.execute("CREATE INDEX IF NOT EXISTS idx_warmup_logs_job ON warmup_logs(job_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_warmup_logs_group ON warmup_logs(group_id)")
+        # v3.21: AI writes the group messages from live context (no scripts needed)
+        await _add_column(db, "warmup_jobs", "ai_write", "INTEGER DEFAULT 1")
 
         # ══════════════════════════════════════════════════════════════
         # ══ Smart Template Rotation ══════════════════════════════════
@@ -1792,6 +1795,34 @@ async def init_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_camp_sent ON dm_campaign_logs(campaign_id, sent_at DESC)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_dm_campaign_logs_status_sent ON dm_campaign_logs(status, sent_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_scraped_members_user_id ON scraped_members(user_id)")
+
+        # ── KOL directory: channels found by Deep Crawl (for booking ads / export) ──
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS kol_channels (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ukey            TEXT NOT NULL UNIQUE,
+                channel_id      TEXT,
+                username        TEXT,
+                title           TEXT,
+                subscribers     INTEGER DEFAULT 0,
+                trading_score   INTEGER DEFAULT 0,
+                category        TEXT,
+                category_label  TEXT,
+                contacts        TEXT DEFAULT '[]',
+                description     TEXT,
+                parent_channel  TEXT,
+                depth           INTEGER,
+                source          TEXT,
+                saved_job       TEXT,
+                status          TEXT DEFAULT 'new',
+                price           TEXT DEFAULT '',
+                note            TEXT DEFAULT '',
+                first_seen      TEXT DEFAULT (datetime('now')),
+                last_seen       TEXT DEFAULT (datetime('now')),
+                updated_at      TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_kol_channels_score ON kol_channels(trading_score DESC)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_reaction_logs_status_sent ON reaction_logs(status, sent_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_wal_status_created ON warmup_action_log(status, created_at DESC)")
 
@@ -1901,6 +1932,217 @@ async def get_all_internal_telegram_user_ids() -> set[int]:
         )
         rows = await cursor.fetchall()
         return {row[0] for row in rows}
+
+
+# ── KOL directory (kol_channels) ─────────────────────────────────────────────
+KOL_STATUSES = ("new", "contacted", "negotiating", "booked", "rejected")
+
+
+def _kol_ukey(lead: dict) -> str:
+    u = (lead.get("username") or "").strip().lstrip("@").lower()
+    return u or f"id:{lead.get('channel_id') or ''}"
+
+
+def _as_list(v) -> list:
+    if isinstance(v, list):
+        return v
+    if isinstance(v, str) and v.startswith("["):
+        try:
+            return json.loads(v)
+        except Exception:
+            return []
+    return []
+
+
+async def upsert_kol_channels(leads: list[dict], source: str = "", saved_job: str | None = None) -> int:
+    """Insert/refresh channels in the KOL directory. Keeps the user's own
+    status / price / note; contacts are merged with what was stored before."""
+    rows = []
+    for l in leads or []:
+        key = _kol_ukey(l)
+        if key in ("", "id:"):
+            continue
+        contacts = [c for c in _as_list(l.get("contacts")) if c]
+        try:
+            subs = int(l.get("participants_count") or l.get("subscribers") or 0)
+        except (TypeError, ValueError):
+            subs = 0
+        try:
+            score = int(float(l.get("trading_score") or 0))
+        except (TypeError, ValueError):
+            score = 0
+        try:
+            depth = int(l.get("depth")) if l.get("depth") not in (None, "") else None
+        except (TypeError, ValueError):
+            depth = None
+        rows.append((key, str(l.get("channel_id") or ""), (l.get("username") or "").lstrip("@"),
+                     l.get("title") or "", subs, score, l.get("category") or "",
+                     l.get("category_label") or "", json.dumps(contacts, ensure_ascii=False),
+                     (l.get("description") or "")[:600], l.get("parent_channel") or "", depth,
+                     source or "", saved_job))
+    if not rows:
+        return 0
+    async with get_db() as db:
+        old = {}
+        keys = [r[0] for r in rows]
+        for i in range(0, len(keys), 500):
+            chunk = keys[i:i + 500]
+            cur = await db.execute(
+                f"SELECT ukey, contacts FROM kol_channels WHERE ukey IN ({','.join('?' * len(chunk))})", chunk)
+            for k, c in await cur.fetchall():
+                old[k] = _as_list(c)
+        merged = []
+        for r in rows:
+            prev = old.get(r[0])
+            if prev:
+                new_c = json.loads(r[8])
+                seen = {x.lower() for x in prev}
+                r = r[:8] + (json.dumps(prev + [x for x in new_c if x.lower() not in seen], ensure_ascii=False),) + r[9:]
+            merged.append(r)
+        await db.executemany("""
+            INSERT INTO kol_channels (ukey, channel_id, username, title, subscribers, trading_score,
+                category, category_label, contacts, description, parent_channel, depth, source, saved_job)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(ukey) DO UPDATE SET
+                channel_id = COALESCE(NULLIF(excluded.channel_id, ''), channel_id),
+                title = excluded.title, subscribers = excluded.subscribers,
+                trading_score = excluded.trading_score, category = excluded.category,
+                category_label = excluded.category_label, contacts = excluded.contacts,
+                description = COALESCE(NULLIF(excluded.description, ''), description),
+                parent_channel = COALESCE(NULLIF(excluded.parent_channel, ''), parent_channel),
+                depth = COALESCE(depth, excluded.depth),
+                source = COALESCE(NULLIF(source, ''), excluded.source),
+                saved_job = COALESCE(excluded.saved_job, saved_job),
+                last_seen = datetime('now')
+        """, merged)
+        await db.commit()
+    return len(rows)
+
+
+_KOL_SORTS = {
+    "score": "trading_score DESC, subscribers DESC",
+    "subs": "subscribers DESC",
+    "recent": "last_seen DESC, id DESC",
+    "title": "title COLLATE NOCASE ASC",
+    "updated": "updated_at DESC",
+}
+
+
+def _kol_where(q: str = "", status: str = "", min_score: int = 0,
+               has_contact: bool = False, category: str = "") -> tuple[str, list]:
+    where, args = ["1=1"], []
+    if q:
+        like = f"%{q.strip().lstrip('@').lower()}%"
+        where.append("(LOWER(title) LIKE ? OR LOWER(username) LIKE ? OR LOWER(contacts) LIKE ? OR LOWER(note) LIKE ?)")
+        args += [like] * 4
+    if status:
+        where.append("status = ?"); args.append(status)
+    if min_score:
+        where.append("trading_score >= ?"); args.append(int(min_score))
+    if has_contact:
+        where.append("contacts NOT IN ('', '[]')")
+    if category:
+        where.append("category = ?"); args.append(category)
+    return " AND ".join(where), args
+
+
+async def list_kol_channels(q: str = "", status: str = "", min_score: int = 0, has_contact: bool = False,
+                            category: str = "", sort: str = "score", page: int = 0, limit: int = 50,
+                            all_rows: bool = False) -> dict:
+    where, args = _kol_where(q, status, min_score, has_contact, category)
+    order = _KOL_SORTS.get(sort, _KOL_SORTS["score"])
+    async with get_db() as db:
+        cur = await db.execute(f"SELECT COUNT(*) FROM kol_channels WHERE {where}", args)
+        total = (await cur.fetchone())[0]
+        sql = f"SELECT * FROM kol_channels WHERE {where} ORDER BY {order}"
+        if not all_rows:
+            sql += f" LIMIT {max(1, min(int(limit), 500))} OFFSET {max(0, int(page)) * max(1, min(int(limit), 500))}"
+        cur = await db.execute(sql, args)
+        cols = [d[0] for d in cur.description]
+        items = []
+        for row in await cur.fetchall():
+            it = dict(zip(cols, row))
+            it["contacts"] = _as_list(it.get("contacts"))
+            items.append(it)
+        cur = await db.execute("SELECT status, COUNT(*) FROM kol_channels GROUP BY status")
+        counts = {s: n for s, n in await cur.fetchall()}
+    return {"items": items, "total": total, "counts": counts}
+
+
+async def update_kol_channel(kid: int, fields: dict) -> bool:
+    allowed = {k: v for k, v in fields.items() if k in ("status", "price", "note") and v is not None}
+    if "status" in allowed and allowed["status"] not in KOL_STATUSES:
+        raise ValueError("status không hợp lệ")
+    if not allowed:
+        return False
+    sets = ", ".join(f"{k} = ?" for k in allowed) + ", updated_at = datetime('now')"
+    async with get_db() as db:
+        cur = await db.execute(f"UPDATE kol_channels SET {sets} WHERE id = ?", [*allowed.values(), kid])
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def delete_kol_channels(ids: list[int]) -> int:
+    if not ids:
+        return 0
+    async with get_db() as db:
+        cur = await db.execute(
+            f"DELETE FROM kol_channels WHERE id IN ({','.join('?' * len(ids))})", [int(i) for i in ids])
+        await db.commit()
+        return cur.rowcount
+
+
+async def find_saved_usernames(usernames: list[str]) -> dict[str, str]:
+    """lower(username) -> scrape_job_id for usernames already saved in any list."""
+    found: dict[str, str] = {}
+    names = sorted({u.lower() for u in usernames if u})
+    if not names:
+        return found
+    async with get_db() as db:
+        for i in range(0, len(names), 500):
+            chunk = names[i:i + 500]
+            cur = await db.execute(
+                f"SELECT LOWER(username), MIN(scrape_job_id) FROM scraped_members "
+                f"WHERE LOWER(username) IN ({','.join('?' * len(chunk))}) GROUP BY LOWER(username)", chunk)
+            for u, job in await cur.fetchall():
+                found[u] = job
+    return found
+
+
+_conversation_sets_cache: tuple[float, set[int], set[str]] | None = None
+_CONVERSATION_SETS_TTL = 600
+
+
+async def get_existing_conversation_sets() -> tuple[set[int], set[str]]:
+    """(user_ids, lowercased usernames) of people already in a conversation with one of
+    our accounts: AI follow-up chats (not bot_ignored), KOL profiles, and anyone who has
+    messaged us (dm_replies). Cold outreach from another account must skip them.
+    Cached 10 minutes — the sets only grow and a few minutes of lag is harmless."""
+    global _conversation_sets_cache
+    now = time.time()
+    if _conversation_sets_cache and now - _conversation_sets_cache[0] < _CONVERSATION_SETS_TTL:
+        return _conversation_sets_cache[1], _conversation_sets_cache[2]
+    ids: set[int] = set()
+    names: set[str] = set()
+    async with get_db() as db:
+        for sql in (
+            "SELECT DISTINCT user_id, LOWER(username) FROM ai_followup_chats "
+            "WHERE COALESCE(status, '') != 'bot_ignored'",
+            "SELECT DISTINCT user_id, NULL FROM kol_profiles",
+            "SELECT DISTINCT sender_user_id, LOWER(sender_username) FROM dm_replies",
+        ):
+            try:
+                rows = await (await db.execute(sql)).fetchall()
+            except Exception as e:  # table missing on an old DB
+                logger.debug(f"[conversation-sets] skipped query: {e}")
+                continue
+            for uid, uname in rows:
+                if uid and uid > 0:
+                    ids.add(uid)
+                if uname:
+                    names.add(uname.lstrip("@"))
+    _conversation_sets_cache = (now, ids, names)
+    return ids, names
 
 
 async def update_account_login_status(account_id: int, is_logged_in: bool):
@@ -5273,18 +5515,37 @@ async def create_warmup_job(data: dict) -> int:
         cursor = await db.execute(
             """INSERT INTO warmup_jobs
                (group_id, account_ids, interval_min, interval_max,
-                daily_post_limit, schedule_start, schedule_end)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                daily_post_limit, schedule_start, schedule_end, ai_write)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (data["group_id"],
              json.dumps(data.get("account_ids", [])),
              data.get("interval_min", 30),
              data.get("interval_max", 120),
              data.get("daily_post_limit", 10),
              data.get("schedule_start", "09:00"),
-             data.get("schedule_end", "22:00"))
+             data.get("schedule_end", "22:00"),
+             1 if data.get("ai_write", 1) else 0)
         )
         await db.commit()
         return cursor.lastrowid
+
+
+async def update_warmup_job_fields(job_id: int, account_ids: list | None = None,
+                                   ai_write: bool | None = None) -> None:
+    """Change a job's accounts and/or the AI-write switch (used by 1-click warmup)."""
+    sets, params = [], []
+    if account_ids is not None:
+        sets.append("account_ids=?")
+        params.append(json.dumps([int(a) for a in account_ids]))
+    if ai_write is not None:
+        sets.append("ai_write=?")
+        params.append(1 if ai_write else 0)
+    if not sets:
+        return
+    params.append(job_id)
+    async with get_db() as db:
+        await db.execute(f"UPDATE warmup_jobs SET {', '.join(sets)} WHERE id=?", params)
+        await db.commit()
 
 
 async def get_warmup_jobs(group_id: int = None) -> list:
@@ -7366,6 +7627,64 @@ def kol_missing_items_for_kol(missing: list[str]) -> list[str]:
     return [m for m in missing if MISSING_ITEM_META.get(m, {}).get("owner") == "kol"]
 
 
+# Exchange a lead is onboarded to. The UID column is still called `weex_uid`
+# (historic name) but it holds the UID of whichever exchange the chat's AI Agent
+# sells: "BloFin Negotiator" -> BloFin. Only names are matched (agent first, then
+# the account), never descriptions, which mention competitors.
+EXCHANGE_NAMES = ("WEEX", "BloFin", "Bitget", "Bybit", "OKX", "Binance", "MEXC", "BingX", "KuCoin",
+                  "Gate", "HTX", "Bitunix", "LBank", "Toobit", "Phemex", "CoinEx", "BitMart", "PU Prime")
+DEFAULT_EXCHANGE = "WEEX"
+_EXCHANGE_RE = re.compile(
+    r"(?<![a-z0-9])(" + "|".join(n.replace(" ", r"\s*") for n in EXCHANGE_NAMES) + ")", re.IGNORECASE)
+_EXCHANGE_CANON = {n.replace(" ", "").lower(): n for n in EXCHANGE_NAMES}
+
+
+def exchange_from_name(*names) -> str | None:
+    """First known exchange named in any of `names` ('Coy | Weex' -> 'WEEX')."""
+    for name in names:
+        m = _EXCHANGE_RE.search(name or "")
+        if m:
+            return _EXCHANGE_CANON.get(re.sub(r"\s+", "", m.group(1)).lower())
+    return None
+
+
+async def get_chat_exchange(account_id: int, user_id: int | None = None) -> str:
+    """Exchange for this lead: the account's own AI Agent first (the persona the
+    KOL talks to, e.g. "Mayko | Blofin" runs the BloFin agent even when a WEEX
+    campaign borrowed it as a sender), then the DM campaign / Keyword-DM agent,
+    then the account name. One query; DEFAULT_EXCHANGE when nothing matches."""
+    try:
+        async with get_db() as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT gc.name AS campaign_agent, gw.name AS watcher_agent,
+                       ga.name AS account_agent, a.name AS account_name
+                FROM accounts a
+                LEFT JOIN ai_followup_chats c ON c.account_id = a.id AND c.user_id = ?
+                LEFT JOIN dm_campaigns dc ON dc.id = c.campaign_id
+                LEFT JOIN ai_agents gc ON gc.id = dc.ai_agent_id
+                LEFT JOIN keyword_watchers w ON w.id = c.watcher_id
+                LEFT JOIN ai_agents gw ON gw.id = w.ai_agent_id
+                LEFT JOIN ai_agents ga ON ga.id = a.ai_agent_id
+                WHERE a.id = ?
+                LIMIT 1
+            """, (user_id if user_id is not None else -1, account_id))
+            row = await cursor.fetchone()
+        if row:
+            for col in ("account_agent", "campaign_agent", "watcher_agent", "account_name"):
+                ex = exchange_from_name(row[col])
+                if ex:
+                    return ex
+    except Exception as e:
+        logger.debug("[KOL] exchange lookup failed for %s/%s: %s", account_id, user_id, e)
+    return DEFAULT_EXCHANGE
+
+
+def uid_ask_for(exchange: str) -> str:
+    """MISSING_ITEM_META['weex_uid']['ask'] for the lead's exchange."""
+    return MISSING_ITEM_META["weex_uid"]["ask"].replace(DEFAULT_EXCHANGE, exchange)
+
+
 async def get_kol_step(account_id: int, user_id: int) -> str:
     async with get_db() as db:
         cursor = await db.execute(
@@ -7558,6 +7877,8 @@ async def get_kol_state(account_id: int, user_id: int) -> dict:
     step = normalize_kol_step(chat.get("kol_step") if chat else None) or "prospect"
     profile = await get_kol_profile(account_id, user_id)
     missing = compute_missing_items(step, profile)
+    exchange = await get_chat_exchange(account_id, user_id)
+    uid_label = f"{exchange} UID"
     have = {k: profile.get(k) for k in ("channel_link", "platform", "followers", "weex_uid", "volume_claimed",
                                         "volume_verified", "selected_campaign", "vip_code", "affiliate_link",
                                         "first_post_link", "offer_version")
@@ -7571,8 +7892,11 @@ async def get_kol_state(account_id: int, user_id: int) -> dict:
         "steps": list(KOL_STEPS),
         "step_labels": KOL_STEP_LABELS,
         "missing_items": missing,
-        "missing_labels": [MISSING_ITEM_META.get(m, {}).get("label", m) for m in missing],
+        "missing_labels": [uid_label if m == "weex_uid" else MISSING_ITEM_META.get(m, {}).get("label", m)
+                           for m in missing],
         "have": have,
+        "exchange": exchange,
+        "uid_label": uid_label,
         "status": chat.get("status") if chat else None,
         "stage": chat.get("stage") if chat else None,
         # v3.10.2: verification_status was write-only (API wrote it, nothing read

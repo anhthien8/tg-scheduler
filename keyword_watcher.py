@@ -721,13 +721,8 @@ async def _do_send_dm_with_fallback(
         except tg_errors.FloodWaitError as e:
             # FloodWait = ACCOUNT-level → try next account, don't penalise user
             last_error = _translate_dm_error(f"FloodWait {e.seconds}s")
-            if e.seconds > 600:
-                await db.pause_account(acc_id, f"FloodWait {e.seconds}s - auto-paused")
+            if await alerts.flood_wait_guard(acc_id, e.seconds, f"watcher #{watcher_id}"):
                 logger.warning(f"[Watcher {watcher_id}] Account {acc_id} AUTO-PAUSED: FloodWait {e.seconds}s")
-                await alerts.send_alert(
-                    f"floodwait_{acc_id}",
-                    f"⏳ Tài khoản #{acc_id} bị FloodWait {e.seconds}s — đã tự tắt. Bật lại trong UI khi hết hạn."
-                )
             else:
                 logger.warning(f"[Watcher {watcher_id}] Account {acc_id} ✗ FloodWait {e.seconds}s, trying next account")
             continue

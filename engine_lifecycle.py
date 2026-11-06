@@ -178,6 +178,15 @@ async def start_engines() -> asyncio.Task:
     except Exception as e:
         logger.warning("Error auto-resuming DM campaigns: %s", e)
 
+    # Warmup jobs left 'running' when the server stopped continue after accounts connect.
+    try:
+        import warmup_engine
+        n = await warmup_engine.resume_running_jobs()
+        if n:
+            logger.info("Auto-resumed %d warmup jobs", n)
+    except Exception as e:
+        logger.warning("Error auto-resuming warmup jobs: %s", e)
+
     # Daily summary
     from apscheduler.triggers.cron import CronTrigger
 
@@ -225,6 +234,15 @@ async def start_engines() -> asyncio.Task:
         replace_existing=True,
     )
     logger.info("Speed-to-reply SLA check scheduled daily at 09:01")
+
+    # ChatGPT access tokens expire after ~10 days without notice — remind 3 days ahead.
+    sch.get_scheduler().add_job(
+        alerts.check_chatgpt_token_expiry,
+        trigger=CronTrigger(hour=9, minute=2, timezone=sch.TZ),
+        id="chatgpt_token_expiry_check",
+        name="ChatGPT Token Expiry Check",
+        replace_existing=True,
+    )
 
     # Message queue worker
     mq.start_worker()
