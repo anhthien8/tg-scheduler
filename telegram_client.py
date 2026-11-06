@@ -1288,12 +1288,93 @@ async def get_similar_channels_and_contacts(account_id: int, channel_link: str) 
     return leads
 
 
+# ── Contact verification for Deep Crawl ─────────────────────────────────────
+# @mentions in a channel description are often other channels, groups, bots or
+# dead usernames. Resolve each once and keep only real people. Results are cached
+# for 7 days (performance: no repeated ResolveUsername calls across crawls).
+_CONTACT_KIND_TTL = 7 * 86400
+_contact_kind_cache: dict[str, tuple[str, float]] = {}
+
+
+# Channel "about" text by channel id — lets a re-run (e.g. after a server restart)
+# skip GetFullChannel for channels it already saw. Seeded from saved results.
+_CHANNEL_ABOUT_TTL = 7 * 86400
+_channel_about_cache: dict[int, tuple[str, float]] = {}
+
+
+def seed_channel_about_cache(leads) -> int:
+    """Fill the description cache from earlier crawl results. Returns entries added."""
+    n = 0
+    now = time.time()
+    for lead in leads or []:
+        cid = lead.get("channel_id")
+        if cid and cid not in _channel_about_cache and lead.get("description") is not None \
+                and not lead.get("no_description"):
+            _channel_about_cache[cid] = (lead.get("description") or "", now)
+            n += 1
+    return n
+
+
+def export_contact_kind_cache() -> dict:
+    now = time.time()
+    return {k: v for k, v in _contact_kind_cache.items() if now - v[1] < _CONTACT_KIND_TTL}
+
+
+def import_contact_kind_cache(data: dict) -> None:
+    now = time.time()
+    for k, v in (data or {}).items():
+        try:
+            kind, ts = v[0], float(v[1])
+        except Exception:
+            continue
+        if now - ts < _CONTACT_KIND_TTL and k not in _contact_kind_cache:
+            _contact_kind_cache[k] = (kind, ts)
+
+
+async def classify_contact_username(client, username: str) -> str:
+    """Return 'user' | 'bot' | 'channel' | 'group' | 'deleted' | 'scam' | 'invalid'.
+
+    Raises FloodWaitError so the caller can stop resolving for a while."""
+    from telethon.tl.functions.contacts import ResolveUsernameRequest
+    from telethon.tl.types import PeerUser
+
+    key = username.lstrip("@").lower()
+    hit = _contact_kind_cache.get(key)
+    if hit and time.time() - hit[1] < _CONTACT_KIND_TTL:
+        return hit[0]
+    try:
+        res = await client(ResolveUsernameRequest(key))
+    except (errors.UsernameNotOccupiedError, errors.UsernameInvalidError):
+        kind = "invalid"
+    else:
+        kind = "invalid"
+        if isinstance(res.peer, PeerUser):
+            u = next((x for x in res.users if x.id == res.peer.user_id), None)
+            if u is None:
+                kind = "invalid"
+            elif getattr(u, "deleted", False):
+                kind = "deleted"
+            elif is_bot_account(u):
+                kind = "bot"
+            elif getattr(u, "scam", False) or getattr(u, "fake", False):
+                kind = "scam"
+            else:
+                kind = "user"
+        else:
+            ch = next(iter(res.chats), None)
+            kind = "group" if getattr(ch, "megagroup", False) or getattr(ch, "gigagroup", False) else "channel"
+    _contact_kind_cache[key] = (kind, time.time())
+    return kind
+
+
 async def deep_crawl_similar_channels(
     account_ids: list[int],
     channel_link: str,
     max_depth: int = 2,
     progress_callback=None,
     stop_flag: dict | None = None,
+    min_expand_score: int = 40,
+    per_account_budget: int = 300,
 ) -> list[dict]:
     """
     BFS deep crawl of similar channels up to max_depth layers.
@@ -1305,6 +1386,9 @@ async def deep_crawl_similar_channels(
         max_depth: How many layers deep to crawl (1-4)
         progress_callback: async callable(state_dict) for realtime updates
         stop_flag: dict with key "stopped" (bool) to allow graceful abort
+        min_expand_score: only channels with trading_score >= this are crawled
+            further (the rest are still saved as leads, their branch is pruned)
+        per_account_budget: max Telegram requests per account in one crawl
     """
     import re
     from collections import deque
@@ -1314,14 +1398,27 @@ async def deep_crawl_similar_channels(
     if not account_ids:
         raise Exception("Không có tài khoản premium nào được chọn")
 
-    # Validate clients
+    # Validate clients — paused/flagged/PeerFlood accounts never work ("tạm dừng = dừng hẳn")
+    import database as _db
+    try:
+        _flag = {a["id"] for a in await _db.get_all_accounts() if a.get("is_flagged")}
+        _pf = {aid for aid, _ in await _db.get_accounts_with_peerflood()}
+    except Exception:
+        _flag, _pf = set(), set()
     valid_clients = []
+    skipped_unsafe = []
     for aid in account_ids:
+        if await _db.is_account_paused(aid) or aid in _flag or aid in _pf:
+            skipped_unsafe.append(aid)
+            continue
         c = _clients.get(aid)
         if c and c.is_connected():
             valid_clients.append((aid, c))
+    if skipped_unsafe:
+        logger.info(f"[DeepCrawl] Skipping paused/flagged accounts: {skipped_unsafe}")
     if not valid_clients:
-        raise Exception("Không có tài khoản nào đang kết nối")
+        raise Exception("Không có tài khoản khỏe nào đang kết nối"
+                        + (f" (bỏ qua tài khoản tạm dừng/bị flag: {skipped_unsafe})" if skipped_unsafe else ""))
 
     username_regex = re.compile(r'@([a-zA-Z0-9_]{5,32})')
 
@@ -1334,7 +1431,9 @@ async def deep_crawl_similar_channels(
 
     # Anti-ban counters per account
     account_request_count: dict[int, int] = {aid: 0 for aid, _ in valid_clients}
-    account_idx = 0  # round-robin index
+    account_idx = -1  # round-robin index
+    flood_until: dict[int, float] = {}  # aid -> unix time its FloodWait ends
+    MAX_INLINE_WAIT = 120  # never sleep longer than this inside the crawl
 
     # Progress state
     state = {
@@ -1347,22 +1446,56 @@ async def deep_crawl_similar_channels(
         "queue_remaining": 0,
         "current_channel": "",
         "current_account": "",
+        "contacts_removed": 0,
+        "branches_pruned": 0,
         "errors": [],
+        "results": all_leads,  # live list → caller can save partial results
     }
+    if skipped_unsafe:
+        state["errors"].append(f"Bỏ qua {len(skipped_unsafe)} tài khoản tạm dừng/bị flag: "
+                               + ", ".join(f"#{a}" for a in skipped_unsafe))
+    contact_check_paused_until = 0.0  # after a FloodWait on ResolveUsername, keep contacts unverified for a while
+
+    def _is_flooded(aid: int) -> bool:
+        return flood_until.get(aid, 0) > time.time()
+
+    def _mark_flood(aid: int, seconds: int):
+        flood_until[aid] = max(flood_until.get(aid, 0), time.time() + seconds)
+
+    def _usable(aid: int) -> bool:
+        return not _is_flooded(aid) and account_request_count.get(aid, 0) < per_account_budget
 
     def _next_client():
-        """Round-robin to next available client."""
+        """Pick the least-used account that is not flood-limited and still has budget
+        (round-robin among equals). None if no account is usable right now."""
         nonlocal account_idx
-        for _ in range(len(valid_clients)):
-            account_idx = (account_idx + 1) % len(valid_clients)
-            aid, client = valid_clients[account_idx]
-            # Skip if account has hit daily soft limit (100 requests)
-            if account_request_count.get(aid, 0) >= 100:
-                continue
-            return aid, client
-        # All accounts exhausted — use least-used one anyway
-        aid, client = valid_clients[account_idx]
+        n = len(valid_clients)
+        usable = [(i, aid, c) for i, (aid, c) in enumerate(valid_clients) if _usable(aid)]
+        if not usable:
+            return None
+        least = min(account_request_count.get(aid, 0) for _, aid, _ in usable)
+        usable.sort(key=lambda t: (account_request_count.get(t[1], 0) > least, (t[0] - account_idx - 1) % n))
+        account_idx, aid, client = usable[0]
         return aid, client
+
+    async def _wait_for_any_account() -> bool:
+        """All accounts flood-limited or out of budget. Wait (capped) if a FloodWait ends soon.
+        Returns False when the crawl should stop."""
+        with_budget = [aid for aid, _ in valid_clients if account_request_count.get(aid, 0) < per_account_budget]
+        if not with_budget:
+            state["errors"].append(f"Đã dùng hết hạn mức an toàn ({per_account_budget} request/tài khoản) — "
+                                   "dừng để bảo vệ tài khoản. Kết quả đã lưu.")
+            return False
+        soonest = min(flood_until.get(aid, 0) for aid in with_budget) - time.time()
+        if soonest > MAX_INLINE_WAIT:
+            state["errors"].append(f"Mọi tài khoản đang FloodWait (~{int(soonest // 60) + 1} phút) — "
+                                   "dừng sớm, kết quả đã lưu. Hãy chạy lại sau.")
+            return False
+        wait = max(1, int(soonest) + 2)
+        state["errors"].append(f"⏳ Mọi tài khoản đang FloodWait — chờ {wait}s")
+        await _update_progress()
+        await asyncio.sleep(wait)
+        return True
 
     async def _safe_delay(base_min: float, base_max: float):
         """Random delay for anti-ban."""
@@ -1396,6 +1529,7 @@ async def deep_crawl_similar_channels(
             except errors.FloodWaitError as e:
                 resolve_errors.append(f"Account #{_aid}: FloodWait {e.seconds}s")
                 flood_waits.append((e.seconds, _aid, _client))
+                _mark_flood(_aid, e.seconds)
                 logger.warning(f"[DeepCrawl] Account #{_aid} FloodWait on resolve ({e.seconds}s), trying next...")
                 continue
             except Exception as e:
@@ -1448,8 +1582,15 @@ async def deep_crawl_similar_channels(
         # Depth 1-4 = similar channels found at that depth
         state["current_depth"] = depth
 
-        # Pick next account (round-robin)
-        aid, client = _next_client()
+        # Pick next account (least-used, skipping flood-limited / over-budget ones)
+        picked = _next_client()
+        if picked is None:
+            queue.appendleft((channel_ref, depth, parent_title))
+            if not await _wait_for_any_account():
+                state["status"] = "stopped"
+                break
+            continue
+        aid, client = picked
         state["current_account"] = f"Account #{aid}"
 
         # Resolve channel entity — with multi-account fallback on FloodWait
@@ -1485,10 +1626,11 @@ async def deep_crawl_similar_channels(
         # Try primary account first, then fallback to others on FloodWait
         try:
             entity = await _try_resolve_with(client)
-        except errors.FloodWaitError:
-            logger.warning(f"[DeepCrawl] Account #{aid} FloodWait on resolve, trying others...")
+        except errors.FloodWaitError as e:
+            _mark_flood(aid, e.seconds)
+            logger.warning(f"[DeepCrawl] Account #{aid} FloodWait on resolve ({e.seconds}s), trying others...")
             for _faid, _fclient in valid_clients:
-                if _faid == aid:
+                if _faid == aid or not _usable(_faid):
                     continue
                 try:
                     entity = await _try_resolve_with(_fclient)
@@ -1496,7 +1638,8 @@ async def deep_crawl_similar_channels(
                         aid, client = _faid, _fclient  # Switch to this account for recommendations too
                         state["current_account"] = f"Account #{aid}"
                         break
-                except errors.FloodWaitError:
+                except errors.FloodWaitError as fe:
+                    _mark_flood(_faid, fe.seconds)
                     continue
                 except Exception:
                     continue
@@ -1505,7 +1648,14 @@ async def deep_crawl_similar_channels(
             continue
 
         if not entity:
-            state["errors"].append(f"Skip depth {depth}: all accounts flood-limited for resolve")
+            if not any(_usable(a) for a, _ in valid_clients):
+                # Everyone is limited: retry this node later instead of losing the branch
+                queue.appendleft((channel_ref, depth, parent_title))
+                if not await _wait_for_any_account():
+                    state["status"] = "stopped"
+                    break
+                continue
+            state["errors"].append(f"Bỏ qua 1 kênh ở depth {depth}: không resolve được")
             continue
 
         ch_title = getattr(entity, 'title', str(channel_ref))
@@ -1519,10 +1669,11 @@ async def deep_crawl_similar_channels(
             res = await client(GetChannelRecommendationsRequest(channel=entity))
             account_request_count[aid] = account_request_count.get(aid, 0) + 1
         except errors.FloodWaitError as e:
+            _mark_flood(aid, e.seconds)
             logger.warning(f"[DeepCrawl] FloodWait on GetRecommendations for account #{aid} ({e.seconds}s), trying others...")
             # Try other accounts
             for _faid, _fclient in valid_clients:
-                if _faid == aid:
+                if _faid == aid or not _usable(_faid):
                     continue
                 try:
                     # Need to re-resolve entity for the fallback client
@@ -1539,20 +1690,21 @@ async def deep_crawl_similar_channels(
                         continue
                     res = await _fclient(GetChannelRecommendationsRequest(channel=_entity))
                     account_request_count[_faid] = account_request_count.get(_faid, 0) + 1
+                    aid, client = _faid, _fclient  # GetFullChannel below must use the same session
+                    state["current_account"] = f"Account #{aid}"
                     logger.info(f"[DeepCrawl] GetRecommendations succeeded via fallback account #{_faid}")
                     break
-                except errors.FloodWaitError:
+                except errors.FloodWaitError as fe:
+                    _mark_flood(_faid, fe.seconds)
                     continue
                 except Exception:
                     continue
             if res is None:
-                # All accounts flood-limited — wait on the original and re-queue
-                wait_time = min(e.seconds + 10, 120)  # Cap wait at 2 min
-                logger.warning(f"[DeepCrawl] All accounts flood-limited for recommendations, waiting {wait_time}s")
-                state["errors"].append(f"FloodWait all accounts: pause {wait_time}s")
-                await _update_progress()
-                await asyncio.sleep(wait_time)
+                # All accounts flood-limited — re-queue this node and wait (capped) or stop early
                 queue.appendleft((channel_ref, depth, parent_title))
+                if not await _wait_for_any_account():
+                    state["status"] = "stopped"
+                    break
                 continue
         except Exception as e:
             state["errors"].append(f"Recommendations error for '{ch_title}': {str(e)[:80]}")
@@ -1574,6 +1726,7 @@ async def deep_crawl_similar_channels(
         chats = getattr(res, 'chats', [])
         logger.info(f"[DeepCrawl] Depth {depth}: '{ch_title}' returned {len(chats)} recommended chats (type={type(res).__name__})")
         state["channels_processed"] += 1
+        requeue_node = False  # set when this session gets limited and another account can redo the node
 
         for chat in chats:
             if stop_flag and stop_flag.get("stopped"):
@@ -1594,12 +1747,27 @@ async def deep_crawl_similar_channels(
             # Get full channel info for description & contacts
             description = ""
             contacts = []
+            contacts_unverified = []
+            no_description = False
             try:
-                # MUST use the same client that fetched recommendations
-                # because `chat` object is bound to that client's session
-                full_chat = await client(GetFullChannelRequest(channel=chat))
-                description = getattr(full_chat.full_chat, 'about', '') or ""
-                account_request_count[aid] = account_request_count.get(aid, 0) + 1
+                cached = _channel_about_cache.get(ch_id)
+                if cached and time.time() - cached[1] < _CHANNEL_ABOUT_TTL:
+                    description = cached[0]
+                elif _is_flooded(aid) or account_request_count.get(aid, 0) >= per_account_budget:
+                    if any(_usable(a) for a, _ in valid_clients):
+                        requeue_node = True  # let a healthy account redo the rest of this node
+                    else:
+                        # Nobody can fetch it: keep the lead (title-based score), skip its description
+                        no_description = True
+                else:
+                    # MUST use the same client that fetched recommendations
+                    # because `chat` object is bound to that client's session
+                    full_chat = await client(GetFullChannelRequest(channel=chat))
+                    description = getattr(full_chat.full_chat, 'about', '') or ""
+                    account_request_count[aid] = account_request_count.get(aid, 0) + 1
+                    _channel_about_cache[ch_id] = (description, time.time())
+                    # Anti-ban: shorter delay for full channel fetch
+                    await _safe_delay(1.0, 2.0)
 
                 found = username_regex.findall(description)
                 for u in found:
@@ -1612,14 +1780,55 @@ async def deep_crawl_similar_channels(
                     if contact_str not in contacts:
                         contacts.append(contact_str)
 
-                # Anti-ban: shorter delay for full channel fetch
-                await _safe_delay(1.0, 2.0)
+                # Keep only real people: drop channels, groups, bots, deleted/scam and dead usernames.
+                verified, unverified = [], []
+                for c_str in contacts:
+                    if time.time() < contact_check_paused_until:
+                        unverified.append(c_str)
+                        continue
+                    _hit = _contact_kind_cache.get(c_str.lstrip("@").lower())
+                    if not (_hit and time.time() - _hit[1] < _CONTACT_KIND_TTL):
+                        if _is_flooded(aid) or account_request_count.get(aid, 0) >= per_account_budget:
+                            unverified.append(c_str)
+                            continue
+                        account_request_count[aid] = account_request_count.get(aid, 0) + 1
+                        await _safe_delay(1.0, 2.0)  # anti-ban: space out ResolveUsername calls
+                    try:
+                        kind = await classify_contact_username(client, c_str)
+                    except errors.FloodWaitError as fe:
+                        # ResolveUsername has its own (stricter) limit — pause only contact checks
+                        contact_check_paused_until = time.time() + fe.seconds
+                        logger.warning(f"[DeepCrawl] FloodWait on contact check ({fe.seconds}s) — keeping contacts unverified meanwhile")
+                        unverified.append(c_str)
+                        continue
+                    except Exception as ce:
+                        logger.debug(f"[DeepCrawl] contact check {c_str} failed: {ce}")
+                        unverified.append(c_str)
+                        continue
+                    if kind == "user":
+                        verified.append(c_str)
+                    else:
+                        state["contacts_removed"] += 1
+                        logger.debug(f"[DeepCrawl] drop contact {c_str}: {kind}")
+                contacts = verified + unverified
+                contacts_unverified = unverified
             except errors.FloodWaitError as e:
-                wait_time = e.seconds + 10
-                logger.warning(f"[DeepCrawl] FloodWait on GetFullChannel, waiting {wait_time}s")
-                await asyncio.sleep(wait_time)
+                # Don't sleep for the full (possibly hours-long) wait: mark this account and
+                # hand the rest of this node to another account; only sleep for short waits.
+                _mark_flood(aid, e.seconds)
+                logger.warning(f"[DeepCrawl] FloodWait {e.seconds}s on GetFullChannel for account #{aid}")
+                if any(_usable(a) for a, _ in valid_clients):
+                    requeue_node = True
+                else:
+                    no_description = True
+                    if e.seconds <= 30:
+                        await asyncio.sleep(e.seconds + 1)
             except Exception as e:
                 logger.debug(f"[DeepCrawl] GetFullChannel error for {title}: {e}")
+
+            if requeue_node:
+                visited.discard(ch_id)  # not processed yet — the retry will pick it up
+                break
 
             score_info = score_community_trading(title, description, username, contacts, participants_count=participants_count)
             lead = {
@@ -1629,6 +1838,8 @@ async def deep_crawl_similar_channels(
                 "participants_count": participants_count,
                 "description": description,
                 "contacts": contacts,
+                "contacts_unverified": contacts_unverified,
+                "no_description": no_description,
                 "depth": depth + 1,        # This channel was found at depth+1
                 "parent_channel": parent_title if depth > 0 else ch_title,
                 "trading_score": score_info["trading_score"],
@@ -1645,10 +1856,20 @@ async def deep_crawl_similar_channels(
             # If we haven't reached max depth, queue this channel for next layer
             # Store as (id, access_hash, username) tuple to avoid cross-account entity issues
             if depth + 1 < max_depth:
-                ch_access_hash = getattr(chat, 'access_hash', None) or 0
-                queue.append(((ch_id, ch_access_hash, username), depth + 1, title))
+                if score_info["trading_score"] >= min_expand_score:
+                    ch_access_hash = getattr(chat, 'access_hash', None) or 0
+                    queue.append(((ch_id, ch_access_hash, username), depth + 1, title))
+                else:
+                    # Low-relevance branch: keep the lead, don't crawl its neighbours
+                    state["branches_pruned"] += 1
 
             await _update_progress()
+
+        if requeue_node:
+            # Recommendations are bound to the session that fetched them, so another account
+            # re-fetches this node; channels already saved stay in `visited` and are skipped.
+            state["channels_processed"] -= 1
+            queue.appendleft((channel_ref, depth, parent_title))
 
     # Done
     if state["status"] != "stopped":
@@ -1656,7 +1877,9 @@ async def deep_crawl_similar_channels(
     state["channels_found"] = len(all_leads)
     await _update_progress()
 
-    logger.info(f"[DeepCrawl] Finished. Found {len(all_leads)} unique channels, {state['contacts_found']} contacts across {max_depth} layers.")
+    logger.info(f"[DeepCrawl] Finished. Found {len(all_leads)} unique channels, {state['contacts_found']} contacts "
+                f"({state['contacts_removed']} non-user removed, {state['branches_pruned']} branches pruned) "
+                f"across {max_depth} layers. Requests per account: {account_request_count}")
     return all_leads
 
 

@@ -8,11 +8,27 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.18.0",
+        "date": "06/11/2026",
+        "title": "🕸️ Deep Crawl an toàn hơn + lịch sử cào + contact chỉ giữ người thật",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "Deep Crawl (cào kênh tương tự) chỉ dùng account khỏe, chia đều request giữa các account và không còn treo vì FloodWait. Nhánh không liên quan trading bị cắt sớm. Kết quả được lưu dần nên server lỗi cũng không mất. Mục Lịch sử cào hiện các lượt bị ngắt để cào lại 1 chạm. Contact trong mô tả kênh chỉ giữ người dùng thật.",
+        "changes": [
+            {"type": "fix", "title": "Không dùng account đang Tạm dừng", "desc": "Deep Crawl bỏ qua account tạm dừng, bị flag hoặc đang PeerFlood. Nếu không còn account khỏe sẽ báo lỗi ngay thay vì chạy.", "tag": "Deep Crawl"},
+            {"type": "improve", "title": "Xoay vòng account + giới hạn mỗi account", "desc": "Mỗi request chọn account dùng ít nhất, tối đa 300 request/account/lượt. Gặp FloodWait thì đổi account khác; chỉ chờ nếu cả nhóm cùng bị và thời gian chờ ≤ 2 phút, lâu hơn thì dừng và lưu kết quả.", "tag": "Deep Crawl"},
+            {"type": "feature", "title": "Cắt nhánh theo điểm trading", "desc": "Ô 'Điểm mở rộng' (mặc định 40): chỉ đi sâu tiếp từ kênh có trading score đạt ngưỡng, kênh thấp hơn vẫn được lưu nhưng không mở rộng. Tiết kiệm request cho các nhánh mèo, nấu ăn...", "tag": "Deep Crawl"},
+            {"type": "improve", "title": "Cache + lưu kết quả dở dang", "desc": "Mô tả kênh và loại contact được nhớ 7 ngày nên cào lại không tốn request. Kết quả lưu 30 giây/lần, server khởi động lại vẫn còn.", "tag": "Deep Crawl"},
+            {"type": "feature", "title": "Lịch sử cào", "desc": "Lưu 50 lượt gần nhất kèm trạng thái, số kênh, số contact. Lượt đang chạy hoặc đang chờ trong hàng đợi khi server dừng được đánh dấu 'Bị ngắt', có nút ▶ cào lại và ✕ xóa.", "tag": "Deep Crawl"},
+            {"type": "improve", "title": "Contact chỉ giữ người dùng thật", "desc": "@username trong mô tả kênh được kiểm tra: bỏ bot, kênh, nhóm, account đã xóa hoặc scam. Username không kiểm tra được (đang giới hạn) vẫn giữ và đánh dấu chưa xác minh.", "tag": "Deep Crawl"},
+        ],
+    },
+    {
         "version": "v3.17.0",
         "date": "05/11/2026",
         "title": "🤖 MCP server cho AI agent + cào được nhóm thường (basic group)",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "AI agent (Claude, Codex, Antigravity, Hermes…) điều khiển TG Scheduler qua MCP: xem account khỏe, tìm nhóm, cào member, xem trước danh sách lọc và tạo campaign DM ở trạng thái nháp. Agent không thể tự bấm chạy campaign. Cào member giờ chạy được với nhóm thường (không phải supergroup).",
         "changes": [
             {"type": "feature", "title": "MCP server (mcp_server/)", "desc": "10 tool: list_accounts, find_groups, scrape_group_members, list_scrape_jobs, preview_targets, create_target_list, create_dm_campaign_draft, list_campaigns, campaign_progress, pause_campaign. Không có tool start/resume; thông tin nhạy cảm của account bị ẩn; sender không khỏe bị từ chối. Hướng dẫn cấu hình từng client trong mcp_server/README.md.", "tag": "AI Agent"},

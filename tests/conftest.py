@@ -202,7 +202,7 @@ async def join_channel(account_id, channel_link):
     return {"success": True, "channel_id": 111}
 tg_mock.join_channel = join_channel
 
-async def deep_crawl_similar_channels(account_ids, channel_link, max_depth, progress_callback=None, stop_flag=None):
+async def deep_crawl_similar_channels(account_ids, channel_link, max_depth, progress_callback=None, stop_flag=None, **kwargs):
     if progress_callback:
         await progress_callback({
             "status": "running",

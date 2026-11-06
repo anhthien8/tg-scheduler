@@ -933,37 +933,7 @@ const Members = {
         } catch (e) {}
       }
 
-      const sortedAccounts = [...this._accounts].sort((a, b) => (b.is_premium || 0) - (a.is_premium || 0));
-      const accDiv = document.getElementById('cmp-accounts-list');
-      accDiv.innerHTML = `
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;width:100%;flex-wrap:wrap">
-          <button type="button" class="btn btn-ghost btn-sm cmp-acc-filter active" data-filter="all" onclick="Members.filterCampaignAccounts('all')" style="font-size:12px">Tất cả (${sortedAccounts.length})</button>
-          <button type="button" class="btn btn-ghost btn-sm cmp-acc-filter" data-filter="premium" onclick="Members.filterCampaignAccounts('premium')" style="font-size:12px">⭐ Premium (${sortedAccounts.filter(a=>a.is_premium).length})</button>
-          <span style="flex:1"></span>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(true)" style="font-size:11px;color:var(--accent);padding:2px 8px" title="Chọn tất cả">☑ Chọn hết</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="Members.selectPremiumOnly()" style="font-size:11px;color:var(--orange);padding:2px 8px" title="Chỉ chọn Premium">⭐ Chọn Premium</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(false)" style="font-size:11px;color:var(--danger);padding:2px 8px" title="Bỏ chọn tất cả">☐ Bỏ hết</button>
-        </div>
-        <div id="cmp-accounts-chips" style="display:flex;flex-wrap:wrap;gap:6px"></div>
-      `;
-      this._sortedCampaignAccounts = sortedAccounts;
-
-      // Render account chips, pre-check sender accounts
-      const senderIds = c.sender_account_ids || [];
-      const container = document.getElementById('cmp-accounts-chips');
-      container.innerHTML = sortedAccounts.map(a => {
-        const name = a.user_info
-          ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ')
-          : a.name;
-        const phone = a.phone || '';
-        const premiumBadge = a.is_premium ? '⭐ ' : '';
-        const premiumStyle = a.is_premium ? 'border-color:var(--orange);' : '';
-        const checked = senderIds.includes(a.id) ? 'checked' : '';
-        return `<label class="cmp-acc-chip" style="${premiumStyle}" data-premium="${a.is_premium ? 1 : 0}">
-          <input type="checkbox" class="cmp-acc-checkbox" value="${a.id}" ${checked}>
-          <span title="${esc(name || phone)}">${premiumBadge}${esc(shortName(name || phone))}</span>
-        </label>`;
-      }).join('');
+      await this._renderCampaignAccountPicker(c.sender_account_ids || []);
 
       // Fill messages
       const msgList = document.getElementById('cmp-messages-list');
@@ -1186,24 +1156,7 @@ const Members = {
       } catch (e) {}
     }
 
-    // Sort: premium first
-    const sortedAccounts = [...this._accounts].sort((a, b) => (b.is_premium || 0) - (a.is_premium || 0));
-
-    const accDiv = document.getElementById('cmp-accounts-list');
-    // Add filter toggle
-    accDiv.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;width:100%;flex-wrap:wrap">
-        <button type="button" class="btn btn-ghost btn-sm cmp-acc-filter active" data-filter="all" onclick="Members.filterCampaignAccounts('all')" style="font-size:12px">Tất cả (${sortedAccounts.length})</button>
-        <button type="button" class="btn btn-ghost btn-sm cmp-acc-filter" data-filter="premium" onclick="Members.filterCampaignAccounts('premium')" style="font-size:12px">⭐ Premium (${sortedAccounts.filter(a=>a.is_premium).length})</button>
-        <span style="flex:1"></span>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(true)" style="font-size:11px;color:var(--accent);padding:2px 8px" title="Chọn tất cả">☑ Chọn hết</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.selectPremiumOnly()" style="font-size:11px;color:var(--orange);padding:2px 8px" title="Chỉ chọn Premium">⭐ Chọn Premium</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="Members.toggleAllCampaignAccounts(false)" style="font-size:11px;color:var(--danger);padding:2px 8px" title="Bỏ chọn tất cả">☐ Bỏ hết</button>
-      </div>
-      <div id="cmp-accounts-chips" style="display:flex;flex-wrap:wrap;gap:6px"></div>
-    `;
-    this._sortedCampaignAccounts = sortedAccounts;
-    this._renderCampaignAccountChips(sortedAccounts);
+    await this._renderCampaignAccountPicker(null);
 
     // Add one empty message by default
     this.addCampaignMessage();
@@ -1235,52 +1188,80 @@ const Members = {
     }
   },
 
-  _renderCampaignAccountChips(accounts) {
-    const container = document.getElementById('cmp-accounts-chips');
-    if (!container) return;
-    container.innerHTML = accounts.map(a => {
-      const name = a.user_info
-        ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ')
-        : a.name;
-      const phone = a.phone || '';
-      const premiumBadge = a.is_premium ? '⭐ ' : '';
-      const premiumStyle = a.is_premium ? 'border-color:var(--orange);' : '';
-      return `<label class="cmp-acc-chip" style="${premiumStyle}" data-premium="${a.is_premium ? 1 : 0}">
-        <input type="checkbox" class="cmp-acc-checkbox" value="${a.id}" checked>
-        <span title="${esc(name || phone)}">${premiumBadge}${esc(shortName(name || phone))}</span>
+  // Sender picker for DM campaigns: each chip shows a health dot (+ SpamBot
+  // result), unsafe accounts are dimmed and sorted last, and the quick row
+  // picks a whole set in one click. checkedIds=null → tick healthy accounts.
+  async _renderCampaignAccountPicker(checkedIds) {
+    const accDiv = document.getElementById('cmp-accounts-list');
+    if (!accDiv) return;
+    const now = Date.now();
+    if (!this._accounts?.length || !this._accountsCachedAt || (now - this._accountsCachedAt) > 30000) {
+      try { this._accounts = (await API.getAccounts()).accounts || []; this._accountsCachedAt = now; } catch (e) {}
+    }
+    // SpamBot results change rarely → cache 10 min.
+    if (!this._spamCache || now - this._spamCacheAt > 600000) {
+      try { this._spamCache = (await API.get('/api/members/accounts/spam-status')).statuses || {}; this._spamCacheAt = now; }
+      catch (e) { this._spamCache = this._spamCache || {}; }
+    }
+    const E = typeof Engagement !== 'undefined' ? Engagement : null;
+    const rows = (this._accounts || []).filter(a => a && a.id).map(a => {
+      let st = E ? E._accStatus(a) : { ok: !!a.is_logged_in, color: a.is_logged_in ? 'var(--success,#3fb950)' : 'var(--text3)', label: a.is_logged_in ? 'Hoạt động' : 'Offline' };
+      const sp = this._spamCache[a.id] || this._spamCache[String(a.id)];
+      if (st.ok && sp && sp.status === 'limited') st = { ok: false, color: 'var(--red)', label: 'SpamBot giới hạn', detail: sp.message };
+      return { a, st, sp, brand: E ? E._accBrand(a) : '' };
+    });
+    rows.sort((x, y) => (y.st.ok - x.st.ok) || ((y.a.is_premium || 0) - (x.a.is_premium || 0)));
+    this._cmpPickerRows = rows;
+
+    const ok = rows.filter(r => r.st.ok);
+    const brands = {};
+    ok.forEach(r => { if (r.brand) brands[r.brand] = (brands[r.brand] || 0) + 1; });
+    const chip = (sel, label, tip) => `<button type="button" class="btn btn-ghost btn-sm" onclick="Members.quickPickCampaignAccounts('${sel}')" title="${esc(tip)}" style="font-size:11px;padding:2px 8px;border:1px solid var(--border)">${label}</button>`;
+    accDiv.innerHTML = `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;width:100%;flex-wrap:wrap">
+        ${chip('ok', `✅ Khỏe (${ok.length})`, 'Chọn mọi account đang hoạt động, không tạm dừng/flag/PeerFlood/SpamBot giới hạn')}
+        ${chip('premium', `⭐ Premium khỏe (${ok.filter(r => r.a.is_premium).length})`, 'Chỉ chọn account Premium đang khỏe')}
+        ${Object.keys(brands).sort().map(b => chip('brand:' + b, `#${esc(b)} (${brands[b]})`, `Chỉ chọn account khỏe có tên "| ${b}"`)).join('')}
+        ${chip('all', '☑ Tất cả', 'Chọn cả account không khỏe (hệ thống vẫn tự bỏ qua khi gửi)')}
+        ${chip('none', '☐ Bỏ hết', 'Bỏ chọn tất cả')}
+        <span style="flex:1"></span>
+        <span id="cmp-acc-count" style="font-size:11px;color:var(--text2)"></span>
+        <span class="info-i" title="Chấm xanh = khỏe. Vàng = tạm dừng / flag / PeerFlood. Đỏ = SpamBot giới hạn hoặc lỗi session. Xám = offline. Account không khỏe bị làm mờ, xếp cuối và mặc định không chọn.">i</span>
+      </div>
+      <div id="cmp-accounts-chips" style="display:flex;flex-wrap:wrap;gap:6px"></div>`;
+
+    const isChecked = r => checkedIds ? checkedIds.includes(r.a.id) : r.st.ok;
+    document.getElementById('cmp-accounts-chips').innerHTML = rows.map(r => {
+      const a = r.a, st = r.st;
+      const name = (a.user_info ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ') : '') || a.name || a.phone || ('#' + a.id);
+      let tip = `${name} — ${st.label}${st.detail ? ': ' + st.detail : ''}`;
+      if (r.sp) tip += ` · SpamBot: ${r.sp.status}${r.sp.checked_at ? ' (' + new Date(r.sp.checked_at).toLocaleString('vi-VN') + ')' : ''}`;
+      return `<label class="cmp-acc-chip" data-ok="${st.ok ? 1 : 0}" data-premium="${a.is_premium ? 1 : 0}" data-brand="${esc(r.brand)}" title="${esc(tip)}"
+          style="${a.is_premium ? 'border-color:var(--orange);' : ''}${st.ok ? '' : 'opacity:.55;'}">
+        <input type="checkbox" class="cmp-acc-checkbox" value="${a.id}" ${isChecked(r) ? 'checked' : ''} onchange="Members._cmpAccCount()">
+        <span style="width:7px;height:7px;border-radius:50%;background:${st.color};flex:none"></span>
+        <span>${a.is_premium ? '⭐ ' : ''}${esc(shortName(name))}${st.ok ? '' : ` <span style="color:${st.color};font-size:.85em">· ${esc(st.label)}</span>`}</span>
       </label>`;
-    }).join('');
+    }).join('') || '<span style="color:var(--text3)">Chưa có tài khoản</span>';
+    this._cmpAccCount();
   },
 
-  filterCampaignAccounts(filter) {
-    // Update active button
-    document.querySelectorAll('.cmp-acc-filter').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.filter === filter);
-      btn.style.background = btn.dataset.filter === filter ? 'var(--primary)' : '';
-      btn.style.color = btn.dataset.filter === filter ? '#fff' : '';
+  quickPickCampaignAccounts(sel) {
+    document.querySelectorAll('#cmp-accounts-chips .cmp-acc-chip').forEach(l => {
+      const cb = l.querySelector('.cmp-acc-checkbox'), d = l.dataset;
+      cb.checked = sel === 'all' ? true : sel === 'none' ? false
+        : d.ok === '1' && (sel === 'ok' || (sel === 'premium' && d.premium === '1') || (sel.startsWith('brand:') && d.brand === sel.slice(6)));
     });
-    const accounts = filter === 'premium'
-      ? this._sortedCampaignAccounts.filter(a => a.is_premium)
-      : this._sortedCampaignAccounts;
-    this._renderCampaignAccountChips(accounts);
+    this._cmpAccCount();
   },
 
-  toggleAllCampaignAccounts(check) {
-    const chips = document.getElementById('cmp-accounts-chips');
-    if (!chips) return;
-    chips.querySelectorAll('.cmp-acc-checkbox').forEach(cb => {
-      cb.checked = check;
-    });
-  },
-
-  selectPremiumOnly() {
-    const chips = document.getElementById('cmp-accounts-chips');
-    if (!chips) return;
-    chips.querySelectorAll('label[data-premium]').forEach(label => {
-      const cb = label.querySelector('.cmp-acc-checkbox');
-      if (!cb) return;
-      cb.checked = label.dataset.premium === '1';
-    });
+  _cmpAccCount() {
+    const el = document.getElementById('cmp-acc-count');
+    if (!el) return;
+    const all = document.querySelectorAll('#cmp-accounts-chips .cmp-acc-checkbox');
+    const on = [...all].filter(c => c.checked);
+    const bad = on.filter(c => c.closest('.cmp-acc-chip').dataset.ok !== '1').length;
+    el.innerHTML = `Đã chọn <b>${on.length}</b>/${all.length}${bad ? ` · <span style="color:var(--orange)">${bad} không khỏe</span>` : ''}`;
   },
 
   loadOutreachTemplate(type) {
@@ -1637,6 +1618,67 @@ const Members = {
     } catch (e) {
       console.error('Error restoring deep crawl status:', e);
     }
+    this.loadCrawlHistory();
+  },
+
+  // ── Crawl history (incl. runs/queue interrupted by a server restart) ──
+  async loadCrawlHistory() {
+    const list = document.getElementById('sim-history-list');
+    if (!list) return;
+    let hist = [];
+    try {
+      const r = await fetch('/api/members/deep-crawl/history');
+      if (!r.ok) return;
+      hist = (await r.json()).history || [];
+    } catch (e) { return; }
+    const escH = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const interrupted = hist.filter(h => h.status === 'interrupted' && !h.rerun).length;
+    const badge = document.getElementById('sim-history-badge');
+    if (badge) badge.innerHTML = hist.length
+      ? `(${hist.length}${interrupted ? ` · <span style="color:var(--danger)">${interrupted} bị ngắt</span>` : ''})` : '';
+    const det = document.getElementById('sim-history');
+    if (det && interrupted && !this._historyAutoOpened) { this._historyAutoOpened = true; det.open = true; }
+    if (!hist.length) {
+      list.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Chưa có lần cào nào.</div>';
+      return;
+    }
+    const st = {
+      running: ['Đang chạy', 'var(--accent)'], completed: ['Xong', 'var(--success)'],
+      stopped: ['Đã dừng', 'var(--warning)'], error: ['Lỗi', 'var(--danger)'],
+      flood_wait: ['FloodWait', 'var(--warning)'], interrupted: ['Bị ngắt', 'var(--danger)'],
+    };
+    list.innerHTML = hist.map(h => {
+      const [lbl, col] = st[h.status] || [h.status, 'var(--text2)'];
+      const when = (h.ended_at || h.started_at || '').replace('T', ' ').slice(5, 16);
+      const link = h.channel_link.length > 40 ? h.channel_link.slice(0, 40) + '…' : h.channel_link;
+      const canRerun = h.status !== 'running';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:12px;background:color-mix(in srgb, var(--text) 4%, transparent)" title="${escH(h.note || '')}">
+        <span style="padding:1px 7px;border-radius:9px;background:${col};color:#fff;font-weight:600;white-space:nowrap">${lbl}</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escH(link)} <span style="color:var(--text-muted)">· depth ${h.max_depth} · ${h.channels_found || 0} kênh · ${h.contacts_found || 0} contact${h.rerun ? ' · đã chạy lại' : ''}</span></span>
+        <span style="color:var(--text-muted);white-space:nowrap">${escH(when)}</span>
+        ${canRerun ? `<button class="btn btn-ghost btn-sm" style="padding:1px 8px" onclick="Members.rerunCrawl('${h.id}')" title="Chạy lại với cùng kênh và cài đặt">▶</button>` : ''}
+        <button style="background:none;border:none;color:var(--text-muted);cursor:pointer" onclick="Members.deleteCrawlHistory('${h.id}')" title="Xóa khỏi lịch sử">✕</button>
+      </div>`;
+    }).join('');
+  },
+
+  async rerunCrawl(id) {
+    try {
+      const r = await fetch(`/api/members/deep-crawl/history/${id}/rerun`, { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || 'Không chạy lại được');
+      App.toast(d.queued ? `📥 ${d.message}` : '🚀 Đã chạy lại Deep Crawl', 'success');
+      this.loadCrawlHistory();
+      this._deepCrawlPollInterval = 3000;
+      this._deepCrawlPrevState = null;
+      if (!this._deepCrawlPolling) { this._deepCrawlPolling = true; this._pollDeepCrawlProgress(); }
+      this.restoreDeepCrawlState();
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  async deleteCrawlHistory(id) {
+    await fetch(`/api/members/deep-crawl/history/${id}`, { method: 'DELETE' }).catch(() => {});
+    this.loadCrawlHistory();
   },
 
   _restoreDeepCrawlUI(s) {
@@ -1688,7 +1730,7 @@ const Members = {
 
     if (stopBtn) stopBtn.classList.add('hidden');
 
-    if (s.results_count > 0 || s.status === 'completed' || s.status === 'stopped') {
+    if (s.results_count > 0 || s.status === 'completed' || s.status === 'stopped' || s.status === 'interrupted') {
       if (progressPanel) progressPanel.classList.remove('hidden');
       this._renderDeepCrawlProgressFromState(s);
       this._fetchDeepCrawlResults();
@@ -1807,7 +1849,8 @@ const Members = {
         body: JSON.stringify({
           account_ids: accountIds,
           channel_link: channelLink,
-          max_depth: depth
+          max_depth: depth,
+          min_expand_score: Math.max(0, Math.min(100, parseInt(document.getElementById('sim-min-score')?.value, 10) || 0))
         })
       });
       const d = await res.json();
@@ -1870,7 +1913,14 @@ const Members = {
     if (depthEl) depthEl.textContent = `${s.current_depth}/${s.max_depth}`;
     if (foundEl) foundEl.textContent = s.channels_found;
     if (processedEl) processedEl.textContent = s.channels_processed;
-    if (contactsEl) contactsEl.textContent = s.contacts_found;
+    if (contactsEl) {
+      contactsEl.textContent = s.contacts_found;
+      const extra = [];
+      if (s.contacts_removed) extra.push(`đã loại ${s.contacts_removed} contact không phải người thật (kênh/nhóm/bot/đã xoá)`);
+      if (s.branches_pruned) extra.push(`bỏ ${s.branches_pruned} nhánh điểm thấp`);
+      contactsEl.title = extra.join(' · ');
+      if (s.contacts_removed) contactsEl.textContent += ` (−${s.contacts_removed})`;
+    }
     if (queueEl) queueEl.textContent = s.queue_remaining;
     if (accountEl) accountEl.textContent = s.current_account || '—';
     if (channelEl) channelEl.textContent = s.current_channel || '—';
@@ -1886,6 +1936,8 @@ const Members = {
         completed: { text: 'Hoàn thành ✓', bg: 'var(--success)' },
         stopped: { text: 'Đã dừng', bg: 'var(--warning)' },
         error: { text: 'Lỗi', bg: 'var(--danger)' },
+        flood_wait: { text: 'FloodWait', bg: 'var(--warning)' },
+        interrupted: { text: 'Bị ngắt (server dừng)', bg: 'var(--danger)' },
       };
       const info = statusMap[s.status] || statusMap.running;
       statusEl.textContent = info.text;
@@ -1992,7 +2044,9 @@ const Members = {
       this._renderDeepCrawlProgressFromState(s);
 
       // Check if done or idle
-      if (s.status === 'completed' || s.status === 'stopped' || s.status === 'error' || s.status === 'idle') {
+      if (s.status === 'completed' || s.status === 'stopped' || s.status === 'error' || s.status === 'idle' || s.status === 'interrupted') {
+        const histKey = `${s.status}|${s.source_url || ''}`;
+        if (this._lastHistKey !== histKey) { this._lastHistKey = histKey; this.loadCrawlHistory(); }
         const barEl = document.getElementById('sim-progress-bar');
         if (barEl) barEl.style.width = s.status === 'completed' ? '100%' : '0%';
 

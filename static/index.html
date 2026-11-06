@@ -1425,6 +1425,10 @@
                   <option value="4">4 lớp (~500-2000+ kênh)</option>
                 </select>
               </div>
+              <div class="form-group" style="margin:0;width:120px">
+                <label class="form-label">Điểm tối thiểu <span class="info-i" tabindex="0" data-tip="Chỉ đào sâu tiếp từ kênh có điểm trading ≥ số này (0–100). Kênh điểm thấp vẫn được lưu, nhưng không cào các kênh tương tự của nó — tiết kiệm request, ít bị FloodWait. 0 = cào hết.">i</span></label>
+                <input type="number" id="sim-min-score" class="form-input" value="40" min="0" max="100" step="5">
+              </div>
               <button class="btn btn-primary" onclick="Members.findSimilarChannels()" id="sim-btn-search">
                 🚀 Bắt đầu Deep Crawl
               </button>
@@ -1440,6 +1444,13 @@
                 <span style="color:var(--text-muted);font-size:13px">Đang tải...</span>
               </div>
             </div>
+
+            <!-- Crawl history: past runs + runs/queue interrupted by a server restart -->
+            <details id="sim-history" style="margin-bottom:16px" ontoggle="if(this.open) Members.loadCrawlHistory()">
+              <summary style="cursor:pointer;font-weight:600;font-size:13px">🕘 Lịch sử cào <span id="sim-history-badge" style="font-weight:400;color:var(--text-muted)"></span>
+                <span class="info-i" tabindex="0" data-tip="Các lần cào gần đây. Lần nào bị ngắt vì server dừng (đang chạy hoặc còn trong hàng đợi) hiện nhãn 'Bị ngắt' — bấm ▶ để chạy lại với cùng kênh và cài đặt.">i</span></summary>
+              <div id="sim-history-list" style="margin-top:8px;display:flex;flex-direction:column;gap:4px;max-height:260px;overflow-y:auto"></div>
+            </details>
 
             <!-- Progress Panel (hidden by default) -->
             <div id="sim-progress-panel" class="hidden" style="margin-bottom:20px;padding:16px;border-radius:10px;background:linear-gradient(135deg, color-mix(in srgb, var(--violet) 8%, transparent), color-mix(in srgb, var(--violet) 8%, transparent));border:1px solid color-mix(in srgb, var(--violet) 20%, transparent)">
@@ -2131,7 +2142,7 @@
   <script defer src="/static/js/api.js?v=492"></script>
   <script defer src="/static/js/discord.js?v=492"></script>
   <script defer src="/static/js/zalo.js?v=495"></script>
-  <script defer src="/static/js/members.js?v=499"></script>
+  <script defer src="/static/js/members.js?v=501"></script>
   <script defer src="/static/js/analytics.js?v=492"></script>
   <script defer src="/static/js/ai_agents.js?v=492"></script>
   <script defer src="/static/js/ai_followup.js?v=496"></script>
@@ -2230,6 +2241,7 @@
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#10a37f;color:white;font-size:12px;font-weight:700;flex-shrink:0">2</span>
           <span style="font-size:14px;font-weight:600">Dán JSON / Access Token vào đây</span>
+          <span class="info-i" tabindex="0" data-tip="Quay lại tab này sau khi Ctrl+C: app tự đọc clipboard và xác thực (trình duyệt có thể hỏi quyền đọc clipboard, bấm Cho phép). Dán bằng Ctrl+V cũng tự xác thực luôn.">i</span>
         </div>
         <textarea id="chatgpt-token-paste-input" class="form-input" rows="4" onpaste="setTimeout(function(){App.processChatgptOAuthLogin()},50)" placeholder='Dán {"accessToken":"eyJhb..."} hoặc chỉ chuỗi eyJhb... vào đây' style="font-family:monospace;font-size:12px;resize:vertical;margin-bottom:12px"></textarea>
 
@@ -2241,7 +2253,6 @@
       <div style="display:flex;justify-content:flex-end;gap:8px;padding:16px 24px;border-top:1px solid var(--border)">
         <button class="btn btn-outline" onclick="document.getElementById('chatgpt-oauth-modal').classList.remove('open')">Hủy</button>
         <button class="btn btn-primary" id="btn-verify-chatgpt-oauth" onclick="App.processChatgptOAuthLogin()" style="background:linear-gradient(135deg,#10a37f,#0d8c6d);border:none;font-weight:600">
-          <span class="info-i" tabindex="0" data-tip="Quay lại tab này sau khi Ctrl+C: app tự đọc clipboard và xác thực (trình duyệt có thể hỏi quyền đọc clipboard, bấm Cho phép). Dán bằng Ctrl+V cũng tự xác thực luôn.">i</span>
           &#x1F680; Xác thực &amp; Tự động điền cấu hình
         </button>
       </div>

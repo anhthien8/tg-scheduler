@@ -120,6 +120,7 @@ class DeepCrawlRequest(BaseModel):
     account_ids: list[int]           # Premium accounts to rotate
     channel_link: str                # Source channel link/username
     max_depth: int = 2               # 1-4 layers deep
+    min_expand_score: int = 40       # only crawl further from channels scoring >= this
 
 
 class TranslateDescriptionsRequest(BaseModel):
@@ -144,6 +145,10 @@ _deep_crawl_state: dict = {
 _deep_crawl_stop_flag: dict = {"stopped": False}
 _deep_crawl_task = None  # asyncio.Task reference — survives browser refresh
 _deep_crawl_queue: list[dict] = []  # Queue of pending crawl requests
+_deep_crawl_history_id: str | None = None  # history entry of the crawl that is running now
+_deep_crawl_recovered = False  # restart recovery runs once per process
+_deep_crawl_last_save = 0.0  # throttles partial-result snapshots
+_contact_cache_loaded = False
 
 
 def _parse_channel_identifier(raw: str) -> str:
@@ -1042,13 +1047,95 @@ async def _save_deep_crawl_snapshot():
         logger.debug(f"[DeepCrawl] Error persisting snapshot: {e}")
 
 
+_HISTORY_KEY = "deep_crawl_history"
+_HISTORY_MAX = 50
+
+
+async def _history_load() -> list[dict]:
+    try:
+        return json.loads(await db.get_setting(_HISTORY_KEY, "[]") or "[]")
+    except Exception:
+        return []
+
+
+async def _history_add(item: dict) -> str:
+    import uuid
+    hist = await _history_load()
+    item = {"id": uuid.uuid4().hex[:10], "started_at": datetime.now().isoformat(timespec="seconds"),
+            "channels_found": 0, "contacts_found": 0, "note": "", **item}
+    hist.insert(0, item)
+    await db.set_setting(_HISTORY_KEY, json.dumps(hist[:_HISTORY_MAX], ensure_ascii=False))
+    return item["id"]
+
+
+async def _history_update(hid: str | None, **fields):
+    if not hid:
+        return
+    hist = await _history_load()
+    for h in hist:
+        if h.get("id") == hid:
+            h.update(fields)
+            break
+    await db.set_setting(_HISTORY_KEY, json.dumps(hist, ensure_ascii=False))
+
+
+async def _recover_after_restart(state: dict):
+    """The server stopped while a crawl was running and/or items were queued. Nothing will
+    resume them, so record them in the crawl history as interrupted (with a re-run button)."""
+    global _deep_crawl_queue
+    hist = await _history_load()
+    now = datetime.now().isoformat(timespec="seconds")
+    if state.get("status") in ("running", "flood_wait"):
+        running = [h for h in hist if h.get("status") == "running"]
+        if running:
+            for h in running:
+                h.update(status="interrupted", ended_at=now,
+                         channels_found=len(state.get("results") or []),
+                         contacts_found=state.get("contacts_found", 0),
+                         note="Server dừng khi đang chạy — kết quả dở dang đã được giữ lại")
+        elif state.get("source_url"):
+            hist.insert(0, {"id": __import__("uuid").uuid4().hex[:10], "channel_link": state["source_url"],
+                            "max_depth": state.get("max_depth", 2), "account_ids": state.get("account_ids", []),
+                            "status": "interrupted", "started_at": "", "ended_at": now,
+                            "channels_found": len(state.get("results") or []),
+                            "contacts_found": state.get("contacts_found", 0),
+                            "note": "Server dừng khi đang chạy — kết quả dở dang đã được giữ lại"})
+    for q in _deep_crawl_queue:
+        hist.insert(0, {"id": __import__("uuid").uuid4().hex[:10], "channel_link": q.get("channel_link", ""),
+                        "max_depth": q.get("max_depth", 2), "account_ids": q.get("account_ids", []),
+                        "min_expand_score": q.get("min_expand_score", 40),
+                        "status": "interrupted", "started_at": "", "ended_at": now,
+                        "channels_found": 0, "contacts_found": 0,
+                        "note": "Đang trong hàng đợi khi server dừng — chưa chạy"})
+    if _deep_crawl_queue:
+        logger.info(f"[DeepCrawl] Restart recovery: moved {len(_deep_crawl_queue)} queued item(s) to history")
+        _deep_crawl_queue = []
+        await db.set_setting("deep_crawl_queue", "[]")
+    await db.set_setting(_HISTORY_KEY, json.dumps(hist[:_HISTORY_MAX], ensure_ascii=False))
+
+
 async def _load_deep_crawl_snapshot():
     """Load persisted deep crawl state and queue on startup."""
-    global _deep_crawl_state, _deep_crawl_queue
+    global _deep_crawl_state, _deep_crawl_queue, _deep_crawl_recovered
+    if _deep_crawl_task is not None and not _deep_crawl_task.done():
+        return  # a crawl is live in this process — its in-memory state is the truth
+    first_load = not _deep_crawl_recovered
+    _deep_crawl_recovered = True
     try:
         raw_state = await db.get_setting("deep_crawl_state", "")
+        raw_queue = await db.get_setting("deep_crawl_queue", "")
+        if raw_queue:
+            _deep_crawl_queue = json.loads(raw_queue)
         if raw_state:
             s = json.loads(raw_state)
+            if first_load:
+                was_live = s.get("status") in ("running", "flood_wait")
+                if was_live or _deep_crawl_queue:
+                    await _recover_after_restart(s)
+                if was_live:
+                    s["status"] = "interrupted"
+                    s.setdefault("errors", []).append("Server dừng khi đang chạy — xem Lịch sử cào để chạy lại.")
+                    await db.set_setting("deep_crawl_state", json.dumps(s, ensure_ascii=False))
             if s.get("status") == "running":
                 s["status"] = "stopped"
             if "results" in s and isinstance(s["results"], list):
@@ -1065,10 +1152,7 @@ async def _load_deep_crawl_snapshot():
                         )
                         lead.update(score_info)
             _deep_crawl_state.update(s)
-        
-        raw_queue = await db.get_setting("deep_crawl_queue", "")
-        if raw_queue:
-            _deep_crawl_queue = json.loads(raw_queue)
+            tg.seed_channel_about_cache(s.get("results") or [])
     except Exception as e:
         logger.debug(f"[DeepCrawl] Error loading snapshot: {e}")
 
@@ -1086,6 +1170,8 @@ async def start_deep_crawl(req: DeepCrawlRequest):
 
     if req.max_depth < 1 or req.max_depth > 4:
         raise HTTPException(status_code=400, detail="Độ sâu phải từ 1 đến 4.")
+    if not _deep_crawl_recovered:
+        await _load_deep_crawl_snapshot()  # record a crawl/queue interrupted by a restart first
 
     # If a crawl is running, queue this request
     if _deep_crawl_state.get("status") == "running":
@@ -1093,6 +1179,7 @@ async def start_deep_crawl(req: DeepCrawlRequest):
             "account_ids": req.account_ids,
             "channel_link": req.channel_link,
             "max_depth": req.max_depth,
+            "min_expand_score": req.min_expand_score,
             "added_at": datetime.now().isoformat(),
         }
         _deep_crawl_queue.append(queue_item)
@@ -1120,24 +1207,44 @@ async def start_deep_crawl(req: DeepCrawlRequest):
         "errors": [],
         "results": [],
         "source_url": req.channel_link,
+        "account_ids": req.account_ids,
     }
     _deep_crawl_stop_flag = {"stopped": False}
+    hid = await _history_add({"channel_link": req.channel_link, "max_depth": req.max_depth,
+                              "account_ids": req.account_ids, "min_expand_score": req.min_expand_score,
+                              "status": "running"})
     await _save_deep_crawl_snapshot()
 
     _deep_crawl_task = asyncio.create_task(
-        _do_deep_crawl(req.account_ids, req.channel_link, req.max_depth)
+        _do_deep_crawl(req.account_ids, req.channel_link, req.max_depth, hid, req.min_expand_score)
     )
     return {"success": True, "queued": False, "message": f"Deep crawl started: {req.max_depth} layers"}
 
 
-async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: int):
+async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: int,
+                         history_id: str | None = None, min_expand_score: int = 40):
     """Background task that runs the BFS deep crawl. Auto-starts next queued item when done."""
     global _deep_crawl_state, _deep_crawl_queue, _deep_crawl_stop_flag, _deep_crawl_task
+    global _deep_crawl_history_id, _deep_crawl_last_save, _contact_cache_loaded
     import asyncio
+    import time as _t
+    _deep_crawl_history_id = history_id
+
+    if not _contact_cache_loaded:
+        _contact_cache_loaded = True
+        try:
+            tg.import_contact_kind_cache(json.loads(await db.get_setting("contact_kind_cache", "{}") or "{}"))
+        except Exception:
+            pass
 
     async def _progress_cb(state: dict):
-        """Callback to update module-level state for polling."""
+        """Callback to update module-level state for polling. Saves partial results every 30s
+        so a server restart mid-crawl keeps what was already found."""
+        global _deep_crawl_last_save
         _deep_crawl_state.update(state)
+        if _t.time() - _deep_crawl_last_save >= 30:
+            _deep_crawl_last_save = _t.time()
+            await _save_deep_crawl_snapshot()
 
     _floodwait_retry_after = None  # seconds to wait before retry
     try:
@@ -1147,6 +1254,7 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
             max_depth=max_depth,
             progress_callback=_progress_cb,
             stop_flag=_deep_crawl_stop_flag,
+            min_expand_score=min_expand_score,
         )
         _deep_crawl_state["results"] = results
         if _deep_crawl_state["status"] != "stopped":
@@ -1172,6 +1280,19 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
             _deep_crawl_state["errors"].append(f"Fatal: {err_str}")
             logger.error(f"[DeepCrawl] Fatal error: {e}", exc_info=True)
         await _save_deep_crawl_snapshot()
+
+    try:
+        errs = _deep_crawl_state.get("errors") or []
+        await _history_update(
+            history_id, status=_deep_crawl_state.get("status"),
+            ended_at=datetime.now().isoformat(timespec="seconds"),
+            channels_found=len(_deep_crawl_state.get("results") or []),
+            contacts_found=_deep_crawl_state.get("contacts_found", 0),
+            note=(errs[-1][:160] if errs and _deep_crawl_state.get("status") != "completed" else ""))
+        await db.set_setting("contact_kind_cache",
+                             json.dumps(tg.export_contact_kind_cache(), ensure_ascii=False))
+    except Exception as e:
+        logger.debug(f"[DeepCrawl] history/cache save failed: {e}")
 
     # ── FloodWait auto-retry: re-queue current crawl with a delay ──
     if _floodwait_retry_after and not _deep_crawl_stop_flag.get("stopped"):
@@ -1216,11 +1337,18 @@ async def _do_deep_crawl(account_ids: list[int], channel_link: str, max_depth: i
             "errors": [],
             "results": [],
             "source_url": next_item["channel_link"],
+            "account_ids": next_item["account_ids"],
         }
         _deep_crawl_stop_flag = {"stopped": False}
+        _mes = next_item.get("min_expand_score", 40)
+        next_hid = await _history_add({"channel_link": next_item["channel_link"],
+                                       "max_depth": next_item["max_depth"],
+                                       "account_ids": next_item["account_ids"],
+                                       "min_expand_score": _mes, "status": "running"})
         await _save_deep_crawl_snapshot()
         _deep_crawl_task = asyncio.create_task(
-            _do_deep_crawl(next_item["account_ids"], next_item["channel_link"], next_item["max_depth"])
+            _do_deep_crawl(next_item["account_ids"], next_item["channel_link"], next_item["max_depth"],
+                           next_hid, _mes)
         )
 
 
@@ -1483,6 +1611,42 @@ async def clear_deep_crawl_queue():
     await _save_deep_crawl_snapshot()
     logger.info(f"[DeepCrawl] Queue: cleared {count} items")
     return {"success": True, "cleared": count}
+
+
+@router.get("/deep-crawl/history")
+async def get_deep_crawl_history():
+    """Past crawls (newest first). Interrupted ones — the server stopped while they were
+    running or queued — can be re-run from the UI."""
+    if not _deep_crawl_recovered:
+        await _load_deep_crawl_snapshot()
+    hist = await _history_load()
+    return {"history": [{k: v for k, v in h.items() if k != "account_ids"} for h in hist]}
+
+
+@router.post("/deep-crawl/history/{hid}/rerun")
+async def rerun_deep_crawl_history(hid: str):
+    """Start (or queue) a crawl with the same channel and settings as a history entry."""
+    hist = await _history_load()
+    item = next((h for h in hist if h.get("id") == hid), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Không tìm thấy mục lịch sử")
+    account_ids = item.get("account_ids") or []
+    if not account_ids:
+        accs = await db.get_all_accounts()
+        account_ids = [a["id"] for a in accs if a.get("is_premium")]
+    req = DeepCrawlRequest(account_ids=account_ids, channel_link=item["channel_link"],
+                           max_depth=item.get("max_depth", 2),
+                           min_expand_score=item.get("min_expand_score", 40))
+    result = await start_deep_crawl(req)
+    await _history_update(hid, rerun=True)
+    return result
+
+
+@router.delete("/deep-crawl/history/{hid}")
+async def delete_deep_crawl_history(hid: str):
+    hist = [h for h in await _history_load() if h.get("id") != hid]
+    await db.set_setting(_HISTORY_KEY, json.dumps(hist, ensure_ascii=False))
+    return {"success": True}
 
 
 # ── DM Campaigns ────────────────────────────────────────────────────────────
