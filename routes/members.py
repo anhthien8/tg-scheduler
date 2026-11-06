@@ -296,22 +296,39 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
         batch_size = 200
         seen_ids = set()
 
+        # Basic (non-super) groups have no channels.GetParticipants: one
+        # GetFullChat returns every member, admin/creator marked per participant.
+        from telethon.tl.types import (
+            ChatParticipantAdmin,
+            ChatParticipantCreator,
+            InputPeerChat,
+        )
+        basic_chat_users = None
+        if isinstance(input_chat, InputPeerChat):
+            basic_chat_users = await client.get_participants(input_chat)
+
         # Get administrators list to exclude them
         admin_ids = set()
-        try:
-            from telethon.tl.types import ChannelParticipantsAdmins
-            admins_result = await client(GetParticipantsRequest(
-                channel=input_chat,
-                filter=ChannelParticipantsAdmins(),
-                offset=0,
-                limit=200,
-                hash=0,
-            ))
-            for admin in admins_result.users:
-                admin_ids.add(admin.id)
-            logger.info(f"[Scrape {scrape_job_id}] Found {len(admin_ids)} administrators to exclude")
-        except Exception as e:
-            logger.warning(f"[Scrape {scrape_job_id}] Failed to fetch administrators: {e}")
+        if basic_chat_users is not None:
+            admin_ids = {u.id for u in basic_chat_users if isinstance(
+                getattr(u, "participant", None), (ChatParticipantAdmin, ChatParticipantCreator))}
+            logger.info(f"[Scrape {scrape_job_id}] Basic group: {len(basic_chat_users)} members, "
+                        f"{len(admin_ids)} admins excluded")
+        else:
+            try:
+                from telethon.tl.types import ChannelParticipantsAdmins
+                admins_result = await client(GetParticipantsRequest(
+                    channel=input_chat,
+                    filter=ChannelParticipantsAdmins(),
+                    offset=0,
+                    limit=200,
+                    hash=0,
+                ))
+                for admin in admins_result.users:
+                    admin_ids.add(admin.id)
+                logger.info(f"[Scrape {scrape_job_id}] Found {len(admin_ids)} administrators to exclude")
+            except Exception as e:
+                logger.warning(f"[Scrape {scrape_job_id}] Failed to fetch administrators: {e}")
 
         if scrape_method == "history":
             logger.info(f"[Scrape {scrape_job_id}] Scraping via chat history. Limit: {max_messages} messages.")
@@ -399,23 +416,27 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
         else:
             # Use empty search to get all participants
             while True:
-                try:
-                    result = await client(GetParticipantsRequest(
-                        channel=input_chat,
-                        filter=ChannelParticipantsSearch(""),
-                        offset=offset,
-                        limit=batch_size,
-                        hash=0,
-                    ))
-                except Exception as e:
-                    logger.warning(f"[Scrape {scrape_job_id}] Error at offset {offset}: {e}")
-                    # Try alphabetical search as fallback
+                if basic_chat_users is not None:
+                    page_users, page_n = basic_chat_users, 0
+                else:
+                    try:
+                        result = await client(GetParticipantsRequest(
+                            channel=input_chat,
+                            filter=ChannelParticipantsSearch(""),
+                            offset=offset,
+                            limit=batch_size,
+                            hash=0,
+                        ))
+                    except Exception as e:
+                        logger.warning(f"[Scrape {scrape_job_id}] Error at offset {offset}: {e}")
+                        # Try alphabetical search as fallback
+                        break
+                    page_users, page_n = result.users, len(result.participants)
+
+                if not page_users:
                     break
 
-                if not result.users:
-                    break
-
-                for user in result.users:
+                for user in page_users:
                     if user.id in seen_ids:
                         continue
                     seen_ids.add(user.id)
@@ -479,15 +500,17 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
                         "last_seen": last_seen,
                     })
 
-                offset += len(result.participants)
-                if len(result.participants) < batch_size:
+                if basic_chat_users is not None:
+                    break  # basic group: everything came in one GetFullChat
+                offset += page_n
+                if page_n < batch_size:
                     break
 
                 # Rate limit: small delay between batches
                 await asyncio.sleep(1.5)
 
             # If empty search didn't get all, try alphabetical search
-            if len(all_members) < 100:
+            if len(all_members) < 100 and basic_chat_users is None:
                 for letter in "abcdefghijklmnopqrstuvwxyz":
                     try:
                         result = await client(GetParticipantsRequest(
@@ -590,6 +613,32 @@ async def delete_scrape_job(scrape_job_id: str):
     except Exception as e:
         logger.error(f"Error deleting scrape job {scrape_job_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Lỗi xóa scrape job: {str(e)}")
+
+
+class ScrapeSubsetRequest(BaseModel):
+    keep_user_ids: list[int]
+    group_title: Optional[str] = None
+
+
+@router.post("/scrape-jobs/{scrape_job_id}/subset")
+async def create_scrape_subset(scrape_job_id: str, req: ScrapeSubsetRequest):
+    """Copy only `keep_user_ids` of a scrape job into a NEW job (source untouched).
+    Lets callers (UI, MCP) filter a target list — drop admins, brand staff,
+    keyword matches — while keeping real user_ids, premium flag and lang_code."""
+    members = await db.get_scraped_members(scrape_job_id, limit=10000)
+    if not members:
+        raise HTTPException(status_code=404, detail="Scrape job không tồn tại hoặc trống")
+    keep = set(req.keep_user_ids)
+    rows = [m for m in members if m["user_id"] in keep]
+    if not rows:
+        raise HTTPException(status_code=400, detail="Không còn member nào sau khi lọc")
+    src = members[0]
+    new_job_id = f"{scrape_job_id[:40]}_f{uuid.uuid4().hex[:6]}"
+    title = (req.group_title or "").strip() or f"{src.get('group_title') or scrape_job_id} (đã lọc)"
+    await db.save_scraped_members(new_job_id, src.get("account_id") or 0, src.get("group_id") or 0,
+                                  title, rows)
+    return {"scrape_job_id": new_job_id, "group_title": title,
+            "count": await db.count_scraped_members(new_job_id), "source_count": len(members)}
 
 
 # ── Batch Scrape ─────────────────────────────────────────────────────────────

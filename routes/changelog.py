@@ -8,11 +8,24 @@ router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 CHANGELOG_DATA = [
     {
+        "version": "v3.17.0",
+        "date": "05/11/2026",
+        "title": "🤖 MCP server cho AI agent + cào được nhóm thường (basic group)",
+        "is_latest": True,
+        "badge": "LATEST",
+        "summary": "AI agent (Claude, Codex, Antigravity, Hermes…) điều khiển TG Scheduler qua MCP: xem account khỏe, tìm nhóm, cào member, xem trước danh sách lọc và tạo campaign DM ở trạng thái nháp. Agent không thể tự bấm chạy campaign. Cào member giờ chạy được với nhóm thường (không phải supergroup).",
+        "changes": [
+            {"type": "feature", "title": "MCP server (mcp_server/)", "desc": "10 tool: list_accounts, find_groups, scrape_group_members, list_scrape_jobs, preview_targets, create_target_list, create_dm_campaign_draft, list_campaigns, campaign_progress, pause_campaign. Không có tool start/resume; thông tin nhạy cảm của account bị ẩn; sender không khỏe bị từ chối. Hướng dẫn cấu hình từng client trong mcp_server/README.md.", "tag": "AI Agent"},
+            {"type": "feature", "title": "Lưu danh sách member đã lọc", "desc": "API POST /api/members/scrape-jobs/{id}/subset tạo scrape job mới chỉ gồm các user_id được giữ (loại nhân sự đối tác, account nội bộ, người không có username...), dùng làm nguồn cho campaign.", "tag": "Members"},
+            {"type": "fix", "title": "Cào member nhóm thường", "desc": "Nhóm Telegram dạng basic group trước đây cào ra 0 người (lỗi InputPeerChat). Giờ lấy đủ member, vẫn loại admin/owner và bot.", "tag": "Members"},
+        ],
+    },
+    {
         "version": "v3.16.0",
         "date": "05/11/2026",
         "title": "⏸️ Tạm dừng là dừng hẳn + 🚫 AI không bao giờ nhắn giữa account nội bộ + Zalo nhiều nick",
-        "is_latest": True,
-        "badge": "LATEST",
+        "is_latest": False,
+        "badge": "",
         "summary": "Account đang Tạm dừng không còn thả reaction, trả lời nhóm, đăng bài lịch hay gửi DM campaign. AI không bao giờ trả lời tin từ account nội bộ (Telegram và Zalo). Warm-up tự né account bị flag/PeerFlood. AI trả lời sticker/ảnh đúng ngôn ngữ người gửi. Zalo Outreach chạy nhiều nick với warm-up riêng.",
         "changes": [
             {"type": "fix", "title": "Tạm dừng áp dụng cho mọi tính năng", "desc": "Auto-reaction, trả lời AI trong nhóm, đăng bài theo lịch và DM campaign đều bỏ qua account đang Tạm dừng (trước đây auto-reaction vẫn chạy). Danh sách account tạm dừng giữ trong bộ nhớ nên không tốn thêm truy vấn.", "tag": "Tài khoản"},
