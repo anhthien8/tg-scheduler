@@ -439,3 +439,28 @@ async def test_decline_with_off_ladder_figure_sends_closing_not_number_check(moc
     sent = mock_send.call_args[0][2]
     assert sent == tracker.get_decline_closing_reply([{"role": "user", "content": "Hi not interested"}])
     assert "double-check" not in sent and "%" not in sent
+
+
+
+@patch("ai_remix._call_chat_provider", new_callable=AsyncMock)
+@patch("telegram_client.send_text_message", new_callable=AsyncMock)
+async def test_human_admin_tag_never_reaches_lead(mock_send, mock_call):
+    await _setup_agent_chat("ok a")
+    await db.append_followup_chat_message(1, 202, "assistant", "[Human Admin]: để anh xem nhé")
+    await db.append_followup_chat_message(1, 202, "user", "vâng a ạ")
+    mock_call.return_value = "[Human Admin]: Ừ để anh lọc thêm vài channel rồi gửi em nhé"
+
+    with patch("dm_reply_tracker._notify_main_account_handover", new_callable=AsyncMock):
+        await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
+
+    sent_history = mock_call.call_args_list[0][0][2]  # the reply call, not later profile extraction
+    assert all("[Human Admin" not in (m.get("content") or "") for m in sent_history)
+    sent = mock_send.call_args[0][2]
+    assert "[Human Admin" not in sent and sent.startswith("Ừ để anh")
+
+
+async def test_strip_role_prefix_variants():
+    import ai_remix
+    for raw in ("[Human Admin]: hi", "[Human Admin via Forum]: hi", " [AI] hi", "[assistant]:hi"):
+        assert ai_remix.strip_role_prefix(raw).strip() == "hi"
+    assert ai_remix.strip_role_prefix("Giá [AI] token") == "Giá [AI] token"

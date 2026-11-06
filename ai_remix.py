@@ -887,6 +887,16 @@ async def generate_chat_response(*args, **kwargs):
     return humanize_text(res) if res else res
 
 
+# Leading role tags that must never reach a lead: "[Human Admin]:",
+# "[Human Admin via Forum]:", "[Admin]", "[AI]", "[Assistant]", "[Bot]".
+ROLE_PREFIX_RE = re.compile(
+    r"^\s*(?:\[(?:human\s*admin[^\]]*|admin|ai|assistant|bot|agent)\]\s*:?\s*)+", re.IGNORECASE)
+
+
+def strip_role_prefix(text: str) -> str:
+    return ROLE_PREFIX_RE.sub("", text or "")
+
+
 async def _generate_chat_response_raw(
     messages_history: list[dict],
     system_prompt: str,
@@ -911,7 +921,9 @@ async def _generate_chat_response_raw(
     formatted_messages = [{"role": "system", "content": system_prompt}]
     for m in messages_history:
         role = "assistant" if m.get("role") in ("assistant", "model") else "user"
-        content = m.get("content", "").strip()
+        # History marks admin-typed turns "[Human Admin]: ..."; the model copied
+        # that tag into its own replies, so it never sees it.
+        content = ROLE_PREFIX_RE.sub("", m.get("content", "") or "").strip()
         if content:
             formatted_messages.append({"role": role, "content": content})
 

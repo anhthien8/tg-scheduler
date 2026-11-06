@@ -1015,6 +1015,10 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
             return False
         if drip_stage is not None and chat.get("last_drip_stage", 0) >= drip_stage:
             return False
+        # Last line of defence: never let an internal role tag reach the lead.
+        text = ai_rmx.strip_role_prefix(text).strip()
+        if not text:
+            return False
         _pending_ai_sends.add((account_id, user_id))
         try:
             if await tg.send_text_message(account_id, user_id, text) is False:
@@ -2738,7 +2742,8 @@ async def process_outreach_nudges() -> dict:
                         username=cand.get("target_username"),
                         name=cand.get("target_username") or f"User {user_id}",
                     )
-                    if await tg.send_text_message(account_id, user_id, msg) is False:
+                    msg = ai_rmx.strip_role_prefix(msg).strip()
+                    if not msg or await tg.send_text_message(account_id, user_id, msg) is False:
                         await db.record_nudge(account_id, user_id, channel, "failed",
                                               watcher_id=watcher_id, campaign_id=campaign_id,
                                               error_message="send_failed")
