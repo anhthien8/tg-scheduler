@@ -52,17 +52,30 @@ async def test_remix(payload: TestRemixPayload):
     elif payload.provider == "chatgpt_oauth":
         kwargs["base_url"] = payload.base_url or "https://api.openai.com/v1"
         kwargs["model"] = payload.model or "gpt-4o"
-    try:
-        remixed = await ai_rmx.remix_message(
-            original_text=payload.text,
-            provider=payload.provider,
-            api_keys=payload.keys,
-            sender_name=payload.sender_name,
-            **kwargs
-        )
-        return {"success": True, "remixed": remixed, "original": payload.text}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Test ONLY the selected provider (no fallback chain): with a dead token the
+    # full chain took ~85s, outlived the Cloudflare/browser request ("Failed to
+    # fetch") and answered from another provider, hiding the real error.
+    import asyncio
+    import time as _time
+    prompt = ai_rmx._build_prompt(payload.text, sender_name=payload.sender_name)
+    errors = []
+    t0 = _time.time()
+    for i, key in enumerate(payload.keys[:3]):
+        try:
+            out = await asyncio.wait_for(ai_rmx._try_call(payload.provider, key, prompt, **kwargs), 40)
+            if out and out.strip():
+                return {"success": True, "remixed": ai_rmx.ensure_paragraphs(ai_rmx.humanize_text(out)),
+                        "original": payload.text, "key_index": i, "ms": int((_time.time() - t0) * 1000)}
+            errors.append(f"key[{i}]: trả về rỗng")
+        except asyncio.TimeoutError:
+            errors.append(f"key[{i}]: quá 40s không phản hồi")
+        except httpx.HTTPStatusError as e:
+            code = e.response.status_code
+            hint = " — token/key hết hạn hoặc sai" if code in (401, 403) else " — hết quota/bị giới hạn" if code == 429 else ""
+            errors.append(f"key[{i}]: HTTP {code}{hint}")
+        except Exception as e:
+            errors.append(f"key[{i}]: {(str(e) or type(e).__name__)[:250]}")
+    raise HTTPException(status_code=502, detail=f"{payload.provider} lỗi: " + "; ".join(errors))
 
 
 @router.post("/daily-summary")
@@ -165,6 +178,25 @@ async def fetch_models(payload: FetchModelsPayload):
         return {"success": False, "error": str(e)[:200]}
 
 
+def _jwt_expired_message(token: str) -> str:
+    """Return a Vietnamese error if `token` is a JWT whose `exp` is in the past, else ''."""
+    import base64, json as _json, time as _time
+    from datetime import datetime
+    parts = token.split(".")
+    if len(parts) != 3:
+        return ""
+    try:
+        seg = parts[1] + "=" * (-len(parts[1]) % 4)
+        exp = int(_json.loads(base64.urlsafe_b64decode(seg)).get("exp") or 0)
+    except Exception:
+        return ""
+    if not exp or exp > _time.time():
+        return ""
+    when = datetime.fromtimestamp(exp).strftime("%d/%m/%Y %H:%M")
+    return (f"Token ChatGPT đã hết hạn từ {when}. Đây là token cũ: mở chatgpt.com, đăng nhập lại, "
+            "rồi mở lại chatgpt.com/api/auth/session (F5) để copy token mới.")
+
+
 class VerifyChatgptOauthPayload(BaseModel):
     access_token: str
     base_url: Optional[str] = None
@@ -180,6 +212,11 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
     if token.lower().startswith("bearer "):
         token = token[7:].strip()
 
+    # An expired JWT can never work: say so (with the date) instead of "accepting" it.
+    expired_msg = _jwt_expired_message(token)
+    if expired_msg:
+        return {"success": False, "error": expired_msg}
+
     # Headers for chatgpt.com (needs proper User-Agent to avoid Cloudflare block)
     chatgpt_headers = {
         "Authorization": f"Bearer {token}",
@@ -192,6 +229,7 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
         "Content-Type": "application/json",
     }
 
+    rejected = 0  # endpoints that answered 401 = OpenAI itself says the token is bad
     try:
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             # Strategy 1: Try chatgpt.com/backend-api/me (ChatGPT session token)
@@ -217,6 +255,7 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
                         "message": f"Xác thực thành công! Tài khoản: {email or name}"
                     }
                 else:
+                    rejected += me_resp.status_code == 401
                     logger.warning(f"[ChatGPT OAuth] backend-api/me returned {me_resp.status_code}: {me_resp.text[:200]}")
             except Exception as e:
                 logger.warning(f"[ChatGPT OAuth] backend-api/me check failed: {e}")
@@ -226,6 +265,7 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
             models_url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
             try:
                 api_resp = await client.get(models_url, headers=api_headers)
+                rejected += api_resp.status_code == 401
                 if api_resp.status_code == 200:
                     data = api_resp.json()
                     models_list = []
@@ -253,7 +293,14 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
             except Exception as e:
                 logger.debug(f"[ChatGPT OAuth] /v1/models check failed: {e}")
 
-            # Strategy 3: If online verify fails but token looks like a valid JWT, accept it
+            if rejected:
+                return {
+                    "success": False,
+                    "error": "OpenAI từ chối token này (401). Token cũ hoặc đã bị thu hồi. Mở chatgpt.com, "
+                             "đăng nhập lại, rồi mở lại chatgpt.com/api/auth/session để copy token mới."
+                }
+
+            # Strategy 3: chatgpt.com blocked us (Cloudflare 403) but token looks like a JWT: accept it
             if token.startswith("ey") and len(token) > 100:
                 logger.info("[ChatGPT OAuth] Online verification failed, but token looks like valid JWT - accepting")
                 return {
@@ -303,6 +350,8 @@ async def fetch_chatgpt_models(payload: FetchChatgptModelsPayload):
     if token.lower().startswith("bearer "):
         token = token[7:].strip()
 
+    expired_msg = _jwt_expired_message(token)
+
     chatgpt_headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
@@ -335,8 +384,13 @@ async def fetch_chatgpt_models(payload: FetchChatgptModelsPayload):
                             if isinstance(m, dict):
                                 slug = m.get("slug", "")
                                 title = m.get("title", slug)
-                                if slug:
-                                    models.append({"id": slug, "name": title})
+                                # 'hidden' = OpenAI's internal gated slots (e.g. "...reserved_gate_12");
+                                # 'research' = Deep Research, not a chat model. ChatGPT's own picker hides both.
+                                if not slug or "hidden" in (m.get("tags") or []) or slug == "research":
+                                    continue
+                                # Several slugs share one title (GPT-6 = gpt-6 / -instant / -thinking / -mini…):
+                                # show the slug so they can be told apart.
+                                models.append({"id": slug, "name": f"{title} · {slug}"})
                     if models:
                         logger.info(f"[ChatGPT Models] Found {len(models)} models from backend-api")
                         return {"success": True, "models": models, "source": "chatgpt_backend"}
@@ -385,7 +439,9 @@ async def fetch_chatgpt_models(payload: FetchChatgptModelsPayload):
         {"id": "o3-mini", "name": "o3-mini"},
     ]
     result = {"success": True, "models": fallback, "source": "fallback"}
-    if auth_failed:
+    if expired_msg:
+        result["error"] = expired_msg
+    elif auth_failed:
         result["error"] = "Token ChatGPT đã hết hạn hoặc không hợp lệ (401). Bấm \"Đăng nhập & Tự động lấy Token\" để lấy token mới."
     return result
 

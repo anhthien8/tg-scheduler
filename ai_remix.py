@@ -406,6 +406,16 @@ async def _try_call(provider, api_key, prompt, **kwargs):
             try:
                 logger.info("[ChatGPT Web Adapter] Calling native chatgpt.com/backend-api/conversation (model=%s)...", model)
                 return await _call_chatgpt_web_backend(api_key, prompt, model)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 403:
+                    # chatgpt.com's anti-bot ("Unusual activity…") blocks server-side chat even with a
+                    # valid token; api.openai.com would only add a misleading 401 for a session token.
+                    raise RuntimeError(
+                        "chatgpt.com chặn gửi chat từ server (403 'Unusual activity'). Token vẫn còn hạn, "
+                        "nhưng hãy dùng GPT qua 9Router (model cx/gpt-6-sol, cx/gpt-6-luna…)."
+                    ) from e
+                logger.warning("[ChatGPT Web Adapter] Native call failed (%s), attempting OpenAI compatible gateway...", e)
+                return await _call_openai_compatible(api_key, prompt, "https://api.openai.com/v1", model)
             except Exception as e:
                 logger.warning("[ChatGPT Web Adapter] Native call failed (%s), attempting OpenAI compatible gateway...", e)
                 return await _call_openai_compatible(api_key, prompt, "https://api.openai.com/v1", model)

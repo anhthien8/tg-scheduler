@@ -2138,7 +2138,7 @@
   <script defer src="/static/js/changelog.js?v=492"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=506"></script>
-  <script defer src="/static/js/app.js?v=503"></script>
+  <script defer src="/static/js/app.js?v=506"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">
@@ -2231,7 +2231,7 @@
           <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#10a37f;color:white;font-size:12px;font-weight:700;flex-shrink:0">2</span>
           <span style="font-size:14px;font-weight:600">Dán JSON / Access Token vào đây</span>
         </div>
-        <textarea id="chatgpt-token-paste-input" class="form-input" rows="4" placeholder='Dán {"accessToken":"eyJhb..."} hoặc chỉ chuỗi eyJhb... vào đây' style="font-family:monospace;font-size:12px;resize:vertical;margin-bottom:12px"></textarea>
+        <textarea id="chatgpt-token-paste-input" class="form-input" rows="4" onpaste="setTimeout(function(){App.processChatgptOAuthLogin()},50)" placeholder='Dán {"accessToken":"eyJhb..."} hoặc chỉ chuỗi eyJhb... vào đây' style="font-family:monospace;font-size:12px;resize:vertical;margin-bottom:12px"></textarea>
 
         <!-- Status -->
         <div id="chatgpt-verify-status" style="font-size:13px;min-height:20px;margin-bottom:4px"></div>
@@ -2241,6 +2241,7 @@
       <div style="display:flex;justify-content:flex-end;gap:8px;padding:16px 24px;border-top:1px solid var(--border)">
         <button class="btn btn-outline" onclick="document.getElementById('chatgpt-oauth-modal').classList.remove('open')">Hủy</button>
         <button class="btn btn-primary" id="btn-verify-chatgpt-oauth" onclick="App.processChatgptOAuthLogin()" style="background:linear-gradient(135deg,#10a37f,#0d8c6d);border:none;font-weight:600">
+          <span class="info-i" tabindex="0" data-tip="Quay lại tab này sau khi Ctrl+C: app tự đọc clipboard và xác thực (trình duyệt có thể hỏi quyền đọc clipboard, bấm Cho phép). Dán bằng Ctrl+V cũng tự xác thực luôn.">i</span>
           &#x1F680; Xác thực &amp; Tự động điền cấu hình
         </button>
       </div>

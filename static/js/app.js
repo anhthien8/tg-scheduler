@@ -26,9 +26,16 @@ if(document.readyState!=='complete'){await new Promise(r=>window.addEventListene
 if(hasCached){this.showDashboard(null);API.authStatus().then(s=>{if(s&&s.user)this._setUserInfo(s.user)}).catch(()=>{});return}
 try{const s=await API.authStatus();if(s.authenticated){this.showDashboard(s.user);return}}catch{}
 
-try{const a=await API.getAccounts();App._accounts=a.accounts||[];if(a.accounts&&a.accounts.length>0){this.showDashboard(null);return}}catch(e){if(e&&e.message==='Unauthorized'){/* Server cần đăng nhập: key cũ sai/hết hạn → xoá và hiện form username/mật khẩu */localStorage.removeItem('tgs_api_key');this.showLogin();return}}
+try{const a=await API.getAccounts();App._accounts=a.accounts||[];if(a.accounts&&a.accounts.length>0){this.showDashboard(null);return}}catch(e){if(e&&e.message==='Unauthorized'){/* Server cần đăng nhập: key cũ sai/hết hạn → xoá và hiện form username/mật khẩu */localStorage.removeItem('tgs_api_key');this.showLogin();return}if(e&&/kết nối server/.test(e.message||'')){this.showServerDown();return}}
 
 this.showLogin()},
+
+// Server không chạy (fetch lỗi mạng): không được hiện form "thêm tài khoản đầu tiên".
+// Thử lại thưa dần 5s→10s→20s→30s, kết nối được thì tải lại trang.
+showServerDown(delay=5){(document.getElementById('login-page')?.classList||{remove:()=>{}}).remove('hidden');(document.getElementById('dashboard-page')?.classList||{add:()=>{}}).add('hidden');
+['dashboard-login-step','login-step-setup','login-step-otp','login-step-2fa'].forEach(id=>document.getElementById(id)?.classList.add('hidden'));
+const sub=document.getElementById('login-subtitle');if(sub)sub.innerHTML='⚠️ Không kết nối được server TG Scheduler. Đang thử lại sau '+delay+' giây… <button type="button" class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="location.reload()">Thử lại ngay</button>';
+clearTimeout(this._serverDownTimer);this._serverDownTimer=setTimeout(()=>{fetch('/api/whoami',{cache:'no-store'}).then(r=>{if(r.status<500)location.reload();else this.showServerDown(Math.min(delay*2,30))}).catch(()=>this.showServerDown(Math.min(delay*2,30)))},delay*1000)},
 
 _setUserInfo(){const el=document.getElementById('user-info');if(!el)return;const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');const draw=d=>{const u=d.username||'admin';el.innerHTML=`<span class="user-avatar">${esc(u[0].toUpperCase())}</span><span class="user-meta"><strong>${esc(u)}</strong><span>${d.role==='admin'?'Quản trị viên':'Thành viên'}</span></span>`};try{const c=JSON.parse(localStorage.getItem('tgs_whoami')||'null');if(c)draw(c)}catch(e){}
 if(this._whoamiReq)return;this._whoamiReq=fetch('/api/whoami').then(r=>r.ok?r.json():null).then(d=>{if(d){localStorage.setItem('tgs_whoami',JSON.stringify(d));draw(d)}}).catch(()=>{})},
@@ -2775,6 +2782,26 @@ App.openChatgptAuthTab = function() {
     var input = document.getElementById('chatgpt-token-paste-input');
     if (input) input.focus();
   }, 500);
+
+  // When the user comes back from the popup (after Ctrl+A, Ctrl+C), read the clipboard
+  // and verify by itself, so nobody forgets the paste + "Xác thực" step.
+  if (App._chatgptFocusHandler) window.removeEventListener('focus', App._chatgptFocusHandler);
+  App._chatgptFocusHandler = function() { App._tryChatgptClipboard(); };
+  window.addEventListener('focus', App._chatgptFocusHandler);
+};
+
+App._tryChatgptClipboard = async function() {
+  var modal = document.getElementById('chatgpt-oauth-modal');
+  if (!modal || !modal.classList.contains('open') || !navigator.clipboard || !navigator.clipboard.readText) return;
+  var text = '';
+  try { text = (await navigator.clipboard.readText() || '').trim(); } catch (e) { return; }
+  if (!text || (text.indexOf('accessToken') < 0 && !/^(bearer\s+)?ey[\w-]+\.[\w-]+\.[\w-]+$/i.test(text))) return;
+  var input = document.getElementById('chatgpt-token-paste-input');
+  if (!input || input.value.trim() === text) return;
+  input.value = text;
+  window.removeEventListener('focus', App._chatgptFocusHandler);
+  App._chatgptFocusHandler = null;
+  App.processChatgptOAuthLogin();
 };
 
 // ── Apply token after OAuth or manual paste ──
@@ -2797,7 +2824,12 @@ App._applyChatgptOAuthToken = async function(token) {
   await App.saveSettings();
 
   // Auto-load models using the new token
-  await App.loadChatgptModels(token);
+  var source = await App.loadChatgptModels(token);
+  if (source === 'fallback') {
+    // Token was saved but OpenAI rejected it: don't claim success.
+    if (status) status.innerHTML = '<span style="color:var(--red)">❌ Token đã lưu nhưng OpenAI không chấp nhận, nên chưa tải được models thật. Hãy lấy token mới.</span>';
+    return;
+  }
 
   if (status) {
     status.innerHTML = '<span style="color:var(--green)">✅ Đăng nhập ChatGPT Subscription thành công! Models đã được tải.</span>';
@@ -2866,6 +2898,7 @@ App.loadChatgptModels = async function(tokenOverride) {
         var source = data.source === 'chatgpt_backend' ? 'ChatGPT' : 'OpenAI API';
         App.toast('Đã tải ' + data.models.length + ' models từ ' + source, 'success');
       }
+      return data.source;
     } else {
       selectEl.innerHTML = '<option value="gpt-4o">gpt-4o</option>';
       App.toast('Không thể tải models. Đang dùng mặc định.', 'error');
@@ -2916,6 +2949,14 @@ App.processChatgptOAuthLogin = async function() {
 
   if (token.toLowerCase().startsWith('bearer ')) {
     token = token.substring(7).trim();
+  }
+
+  // Session JSON without a token = the popup wasn't signed in (chatgpt.com returns {}).
+  if (token === raw && raw.charAt(0) === '{') {
+    var msg = 'JSON dán vào không có accessToken: popup chưa đăng nhập ChatGPT. Đăng nhập trong popup, F5 trang session rồi copy lại.';
+    if (status) status.innerHTML = '<span style="color:var(--red)">❌ ' + msg + '</span>';
+    App.toast(msg, 'error');
+    return;
   }
 
   var baseUrl = (document.getElementById('chatgpt-oauth-base-url') || {}).value || 'https://api.openai.com/v1';
@@ -3104,16 +3145,16 @@ App.testAiRemix = async function() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
-    const data = await resp.json();
-    if (data.remixed) {
+    const data = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
+    if (resp.ok && data.remixed) {
       outputEl.textContent = data.remixed;
       resultBox.classList.remove('hidden');
-      App.toast('AI remix thành công!', 'success');
+      App.toast(`AI remix thành công (${((data.ms || 0) / 1000).toFixed(1)}s)`, 'success');
     } else {
-      App.toast('Lỗi: ' + (data.detail || data.error || 'Unknown'), 'error');
+      App.toast('Lỗi: ' + (data.detail || data.error || `HTTP ${resp.status}`), 'error');
     }
   } catch(e) {
-    App.toast('Test thất bại: ' + e.message, 'error');
+    App.toast('Test thất bại: không kết nối được server (server tắt/khởi động lại hoặc mất mạng). Thử lại sau vài giây.', 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = '🧪 Test Remix';
