@@ -16,6 +16,7 @@ from telethon import events
 import ai_remix as ai_rmx
 import alerts
 import database as db
+import flood_state
 import image_randomizer as img_rand
 import telegram_client as tg
 import template_rotation as tmpl_rot
@@ -548,6 +549,11 @@ async def _do_send_dm_with_fallback(
             logger.warning(f"[Watcher {watcher_id}] Account {acc_id} offline/unreachable, trying next")
             continue
 
+        # Skip accounts resting from a FloodWait hit anywhere (campaign, watcher...)
+        if flood_state.is_resting(acc_id):
+            logger.info(f"[Watcher {watcher_id}] Account {acc_id} resting {flood_state.remaining(acc_id):.0f}s after FloodWait, skipping")
+            continue
+
         # Skip accounts that are in PeerFlood cooldown
         if _is_peerflood_blocked(acc_id):
             logger.warning(f"[Watcher {watcher_id}] Account {acc_id} in PeerFlood cooldown, skipping")
@@ -720,6 +726,7 @@ async def _do_send_dm_with_fallback(
 
         except tg_errors.FloodWaitError as e:
             # FloodWait = ACCOUNT-level → try next account, don't penalise user
+            flood_state.mark(acc_id, e.seconds + 10)
             last_error = _translate_dm_error(f"FloodWait {e.seconds}s")
             if e.seconds > 600:
                 await db.pause_account(acc_id, f"FloodWait {e.seconds}s - auto-paused")
