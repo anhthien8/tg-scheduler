@@ -284,12 +284,17 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None) 
         "NEVER quote any % or $ figure that is not in this ladder (no internal estimates, no 'total payout' maths, no ranges like 50-60%).",
     ]
     pred = predicted_tier(ladder, volume_claimed)
+    est = value_estimate(ladder, volume_claimed)
+    if est is not None:
+        lines[-1] = ("NEVER quote any % or $ figure that is not in this ladder, EXCEPT the pre-computed figures in the "
+                     "VALUE ESTIMATE block below (copy them exactly; never compute new totals yourself).")
+        lines.append(render_value_estimate(est))
     if pred is not None:
         lines.append(
             f"TIER PREDICTION ALLOWED: the KOL stated about {_fmt_num(pred['volume_m'])}M monthly volume → "
             f"if they keep that volume, from next month they qualify for Tier {pred['tier']} "
             f"({_fmt_num(pred['revshare_pct'])}% revshare + ${_fmt_num(pred['bonus_per_1m_taker_usd'])} per 1M taker). "
-            "You may tell them this; remind them the first month starts at the starting tier."
+            "You may tell them this: once their performance from their current exchange is synced, this tier applies right away."
         )
     else:
         lines.append(
@@ -297,6 +302,89 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None) 
             "Do not run a separate volume interview: their last-3-months performance (asked once) is enough."
         )
     return "\n".join(lines)
+
+
+# ── Value estimate (what the KOL earns with WEEX at their current volume) ───
+
+# Blended fee rate implied by WEEX's SABC table (100,000 USDT fees ≈ 166.67M volume).
+EST_FEE_RATE = 0.0006
+# Taker share assumed for the per-1M taker bonus (stated as an assumption to the KOL).
+EST_TAKER_SHARE = 0.5
+# SABC channel tiers by monthly fees (USDT), highest first.
+# Monthly marketing-fee bonus cap (owner-set, 2026-11-07).
+MARKETING_FEE_MAX = 200
+SABC_TIERS = (("S", 100_000), ("A", 10_000), ("B", 1_000), ("C", 100))
+
+
+def sabc_tier(fees_usd: float) -> str | None:
+    for name, floor in SABC_TIERS:
+        if fees_usd >= floor:
+            return name
+    return None
+
+
+def _round_money(v: float) -> int:
+    """Round to a clean figure so the reply reads naturally (and matches the guard exactly)."""
+    step = 10 if v < 1_000 else 50 if v < 10_000 else 100 if v < 100_000 else 1_000
+    return int(round(v / step) * step)
+
+
+def value_estimate(ladder: dict | None, volume_claimed) -> dict | None:
+    """Monthly earnings estimate at the KOL's stated monthly volume, or None when unknown."""
+    ladder = _normalize_ladder(ladder or DEFAULT_LADDER)
+    vol_m = parse_volume_m(volume_claimed)
+    if not vol_m or vol_m <= 0:
+        return None
+    vol = vol_m * 1_000_000
+    fees = vol * EST_FEE_RATE
+    taker_m = vol_m * EST_TAKER_SHARE
+
+    def _at(t: dict) -> dict:
+        com = _round_money(fees * float(t["revshare_pct"]) / 100)
+        bonus = _round_money(taker_m * float(t["bonus_per_1m_taker_usd"]))
+        return {"tier": t["tier"], "revshare_pct": t["revshare_pct"], "commission": com,
+                "bonus": bonus, "total": com + bonus}
+
+    first = ladder["tiers"][0]
+    target = tier_for_volume(ladder, vol_m) or first
+    return {"volume_m": vol_m, "fees": _round_money(fees), "sabc": sabc_tier(fees),
+            "month1": _at(first), "steady": _at(target)}
+
+
+def estimate_dollars(est: dict | None) -> set[float]:
+    if not est:
+        return set()
+    out = {float(est["fees"])}
+    st = est["steady"]
+    out |= {float(st["commission"]), float(st["bonus"]), float(st["total"]), float(MARKETING_FEE_MAX)}
+    return out
+
+
+def render_value_estimate(est: dict) -> str:
+    st = est["steady"]
+    sabc = est["sabc"]
+    fmt = lambda v: f"${v:,}"
+    return "\n".join([
+        "--- VALUE ESTIMATE FOR THIS KOL (pre-computed by the system; use these exact figures) ---",
+        f"Stated volume ≈ {_fmt_num(est['volume_m'])}M/month → trading fees ≈ {fmt(est['fees'])}/month "
+        "(estimate at their current volume, assuming ~half taker volume).",
+        f"SABC channel tier: {sabc or 'below C (no tier yet)'}"
+        + (f" — pitch the tier-{sabc} benefits from the knowledge base and send [[BANNER:tier_{sabc.lower()}]]." if sabc else "."),
+        f"PERFORMANCE SYNC: once their performance from the current exchange is synced, the matching ladder tier applies "
+        f"RIGHT AWAY (no starting-tier month): Tier {st['tier']}, {_fmt_num(st['revshare_pct'])}% revshare → commission ≈ "
+        f"{fmt(st['commission'])} + taker bonus ≈ {fmt(st['bonus'])} = ≈ {fmt(st['total'])}/month EXTRA income "
+        "if they ADD WEEX alongside what they run now (frame it as additional, not a replacement).",
+        "When the KOL has shared their numbers, present the FULL PACKAGE in one message (short lines):",
+        f"1) ≈ {fmt(st['total'])}/month extra from commission + taker bonus (paid daily).",
+        "2) Marketing campaign support: ONE exclusive campaign for their channel (best fit; rotates every ~2 weeks, never stacked).",
+        "3) Marketing accounts provided so they can build consistent WEEX content.",
+        "4) Bonus: offline events in the future, and trial-fund bonuses for their community.",
+        f"5) Marketing fee bonus: up to {fmt(MARKETING_FEE_MAX)}/month. By default mention ONLY the money. Only if the KOL asks "
+        "for details: it requires 10 posts/month about WEEX campaigns across their social channels (web3 airdrops, trading "
+        "campaigns, holding WXT, etc.), unlocked after the first 30 days hit their tier's volume KPI, and continues monthly "
+        "while they keep it. Use it instead of any upfront payment.",
+        "Then ask ONE question to move forward (e.g. which campaign they prefer or their WEEX UID).",
+    ])
 
 
 # ── Code-side guard ─────────────────────────────────────────────────────────
@@ -438,6 +526,11 @@ def find_off_offer_figures(text: str, exchange: str | None = None, agent: dict |
     """Off-offer guard for the exchange the chat sells: the WEEX ladder for WEEX,
     the replying agent's own figures for any other exchange."""
     if uses_ladder(exchange):
+        own = f"{(agent or {}).get('system_prompt') or ''}\n{(agent or {}).get('knowledge_base') or ''}"
+        if LADDER_EXCHANGE.lower() in own.lower():  # the WEEX agent's own KB figures (campaign prizes, tier APR)
+            lp, ld = allowed_figures(ladder)
+            kp, kd = figures_in(own)
+            return find_off_ladder_figures(text, ladder, allowed=(lp | kp, ld | kd))
         return find_off_ladder_figures(text, ladder)
     return find_off_ladder_figures(text, ladder, allowed=agent_figures(agent))
 
@@ -466,7 +559,13 @@ async def offer_block_for(exchange: str | None, volume_claimed=None) -> tuple[st
     """(prompt block, ladder or None) for the exchange the chat sells."""
     if uses_ladder(exchange):
         ladder = await get_ladder()
-        return render_offer_ladder_prompt(ladder, volume_claimed), ladder
+        block = render_offer_ladder_prompt(ladder, volume_claimed)
+        est_d = estimate_dollars(value_estimate(ladder, volume_claimed))
+        if est_d:  # let the guard pass the pre-computed estimate figures for this KOL only
+            ladder = copy.deepcopy(ladder)
+            rules = ladder.setdefault("rules", {})
+            rules["extra_allowed_dollars"] = list(rules.get("extra_allowed_dollars") or []) + sorted(est_d)
+        return block, ladder
     return render_agent_offer_prompt(exchange), None
 
 
@@ -492,8 +591,9 @@ UPFRONT_PROOF_RULE = (
     "(affiliate dashboard: referred volume, active traders, commission), clearly showing the deal terms of the exchange "
     "they currently partner with (rate, any upfront/fixed fee they receive). They may hide UID, balance and email. "
     "Do not promise anything in return for the video. "
-    "After the video is received (or the KOL refuses / cannot provide it), reply following your system prompt's upfront rule, "
-    "and append [HANDOVER_REQUIRED] so the team reviews the proof or the exception request."
+    "After the video is received, rank the KOL with it and offer the monthly MARKETING FEE BONUS instead of upfront "
+    "(amount and conditions as in the offer block; continuing monthly while they keep the KPI and posting). Only if they still insist on upfront/fixed fees (or refuse / cannot "
+    "provide the video), reply following your system prompt's upfront rule and append [HANDOVER_REQUIRED] so the team reviews it."
 )
 
 

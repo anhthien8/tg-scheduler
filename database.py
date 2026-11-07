@@ -1823,6 +1823,10 @@ async def init_db():
             )
         """)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_kol_channels_score ON kol_channels(trading_score DESC)")
+        try:
+            await db.execute("ALTER TABLE kol_channels ADD COLUMN country TEXT DEFAULT ''")
+        except Exception:
+            pass
         await db.execute("CREATE INDEX IF NOT EXISTS idx_reaction_logs_status_sent ON reaction_logs(status, sent_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_wal_status_created ON warmup_action_log(status, created_at DESC)")
 
@@ -1935,6 +1939,8 @@ async def get_all_internal_telegram_user_ids() -> set[int]:
 
 
 # ── KOL directory (kol_channels) ─────────────────────────────────────────────
+from channel_country import guess_country as _guess_country  # noqa: E402
+
 KOL_STATUSES = ("new", "contacted", "negotiating", "booked", "rejected")
 
 
@@ -1979,7 +1985,7 @@ async def upsert_kol_channels(leads: list[dict], source: str = "", saved_job: st
                      l.get("title") or "", subs, score, l.get("category") or "",
                      l.get("category_label") or "", json.dumps(contacts, ensure_ascii=False),
                      (l.get("description") or "")[:600], l.get("parent_channel") or "", depth,
-                     source or "", saved_job))
+                     source or "", saved_job, l.get("country") or _guess_country(l.get("title") or "", l.get("description") or "", l.get("username") or "")))
     if not rows:
         return 0
     async with get_db() as db:
@@ -2001,8 +2007,8 @@ async def upsert_kol_channels(leads: list[dict], source: str = "", saved_job: st
             merged.append(r)
         await db.executemany("""
             INSERT INTO kol_channels (ukey, channel_id, username, title, subscribers, trading_score,
-                category, category_label, contacts, description, parent_channel, depth, source, saved_job)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                category, category_label, contacts, description, parent_channel, depth, source, saved_job, country)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(ukey) DO UPDATE SET
                 channel_id = COALESCE(NULLIF(excluded.channel_id, ''), channel_id),
                 title = excluded.title, subscribers = excluded.subscribers,
@@ -2013,6 +2019,7 @@ async def upsert_kol_channels(leads: list[dict], source: str = "", saved_job: st
                 depth = COALESCE(depth, excluded.depth),
                 source = COALESCE(NULLIF(source, ''), excluded.source),
                 saved_job = COALESCE(excluded.saved_job, saved_job),
+                country = COALESCE(NULLIF(excluded.country, ''), country),
                 last_seen = datetime('now')
         """, merged)
         await db.commit()
@@ -2028,8 +2035,19 @@ _KOL_SORTS = {
 }
 
 
+# Content type filter: only futures/trading communities are CEX BD targets.
+_KOL_KINDS = {
+    "futures": "category IN ('trading_signals','crypto_trading','potential_bd') AND trading_score >= 45",
+    "news": "category = 'news_general'",
+    "airdrop": "category = 'airdrop_bonus'",
+    "other": "NOT (category IN ('trading_signals','crypto_trading','potential_bd') AND trading_score >= 45)"
+             " AND COALESCE(category,'') NOT IN ('news_general','airdrop_bonus')",
+}
+
+
 def _kol_where(q: str = "", status: str = "", min_score: int = 0,
-               has_contact: bool = False, category: str = "") -> tuple[str, list]:
+               has_contact: bool = False, category: str = "", kind: str = "",
+               country: str = "") -> tuple[str, list]:
     where, args = ["1=1"], []
     if q:
         like = f"%{q.strip().lstrip('@').lower()}%"
@@ -2043,13 +2061,17 @@ def _kol_where(q: str = "", status: str = "", min_score: int = 0,
         where.append("contacts NOT IN ('', '[]')")
     if category:
         where.append("category = ?"); args.append(category)
+    if kind in _KOL_KINDS:
+        where.append(_KOL_KINDS[kind])
+    if country:
+        where.append("COALESCE(country, '') = ?"); args.append("" if country == "none" else country)
     return " AND ".join(where), args
 
 
 async def list_kol_channels(q: str = "", status: str = "", min_score: int = 0, has_contact: bool = False,
                             category: str = "", sort: str = "score", page: int = 0, limit: int = 50,
-                            all_rows: bool = False) -> dict:
-    where, args = _kol_where(q, status, min_score, has_contact, category)
+                            all_rows: bool = False, kind: str = "", country: str = "") -> dict:
+    where, args = _kol_where(q, status, min_score, has_contact, category, kind, country)
     order = _KOL_SORTS.get(sort, _KOL_SORTS["score"])
     async with get_db() as db:
         cur = await db.execute(f"SELECT COUNT(*) FROM kol_channels WHERE {where}", args)
@@ -2066,7 +2088,34 @@ async def list_kol_channels(q: str = "", status: str = "", min_score: int = 0, h
             items.append(it)
         cur = await db.execute("SELECT status, COUNT(*) FROM kol_channels GROUP BY status")
         counts = {s: n for s, n in await cur.fetchall()}
-    return {"items": items, "total": total, "counts": counts}
+        # Facet counts for the kind/country chips, respecting the other active filters.
+        w2, a2 = _kol_where(q, status, min_score, has_contact, category, "", country)
+        kind_counts = {}
+        for k, cond in _KOL_KINDS.items():
+            cur = await db.execute(f"SELECT COUNT(*) FROM kol_channels WHERE {w2} AND {cond}", a2)
+            kind_counts[k] = (await cur.fetchone())[0]
+        w3, a3 = _kol_where(q, status, min_score, has_contact, category, kind, "")
+        cur = await db.execute(
+            f"SELECT COALESCE(country,''), COUNT(*) FROM kol_channels WHERE {w3} GROUP BY 1 ORDER BY 2 DESC", a3)
+        country_counts = {c: n for c, n in await cur.fetchall()}
+    return {"items": items, "total": total, "counts": counts,
+            "kind_counts": kind_counts, "country_counts": country_counts}
+
+
+async def rescore_kol_channels(score_fn, country_fn) -> int:
+    """Re-apply the current scoring + country rules to every stored channel."""
+    async with get_db() as db:
+        cur = await db.execute("SELECT id, title, description, username, contacts, subscribers FROM kol_channels")
+        rows = await cur.fetchall()
+        upd = []
+        for kid, title, desc, user, contacts, subs in rows:
+            r = score_fn(title or "", desc or "", user or "", _as_list(contacts), participants_count=subs or 0)
+            upd.append((r["trading_score"], r["category"], r["category_label"],
+                        country_fn(title or "", desc or "", user or ""), kid))
+        await db.executemany(
+            "UPDATE kol_channels SET trading_score=?, category=?, category_label=?, country=? WHERE id=?", upd)
+        await db.commit()
+    return len(upd)
 
 
 async def update_kol_channel(kid: int, fields: dict) -> bool:

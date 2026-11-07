@@ -69,3 +69,20 @@ def test_rename_scrape_job_keeps_id(client):
     jobs = client.get("/api/members/scrape-jobs").json()["jobs"]
     assert any(j["scrape_job_id"] == "deep_https___t_me_xyz" and j["group_title"] == "xyz · Deep Crawl" for j in jobs)
     assert client.post("/api/members/scrape-jobs/nope/rename", json={"group_title": "a"}).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_kind_and_country_filters_after_rescore():
+    from channel_country import guess_country
+    from telegram_client import score_community_trading
+    await db.upsert_kol_channels([
+        {**_lead("idfut1"), "title": "Sinyal Futures Indonesia",
+         "description": "Sinyal futures leverage x20 untuk member dan VIP chat @adm"},
+        {**_lead("drop1"), "title": "Airdrop Finder", "description": "Get free crypto airdrop everyday @adm"},
+    ])
+    await db.rescore_kol_channels(score_community_trading, guess_country)
+    fut = await db.list_kol_channels(kind="futures", country="ID", q="idfut1")
+    assert [i["username"] for i in fut["items"]] == ["idfut1"]
+    drop = await db.list_kol_channels(kind="airdrop", q="drop1")
+    assert [i["username"] for i in drop["items"]] == ["drop1"]
+    assert drop["kind_counts"]["airdrop"] >= 1 and "ID" in fut["country_counts"]

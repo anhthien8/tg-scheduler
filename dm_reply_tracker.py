@@ -1051,10 +1051,25 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
             return False
         if drip_stage is not None and chat.get("last_drip_stage", 0) >= drip_stage:
             return False
+        import kol_banners
+        text, banner_keys = kol_banners.extract(text)
+        banner = None
+        for k in banner_keys[:1]:
+            p = kol_banners.banner_path(k)
+            if p and not kol_banners.already_sent(chat.get("history"), k):
+                banner = (k, p)
+        if not text and not banner:
+            return False
         lock_gen = _lock_ai_send(account_id, user_id)
         try:
-            if await tg.send_text_message(account_id, user_id, text) is False:
+            if text and await tg.send_text_message(account_id, user_id, text) is False:
                 return False
+            if banner:
+                try:
+                    if await tg.send_photo_message(account_id, user_id, banner[1]) is not False:
+                        text = (text + "\n" + kol_banners.sent_mark(banner[0])).strip()
+                except Exception as e:
+                    logger.warning("[AIFollowUp] Banner %s send failed: %s", banner[0], e)
             await db.append_followup_chat_message(account_id, user_id, "assistant", text, inc_reply_count=True,
                                                     model=ai_rmx.last_model_used() or None)
             if new_status != "active":
@@ -1122,6 +1137,34 @@ _COMMISSION_RULE_AGENT = (
 )
 
 
+def _history_sig(chat: dict | None) -> tuple:
+    h = (chat or {}).get("history") or []
+    last = h[-1] if h else {}
+    return (len(h), last.get("role"), last.get("content"))
+
+
+async def _wait_for_user_quiet(account_id: int, user_id: int) -> None:
+    """KOLs often type several short messages in a row. Wait until the chat has
+    been quiet for `ai_reply_debounce_sec` (default 3s, max 20s total) so the AI
+    answers all of them in ONE message instead of replying to the first only."""
+    try:
+        quiet = float(await db.get_setting("ai_reply_debounce_sec", "3") or 3)
+    except (TypeError, ValueError):
+        quiet = 3.0
+    if quiet <= 0:
+        return
+    deadline = time.monotonic() + 20.0
+    sig = _history_sig(await db.get_followup_chat(account_id, user_id))
+    stable_since = time.monotonic()
+    while time.monotonic() < deadline:
+        await asyncio.sleep(0.5)
+        cur = _history_sig(await db.get_followup_chat(account_id, user_id))
+        if cur != sig:
+            sig, stable_since = cur, time.monotonic()
+        elif time.monotonic() - stable_since >= quiet:
+            return
+
+
 async def generate_and_send_ai_reply_for_chat(
     account_id: int,
     user_id: int,
@@ -1178,6 +1221,8 @@ async def generate_and_send_ai_reply_for_chat(
                     sender_username or "?", user_id, account_id)
         return False
     _lock_ai_send(account_id, user_id)  # Lock immediately to prevent race condition
+    # Let the user finish typing (multi-message bursts) before answering once.
+    await _wait_for_user_quiet(account_id, user_id)
 
     # 2. Get chat session
     chat = await db.get_or_create_followup_chat(
@@ -1272,7 +1317,8 @@ async def generate_and_send_ai_reply_for_chat(
         "3. INTERNAL HANDOVER FLOW (HIGHEST PRIORITY): NEVER instruct, ask, or suggest that the prospect contact https://t.me/weexwill, @weexwill, or any other main account. Prospect stays chatting with this nick phụ. When prospect provides UID and campaign choice, acknowledge receipt naturally and append [HANDOVER_REQUIRED]; the app privately notifies the main account. Say only that the team will review/configure internally. NEVER say the commission is configured, never provide a SEND MESSAGE/contact card for the main account, and never expose this internal handover mechanism. If UID or campaign is missing, ask only for the missing item.\n"
         "4. TRUTHFULNESS MANDATE (FINTECH — ZERO TOLERANCE): You may be warm, casual and personable, but you must NEVER invent facts. STRICTLY FORBIDDEN to fabricate: a mutual friend or referral ('your friend referred you'), having watched/read their content when you have not, any UID, any campaign name, commission rates, trading volume, follower counts, earnings figures, payout status, or the claim that commission/binding is already configured. If the prospect asks how you found them, answer honestly: you found their public crypto profile/community and reached out directly. If you do not know something, say you will check with the team. A single fabricated fact destroys the partnership.\n"
         "5. SHORT CLOSING FLOW (no long interviews): introduce yourself by name and role, then ask ONLY two things, one per message, skipping whatever is already known: (a) their channel/community link; (b) their trading/referral performance for the LAST 3 MONTHS (a dashboard screenshot or a rough summary of volume and commission is enough). NEVER ask about active traders, member counts, content type, favourite tokens/markets or any other survey question. After (b) — or right away if they ask what you offer — give the offer and recommend ONE currently running campaign from the knowledge base that fits their community. When they agree, send the standard registration link from the knowledge base once and append [DEAL_AGREED]. If the prospect challenges your opener or asks 'who are you / how did you find me', drop everything else, own the mistake plainly if the opener was wrong, state the real source, introduce yourself by name and role, and offer to let them verify before continuing.\n"
-        "6. PROFESSIONAL REPLIES ONLY (NO NONSENSE): Every reply must be a meaningful, professional business message. STRICTLY FORBIDDEN: one-word jokes, religious phrases, memes, or throwaway replies ('Mô phật', 'lol', 'ok', a single emoji) — these destroy credibility. If someone sends a document/file with no text, acknowledge it professionally: 'Got the file, let me take a look 👍' (or same meaning in the user's language). If the counterparty is a support bot or someone pitching THEIR product to you, stay brief and courteous, do NOT pitch WEEX, do NOT joke, and append [HANDOVER_REQUIRED] so a human decides. If the counterparty is a COMPANY/PLATFORM (exchange, white-label exchange, broker, fintech app, neobank, financial services platform) rather than an individual KOL/community, do NOT pitch the KOL commission ladder: briefly introduce the exchange's Broker / B2B partnership model if the KNOWLEDGE BASE describes one, never quote Broker commission rates, fees or timelines, and append [HANDOVER_REQUIRED] so the partnership team handles it.\n"
+        "6. ONE MESSAGE PER TURN: if the prospect sent several messages in a row, answer ALL their points together in ONE complete message. Never split an answer across several messages or leave a point for a later message.\n"
+        "6b. PROFESSIONAL REPLIES ONLY (NO NONSENSE): Every reply must be a meaningful, professional business message. STRICTLY FORBIDDEN: one-word jokes, religious phrases, memes, or throwaway replies ('Mô phật', 'lol', 'ok', a single emoji) — these destroy credibility. If someone sends a document/file with no text, acknowledge it professionally: 'Got the file, let me take a look 👍' (or same meaning in the user's language). If the counterparty is a support bot or someone pitching THEIR product to you, stay brief and courteous, do NOT pitch WEEX, do NOT joke, and append [HANDOVER_REQUIRED] so a human decides. If the counterparty is a COMPANY/PLATFORM (exchange, white-label exchange, broker, fintech app, neobank, financial services platform) rather than an individual KOL/community, do NOT pitch the KOL commission ladder: briefly introduce the exchange's Broker / B2B partnership model if the KNOWLEDGE BASE describes one, never quote Broker commission rates, fees or timelines, and append [HANDOVER_REQUIRED] so the partnership team handles it.\n"
         + commission_rule +
         "8. STRICT CONTEXTUAL CONTINUATION, NATURAL HUMAN TONE & ANTI-NAGGING:\n"
         "   - NATURAL HUMAN TONE: Be friendly, open and approachable like a crypto industry peer (bro, mate, buddy). Do not use robotic, formal, or bureaucratic language.\n"
@@ -1501,6 +1547,16 @@ async def generate_and_send_ai_reply_for_chat(
         # Re-check human takeover AFTER the typing delay: an admin (dashboard or
         # Forum Inbox confirm) may have taken over during the 8-22s sleep above.
         fresh_chat = await db.get_followup_chat(account_id, user_id)
+        # The user wrote again while we were generating/typing: drop this draft and
+        # answer everything in one fresh reply instead of sending two messages.
+        _fh = (fresh_chat or {}).get("history") or []
+        if (fresh_chat and fresh_chat.get("status") == "active" and _fh
+                and _fh[-1].get("role") == "user" and _history_sig(fresh_chat) != _history_sig(chat)):
+            logger.info("[AIFollowUp] ✍️ New message from user %d during typing — regenerating one combined reply", user_id)
+            _pending_ai_sends.discard((account_id, user_id))
+            _spawn_background(generate_and_send_ai_reply_for_chat(
+                account_id, user_id, sender_username, sender_name, target_campaign_id, watcher_id))
+            return False
         takeover_str = (fresh_chat or {}).get("human_takeover_at")
         if fresh_chat and fresh_chat.get("status") == "needs_human" and takeover_str:
             try:

@@ -429,3 +429,10 @@
 .msg-variant-hint b { color: var(--accent); }
 .msg-variant-label .info-i::after, .msg-tags .info-i::after { left: auto; right: -8px; transform: none; }
 .msg-tags .info-i::after { right: auto; left: -8px; }
+
+/* Account name row: badges wrap as a group under the name instead of
+   squeezing the name and breaking "✅ Sạch" onto two lines. */
+.acc-name { flex-wrap: wrap; row-gap: 4px; }
+.acc-name b { flex: 0 1 auto; max-width: 100%; }
+.spam-badge-slot { display: inline-flex; flex: none; }
+.spam-badge-slot > *, .acc-tag, .acc-flag { white-space: nowrap; }

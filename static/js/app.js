@@ -5616,6 +5616,49 @@ window.Warmup = Warmup;
 window.Reactions = Reactions;
 window.App = App;
 
+// Friendly replacement for window.confirm(). Resolves true/false.
+// opts: {title, message, icon, okText, cancelText, tone:'primary'|'danger', stats:[{label,value,hint}], note}
+App.confirmDialog = function (opts) {
+  opts = typeof opts === 'string' ? { message: opts } : (opts || {});
+  const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay cfm-overlay';
+    const stats = (opts.stats || []).map(x => `
+      <div class="cfm-stat"><div class="cfm-stat-val">${esc(x.value)}</div>
+        <div class="cfm-stat-lbl">${esc(x.label)}</div>${x.hint ? `<div class="cfm-stat-hint">${esc(x.hint)}</div>` : ''}</div>`).join('');
+    ov.innerHTML = `
+      <div class="modal cfm-modal" role="dialog" aria-modal="true">
+        <div class="cfm-icon cfm-${opts.tone === 'danger' ? 'danger' : 'primary'}">${esc(opts.icon || (opts.tone === 'danger' ? '⚠️' : '✨'))}</div>
+        <div class="cfm-title">${esc(opts.title || 'Xác nhận')}</div>
+        ${opts.message ? `<div class="cfm-msg">${esc(opts.message).replace(/\n/g, '<br>')}</div>` : ''}
+        ${stats ? `<div class="cfm-stats">${stats}</div>` : ''}
+        ${opts.note ? `<div class="cfm-note">${esc(opts.note)}</div>` : ''}
+        <div class="cfm-actions">
+          <button class="btn btn-ghost cfm-cancel">${esc(opts.cancelText || 'Để sau')}</button>
+          <button class="btn ${opts.tone === 'danger' ? 'btn-danger' : 'btn-primary'} cfm-ok">${esc(opts.okText || 'Đồng ý')}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    requestAnimationFrame(() => ov.classList.add('open'));
+    const done = v => {
+      document.removeEventListener('keydown', onKey, true);
+      ov.classList.remove('open');
+      setTimeout(() => ov.remove(), 250);
+      resolve(v);
+    };
+    const onKey = e => {
+      if (e.key === 'Escape') { e.stopPropagation(); done(false); }
+      else if (e.key === 'Enter') { e.preventDefault(); done(true); }
+    };
+    document.addEventListener('keydown', onKey, true);
+    ov.addEventListener('mousedown', e => { if (e.target === ov) done(false); });
+    ov.querySelector('.cfm-cancel').onclick = () => done(false);
+    ov.querySelector('.cfm-ok').onclick = () => done(true);
+    setTimeout(() => ov.querySelector('.cfm-ok').focus(), 50);
+  });
+};
+
 
 // ══════════════════════════════════════════════════════════
 //  TEAM ACCOUNTS (admin only)

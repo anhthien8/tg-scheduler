@@ -1,10 +1,53 @@
 [
     {
+        "version": "v3.26.0",
+        "date": "07/11/2026",
+        "title": "⚡ Campaign DM: mỗi tài khoản giữ nhịp delay riêng, nhiều acc gửi nhanh gấp N lần",
+        "is_latest": true,
+        "badge": "LATEST",
+        "summary": "Delay tối thiểu/tối đa giờ tính riêng cho từng tài khoản thay vì cho cả campaign. Có 3 tài khoản thì campaign gửi nhanh khoảng gấp 3, còn mỗi tài khoản vẫn nghỉ đúng delay đã cài. Tài khoản lỗi 3 lần liên tiếp chỉ dừng riêng nó.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Delay theo từng tài khoản",
+                "desc": "Trước đây campaign nghỉ 300–900s sau mỗi DM bất kể dùng acc nào, nên thêm acc không làm nhanh hơn. Giờ mỗi acc có lịch gửi riêng và hệ thống luôn chọn acc đến lượt sớm nhất. Các acc lệch nhau 0–20s ngẫu nhiên khi bắt đầu để không gửi cùng giây."
+            },
+            {
+                "type": "improvement",
+                "title": "Lỗi tính riêng từng tài khoản",
+                "desc": "Acc nào lỗi 3 lần liên tiếp thì chỉ acc đó bị loại khỏi campaign, các acc khác vẫn chạy. Bỏ cơ chế cũ dừng cả campaign sau 10 lỗi chung. FloodWait vẫn chỉ cho acc bị dính chờ."
+            }
+        ]
+    },
+    {
+        "version": "v3.25.0",
+        "date": "07/11/2026",
+        "title": "💬 AI trả lời gộp 1 tin: chờ KOL nhắn xong 3s rồi mới trả lời",
+        "is_latest": false,
+        "summary": "Khi KOL nhắn nhiều tin liên tiếp, AI chờ 3 giây yên lặng rồi trả lời tất cả trong một tin nhắn duy nhất. Nếu KOL nhắn thêm trong lúc AI đang soạn, bản nháp bị bỏ và AI soạn lại một tin gộp đủ ý.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Chờ KOL nhắn xong (3 giây)",
+                "desc": "Trước đây AI trả lời ngay tin đầu tiên và bỏ qua các tin nhắn sau. Giờ AI chờ đến khi cuộc chat yên lặng 3 giây (tối đa 20 giây) rồi mới soạn. Có thể đổi bằng setting ai_reply_debounce_sec."
+            },
+            {
+                "type": "improvement",
+                "title": "Soạn lại nếu KOL nhắn thêm khi AI đang gõ",
+                "desc": "Nếu có tin mới trong lúc AI đang 'typing', AI bỏ bản nháp cũ và trả lời lại một lần, gộp đủ mọi ý, thay vì gửi 2 tin rời rạc."
+            },
+            {
+                "type": "improvement",
+                "title": "Quy tắc 'một tin mỗi lượt' trong prompt",
+                "desc": "AI được yêu cầu trả lời mọi ý của KOL trong một tin nhắn hoàn chỉnh, không chia nhỏ."
+            }
+        ]
+    },
+    {
         "version": "v3.24.0",
         "date": "07/11/2026",
         "title": "📥 Deep Crawl: thêm vào hàng đợi khi đang cào + xem lại kết quả cũ từ lịch sử",
-        "is_latest": true,
-        "badge": "LATEST",
+        "is_latest": false,
         "summary": "Khi đang có lần cào chạy, nút Bắt đầu thành \"➕ Thêm vào hàng đợi\": link mới tự chạy khi lần hiện tại xong. Kết quả của mỗi lần cào được lưu riêng nên lần mới không ghi đè lần cũ. Bấm 👁 hoặc bấm vào dòng trong \"Lịch sử cào\" để mở lại kết quả cũ.",
         "changes": [
             {
@@ -317,7 +360,6 @@
         "date": "06/11/2026",
         "title": "🕸️ Deep Crawl an toàn hơn + lịch sử cào + contact chỉ giữ người thật",
         "is_latest": false,
-        "badge": "",
         "summary": "Deep Crawl (cào kênh tương tự) chỉ dùng account khỏe, chia đều request giữa các account và không còn treo vì FloodWait. Nhánh không liên quan trading bị cắt sớm. Kết quả được lưu dần nên server lỗi cũng không mất. Mục Lịch sử cào hiện các lượt bị ngắt để cào lại 1 chạm. Contact trong mô tả kênh chỉ giữ người dùng thật.",
         "changes": [
             {
@@ -363,7 +405,6 @@
         "date": "05/11/2026",
         "title": "🤖 MCP server cho AI agent + cào được nhóm thường (basic group)",
         "is_latest": false,
-        "badge": "",
         "summary": "AI agent (Claude, Codex, Antigravity, Hermes…) điều khiển TG Scheduler qua MCP: xem account khỏe, tìm nhóm, cào member, xem trước danh sách lọc và tạo campaign DM ở trạng thái nháp. Agent không thể tự bấm chạy campaign. Cào member giờ chạy được với nhóm thường (không phải supergroup).",
         "changes": [
             {
@@ -391,7 +432,6 @@
         "date": "05/11/2026",
         "title": "⏸️ Tạm dừng là dừng hẳn + 🚫 AI không bao giờ nhắn giữa account nội bộ + Zalo nhiều nick",
         "is_latest": false,
-        "badge": "",
         "summary": "Account đang Tạm dừng không còn thả reaction, trả lời nhóm, đăng bài lịch hay gửi DM campaign. AI không bao giờ trả lời tin từ account nội bộ (Telegram và Zalo). Warm-up tự né account bị flag/PeerFlood. AI trả lời sticker/ảnh đúng ngôn ngữ người gửi. Zalo Outreach chạy nhiều nick với warm-up riêng.",
         "changes": [
             {
@@ -455,7 +495,6 @@
         "date": "04/11/2026",
         "title": "💙 Zalo Outreach + 📱 đăng nhập bằng SĐT + AI KOL chuẩn hơn",
         "is_latest": false,
-        "badge": "",
         "summary": "Tab Zalo Outreach mới: cào thành viên nhóm và người tham gia sự kiện, chạy chiến dịch kết bạn + chào hỏi. Thêm account Telegram đầu tiên chỉ bằng SĐT (OTP, 2FA nếu có). AI xử lý KOL từ chối lịch sự hơn, lấy % commission từ thang cấu hình và chỉ chuyển người thật khi đã có bằng chứng.",
         "changes": [
             {
@@ -507,7 +546,6 @@
         "date": "01/11/2026",
         "title": "💌 Chăm sóc KOL định kỳ + lọc rule học rác",
         "is_latest": false,
-        "badge": "",
         "summary": "Mỗi 30/45/60 ngày AI nhắn 1 tin ngắn cho KOL đã chốt hoặc đã hết drip: sự kiện tháng, hỏi cần hỗ trợ gì, mời cafe hoặc gọi ngắn. Drip follow-up không còn bỏ qua agent không có key riêng. Rule học từ người thật quá ngắn hoặc vô nghĩa sẽ chờ duyệt thay vì tự áp dụng.",
         "changes": [
             {
@@ -535,7 +573,6 @@
         "date": "01/11/2026",
         "title": "🤖 Biết rõ model AI đang trả lời + tag {last_name} tự fallback + tài khoản PeerFlood tự mở lại",
         "is_latest": false,
-        "badge": "",
         "summary": "Mỗi tin AI trả lời ghi lại model thật và máy chủ đã dùng (log + lịch sử chat). Tag {last_name} không có họ thì tự lấy tên, rồi tên đầy đủ. Tài khoản bị tạm dừng do PeerFlood tự bật lại khi SpamBot báo sạch. Agent WEEX được cập nhật USP mới.",
         "changes": [
             {
@@ -575,7 +612,6 @@
         "date": "31/10/2026",
         "title": "🌍 AI nhắn đúng ngôn ngữ từng user, đọc được ảnh + 🛡️ badge SpamBot trên trang Tài khoản",
         "is_latest": false,
-        "badge": "",
         "summary": "AI chọn ngôn ngữ theo hồ sơ của chính người nhận (ngôn ngữ Telegram, mã vùng SĐT, location, bio, kênh, group), mặc định tiếng Anh. AI Agent đọc lịch sử chat thật, tin trích dẫn và ảnh user gửi. Bạn chủ động DM user mới thì AI tự tiếp tục trả lời. Trang Tài khoản có nút kiểm tra SpamBot và badge trạng thái.",
         "changes": [
             {
@@ -621,7 +657,6 @@
         "date": "29/10/2026",
         "title": "📱 PWA + đăng nhập theo team, giao diện gọn cho mobile, AI dự phòng thông minh hơn",
         "is_latest": false,
-        "badge": "",
         "summary": "Cài dashboard như app trên điện thoại (PWA), mỗi thành viên team có tài khoản riêng, chọn theme. Keyword DM, form rule và cửa sổ chiến dịch được thiết kế lại gọn, có icon ⓘ giải thích. AI tự chuyển sang 9Router local khi Cloudflare chặn; Groq dùng model mới lấy trực tiếp theo API key.",
         "changes": [
             {
@@ -685,7 +720,6 @@
         "date": "27/10/2026",
         "title": "⚡ Tab Cào & DM nhanh gấp ~3 lần + Docker sẵn sàng chạy cloud (Railway)",
         "is_latest": false,
-        "badge": "",
         "summary": "Đo toàn bộ 98 API dashboard trên server thật: hầu hết < 100ms. Điểm nghẽn duy nhất là tab Cào & DM — tải ~7.000 lead bằng 69 request nối tiếp và vẽ lại cả bảng sau mỗi trang (3,3s). Nay tải song song, vẽ 1 lần, server cache số đếm: ~1,2s. Docker image không còn đóng gói DB/session Telegram; toàn bộ dữ liệu sống trên 1 volume /data.",
         "changes": [
             {
@@ -773,7 +807,6 @@
         "date": "23/10/2026",
         "title": "🔧 Nối mạch 4 tính năng viết-mà-không-chạy + siết chính sách needs_human + token ra khỏi DB",
         "is_latest": false,
-        "badge": "",
         "summary": "Bốn tính năng từng 'có code nhưng chết': (1) rescore_and_update gọi method không tồn tại trên raw connection — lead_score_history mãi 0 row; (2) distribution_enabled không ai set — kol_channel_watcher luôn broadcast tập rỗng; (3) offer_version chưa bao giờ được ghi khi KOL chốt deal; (4) verification_status có API ghi nhưng không ai đọc. Kèm theo: chốt chính sách needs_human (chỉ auto-resume cho lead prospect), chuyển token Command Bot sang env var, và tài liệu cố vấn serverless (docs/serverless-advisory.md).",
         "changes": [
             {
@@ -831,7 +864,6 @@
         "date": "22/10/2026",
         "title": "🩺 Đo lại thật — phễu KOL 5 bước từng chỉ tồn tại trong code, chưa từng sống trong DB",
         "is_latest": false,
-        "badge": "",
         "summary": "Kiểm toán toàn hệ thống phát hiện 3 lớp lỗi im lặng: (1) toàn bộ schema phễu 5 bước (kol_step, kol_profiles, kol_step_events) chỉ nằm trong database.py — DB thật chưa từng nhận ALTER nào, vì ~40 lệnh `except: pass` nuốt lỗi; /pipeline và web vẫn hiển thị như đã chạy. (2) AI vẫn có thể tự chế số ($50.000 prize pool hard-code trong prompt drip, thiếu ladder guard ở drip/nudge, learned rule auto-approve). (3) DM campaign không reserve trước khi gửi, đếm hạn mức riêng từng campaign và không khai báo account_busy. Bản này vá cả 3, thêm self-check schema tự sửa, và khoá lại bằng 30 test.",
         "changes": [
             {
@@ -889,7 +921,6 @@
         "date": "21/10/2026",
         "title": "🪜 KOL Starter Package — thang commission duyệt sẵn + bộ nhớ 5 bước onboarding",
         "is_latest": false,
-        "badge": "",
         "summary": "Giúp KOL bắt đầu chạy nhanh hơn: AI chỉ được chào đúng thang commission chính thức (55% → 80%, 5 bậc theo volume, bonus $/1M taker), mọi con số lạ bị chặn và chuyển người. Mỗi KOL có trạng thái 5 bước (Đồng ý deal → Nhận UID → Gắn link → Bài đầu → Hoạt động) nhớ xuyên suốt AI, Forum Inbox, Command Bot và web; follow-up chỉ nhắc đúng thứ còn thiếu, tối đa 2 lần/bước, dừng khi KOL từ chối. Spec: docs/spec-kol-starter-package.md.",
         "changes": [
             {
@@ -953,7 +984,6 @@
         "date": "19/10/2026",
         "title": "🚀 Track C: Advanced KOL Outreach Engine — 6 tính năng nâng cao",
         "is_latest": false,
-        "badge": "",
         "summary": "Nâng cấp toàn diện hệ thống outreach KOL với 6 module mới: Tier-Differentiated Drip Cadence, Enhanced Lead Scoring (8+ signals + dynamic re-score), Online/Offline Cycle per account, Self-Learning FTS5, Referral/Viral Loop, và Warmup Engine v2 (6 hành vi + graduation 4 giai đoạn).",
         "changes": [
             {
@@ -999,7 +1029,6 @@
         "date": "18/10/2026",
         "title": "🌐 Community Engagement Engine — Reactive v1",
         "is_latest": false,
-        "badge": "",
         "summary": "Tính năng mới: tự động tương tác có giá trị trong nhóm cộng đồng crypto. Account Telegram chỉ định join nhóm mục tiêu, theo dõi từ khóa, và reply bằng nhận định TA do AI sinh — user tự tìm đến DM, funnel AI hiện có tiếp quản. Reactive mode only (v1): chỉ reply khi có người hỏi. Bao gồm hệ thống rate-limit atomic 5 lớp, consent gate fail-closed, auto-pause khi mute/ban, và tab UI Cộng Đồng mới.",
         "changes": [
             {
@@ -1045,7 +1074,6 @@
         "date": "05/10/2026",
         "title": "📖 Thêm trang Hướng dẫn sử dụng trong app",
         "is_latest": false,
-        "badge": "",
         "summary": "Giờ bạn không cần hỏi lại hay lục tài liệu rời — toàn bộ hướng dẫn sử dụng (56 mục, có tìm kiếm) nằm ngay trong app ở nhóm Hệ thống. Ngoài ra Command Bot giờ hiện đúng tên tài khoản thay vì mã số, /kol gõ trần đã có phản hồi, và cảnh báo KOL CAMPAIGN PENDING vào Saved Messages mặc định đã tắt (Command Bot + Forum vẫn nhận bình thường).",
         "changes": [
             {
@@ -1079,7 +1107,6 @@
         "date": "03/10/2026",
         "title": "🔓 Sửa lỗi AI tự nhiên im với hàng loạt lead đang trò chuyện",
         "is_latest": false,
-        "badge": "",
         "summary": "Một số lead đang được AI tư vấn bình thường bỗng nhiên không được trả lời nữa dù bạn không hề tắt AI. Nguyên nhân: khi hệ thống cập nhật, các lead 'đang chờ người xem' bị xếp nhầm vào nhóm 'đã tạm dừng' — mà nhóm này thì AI im vĩnh viễn. Đã sửa và mở khoá 32 lead bị ảnh hưởng.",
         "changes": [
             {
@@ -1101,7 +1128,6 @@
         "date": "03/10/2026",
         "title": "🔗 Thêm nhóm bằng link — không còn bỏ sót group Topic lớn",
         "is_latest": false,
-        "badge": "",
         "summary": "Những group khổng lồ dạng Topic (hàng trăm nghìn thành viên) thường không hiện trong ô tìm nhóm của Keyword DM Rule, vì Telegram chỉ trả về 200 hội thoại gần nhất. Nay bạn chỉ cần dán link nhóm — hệ thống tự cho nick đã chọn vào nhóm, đọc tên nhóm và tick chọn luôn để DM theo từ khóa.",
         "changes": [
             {
@@ -1123,7 +1149,6 @@
         "date": "03/10/2026",
         "title": "🔴 /aioff tắt AI VĨNH VIỄN cho lead — không tự bật lại sau 12 giờ",
         "is_latest": false,
-        "badge": "",
         "summary": "Trước đây gõ /aioff (hoặc bấm nút AI: OFF) chỉ tạm im AI 12 giờ rồi tự bật lại — đúng ra khi bạn tắt cho một lead thì phải tắt hẳn. Nay /aioff khoá AI vĩnh viễn cho lead đó, chỉ khi bạn gõ /aion mới bật lại.",
         "changes": [
             {
@@ -1151,7 +1176,6 @@
         "date": "02/10/2026",
         "title": "⚡ Sửa trang Tài khoản treo 30-40 giây sau khi khởi động",
         "is_latest": false,
-        "badge": "",
         "summary": "Trang Tài khoản Telegram load rất lâu mỗi khi vừa khởi động lại hệ thống. Nguyên nhân: với mỗi tài khoản, server chờ tối đa 2 giây gọi Telegram để lấy tên/trạng thái — 19 tài khoản cộng lại thành 30-40 giây. Nay server trả dữ liệu ngay (dùng bộ nhớ đệm đã có), danh sách hiện tức thì kể cả ngay sau restart.",
         "changes": [
             {
@@ -1167,7 +1191,6 @@
         "date": "02/10/2026",
         "title": "👤 Topic hiện tên tài khoản thay vì 'Nick phụ #18'",
         "is_latest": false,
-        "badge": "",
         "summary": "Trong nhóm Telegram (Forum Inbox), mọi tin relay trước đây ghi 'Nick phụ #18 · user_id 7445768831' — dài và khó nhớ. Nay hiển thị thẳng tên tài khoản Telegram (ví dụ: 'Nauy | Weex'), nhìn phát biết ngay tin thuộc nick nào.",
         "changes": [
             {
@@ -1183,7 +1206,6 @@
         "date": "02/10/2026",
         "title": "🧬 Trang Agent Evolution + sửa lỗi 'học rồi quên'",
         "is_latest": false,
-        "badge": "",
         "summary": "Hai việc: (1) Trang mới 'Agent Evolution' đo mức độ tiến hóa của AI — tốc độ học, tỷ lệ học trùng, % cần người can thiệp, phân loại lead, số tin AI dùng mỗi hội thoại. (2) Sửa lỗi nền tảng: AI chỉ dùng 30 luật học MỚI NHẤT, nên 790 luật cũ hơn bị 'quên' — nay chọn luật theo ĐỘ LIÊN QUAN với câu hỏi đang hỏi.",
         "changes": [
             {
@@ -1211,7 +1233,6 @@
         "date": "02/10/2026",
         "title": "🤖 Nick chính cũng được AI trả lời — cửa sổ bàn giao rút còn 12 giờ",
         "is_latest": false,
-        "badge": "",
         "summary": "Trước đây nick chính bị khóa cứng ở chế độ 'chỉ người thật': AI không bao giờ tự trả lời, mọi hội thoại trên nick chính tự động rơi vào 'Cần người xử lý' — kể cả khi đã gõ /aion. Nay mọi tài khoản đều được AI hỗ trợ theo cùng một luật: bạn im lặng 12 giờ thì AI trả lời thay; bạn nhắn tiếp thì AI lại lùi ra 12 giờ nữa.",
         "changes": [
             {
@@ -1233,7 +1254,6 @@
         "date": "02/10/2026",
         "title": "🐛 Sửa lệnh /aion trong topic không bật được AI",
         "is_latest": false,
-        "badge": "",
         "summary": "Gõ /aion @username bên trong topic của lead (Forum Inbox) trước đây bị hệ thống nuốt mất — lệnh không tới được bộ xử lý nên AI vẫn im. Nguyên nhân: bộ lọc tin nhắn nhóm so khớp CHÍNH XÁC cả câu nên '/aion @Nelajackson1' không khớp '/aion'. Nay ô bật AI trong topic hoạt động đúng.",
         "changes": [
             {
@@ -1255,7 +1275,6 @@
         "date": "02/10/2026",
         "title": "🎯 Ô tìm nhóm chỉ hiện nhóm thật — bỏ kênh và bot",
         "is_latest": false,
-        "badge": "",
         "summary": "Khi chọn nhóm để theo dõi trong Keyword DM Rule, ô tìm kiếm trước đây liệt kê lẫn cả kênh (channel) và bot — những thứ không có thành viên tham gia nên không dùng được cho tính năng DM khi member join. Nay chỉ hiện đúng nhóm (group/supergroup).",
         "changes": [
             {
@@ -1277,7 +1296,6 @@
         "date": "02/10/2026",
         "title": "⚡ Tối ưu tốc độ trang Cào & DM — nhanh hơn 15 lần",
         "is_latest": false,
-        "badge": "",
         "summary": "Trang Cào & DM tải rất lâu vì mỗi lần mở đều tải TOÀN BỘ kết quả deep crawl — 6.901 kênh, ~4 MB kèm mô tả đầy đủ — dù chỉ hiển thị 50 dòng. Nay chỉ tải đúng 1 trang cần xem rồi nạp dần phần còn lại ở nền. Trang mở gần như tức thì.",
         "changes": [
             {
@@ -1305,7 +1323,6 @@
         "date": "01/10/2026",
         "title": "📊 Pipeline KOL — quản lý theo giai đoạn, không phải bật/tắt",
         "is_latest": false,
-        "badge": "",
         "summary": "Thay nút Bật/Tắt AI bằng khái niệm GIAI ĐOẠN cho mỗi KOL: Mới → Đang nuôi → Đàm phán → Đã chốt (hoặc Tạm dừng). Nhìn vào là biết KOL đang ở đâu trong phễu, thay vì phải nhớ mình đã bật AI cho ai. Giai đoạn tự đồng bộ với trạng thái AI: chốt deal hoặc tạm dừng thì AI tự im.",
         "changes": [
             {
@@ -1339,7 +1356,6 @@
         "date": "01/10/2026",
         "title": "📜 Nạp nội dung hội thoại vào topic — đọc được ngay trong group",
         "is_latest": false,
-        "badge": "",
         "summary": "Trước đây topic chỉ có 1 dòng tiêu đề nên mở group ra không hiểu lead đã nói gì. Nay có nút 'Nạp lịch sử': đăng lại toàn bộ tin nhắn (lead + mình trả lời) trong N ngày qua vào từng topic, theo đúng thứ tự thời gian. Hội thoại không có tin nào trong khoảng đó sẽ tự bỏ qua — không tạo topic rác.",
         "changes": [
             {
@@ -1373,7 +1389,6 @@
         "date": "01/10/2026",
         "title": "🛠️ Tạo topic thật sự chạy được (sai module Telethon)",
         "is_latest": false,
-        "badge": "",
         "summary": "Hai lỗi khiến AI như 'chết': (1) chat nằm ở needs_human mà không có mốc human_takeover_at thì phần tự mở khoá sau 24h bị bỏ qua hoàn toàn — chat khoá vĩnh viễn, AI không bao giờ trả lời nữa; (2) timestamp SQLite dạng 'YYYY-MM-DD HH:MM:SS' (dấu cách) bị datetime.fromisoformat() từ chối, lỗi bị nuốt im lặng nên kể cả có mốc cũng không auto-resume. Nay đã sửa gốc và thêm nút bấm/lệnh Bật–Tắt AI cho từng lead ngay trong topic.",
         "changes": [
             {
@@ -1407,7 +1422,6 @@
         "date": "01/10/2026",
         "title": "🗂️ Forum Inbox: hết cảnh không có topic nào cho lead đã trả lời",
         "is_latest": false,
-        "badge": "",
         "summary": "Forum Inbox bật nhưng group Telegram không bao giờ có topic nào. Nguyên nhân: cổng tạo topic đòi phải có log campaign/watcher 'success' khớp ID người dùng — nhưng log campaign lưu ID GROUP (số âm), không phải ID lead, nên gần như mọi hội thoại thật bị chặn trong im lặng. Đã nới cổng theo hướng tương tác thật và thêm nút tạo topic cho hội thoại cũ.",
         "changes": [
             {
@@ -1447,7 +1461,6 @@
         "date": "30/09/2026",
         "title": "⚡ Hết màn hình trắng 3 giây khi mở Dashboard",
         "is_latest": false,
-        "badge": "",
         "summary": "Nạp 9 file JS (512KB) đồng bộ chặn first-paint, cộng với việc app chỉ hiện UI sau khi chờ auth → trên máy chậm/đang tải, người dùng nhìn màn hình trắng 3 giây. Đã defer toàn bộ script và hiện splash tải ngay lập tức.",
         "changes": [
             {
@@ -1475,7 +1488,6 @@
         "date": "30/09/2026",
         "title": "⚡ Giảm truy vấn Settings & N+1: bulk read/write toàn hệ thống",
         "is_latest": false,
-        "badge": "",
         "summary": "Các endpoint đọc nhiều setting không còn mở connection riêng cho từng key. Thêm helper bulk read/write và bulk count, gộp N truy vấn tuần tự thành 1 — giảm độ trễ và tải connection pool trên các trang Settings, AI Agent, Follow-Up, Proxy và Batch Scrape.",
         "changes": [
             {
@@ -1509,7 +1521,6 @@
         "date": "26/09/2026",
         "title": "⚡ Tối ưu hiệu năng: Channels cache + Polling scheduler tập trung",
         "is_latest": false,
-        "badge": "",
         "summary": "Trang Channels không còn lag 1–2 giây khi cold-load. Polling timer phân tán thay bằng scheduler chung, pause khi tab ẩn, chống overlap per-job.",
         "changes": [
             {
@@ -1549,7 +1560,6 @@
         "date": "26/09/2026",
         "title": "🧹 Đóng connection SQLite an toàn khi tác vụ bị hủy",
         "is_latest": false,
-        "badge": "",
         "summary": "Ngăn rò rỉ aiosqlite worker thread và khóa file database khi tác vụ bị hủy đúng lúc pool đang mở connection mới.",
         "changes": [
             {
@@ -1571,7 +1581,6 @@
         "date": "26/09/2026",
         "title": "🧭 Thêm nút Hủy trong luồng gửi tin Command Bot",
         "is_latest": false,
-        "badge": "",
         "summary": "Bổ sung nút Hủy tại mọi bước nhập nội dung tin nhắn để admin thoát luồng gửi ngay, không phải chờ state hết hạn.",
         "changes": [
             {
@@ -1587,7 +1596,6 @@
         "date": "25/09/2026",
         "title": "🛡️ Chặn triệt để AI tự chat giữa nick chính và nick phụ",
         "is_latest": false,
-        "badge": "",
         "summary": "Khắc phục triệt để lỗi nick chính và nick phụ tự nhắn tin qua lại bằng cơ chế nhận diện định danh Telegram bền vững lưu vào database, fail-closed và chặn từ cả 3 lớp (event handler, generate_reply, send_message).",
         "changes": [
             {
@@ -1609,7 +1617,6 @@
         "date": "23/09/2026",
         "title": "⚡ Split Runtime & IPC Command Queue Architecture (Pha 1 & Pha 2)",
         "is_latest": false,
-        "badge": "",
         "summary": "Tách biệt tiến trình Web Dashboard và Telegram Background Worker. Tích hợp SQLite Command Queue (IPC) với cơ chế bảo vệ idempotency, lease timeout, crash recovery. Sửa triệt để lỗi spam warning Reaction Watcher.",
         "changes": [
             {
@@ -1643,7 +1650,6 @@
         "date": "21/09/2026",
         "title": "🗂️ Telegram Forum Inbox (Sales War Room) v1",
         "is_latest": false,
-        "badge": "",
         "summary": "Đưa toàn bộ hội thoại lead vào 1 Telegram Group dạng Forum/Topics. Mỗi lead trả lời sau outreach mở 1 topic riêng. Admin trả lời trực tiếp trong topic bằng bot; nick phụ gửi tin thật ra lead. Topic General nhận Handover/KOL alerts.",
         "changes": [
             {
@@ -1677,7 +1683,6 @@
         "date": "21/09/2026",
         "title": "⚡ Mở khóa nguồn Members + tải trang Members nhanh hơn",
         "is_latest": false,
-        "badge": "",
         "summary": "Modal sửa Campaign cho phép đổi nguồn Members ở mọi trạng thái có thể chỉnh sửa. Trang Members không còn tự gọi Telegram get_dialogs khi mở trang, giúp Campaign/Scrape Jobs hiển thị nhanh hơn.",
         "changes": [
             {
@@ -1699,7 +1704,6 @@
         "date": "18/09/2026",
         "title": "⚡ Campaign linh động nguồn Members + AI Agent UI gọn hơn",
         "is_latest": false,
-        "badge": "",
         "summary": "Modal sửa Campaign giờ đổi được nguồn Members/Scrape Job và tài khoản gửi để chạy tiếp linh động hơn. Trang AI Follow-Up được đổi nhãn thành AI Agent, bố cục 2 tab dễ quét hơn, load data nhẹ hơn với phân trang client-side.",
         "changes": [
             {
@@ -1733,7 +1737,6 @@
         "date": "15/09/2026",
         "title": "🎲 Random Reaction Count — Ngẫu nhiên số account thả cảm xúc",
         "is_latest": false,
-        "badge": "",
         "summary": "Kênh tăng tương tác giờ cho cấu hình số lượng account thả reaction mỗi bài (min–max), random mỗi bài một số khác nhau thay vì luôn 100% account. Nhìn tự nhiên hơn, giảm nguy cơ bị Telegram nhận diện spam pattern.",
         "changes": [
             {
@@ -1761,7 +1764,6 @@
         "date": "13/09/2026",
         "title": "👋 Join Watcher — Tự động DM thành viên mới join nhóm",
         "is_latest": false,
-        "badge": "",
         "summary": "Loại watcher mới: tự động gửi DM chào mừng/giới thiệu khi có thành viên mới join nhóm chỉ định (tự join hoặc được add). Delay ngẫu nhiên 3–15 phút sau join (cấu hình được, chống spam-flag), tái dùng toàn bộ pipeline DM an toàn hiện có: fallback đa tài khoản, PeerFlood cooldown, giới hạn DM/ngày, dedup 24h, blacklist.",
         "changes": [
             {
@@ -1795,7 +1797,6 @@
         "date": "04/09/2026",
         "title": "🌍 Fix outreach sai ngôn ngữ (KOL Nga nhận tin tiếng Anh)",
         "is_latest": false,
-        "badge": "",
         "summary": "Campaign outreach giờ tự nhận diện ngôn ngữ KOL qua 4 tín hiệu: lang_code, tên campaign (vd 'rus kol' → tiếng Nga), tên group nguồn, và bảng chữ cái trong tên (Cyrillic/Hán/Hàn/Ả Rập). Trước đây lang_code luôn trống nên AI mặc định gửi tiếng Anh cho cả KOL Nga.",
         "changes": [
             {
@@ -1811,7 +1812,6 @@
         "date": "04/09/2026",
         "title": "⚡ Tối ưu tốc độ: Index DB + Cache tài khoản",
         "is_latest": false,
-        "badge": "",
         "summary": "Thêm index DB cho trang AI Follow-Up và thống kê Reactions (nhanh hơn ~100x khi dữ liệu lớn). Trang Tài khoản load tức thì nhờ cache thông tin Telegram thay vì gọi API mỗi lần mở.",
         "changes": [
             {
@@ -1833,7 +1833,6 @@
         "date": "04/09/2026",
         "title": "🛡️ Chống gửi trùng Campaign + Fix hiển thị tên tài khoản",
         "is_latest": false,
-        "badge": "",
         "summary": "Khóa chống race condition khi /resume và Start campaign (không thể tạo 2 task gửi trùng). Bot chặn khởi động nếu session cũ chưa xóa được khi đổi token. Dashboard & Bot hiển thị @username thật thay vì tên cũ trong DB; tên tự đồng bộ từ Telegram khi kết nối.",
         "changes": [
             {
@@ -1861,7 +1860,6 @@
         "date": "04/09/2026",
         "title": "🤖 Fix Command Bot + 🚫 Nút Blacklist UI + 📋 Kanban QC Process",
         "is_latest": false,
-        "badge": "",
         "summary": "Sửa toàn bộ 4 lỗi Command Bot (tên field KOL, `/resume`, `/aion`, `/kol`). Lead bị Blacklist tự động ẩn khỏi AI Followup. Thêm nút Blacklist 1-click & chat tay rõ ràng. Thiết lập Kanban + Reviewer QC.",
         "changes": [
             {
@@ -1889,7 +1887,6 @@
         "date": "03/09/2026",
         "title": "🛡️ Bảo Vệ Uy Tín Nick Chính + Bật/Tắt Tài Khoản Hàng Loạt",
         "is_latest": false,
-        "badge": "",
         "summary": "AI bị chặn hoàn toàn trên nick chính — mọi chat trên nick chính đều do người thật trả lời. AI trên nick phụ có quy tắc mới: cấm trả lời vô nghĩa, cấm đùa cợt với admin sàn khác. Trang Tài khoản có chọn nhiều + bật/tắt hàng loạt.",
         "changes": [
             {
@@ -1917,7 +1914,6 @@
         "date": "02/09/2026",
         "title": "🤖 Telegram Command Bot — Điều Hành Từ Nick Chính",
         "is_latest": false,
-        "badge": "",
         "summary": "Nick chính giờ có thể điều khiển toàn bộ hệ thống ngay trong Telegram: gửi tin từ nick phụ cho KOL, xem trạng thái, resume/pause campaign, bật tắt AI — không cần mở app.",
         "changes": [
             {
@@ -1957,7 +1953,6 @@
         "date": "30/08/2026",
         "title": "🤖 Lọc Và Xóa Bot Hàng Loạt",
         "is_latest": false,
-        "badge": "",
         "summary": "Trang Quản lý kênh có thêm bộ lọc Bot để chọn hàng loạt và xóa nhanh các cuộc trò chuyện với bot.",
         "changes": [
             {
@@ -1979,7 +1974,6 @@
         "date": "30/08/2026",
         "title": "🔄 Auto-Resume Chiến Dịch Sau SpamBot + Gọn Bảng Campaign",
         "is_latest": false,
-        "badge": "",
         "summary": "Campaign bị dừng do SpamBot/PeerFlood hoặc hết daily limit giờ tự chạy lại khi account hết bị khóa. Bảng DM Campaign gọn hơn, icon có tooltip mô tả rõ ràng.",
         "changes": [
             {
@@ -2013,7 +2007,6 @@
         "date": "29/08/2026",
         "title": "👤 Hiển Thị Rõ Nick Phụ Đang Chat Với KOL",
         "is_latest": false,
-        "badge": "",
         "summary": "Modal Xem chat nay hiển thị tên tài khoản phụ đang dùng để chat với KOL, không chỉ hiện Acc #ID. Bubble AI/chat tay cũng ghi rõ account gửi tin.",
         "changes": [
             {
@@ -2041,7 +2034,6 @@
         "date": "29/08/2026",
         "title": "🕒 Hiển Thị Ngày Giờ Đầy Đủ Trong Lịch Sử Chat",
         "is_latest": false,
-        "badge": "",
         "summary": "Modal Xem chat trong Lead & AI Follow-Up nay hiển thị đầy đủ ngày/tháng/năm và giờ Việt Nam cho từng tin nhắn, đồng thời sắp xếp lịch sử theo timestamp thật.",
         "changes": [
             {
@@ -2063,7 +2055,6 @@
         "date": "29/08/2026",
         "title": "🤖 Bật/Tắt AI Hàng Loạt Cho Lead",
         "is_latest": false,
-        "badge": "",
         "summary": "Chọn nhiều lead trong Lead & AI Follow-Up rồi bật hoặc tắt AI cho tất cả cùng lúc ngay trên action bar.",
         "changes": [
             {
@@ -2079,7 +2070,6 @@
         "date": "29/08/2026",
         "title": "✅ Việc Cần Làm Ngay Trên Trang Tổng Quan",
         "is_latest": false,
-        "badge": "",
         "summary": "Dashboard có thêm checklist Việc cần làm để ghi nhanh công việc vận hành, đánh dấu hoàn thành và xóa trực tiếp mà không cần rời trang Tổng quan.",
         "changes": [
             {
@@ -2101,7 +2091,6 @@
         "date": "29/08/2026",
         "title": "📦 Thêm Hàng Loạt Tài Khoản Telegram",
         "is_latest": false,
-        "badge": "",
         "summary": "Modal Thêm tài khoản nay có chế độ Hàng loạt: dán danh sách số điện thoại (kèm proxy tuỳ chọn), app tự gửi OTP lần lượt và chờ bạn nhập từng mã — không phải mở modal nhiều lần.",
         "changes": [
             {
@@ -2123,7 +2112,6 @@
         "date": "29/08/2026",
         "title": "📡 Auto-Forward Bài Channel KOL Theo Assignment",
         "is_latest": false,
-        "badge": "",
         "summary": "Tự động forward bài mới từ channel nguồn (VD @weexkolglobal) đến KOL onboarded theo phân công region/campaign. Mỗi KOL nhận link WEEX riêng gắn vipCode của họ.",
         "changes": [
             {
@@ -2157,7 +2145,6 @@
         "date": "29/08/2026",
         "title": "🤖 AI Không Tự Bật Khi Nick Nội Bộ Nhắn Nhau",
         "is_latest": false,
-        "badge": "",
         "summary": "Khắc phục lỗi AI follow-up kích hoạt khi 2 nick nội bộ (nick chính / nick phụ) nhắn tin test với nhau, gây phát sinh reply giả và đôi khi hướng sai về account chính.",
         "changes": [
             {
@@ -2173,7 +2160,6 @@
         "date": "29/08/2026",
         "title": "🎯 KOL Distribution Pipeline: Phân Công, Bulk Send & Personalization",
         "is_latest": false,
-        "badge": "",
         "summary": "Hệ thống phân phối nội dung KOL hoàn chỉnh: admin gán region/campaign một lần, gửi hàng loạt với link WEEX cá nhân hoá vipCode. AI warm-up trung thực, cấm bịa dữ liệu fintech.",
         "changes": [
             {
@@ -2213,7 +2199,6 @@
         "date": "26/08/2026",
         "title": "🔧 Gia Cố Hệ Thống: Chống Cache Stampede, Tối Ưu GZip & Ổn Định Bộ Nhớ",
         "is_latest": false,
-        "badge": "",
         "summary": "Bản vá tăng cường độ ổn định từ đợt rà soát Adversarial Hardening: cache analytics chống thundering-herd với fallback dữ liệu cũ, GZip bỏ qua file nhị phân đã nén sẵn, giới hạn bộ nhớ cache LRU và dọn dẹp toàn bộ test suite.",
         "changes": [
             {
@@ -2253,7 +2238,6 @@
         "date": "05/08/2026",
         "title": "🛡️ Chặn Triệt Để 100% Tất Cả Các Loại Telegram Bot & Username Chứa 'bot'",
         "is_latest": false,
-        "badge": "",
         "summary": "Nâng cấp bộ lọc bot đa tầng: kiểm tra thuộc tính .bot, chặn tất cả username/tên chứa từ 'bot' (case-insensitive) ở cả Keyword DM Watcher và Inbox AI Agent.",
         "changes": [
             {
@@ -2275,7 +2259,6 @@
         "date": "04/08/2026",
         "title": "⚡ Tự Động Join Nhóm Cho Các Tài Khoản Gửi DM & Sửa Lỗi Modal 500 Error",
         "is_latest": false,
-        "badge": "",
         "summary": "Tự động kích hoạt Join nhóm Telegram đối với tất cả tài khoản gửi tin nhắn chưa tham gia nhóm target. Khắc phục dứt điểm lỗi Internal Server Error khi tìm kiếm nhóm.",
         "changes": [
             {
@@ -2297,7 +2280,6 @@
         "date": "03/08/2026",
         "title": "⏰ Tự Động Tiếp Quản Trả Lời Thay Người Thật Sau 60 Phút Trôi Qua (60m Human Timeout Auto-Resume)",
         "is_latest": false,
-        "badge": "",
         "summary": "Tự động kích hoạt AI Agent tiếp quản lại phiên chat nếu người thật đã nhắn tin tiếp quản trước đó nhưng sau 60 phút người dùng nhắn lại mà người thật vẫn chưa phản hồi.",
         "changes": [
             {
@@ -2313,7 +2295,6 @@
         "date": "03/08/2026",
         "title": "💎 Phân Loại Lead Tier A/B/C, Intent Scoring & Drip Follow-Up (Crypto BD Power Pack)",
         "is_latest": false,
-        "badge": "",
         "summary": "Nâng cấp toàn bộ hệ thống AI Agent chuyên sâu cho Business Development sàn Crypto: tự động chấm điểm Intent (0-100), xếp hạng Lead Tier A/B/C, tóm tắt bối cảnh nhu cầu khách hàng và tự động chạy chuỗi Drip Follow-up sau 48h im lặng.",
         "changes": [
             {
@@ -2347,7 +2328,6 @@
         "date": "03/08/2026",
         "title": "🤖 Tự Động Né & Bỏ Qua Telegram Bots (Telegram Bot Auto-Ignorance)",
         "is_latest": false,
-        "badge": "",
         "summary": "Tự động phát hiện và bỏ qua toàn bộ tin nhắn từ Telegram Bot (SpamBot, InfoBot, BotFather, RoseBot...), ngăn chặn tuyệt đối tình trạng AI Agent tự nhắn tin/trả lời bot.",
         "changes": [
             {
@@ -2369,7 +2349,6 @@
         "date": "03/08/2026",
         "title": "🎨 Tái Thiết Kế Giao Diện Thẻ Tài Khoản Telegram (Account Cards Redesign)",
         "is_latest": false,
-        "badge": "",
         "summary": "Nâng cấp giao diện danh sách Telegram Accounts theo chuẩn Glassmorphic hiện đại, sắp xếp khoa học thông tin Avatar, Badge trạng thái, Giới hạn DM/ngày và Khung chọn AI Agent phụ trách.",
         "changes": [
             {
@@ -2391,7 +2370,6 @@
         "date": "03/08/2026",
         "title": "🛑 Tính Năng Tự Động Nhường Quyền Khi Người Thật Nhắn Tin (Human Takeover Interception)",
         "is_latest": false,
-        "badge": "",
         "summary": "Tự động phát hiện khi chủ tài khoản Telegram tự tay nhắn tin với khách hàng (trên ứng dụng Telegram điện thoại/máy tính), AI Agent sẽ ngay lập tức tự động nhường quyền và giữ yên lặng để không làm gián đoạn cuộc trò chuyện.",
         "changes": [
             {
@@ -2413,7 +2391,6 @@
         "date": "03/08/2026",
         "title": "🤖 Hệ Thống Multi-AI-Agent, 9Router Local Proxy & Dynamic Fallback Tự Động",
         "is_latest": false,
-        "badge": "",
         "summary": "Phát hành hệ thống Quản lý Đa AI Agents chuyên biệt cho sales/BD, tích hợp kết nối 9Router local proxy, tự động xử lý định dạng Telegram HTML, phản hồi đa ngôn ngữ theo khách hàng và luồng Fallback đa tầng 24/7.",
         "changes": [
             {
@@ -2453,7 +2430,6 @@
         "date": "03/08/2026",
         "title": "🛡️ Tổng Kiểm Thử Toàn Hệ Thống (Full System QA/QC Audit & Hardening)",
         "is_latest": false,
-        "badge": "",
         "summary": "Hoàn tất tổng kiểm thử toàn bộ hệ thống từ UI/UX, Frontend DOM safety, backend connection pool đến việc bọc try-except các API endpoint và sửa lỗi kiểu dữ liệu ở auto-resume.",
         "changes": [
             {
@@ -2481,7 +2457,6 @@
         "date": "03/08/2026",
         "title": "🎯 Sửa Triệt Để Lỗi Báo Tiến Độ Gửi (Progress Tracking & Real-Time Sync)",
         "is_latest": false,
-        "badge": "",
         "summary": "Khắc phục triệt để tình trạng lệch con số tiến độ và thanh phần trăm (progress bar), đồng thời chuyển sang cập nhật tiến độ real-time theo từng tin nhắn ở backend.",
         "changes": [
             {
@@ -2509,7 +2484,6 @@
         "date": "03/08/2026",
         "title": "🎨 Thiết Kế Lại Giao Diện & Tối Ưu UI/UX Modal Tạo DM Campaign",
         "is_latest": false,
-        "badge": "",
         "summary": "Sửa triệt để lỗi vỡ layout công tắc chuyển đổi (toggle), tối ưu spacing, typography và cấu trúc các ô nhập liệu giúp trải nghiệm tạo chiến dịch chuyên nghiệp & mượt mà hơn.",
         "changes": [
             {
@@ -2537,7 +2511,6 @@
         "date": "03/08/2026",
         "title": "⚡ Tự Động Khôi Phục & Tiếp Tục Gửi DM Sau Khi Server Khởi Động Lại",
         "is_latest": false,
-        "badge": "",
         "summary": "Tự động phát hiện và khôi phục các Chiến dịch DM đang ở trạng thái 'running' mỗi khi app restart, khắc phục triệt để tình trạng campaign bị dừng ngầm.",
         "changes": [
             {
@@ -2559,7 +2532,6 @@
         "date": "02/08/2026",
         "title": "🌐 AI Auto Native Language Outreach — Tự Động Dịch DM Theo Tiếng Bản Địa Của Khách Hàng",
         "is_latest": false,
-        "badge": "",
         "summary": "AI tự động phát hiện ngôn ngữ & quốc gia của từng member (Trung Quốc, Nga, Thổ Nhĩ Kỳ, Việt Nam...) để chuyển đổi tin nhắn outreach sang tiếng mẹ đẻ của họ, tăng Reply Rate 3-5x.",
         "changes": [
             {
@@ -2587,7 +2559,6 @@
         "date": "02/08/2026",
         "title": "🤖 Chế Độ AI Care Auto-Pilot Theo Từng Tài Khoản Telegram",
         "is_latest": false,
-        "badge": "",
         "summary": "Cho phép gán AI Agent trực tiếp cho từng Tài Khoản Telegram để tự động trả lời khách hàng khi bạn rời máy tính hoặc off.",
         "changes": [
             {
@@ -2615,7 +2586,6 @@
         "date": "02/08/2026",
         "title": "🛑 Nút Bật/Tắt Account Thủ Công & Khóa AI Bảo Vệ Khách Hàng",
         "is_latest": false,
-        "badge": "",
         "summary": "Bổ sung tính năng Tắt / Bật tài khoản Telegram thủ công ngắt 100% tự động hóa để test an toàn, cùng cơ chế tự động ngắt AI khi Admin nhắn tin.",
         "changes": [
             {
@@ -2649,7 +2619,6 @@
         "date": "02/08/2026",
         "title": "🔥 Đa AI Agent, Global Provider & Popup Test Trực Quan",
         "is_latest": false,
-        "badge": "",
         "summary": "Nâng cấp toàn bộ kiến trúc AI với tính năng quản lý Đa AI Agent (Multi-Agent BD), dùng chung Provider toàn hệ thống và giao diện thử nghiệm tương tác.",
         "changes": [
             {
@@ -2689,7 +2658,6 @@
         "date": "01/08/2026",
         "title": "👥 Bộ Công Cụ Cào & DM Tự Động Telegram Multi-Account",
         "is_latest": false,
-        "badge": "",
         "summary": "Tối ưu hóa quy trình cào thành viên Deep Crawl và phân bổ tin nhắn outreach tự động giữa nhiều tài khoản Telegram gửi.",
         "changes": [
             {
@@ -2717,7 +2685,6 @@
         "date": "30/07/2026",
         "title": "🤖 AI Auto-Reply Inbox & Handover Chăm Sóc Khách Hàng",
         "is_latest": false,
-        "badge": "",
         "summary": "Tích hợp AI tư vấn tự động khi có khách hàng phản hồi DM outreach.",
         "changes": [
             {
@@ -2739,7 +2706,6 @@
         "date": "25/07/2026",
         "title": "🎯 Keyword DM & Tăng Tương Tác Reaction Lịch Gửi",
         "is_latest": false,
-        "badge": "",
         "summary": "Phát hiện từ khóa nhóm Telegram và tự động tương tác bài viết.",
         "changes": [
             {

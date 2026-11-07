@@ -1238,7 +1238,7 @@ async def test_72_community_trading_scorer():
         contacts=[]
     )
     assert spam_res["trading_score"] < 40
-    assert spam_res["category"] == "low_relevance"
+    assert spam_res["category"] in ("low_relevance", "airdrop_bonus")
     assert spam_res["is_trading"] is False
 
     # 6. Hybrid Channel (Has news in title/desc, but also has Bybit/Binance signals & trading)

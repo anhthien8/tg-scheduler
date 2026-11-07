@@ -2101,3 +2101,36 @@ tr:hover td { background: color-mix(in srgb, var(--text) 2.5%, transparent); }
 select option { background: var(--bg2, var(--bg3)); color: var(--text); }
 input[type="time"]::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
 input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+
+/* ══ Friendly confirm dialog (App.confirmDialog) ══ */
+.cfm-overlay { z-index: 1000; }
+.cfm-modal { width: 420px; padding: 28px 26px 22px; text-align: center; overflow: visible; }
+.cfm-icon { width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-size: 26px; }
+.cfm-primary { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.cfm-danger { background: color-mix(in srgb, var(--red, #ef4444) 18%, transparent); }
+.cfm-title { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+.cfm-msg { font-size: 13.5px; color: var(--text2); line-height: 1.6; }
+.cfm-stats { display: flex; gap: 10px; margin-top: 16px; }
+.cfm-stat { flex: 1; background: var(--bg3, rgba(255,255,255,.04)); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 6px; }
+.cfm-stat-val { font-size: 20px; font-weight: 700; color: var(--accent); }
+.cfm-stat-lbl { font-size: 11.5px; color: var(--text2); margin-top: 2px; }
+.cfm-stat-hint { font-size: 10.5px; color: var(--text3); margin-top: 2px; }
+.cfm-note { margin-top: 14px; font-size: 12px; color: var(--text2); background: var(--bg3, rgba(255,255,255,.04));
+  border-radius: 8px; padding: 8px 10px; text-align: left; line-height: 1.5; }
+.cfm-actions { display: flex; gap: 10px; margin-top: 22px; }
+.cfm-actions .btn { flex: 1; justify-content: center; padding: 10px 0; font-weight: 600; }
+
+/* ══ KOL directory facet chips ══ */
+.kol-facet { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.kol-facet-lbl { flex: 0 0 64px; font-size: 11px; font-weight: 600; color: var(--text3);
+  text-transform: uppercase; letter-spacing: .4px; padding-top: 6px; }
+.kol-facet-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.kol-chip { --chip: var(--accent); background: var(--bg3, rgba(255,255,255,.04)); border: 1px solid var(--border);
+  color: var(--text2); border-radius: 999px; padding: 4px 11px; font-size: 12px; cursor: pointer;
+  transition: border-color .15s, background .15s; }
+.kol-chip b { font-weight: 600; color: var(--text3); margin-left: 3px; }
+.kol-chip:hover { border-color: var(--chip); }
+.kol-chip.active { background: color-mix(in srgb, var(--chip) 18%, transparent); border-color: var(--chip); color: var(--text); }
+.kol-chip.active b { color: var(--text); }

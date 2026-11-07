@@ -1574,9 +1574,21 @@ class KolDeleteRequest(BaseModel):
 
 @router.get("/kol-directory")
 async def kol_directory(q: str = "", status: str = "", min_score: int = 0, has_contact: int = 0,
-                        category: str = "", sort: str = "score", page: int = 0, limit: int = 50):
-    return await db.list_kol_channels(q=q, status=status, min_score=min_score, has_contact=bool(has_contact),
-                                      category=category, sort=sort, page=page, limit=limit)
+                        category: str = "", sort: str = "score", page: int = 0, limit: int = 50,
+                        kind: str = "", country: str = ""):
+    global _kol_rescored
+    from channel_country import COUNTRY_LABELS, guess_country
+    if not _kol_rescored:
+        # Once per process: stored rows pick up scoring rule changes + country detection.
+        _kol_rescored = True
+        await db.rescore_kol_channels(tg.score_community_trading, guess_country)
+    d = await db.list_kol_channels(q=q, status=status, min_score=min_score, has_contact=bool(has_contact),
+                                   category=category, sort=sort, page=page, limit=limit, kind=kind, country=country)
+    d["country_labels"] = COUNTRY_LABELS
+    return d
+
+
+_kol_rescored = False
 
 
 @router.post("/kol-directory/sync")
@@ -1609,21 +1621,21 @@ async def kol_directory_delete(req: KolDeleteRequest):
 
 @router.get("/kol-directory/export.csv")
 async def kol_directory_export(q: str = "", status: str = "", min_score: int = 0, has_contact: int = 0,
-                               category: str = "", sort: str = "score"):
+                               category: str = "", sort: str = "score", kind: str = "", country: str = ""):
     import csv
     import io
 
     from fastapi.responses import Response
     data = await db.list_kol_channels(q=q, status=status, min_score=min_score, has_contact=bool(has_contact),
-                                      category=category, sort=sort, all_rows=True)
+                                      category=category, sort=sort, all_rows=True, kind=kind, country=country)
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["Kênh", "Link", "Subscribers", "Trading Score", "Phân loại", "Contact",
+    w.writerow(["Kênh", "Link", "Subscribers", "Trading Score", "Phân loại", "Quốc gia", "Contact",
                 "Trạng thái", "Giá", "Ghi chú", "Kênh cha", "Nguồn cào", "Danh sách đã lưu", "Thấy lần cuối"])
     for it in data["items"]:
         link = f"https://t.me/{it['username']}" if it.get("username") else ""
         w.writerow([it.get("title"), link, it.get("subscribers"), it.get("trading_score"),
-                    it.get("category_label") or it.get("category"), " ".join(it.get("contacts") or []),
+                    it.get("category_label") or it.get("category"), it.get("country") or "", " ".join(it.get("contacts") or []),
                     it.get("status"), it.get("price"), it.get("note"), it.get("parent_channel"),
                     it.get("source"), it.get("saved_job") or "", it.get("last_seen")])
     fname = f"kol_directory_{datetime.now():%Y%m%d_%H%M}.csv"
@@ -2491,6 +2503,13 @@ async def _run_campaign(campaign_id: int):
         consecutive_errors = 0  # Track consecutive errors for backoff
         consecutive_ai_errors = 0  # Track consecutive AI remix failures
         flooded_accounts: dict[int, float] = {}
+        # Per-account pacing: every sender keeps its OWN delay_min..delay_max gap,
+        # so N accounts send ~N times faster while each account's rhythm is unchanged.
+        # Small random stagger so accounts never fire in the same second.
+        _t0 = time.time()
+        acc_ready: dict[int, float] = {sid: _t0 + random.uniform(0, 20) for sid in sender_ids}
+        acc_errors: dict[int, int] = {}
+        MAX_ACC_ERRORS = 3  # consecutive account-side errors → drop only that account
 
         # Pre-load blacklist ONCE (avoid N+1 query pattern)
         bl = await db.get_dm_blacklist()
@@ -2760,8 +2779,16 @@ async def _run_campaign(campaign_id: int):
                     all_accounts_exhausted = True
                     break
 
-                acc_id = available_senders[account_idx % len(available_senders)]
+                # Account whose own delay ends first; wait for it if nobody is ready yet.
+                acc_id = min(available_senders, key=lambda sid: acc_ready.get(sid, 0.0))
+                _wait = acc_ready.get(acc_id, 0.0) - time.time()
+                if _wait > 0:
+                    await asyncio.sleep(min(_wait, 30))
+                    if campaign_id not in _active_campaigns:
+                        return
+                    continue
                 account_idx += 1
+                consecutive_errors = acc_errors.get(acc_id, 0)
 
                 c = tg.get_client(acc_id)
                 if not c or not await tg.ensure_connected(c, acc_id):
@@ -2846,8 +2873,7 @@ async def _run_campaign(campaign_id: int):
                         await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username,
                                                     "skipped", f"Không resolve được: {reason}"
                                                     + (" (username không tồn tại — bỏ qua vĩnh viễn)" if gone else ""))
-                        await asyncio.sleep(base_delay)  # Always respect delay to avoid FloodWait
-                        continue
+                        continue  # this account's own delay is applied in `finally`
 
                 # ── Bot filter: Layer 2 (Telegram API peer verification) ──
                 if tg.is_bot_account(peer, username):
@@ -3079,7 +3105,6 @@ async def _run_campaign(campaign_id: int):
                                 await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
                                                             "Đã auto-join nhóm, sẽ retry ở vòng tiếp")
                                 # Don't increment failures — this is recoverable
-                                await asyncio.sleep(base_delay)
                                 continue
                             else:
                                 logger.warning(
@@ -3094,7 +3119,6 @@ async def _run_campaign(campaign_id: int):
                     skipped += 1
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped",
                                                 "Cần join nhóm trước — không thể auto-join")
-                    await asyncio.sleep(base_delay)
                     continue
 
                 # ── Skip + blacklist non-sendable errors (don't retry) ──
@@ -3144,6 +3168,20 @@ async def _run_campaign(campaign_id: int):
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed", err_str[:100])
 
             finally:
+                # Per-account error counter + this account's next send slot.
+                acc_errors[acc_id] = consecutive_errors
+                _d = random.uniform(delay_min, delay_max)
+                if consecutive_errors > 0:
+                    _d *= min(2 ** consecutive_errors, 4)
+                acc_ready[acc_id] = max(acc_ready.get(acc_id, 0.0), time.time() + _d)
+                if consecutive_errors >= MAX_ACC_ERRORS and flooded_accounts.get(acc_id) != float('inf'):
+                    flooded_accounts[acc_id] = float('inf')
+                    logger.error(f"[Campaign {campaign_id}] 🛑 Account {acc_id}: {consecutive_errors} lỗi liên tiếp — dừng riêng account này, các account khác vẫn chạy")
+                    try:
+                        await db.add_dm_campaign_log(campaign_id, acc_id, 0, None, "failed",
+                                                     f"🛑 Account {acc_id} dừng sau {consecutive_errors} lỗi liên tiếp")
+                    except Exception:
+                        pass
                 # Always release the per-account busy slot…
                 try:
                     await _busy_cm.__aexit__(None, None, None)
@@ -3163,27 +3201,7 @@ async def _run_campaign(campaign_id: int):
             await db.update_dm_campaign_status(campaign_id, "running",
                                                 sent=sent, failed=failed, skipped=skipped)
 
-            # ── Smart delay with exponential backoff (anti-ban) ──
-            base_delay = random.uniform(delay_min, delay_max)
-            # Increase delay when encountering consecutive errors
-            if consecutive_errors > 0:
-                backoff_multiplier = min(2 ** consecutive_errors, 16)  # Cap at 16x
-                base_delay = base_delay * backoff_multiplier
-                base_delay = min(base_delay, 300)  # Max 5 minutes
-                logger.info(f"[Campaign {campaign_id}] ⚠️ Backoff x{backoff_multiplier}: waiting {base_delay:.0f}s (consecutive errors: {consecutive_errors})")
-            else:
-                logger.info(f"[Campaign {campaign_id}] Waiting {base_delay:.0f}s before next DM")
-
-            # Auto-pause if too many consecutive errors (protect accounts)
-            if consecutive_errors >= 10:
-                logger.error(f"[Campaign {campaign_id}] 🛑 {consecutive_errors} consecutive errors! Auto-pausing campaign to protect accounts.")
-                await db.update_dm_campaign_status(campaign_id, "paused",
-                                                    sent=sent, failed=failed, skipped=skipped)
-                _active_campaigns.pop(campaign_id, None)
-                logger.info(f"[Campaign {campaign_id}] Finished: paused (consecutive errors) — {sent} sent, {failed} failed, {skipped} skipped")
-                return
-
-            await asyncio.sleep(base_delay)
+            # Pacing is per account (acc_ready, set in `finally` above): no global sleep here.
 
         # Campaign completed
         if not _active_campaigns.get(campaign_id):

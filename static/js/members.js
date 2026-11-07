@@ -565,7 +565,11 @@ const Members = {
   },
 
   // ══ Danh bạ KOL: channels + contacts + trading score, for ad booking / export ══
-  _kol: { q: '', status: '', minScore: 0, hasContact: 1, sort: 'score', page: 0, limit: 50 },
+  _kol: { q: '', status: '', minScore: 0, hasContact: 1, sort: 'score', page: 0, limit: 50, kind: '', country: '' },
+  _KOL_KINDS: {
+    futures: ['📈 Futures / Trading', 'var(--green)'], news: ['📰 Tin tức', 'var(--orange)'],
+    airdrop: ['🪂 Airdrop / Bonus', 'var(--text3)'], other: ['💬 Khác', 'var(--text3)'],
+  },
   _KOL_STATUS: {
     new: ['Mới', 'var(--text3)'], contacted: ['Đã liên hệ', 'var(--accent)'],
     negotiating: ['Đang thương lượng', 'var(--orange)'], booked: ['Đã book', 'var(--green)'],
@@ -575,7 +579,8 @@ const Members = {
   _kolQuery(extra = {}) {
     const k = { ...this._kol, ...extra };
     const p = new URLSearchParams({ q: k.q, status: k.status, min_score: k.minScore || 0,
-      has_contact: k.hasContact ? 1 : 0, sort: k.sort, page: k.page, limit: k.limit });
+      has_contact: k.hasContact ? 1 : 0, sort: k.sort, page: k.page, limit: k.limit,
+      kind: k.kind || '', country: k.country || '' });
     return p.toString();
   },
 
@@ -617,6 +622,27 @@ const Members = {
       chips.innerHTML = chip('', 'Tất cả', all, 'var(--text3)') +
         Object.entries(this._KOL_STATUS).map(([k, [l, c]]) => chip(k, l, counts[k], c)).join('');
     }
+    const kc = d.kind_counts || {};
+    const kindEl = document.getElementById('kol-kind-chips');
+    if (kindEl) {
+      const kAll = Object.values(kc).reduce((a, b) => a + b, 0);
+      kindEl.innerHTML = `<button class="kol-chip ${!this._kol.kind ? 'active' : ''}" onclick="Members.kolSet('kind','')">Tất cả <b>${kAll}</b></button>` +
+        Object.entries(this._KOL_KINDS).map(([k, [l, c]]) =>
+          `<button class="kol-chip ${this._kol.kind === k ? 'active' : ''}" style="--chip:${c}" onclick="Members.kolSet('kind','${k}')">${l} <b>${kc[k] || 0}</b></button>`).join('');
+    }
+    const cc = d.country_counts || {};
+    const labels = d.country_labels || {};
+    const ctryEl = document.getElementById('kol-country-chips');
+    if (ctryEl) {
+      const cAll = Object.values(cc).reduce((a, b) => a + b, 0);
+      const cur = this._kol.country;
+      const keys = Object.keys(cc).filter(c => c).sort((a, b) => cc[b] - cc[a]);
+      if (cur && cur !== 'none' && !keys.includes(cur)) keys.unshift(cur);
+      ctryEl.innerHTML = `<button class="kol-chip ${!cur ? 'active' : ''}" onclick="Members.kolSet('country','')">Tất cả <b>${cAll}</b></button>` +
+        keys.map(c => `<button class="kol-chip ${cur === c ? 'active' : ''}" onclick="Members.kolSet('country','${esc(c)}')">${esc(labels[c] || c)} <b>${cc[c] || 0}</b></button>`).join('') +
+        (cc[''] ? `<button class="kol-chip ${cur === 'none' ? 'active' : ''}" onclick="Members.kolSet('country','none')">❔ Chưa rõ <b>${cc['']}</b></button>` : '');
+    }
+    this._kolCountryLabels = labels;
     (document.getElementById('kol-total') || me_dummy).textContent = `${d.total} kênh`;
     if (!items.length) {
       tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:24px">Chưa có kênh nào khớp bộ lọc. Bấm “🔄 Đồng bộ từ Deep Crawl” để nạp kết quả cào gần nhất.</td></tr>`;
@@ -637,7 +663,8 @@ const Members = {
             ${it.saved_job ? `<span title="Contact đã lưu vào danh sách ${esc(it.saved_job)}" style="font-size:10px;margin-left:4px">📥</span>` : ''}</td>
           <td style="text-align:right;font-size:12.5px">${(it.subscribers || 0).toLocaleString()}</td>
           <td><span style="font-weight:700;color:${sc}">${score}</span></td>
-          <td style="font-size:11.5px;color:var(--text2);white-space:nowrap">${esc(it.category_label || it.category || '—')}</td>
+          <td style="font-size:11.5px;color:var(--text2);white-space:nowrap">${esc(it.category_label || it.category || '—')}
+            ${it.country ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">${esc((this._kolCountryLabels || {})[it.country] || it.country)}</div>` : ''}</td>
           <td style="max-width:200px">${contacts}</td>
           <td><select class="form-input" style="min-width:140px;padding:3px 6px;font-size:12px;border-left:3px solid ${stCol}" onchange="Members.kolUpdate(${it.id},'status',this.value)">${opts}</select></td>
           <td><input class="form-input" style="width:90px;padding:3px 6px;font-size:12px" value="${esc(it.price || '')}" placeholder="vd 150$" onchange="Members.kolUpdate(${it.id},'price',this.value)"></td>
@@ -3176,7 +3203,17 @@ const Members = {
 
     const picked = new Set(cleanContacts);
     const nCh = viewLeads.filter(l => (l.contacts || []).some(c => picked.has(c))).length;
-    if (!confirm(`Lưu ${cleanContacts.length} contacts (admin của ${nCh} kênh — 1 kênh có thể có nhiều admin) vào job "${jobId}"?`)) return;
+    const allWithContacts = viewLeads.filter(l => (l.contacts || []).length).length;
+    if (!await App.confirmDialog({
+      icon: '💾', title: 'Lưu contact vào danh sách',
+      message: `Lưu vào job "${jobId}" (tab ${tabLbl})`,
+      stats: [
+        { value: cleanContacts.length, label: 'contact đã chọn' },
+        { value: nCh, label: 'kênh', hint: `/${allWithContacts} kênh trong tab` },
+      ],
+      note: 'Chỉ lưu contact đã tick trong tab đang xem. Contact đã có ở danh sách khác hoặc đã DM sẽ tự bỏ qua. Muốn lấy nhiều hơn: chọn tab "Tất cả có contact" rồi tick hết.',
+      okText: 'Lưu contact', cancelText: 'Huỷ',
+    })) return;
 
     try {
       const res = await fetch('/api/members/import-contacts', {
@@ -3221,7 +3258,16 @@ const Members = {
       this._renderDeepCrawlResults(this._similarLeads);
 
       // Shortcut: go straight from imported contacts to a DM campaign on that job
-      if (d.count > 0 && confirm(`Tạo DM campaign ngay cho ${d.count} contact trong job "${jobId}"?`)) {
+      const skippedTotal = (d.skipped_existing || 0) + (d.skipped_dmd || 0) + (d.skipped_dupe || 0);
+      if (d.count > 0 && await App.confirmDialog({
+        icon: '🚀', title: 'Tạo DM campaign luôn?',
+        message: `Danh sách "${groupTitle}" đã sẵn sàng.`,
+        stats: [
+          { value: d.count, label: 'contact mới' },
+          ...(skippedTotal ? [{ value: skippedTotal, label: 'bỏ qua', hint: 'đã có / đã DM / trùng' }] : []),
+        ],
+        okText: 'Tạo campaign', cancelText: 'Để sau',
+      })) {
         this.openCampaignModal(jobId);
       }
     } catch (e) {

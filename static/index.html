@@ -13,8 +13,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TG Scheduler">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/css/style.css?v=492">
-  <link rel="stylesheet" href="/static/css/themes.css?v=493">
+  <link rel="stylesheet" href="/static/css/style.css?v=493">
+  <link rel="stylesheet" href="/static/css/themes.css?v=494">
   <script src="/static/js/theme.js?v=492"></script>
   <!-- Boot splash: paints instantly (CSS-only, no JS) so the user never sees a
        blank white screen while the app bundle parses/executes. Hidden as soon
@@ -1571,6 +1571,8 @@
               <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px;cursor:pointer">
                 <input type="checkbox" checked onchange="Members.kolSet('hasContact', this.checked ? 1 : 0)"> Chỉ kênh có contact</label>
             </div>
+            <div class="kol-facet"><span class="kol-facet-lbl">Thể loại</span><div id="kol-kind-chips" class="kol-facet-chips"></div></div>
+            <div class="kol-facet"><span class="kol-facet-lbl">Quốc gia</span><div id="kol-country-chips" class="kol-facet-chips"></div></div>
             <div id="kol-status-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
             <div class="table-wrap" style="overflow-x:auto">
               <table>
@@ -2196,14 +2198,14 @@
   <script defer src="/static/js/api.js?v=492"></script>
   <script defer src="/static/js/discord.js?v=492"></script>
   <script defer src="/static/js/zalo.js?v=495"></script>
-  <script defer src="/static/js/members.js?v=507"></script>
+  <script defer src="/static/js/members.js?v=508"></script>
   <script defer src="/static/js/analytics.js?v=492"></script>
   <script defer src="/static/js/ai_agents.js?v=492"></script>
   <script defer src="/static/js/ai_followup.js?v=498"></script>
   <script defer src="/static/js/changelog.js?v=492"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=506"></script>
-  <script defer src="/static/js/app.js?v=512"></script>
+  <script defer src="/static/js/app.js?v=513"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">
