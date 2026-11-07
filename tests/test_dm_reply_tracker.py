@@ -439,3 +439,22 @@ async def test_decline_with_off_ladder_figure_sends_closing_not_number_check(moc
     sent = mock_send.call_args[0][2]
     assert sent == tracker.get_decline_closing_reply([{"role": "user", "content": "Hi not interested"}])
     assert "double-check" not in sent and "%" not in sent
+
+
+@pytest.mark.asyncio
+async def test_stale_delayed_unlock_does_not_release_newer_ai_lock(monkeypatch):
+    """A send's 30s delayed unlock must not free a lock taken later by a reply still
+    being generated — that let a second KOL message trigger a parallel AI reply."""
+    import dm_reply_tracker as drt
+
+    async def _no_sleep(_s):
+        return None
+
+    monkeypatch.setattr(drt.asyncio, "sleep", _no_sleep)
+    key = (91, 92)
+    old_gen = drt._lock_ai_send(*key)  # earlier send
+    drt._lock_ai_send(*key)            # new reply generating
+    await drt._remove_ai_send_after_delay(*key, old_gen)
+    assert key in drt._pending_ai_sends
+    await drt._remove_ai_send_after_delay(*key, drt._pending_ai_gen[key])
+    assert key not in drt._pending_ai_sends

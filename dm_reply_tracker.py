@@ -159,6 +159,16 @@ _SEEN_TTL_SECS = 3600  # 1h — Telethon không redeliver sau vài phút
 
 # Pending AI sends set: (account_id, user_id)
 _pending_ai_sends: set[tuple[int, int]] = set()
+# Lock generation per chat: a delayed unlock from an earlier send must not release
+# a lock taken later by a reply still being generated (that let two replies out).
+_pending_ai_gen: dict[tuple[int, int], int] = {}
+
+
+def _lock_ai_send(account_id: int, user_id: int) -> int:
+    key = (account_id, user_id)
+    _pending_ai_sends.add(key)
+    _pending_ai_gen[key] = _pending_ai_gen.get(key, 0) + 1
+    return _pending_ai_gen[key]
 
 # Background periodic worker task for 24h auto-resume and drip follow-ups
 _periodic_worker_task: asyncio.Task | None = None
@@ -186,9 +196,11 @@ def _clear_background_tasks() -> None:
     _background_tasks.clear()
 
 
-async def _remove_ai_send_after_delay(account_id: int, user_id: int):
+async def _remove_ai_send_after_delay(account_id: int, user_id: int, gen: int | None = None):
     await asyncio.sleep(30)  # Covers full AI cycle: API call + typing delay
-    _pending_ai_sends.discard((account_id, user_id))
+    key = (account_id, user_id)
+    if gen is None or _pending_ai_gen.get(key) == gen:
+        _pending_ai_sends.discard(key)
 
 
 # ── Main account ID for handover notifications ────────────────────────────────
@@ -392,8 +404,8 @@ _STEP_PROMPT_LABELS = {
 
 _STEP_GUIDANCE = {
     "prospect": (
-        "The KOL has NOT agreed to the offer yet. Keep building rapport; present the ladder when they ask. "
-        "When the KOL clearly says yes to the commission ladder / wants to proceed, append [DEAL_AGREED] on its own line."
+        "The KOL has NOT agreed yet. Follow the short closing flow: channel link → last-3-months performance → offer + ONE running campaign "
+        "→ registration link. When the KOL clearly says yes / wants to proceed, send the registration link once and append [DEAL_AGREED] on its own line."
     ),
     "deal_agreed": (
         "The deal is agreed — do NOT re-pitch or re-explain the ladder unless asked. "
@@ -1039,7 +1051,7 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
             return False
         if drip_stage is not None and chat.get("last_drip_stage", 0) >= drip_stage:
             return False
-        _pending_ai_sends.add((account_id, user_id))
+        lock_gen = _lock_ai_send(account_id, user_id)
         try:
             if await tg.send_text_message(account_id, user_id, text) is False:
                 return False
@@ -1054,7 +1066,7 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
                     await conn.commit()
             return True
         finally:
-            _spawn_background(_remove_ai_send_after_delay(account_id, user_id))
+            _spawn_background(_remove_ai_send_after_delay(account_id, user_id, lock_gen))
 
 
 async def _source_agent_id(campaign_id, watcher_id):
@@ -1103,7 +1115,7 @@ async def _event_images(event) -> list[str]:
 
 
 _COMMISSION_RULE_LADDER = (
-    "7. COMMISSION QUOTING MANDATE: The ONLY commission figures you may quote are in the OFFICIAL WEEX KOL COMMISSION LADDER block below (same ladder for every KOL, every region). Lead with the headline given in that block and explain the ladder only when the KOL asks for details. Never invent a tier, a % or a $ figure that is not in that block.\n"
+    "7. COMMISSION QUOTING MANDATE: The ONLY commission figures you may quote are in the OFFICIAL WEEX KOL COMMISSION LADDER block below (same ladder for every KOL, every region). Follow that block's FIRST PITCH rule for the first offer; give the full tier table only when the KOL asks for details. Never invent a tier, a % or a $ figure that is not in that block.\n"
 )
 _COMMISSION_RULE_AGENT = (
     "7. COMMISSION QUOTING MANDATE: The ONLY commission figures you may quote are in the OFFICIAL {ex} KOL COMMISSION TERMS block below, i.e. the terms written in your own instructions and knowledge base. Lead with the starting offer they define and explain the tiers only when the KOL asks for details. Never invent a tier, a % or a $ figure that is not written there.\n"
@@ -1165,7 +1177,7 @@ async def generate_and_send_ai_reply_for_chat(
         logger.info("[AIFollowUp] ⚡ Skipping duplicate — AI reply already in progress for user @%s (id=%d, acc=%d)",
                     sender_username or "?", user_id, account_id)
         return False
-    _pending_ai_sends.add((account_id, user_id))  # Lock immediately to prevent race condition
+    _lock_ai_send(account_id, user_id)  # Lock immediately to prevent race condition
 
     # 2. Get chat session
     chat = await db.get_or_create_followup_chat(
@@ -1259,7 +1271,7 @@ async def generate_and_send_ai_reply_for_chat(
         "2. TELEGRAM FORMATTING: Do NOT output literal '\\n' text characters. Use actual line breaks. Do NOT use raw markdown like **bold**. Use standard HTML <b>bold</b> or <i>italic</i> for formatting.\n"
         "3. INTERNAL HANDOVER FLOW (HIGHEST PRIORITY): NEVER instruct, ask, or suggest that the prospect contact https://t.me/weexwill, @weexwill, or any other main account. Prospect stays chatting with this nick phụ. When prospect provides UID and campaign choice, acknowledge receipt naturally and append [HANDOVER_REQUIRED]; the app privately notifies the main account. Say only that the team will review/configure internally. NEVER say the commission is configured, never provide a SEND MESSAGE/contact card for the main account, and never expose this internal handover mechanism. If UID or campaign is missing, ask only for the missing item.\n"
         "4. TRUTHFULNESS MANDATE (FINTECH — ZERO TOLERANCE): You may be warm, casual and personable, but you must NEVER invent facts. STRICTLY FORBIDDEN to fabricate: a mutual friend or referral ('your friend referred you'), having watched/read their content when you have not, any UID, any campaign name, commission rates, trading volume, follower counts, earnings figures, payout status, or the claim that commission/binding is already configured. If the prospect asks how you found them, answer honestly: you found their public crypto profile/community and reached out directly. If you do not know something, say you will check with the team. A single fabricated fact destroys the partnership.\n"
-        "5. WARM-UP BEFORE OFFER (RAPPORT PHASE): On the first 1-3 exchanges, prioritise a natural human conversation over pitching. Open with a genuine, verifiable reason for reaching out, ask about their community/market view, and react to what they actually say. Do NOT dump commission numbers, campaign lists or CTAs until the prospect shows interest or asks what you want. Small talk, market chat and light humour are encouraged; invented personal history is not. If the prospect challenges your opener or asks 'who are you / how did you find me', drop everything else, own the mistake plainly if the opener was wrong, state the real source, introduce yourself by name and role, and offer to let them verify before continuing.\n"
+        "5. SHORT CLOSING FLOW (no long interviews): introduce yourself by name and role, then ask ONLY two things, one per message, skipping whatever is already known: (a) their channel/community link; (b) their trading/referral performance for the LAST 3 MONTHS (a dashboard screenshot or a rough summary of volume and commission is enough). NEVER ask about active traders, member counts, content type, favourite tokens/markets or any other survey question. After (b) — or right away if they ask what you offer — give the offer and recommend ONE currently running campaign from the knowledge base that fits their community. When they agree, send the standard registration link from the knowledge base once and append [DEAL_AGREED]. If the prospect challenges your opener or asks 'who are you / how did you find me', drop everything else, own the mistake plainly if the opener was wrong, state the real source, introduce yourself by name and role, and offer to let them verify before continuing.\n"
         "6. PROFESSIONAL REPLIES ONLY (NO NONSENSE): Every reply must be a meaningful, professional business message. STRICTLY FORBIDDEN: one-word jokes, religious phrases, memes, or throwaway replies ('Mô phật', 'lol', 'ok', a single emoji) — these destroy credibility. If someone sends a document/file with no text, acknowledge it professionally: 'Got the file, let me take a look 👍' (or same meaning in the user's language). If the counterparty is a support bot or someone pitching THEIR product to you, stay brief and courteous, do NOT pitch WEEX, do NOT joke, and append [HANDOVER_REQUIRED] so a human decides. If the counterparty is a COMPANY/PLATFORM (exchange, white-label exchange, broker, fintech app, neobank, financial services platform) rather than an individual KOL/community, do NOT pitch the KOL commission ladder: briefly introduce the exchange's Broker / B2B partnership model if the KNOWLEDGE BASE describes one, never quote Broker commission rates, fees or timelines, and append [HANDOVER_REQUIRED] so the partnership team handles it.\n"
         + commission_rule +
         "8. STRICT CONTEXTUAL CONTINUATION, NATURAL HUMAN TONE & ANTI-NAGGING:\n"

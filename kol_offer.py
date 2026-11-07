@@ -238,6 +238,21 @@ def _tier_rows(ladder: dict) -> list[str]:
     return rows
 
 
+def _first_pitch_rule(ladder: dict) -> str:
+    """The first offer must carry enough substance to close — a bare headline reads like spam."""
+    t0 = ladder["tiers"][0]
+    why = (ladder["rules"].get("why_us") or [""])[0]
+    return (
+        "FIRST PITCH (the first time the KOL agrees to hear the offer, or asks what you offer): ONE message, 3-5 short lines, "
+        f"covering: the headline; that they start at {_fmt_num(t0['revshare_pct'])}% revshare + "
+        f"${_fmt_num(t0['bonus_per_1m_taker_usd'])} per 1M taker volume and move up the ladder as volume grows; "
+        "commission is paid daily; " + (f"one reason to choose us ({why}); " if why else "")
+        + "then recommend ONE currently running campaign that fits their community and ask if they want to go ahead "
+        "(if their last-3-months performance is still unknown, ask for it instead). "
+        "Never send the headline alone, never send two messages in a row."
+    )
+
+
 def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None) -> str:
     """Build the prompt block the AI receives every turn.
 
@@ -250,6 +265,7 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None) 
         f"--- OFFICIAL WEEX KOL COMMISSION LADDER (v{ladder['version']}, effective {ladder['effective_from']}) ---",
         f"Headline you may use: \"{ladder.get('headline') or 'up to 80% revshare'}\". When the KOL asks for details, use EXACTLY this ladder. "
         "It is the SAME for every KOL, every region and every language — there is no other offer.",
+        _first_pitch_rule(ladder),
         "| Tier | Condition (monthly) | RevShare | Bonus per 1M TAKER volume |",
         "|---|---|---|---|",
         *_tier_rows(ladder),
@@ -278,7 +294,7 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None) 
     else:
         lines.append(
             "TIER PREDICTION: the KOL has NOT stated their monthly volume — do NOT predict a tier for them. "
-            "Ask naturally for their approximate monthly volume instead."
+            "Do not run a separate volume interview: their last-3-months performance (asked once) is enough."
         )
     return "\n".join(lines)
 
@@ -472,7 +488,7 @@ def get_safe_offer_fallback_reply(lang: str = "en") -> str:
 # Upfront asks: collect proof first, then answer with the agent's own upfront rule.
 UPFRONT_PROOF_RULE = (
     "UPFRONT / FIXED-FEE REQUESTS (overrides the handover list above for the FIRST ask): do NOT hand over yet. "
-    "First, ONCE, ask the KOL for a screen-recorded VIDEO of their trading/referral performance for the LAST 3 MONTHS "
+    "First, ONCE (skip if their last-3-months proof is already in the chat), ask the KOL for a screen-recorded VIDEO of their trading/referral performance for the LAST 3 MONTHS "
     "(affiliate dashboard: referred volume, active traders, commission), clearly showing the deal terms of the exchange "
     "they currently partner with (rate, any upfront/fixed fee they receive). They may hide UID, balance and email. "
     "Do not promise anything in return for the video. "
