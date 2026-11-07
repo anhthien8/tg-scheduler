@@ -4534,6 +4534,8 @@ async def get_analytics_daily_stats(days: int = 30) -> list:
 
 
 async def get_analytics_account_health() -> list:
+    # Floods, failures and success rate cover the last 7 days: all-time totals
+    # never recovered, so a rested account looked unhealthy forever.
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("""
@@ -4562,6 +4564,7 @@ async def get_analytics_account_health() -> list:
                         SUM(CASE WHEN status = 'failed' AND (error_message LIKE '%Flood%' OR error_message LIKE '%PeerFlood%') THEN 1 ELSE 0 END) as flood_total,
                         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_total
                     FROM dm_campaign_logs
+                    WHERE sent_at >= datetime('now', '-7 days')
                     GROUP BY account_id
                     
                     UNION ALL
@@ -4573,6 +4576,7 @@ async def get_analytics_account_health() -> list:
                         SUM(CASE WHEN status = 'failed' AND (error_message LIKE '%Flood%' OR error_message LIKE '%PeerFlood%') THEN 1 ELSE 0 END) as flood_total,
                         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_total
                     FROM watcher_dm_logs
+                    WHERE sent_at >= datetime('now', '-7 days')
                     GROUP BY account_id
                 )
                 GROUP BY account_id

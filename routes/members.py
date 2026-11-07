@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from telethon import errors as tg_errors
 
 import ai_remix as ai_rmx
+import flood_state
 import alerts
 import database as db
 import image_randomizer as img_rand
@@ -2206,7 +2207,9 @@ async def _run_campaign(campaign_id: int):
             all_accounts_exhausted = False
             while True:
                 current_time = time.time()
-                available_senders = [sid for sid in sender_ids if sid not in flooded_accounts or current_time >= flooded_accounts[sid]]
+                available_senders = [sid for sid in sender_ids
+                                     if (sid not in flooded_accounts or current_time >= flooded_accounts[sid])
+                                     and not flood_state.is_resting(sid)]
                 if not available_senders:
                     logger.warning(f"[Campaign {campaign_id}] Tất cả các tài khoản gửi đều bị giới hạn/flood/offline. Tạm dừng chiến dịch.")
                     await db.update_dm_campaign_status(campaign_id, "paused_auto",
@@ -2285,6 +2288,16 @@ async def _run_campaign(campaign_id: int):
                         peer = await client.get_entity(username)
                     else:
                         peer = await client.get_entity(user_id)
+                except tg_errors.FloodWaitError as rfe:
+                    # ResolveUsername is rate-limited too: rest this account and retry
+                    # the target later instead of logging it unresolvable.
+                    wait_r = rfe.seconds + random.randint(5, 15)
+                    flooded_accounts[acc_id] = time.time() + wait_r
+                    flood_state.mark(acc_id, wait_r)
+                    await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
+                                                f"FloodWait (tra username): chờ {wait_r}s")
+                    failed += 1
+                    continue
                 except Exception as pe1:
                     try:
                         from telethon.tl.types import PeerUser
@@ -2468,6 +2481,7 @@ async def _run_campaign(campaign_id: int):
                 await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
                                             f"FloodWait: chờ {wait_time}s")
                 flooded_accounts[acc_id] = time.time() + wait_time
+                flood_state.mark(acc_id, wait_time)
                 failed += 1
                 consecutive_errors += 1
                 continue
@@ -2587,11 +2601,14 @@ async def _run_campaign(campaign_id: int):
                     # shadow it and cause UnboundLocalError at the earlier use above.)
                     wait_match = re.search(r'(\d+)', err_str)
                     wait_secs = int(wait_match.group(1)) if wait_match else 60
-                    wait_secs = min(max(wait_secs, 30), 600)  # Clamp 30s-600s
+                    # Honour Telegram's real wait (capping it at 10 min made the account
+                    # retry early and get flooded again with a longer wait).
+                    wait_secs = min(max(wait_secs, 30), 6 * 3600)
                     logger.warning(f"[Campaign {campaign_id}] Flood detected on {acc_id}, waiting {wait_secs}s")
                     await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "failed",
                                                 f"Flood: chờ {wait_secs}s")
                     flooded_accounts[acc_id] = time.time() + wait_secs
+                    flood_state.mark(acc_id, wait_secs)
                     continue
                 else:
                     failed += 1
