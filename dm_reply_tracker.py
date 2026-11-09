@@ -2626,6 +2626,17 @@ async def _process_drip_queue() -> tuple[int, list[str]]:
         except Exception as e:
             logger.error("[DripEngine] Failed drip for user %d: %s", user_id, e)
             errs.append(str(e))
+            if type(e).__name__ == "PeerFloodError":
+                # Telegram says this nick is messaging too many strangers: stop it now
+                # (same guard as Keyword DM / campaigns) instead of retrying on the next pass.
+                try:
+                    import alerts
+                    await alerts.flood_guard(account_id)
+                except Exception as guard_err:
+                    logger.error("[DripEngine] flood guard failed for account %d: %s", account_id, guard_err)
+                await _drip_defer(row_id, 24)
+                done_accounts.add(account_id)
+                continue
             unreachable = "Cannot resolve entity" in str(e)
             fails = (row.get("drip_fail_count") or 0) + 1
             await _drip_defer(row_id, (24 if fails < _DRIP_UNREACHABLE_MAX else 24 * 30) if unreachable else 6,

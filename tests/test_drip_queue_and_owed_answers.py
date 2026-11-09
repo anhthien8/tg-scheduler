@@ -185,6 +185,26 @@ async def test_paused_account_sends_no_drip(mock_send, mock_gen):
     mock_send.assert_not_called()
 
 
+@patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
+@patch("telegram_client.send_text_message", new_callable=AsyncMock)
+async def test_peerflood_on_a_drip_pauses_the_nick(mock_send, mock_gen):
+    """PeerFlood while sending a drip must stop the nick, not retry with the next lead 5 minutes later."""
+    from telethon import errors
+    await _account_and_agent()
+    await db.unpause_account(A)  # the pause cache is in memory and outlives the previous test
+    await _silent_lead(user_id=1001)
+    await _silent_lead(user_id=1002)
+    mock_gen.return_value = "Hey bro, still interested in the affiliate program?"
+    mock_send.side_effect = errors.PeerFloodError(request=None)
+    with patch("alerts.send_alert", new_callable=AsyncMock),             patch("proxy_manager.rotate_proxy_for_account", new_callable=AsyncMock, return_value={}):
+        assert (await tracker.process_drip_followups())["sent"] == 0
+        assert await db.is_account_paused(A)
+        # The paused nick sends nothing on the following passes.
+        await tracker.process_drip_followups()
+    assert mock_send.call_count == 1
+    await db.unpause_account(A)
+
+
 async def test_user_reply_restarts_the_drip_cadence():
     await _account_and_agent()
     await _silent_lead()

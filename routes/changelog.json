@@ -29,6 +29,11 @@
             },
             {
                 "type": "fix",
+                "title": "Follow-up tự động: nick dính PeerFlood được tạm dừng ngay",
+                "desc": "Khi Telegram báo PeerFlood (nick nhắn quá nhiều người lạ) trong lúc gửi follow-up tự động, nick đó được tự tạm dừng và có cảnh báo, giống Keyword DM và campaign. Trước đây nick chỉ nghỉ hết lượt 5 phút rồi thử tiếp với lead khác."
+            },
+            {
+                "type": "fix",
                 "title": "Keyword DM báo rõ khi nick gửi đang tạm dừng",
                 "desc": "Trước đây nếu mọi nick gửi của một rule đang bị tạm dừng (ví dụ sau PeerFlood), rule vẫn phát hiện người phù hợp nhưng âm thầm không gửi và không để lại dấu vết. Giờ rule hiện nhãn “⏸ Nick gửi đang dừng”, cột lỗi có số lần “bỏ qua/24h” kèm lý do của từng nick, và log ghi một dòng “bỏ qua”. Các lần bỏ qua không tính là lỗi nên không làm rule tự dừng."
             }
