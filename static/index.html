@@ -123,22 +123,50 @@
           📊 Tổng quan
         </button>
 
-        <!-- Telegram Group -->
-        <div class="nav-section">Telegram</div>
+        <!-- Menu grouped by workflow (v3.37): prepare nicks → find & reach KOLs → chat & close → channels → measure.
+             data-page ids, onclick targets and badge ids are unchanged. -->
+        <div class="nav-section" title="Các nick Telegram dùng để gửi tin: đăng nhập, sức khoẻ nick, làm nóng nick">1 · Chuẩn bị nick</div>
         <button type="button" class="nav-item" data-page="accounts" onclick="App.navigate('accounts')">
           👤 Tài khoản
         </button>
+        <button type="button" class="nav-item" data-page="warmup" onclick="App.navigate('warmup')">
+          🔥 Warmup Nhóm
+        </button>
+
+        <div class="nav-section" title="Tìm người phù hợp và gửi tin nhắn đầu tiên">2 · Tìm &amp; tiếp cận KOL</div>
+        <button type="button" class="nav-item" data-page="members" onclick="App.navigate('members')">
+          👥 Cào &amp; DM
+        </button>
+        <button type="button" class="nav-item" data-page="watchers" onclick="App.navigate('watchers')">
+          🎯 Keyword DM
+        </button>
+        <button type="button" class="nav-item" data-page="templates" onclick="App.navigate('templates')">
+          📋 Mẫu tin (Templates)
+        </button>
+        <button type="button" class="nav-item" data-page="blacklist" onclick="App.navigate('blacklist')" id="nav-blacklist">
+          🚫 Blacklist <span id="blacklist-badge" class="inbox-badge hidden">0</span>
+        </button>
+
+        <div class="nav-section" title="Khi KOL trả lời: AI chat, người thật tiếp quản, theo dõi từng bước tới lúc chốt">3 · Trò chuyện &amp; chốt deal</div>
+        <button type="button" class="nav-item" data-page="ai-followup" onclick="App.navigate('ai-followup')">
+          💬 Lead KOL (AI Agent)
+        </button>
+        <button type="button" class="nav-item" data-page="inbox" onclick="App.navigate('inbox')" id="nav-inbox">
+          📬 Inbox <span id="inbox-badge" class="inbox-badge hidden">0</span>
+        </button>
+        <button type="button" class="nav-item" data-page="autoreply" onclick="App.navigate('autoreply')">
+          ↩️ Trả lời tự động
+        </button>
+        <button type="button" class="nav-item" data-page="ai-agents" onclick="App.navigate('ai-agents')">
+          🤖 Cấu hình AI Agents
+        </button>
+
+        <div class="nav-section" title="Đăng bài theo lịch và nuôi kênh / nhóm của mình">4 · Kênh &amp; cộng đồng</div>
         <button type="button" class="nav-item" data-page="schedules" onclick="App.navigate('schedules')">
           📅 Lịch gửi
         </button>
         <button type="button" class="nav-item" data-page="channels" onclick="App.navigate('channels')">
           📤 Quản lý kênh
-        </button>
-
-        <!-- Automation Group -->
-        <div class="nav-section">Automation</div>
-        <button type="button" class="nav-item" data-page="watchers" onclick="App.navigate('watchers')">
-          🎯 Keyword DM
         </button>
         <button type="button" class="nav-item" data-page="reactions" onclick="App.navigate('reactions')">
           ❤️ Tăng Tương Tác
@@ -146,57 +174,24 @@
         <button type="button" class="nav-item" data-page="engagement" onclick="App.navigate('engagement')">
           🌐 Cộng Đồng
         </button>
-        <button type="button" class="nav-item" data-page="warmup" onclick="App.navigate('warmup')">
-          🔥 Warmup Nhóm
-        </button>
-        <button type="button" class="nav-item" data-page="inbox" onclick="App.navigate('inbox')" id="nav-inbox">
-          📬 Inbox <span id="inbox-badge" class="inbox-badge hidden">0</span>
-        </button>
-        <button type="button" class="nav-item" data-page="blacklist" onclick="App.navigate('blacklist')" id="nav-blacklist">
-          🚫 Blacklist <span id="blacklist-badge" class="inbox-badge hidden">0</span>
-        </button>
-        <button type="button" class="nav-item" data-page="members" onclick="App.navigate('members')">
-          👥 Cào & DM
-        </button>
 
-        <!-- AI Agents -->
-        <div class="nav-section">AI Agents</div>
-        <button type="button" class="nav-item" data-page="ai-agents" onclick="App.navigate('ai-agents')">
-          🤖 Cấu hình AI Agents
-        </button>
-        <button type="button" class="nav-item" data-page="ai-followup" onclick="App.navigate('ai-followup')">
-          💬 AI Agent
-        </button>
-
-        <!-- Growth Features -->
-        <div class="nav-section">Growth</div>
+        <div class="nav-section" title="Xem kết quả và cải thiện kịch bản AI">5 · Đo lường</div>
         <button type="button" class="nav-item" data-page="analytics" onclick="App.navigate('analytics')">
-          📊 Analytics
+          📊 Thống kê (Analytics)
         </button>
         <button type="button" class="nav-item" data-page="agent-evolution" onclick="App.navigate('agent-evolution')">
           🧬 Agent Evolution
         </button>
-        <button type="button" class="nav-item" data-page="templates" onclick="App.navigate('templates')">
-          📋 Templates
-        </button>
-        <button type="button" class="nav-item" data-page="autoreply" onclick="App.navigate('autoreply')">
-          🤖 Auto-Reply
-        </button>
 
-        <!-- Discord Group -->
-        <div class="nav-section">Discord</div>
+        <div class="nav-section" title="Nền tảng ngoài Telegram">Kênh khác</div>
         <button type="button" class="nav-item" data-page="discord" onclick="App.navigate('discord')">
           🎮 Discord
         </button>
-
-        <!-- Zalo Group -->
-        <div class="nav-section">Zalo</div>
         <button type="button" class="nav-item" data-page="zalo" onclick="App.navigate('zalo')">
           💙 Zalo Outreach
         </button>
 
-        <!-- System Group -->
-        <div class="nav-section">Hệ thống</div>
+        <div class="nav-section" title="Nhật ký, cài đặt, cập nhật và hướng dẫn">Hệ thống</div>
         <button type="button" class="nav-item" data-page="logs" onclick="App.navigate('logs')">
           📋 Lịch sử
         </button>
@@ -2219,11 +2214,11 @@
   <script defer src="/static/js/members.js?v=509"></script>
   <script defer src="/static/js/analytics.js?v=492"></script>
   <script defer src="/static/js/ai_agents.js?v=492"></script>
-  <script defer src="/static/js/ai_followup.js?v=501"></script>
+  <script defer src="/static/js/ai_followup.js?v=502"></script>
   <script defer src="/static/js/changelog.js?v=492"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=506"></script>
-  <script defer src="/static/js/app.js?v=516"></script>
+  <script defer src="/static/js/app.js?v=517"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

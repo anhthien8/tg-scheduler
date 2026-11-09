@@ -3001,12 +3001,24 @@ async def get_watcher_error_summary() -> dict:
                    COALESCE(SUM(l.status='failed'), 0) AS failed,
                    COALESCE(SUM(l.status='success'), 0) AS success,
                    COALESCE(SUM(l.status='failed' AND l.sent_at >= datetime('now','-24 hours')), 0) AS failed_24h,
-                   MAX(CASE WHEN l.status='failed' THEN l.sent_at END) AS last_failed_at
+                   MAX(CASE WHEN l.status='failed' THEN l.sent_at END) AS last_failed_at,
+                   COALESCE(SUM(l.status='skipped' AND l.sent_at >= datetime('now','-24 hours')), 0) AS skipped_24h
             FROM keyword_watchers w LEFT JOIN watcher_dm_logs l ON l.watcher_id = w.id
             GROUP BY w.id
         """)
         for r in await c.fetchall():
-            out[r["id"]] = {**dict(r), "top_errors": []}
+            out[r["id"]] = {**dict(r), "top_errors": [], "last_skip_reason": None, "last_skipped_at": None}
+        c = await db.execute("""
+            SELECT l.watcher_id, l.error_message, l.sent_at FROM watcher_dm_logs l
+            JOIN (SELECT watcher_id, MAX(id) AS mid FROM watcher_dm_logs
+                  WHERE status='skipped' AND sent_at >= datetime('now','-24 hours')
+                  GROUP BY watcher_id) m ON m.mid = l.id
+        """)
+        for r in await c.fetchall():
+            e = out.get(r["watcher_id"])
+            if e is not None:
+                e["last_skip_reason"] = r["error_message"]
+                e["last_skipped_at"] = r["sent_at"]
         c = await db.execute("""
             SELECT watcher_id, error_message, COUNT(*) AS n, MAX(sent_at) AS last_at
             FROM watcher_dm_logs WHERE status='failed'
@@ -6219,7 +6231,7 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
                    c.lead_tier, c.summary, c.last_drip_stage, c.human_takeover_at, c.verification_status,
                    COALESCE(c.kol_step, 'prospect') AS kol_step, c.kol_step_updated_at,
                    COALESCE(c.step_reminders_sent, 0) AS step_reminders_sent,
-                   c.owed_since, c.owed_note,
+                   c.owed_since, c.owed_note, c.last_user_message_at,
                    p.weex_uid, p.vip_code, p.volume_claimed, p.missing_items,
                    a.name AS account_name,
                    CASE WHEN n.status = 'sent' THEN 1 ELSE 0 END AS nudged,

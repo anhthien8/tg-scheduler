@@ -1,11 +1,45 @@
 [
     {
+        "version": "3.37.0",
+        "date": "10/11/2026",
+        "title": "📌 “Việc cần làm”, form sửa hồ sơ lead, menu theo quy trình",
+        "summary": "Giao diện dễ dùng hơn: trang Lead KOL có khối “Việc cần làm” cho biết hôm nay phải xử lý ai, sửa hồ sơ lead bằng một form thay cho chuỗi hộp hỏi, menu bên trái xếp theo thứ tự công việc, và Keyword DM báo rõ khi nick gửi đang bị tạm dừng.",
+        "is_latest": true,
+        "badge": "LATEST",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Khối “📌 Việc cần làm” ở đầu trang Lead KOL (AI Agent)",
+                "desc": "Năm ô đếm những lead đang chờ người thật: cần người thật trả lời, lời hứa quá hạn 24 giờ, proof chờ duyệt, đã nhận UID chờ gắn link, Tier A im lặng quá 2 ngày. Bấm một ô để lọc bảng đúng các lead đó (Tier A nằm trên cùng), bấm lại để bỏ lọc. Tính từ dữ liệu đã tải nên không làm trang chậm đi."
+            },
+            {
+                "type": "improvement",
+                "title": "Lọc kết hợp trạng thái + bước",
+                "desc": "Trước đây chọn lọc theo bước thì mất lọc theo trạng thái và ngược lại. Giờ hai loại lọc dùng cùng lúc được (ví dụ “Cần người thật” + “Đồng ý deal”). Nút “Tất cả” hoặc ô “Tổng lead” bỏ mọi bộ lọc."
+            },
+            {
+                "type": "improvement",
+                "title": "Sửa hồ sơ lead bằng một form",
+                "desc": "“📍 Hồ sơ & phân công” trước đây hỏi lần lượt 9 hộp thoại, bấm Huỷ giữa chừng là mất hết. Giờ là một form thấy đủ mọi ô, có giải thích “i” ở các ô dễ nhầm (UID, Volume, VIP code, phân phối), chỉ lưu những ô bạn thật sự sửa. Phân công nhiều lead, gửi tin hàng loạt và nhập lý do chuyển bước cũng dùng form này; khi phân công nhiều lead, ô để trống nghĩa là giữ nguyên chứ không xoá dữ liệu cũ."
+            },
+            {
+                "type": "improvement",
+                "title": "Menu bên trái xếp theo quy trình",
+                "desc": "Các mục được gom lại theo thứ tự làm việc: 1 · Chuẩn bị nick → 2 · Tìm & tiếp cận KOL → 3 · Trò chuyện & chốt deal → 4 · Kênh & cộng đồng → 5 · Đo lường, rồi Kênh khác và Hệ thống. Không trang nào bị bỏ; “AI Agent” nay ghi là “Lead KOL (AI Agent)”, “Auto-Reply” là “Trả lời tự động”, “Templates” là “Mẫu tin”."
+            },
+            {
+                "type": "fix",
+                "title": "Keyword DM báo rõ khi nick gửi đang tạm dừng",
+                "desc": "Trước đây nếu mọi nick gửi của một rule đang bị tạm dừng (ví dụ sau PeerFlood), rule vẫn phát hiện người phù hợp nhưng âm thầm không gửi và không để lại dấu vết. Giờ rule hiện nhãn “⏸ Nick gửi đang dừng”, cột lỗi có số lần “bỏ qua/24h” kèm lý do của từng nick, và log ghi một dòng “bỏ qua”. Các lần bỏ qua không tính là lỗi nên không làm rule tự dừng."
+            }
+        ]
+    },
+    {
         "version": "3.36.0",
         "date": "10/11/2026",
         "title": "⏳ Follow-up tự động chạy lại + danh sách “Nợ trả lời”",
         "summary": "Sửa lỗi follow-up tự động (drip) bị kẹt khiến gần 600 lead không được nhắc lại, và thêm danh sách các KOL mà bên mình đã hứa “team sẽ xem và báo lại” kèm nhắc admin khi quá 24 giờ.",
-        "is_latest": true,
-        "badge": "LATEST",
+        "is_latest": false,
         "changes": [
             {
                 "type": "fix",

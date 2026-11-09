@@ -216,6 +216,8 @@ if(page==='ai-followup'){
 
       <!-- ══ TAB: LEADS ══ -->
       <div id="aifu-tab-leads">
+        <!-- "Việc cần làm": what needs a human today, built from the already-loaded lead list -->
+        <div id="aifu-todo"></div>
         <div class="stats-grid" style="margin-bottom:var(--sp-4)">
           <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.filterByStatus('needs_human')" title="Bấm để lọc">
             <div class="stat-label">⚠️ Cần người thật</div>
@@ -233,7 +235,7 @@ if(page==='ai-followup'){
             <div class="stat-label">🤝 KOL support</div>
             <div class="stat-value accent" id="aifu-stat-supported">–</div>
           </div>
-          <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.filterByStatus('')" title="Bấm để xem tất cả">
+          <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.clearFilters()" title="Bấm để xem tất cả (bỏ mọi bộ lọc)">
             <div class="stat-label">Tổng lead</div>
             <div class="stat-value" id="aifu-stat-total">–</div>
           </div>
@@ -1728,8 +1730,16 @@ async loadWatchers(){try{
     const accs=(w.sender_account_ids||[]).map(id=>accMap[id]?accDisplayName(accMap[id]):'?');
     const ava=n=>`<span class="wt-ava" title="${esc(n)}">${esc((n.trim()[0]||'?').toUpperCase())}</span>`;
     const accHtml=accs.length?`<div class="wt-accs" title="${esc(accs.join('\n'))}"><div class="wt-stack">${accs.slice(0,3).map(ava).join('')}${accs.length>3?`<span class="wt-ava wt-more">+${accs.length-3}</span>`:''}</div><span class="wt-acc-name">${esc(accs[0])}${accs.length>1?` <em>+${accs.length-1}</em>`:''}</span></div>`:'<span class="wt-muted">—</span>';
-    const paused=er.paused_reason?`<span class="wt-paused" title="${esc(er.paused_reason)}" onclick="App.showWatcherErrors(${w.id})">Tự dừng do lỗi</span>`:'';
-    const errCell=er.failed?`<button class="wt-err" onclick="App.showWatcherErrors(${w.id})" title="Xem lỗi chi tiết"><i></i>${er.failed.toLocaleString('vi-VN')}${er.failed_24h?`<small>${er.failed_24h}/24h</small>`:''}</button>`:'<span class="wt-muted">—</span>';
+    // Senders that cannot send right now (paused / logged out) — the rule sees the trigger but no DM goes out.
+    const sAccs=(w.sender_account_ids||[]).map(id=>accMap[id]).filter(Boolean);
+    const downAccs=sAccs.filter(a=>a.is_paused||a.session_error||!a.is_logged_in);
+    const downTip=downAccs.map(a=>`${accDisplayName(a)}: ${a.is_paused?(a.pause_reason||'đã tắt thủ công'):(a.session_error||'chưa đăng nhập')}`).join('\n');
+    const allDown=w.is_active&&sAccs.length&&downAccs.length===sAccs.length;
+    const noSender=allDown?`<span class="wt-paused" title="${esc('Rule vẫn phát hiện được người phù hợp nhưng KHÔNG gửi được DM vì mọi nick gửi đều đang dừng:\n'+downTip+'\n\nBấm để đổi nick gửi.')}" onclick="App.editWatcher(${w.id})">⏸ Nick gửi đang dừng</span>`
+      :(w.is_active&&downAccs.length?`<span class="wt-paused" style="color:var(--yellow,#d97706);background:rgba(217,119,6,.12)" title="${esc('Một số nick gửi đang dừng (rule vẫn chạy bằng nick còn lại):\n'+downTip)}" onclick="App.editWatcher(${w.id})">⏸ ${downAccs.length}/${sAccs.length} nick dừng</span>`:'');
+    const paused=(er.paused_reason?`<span class="wt-paused" title="${esc(er.paused_reason)}" onclick="App.showWatcherErrors(${w.id})">Tự dừng do lỗi</span>`:'')+noSender;
+    const skipHtml=er.skipped_24h?`<button class="wt-err" style="color:var(--yellow,#d97706)" onclick="App.openWatcherLogsFor(${w.id})" title="${esc((er.last_skip_reason||'Bỏ qua không gửi')+'\n\nBấm để xem log.')}">⏭ ${er.skipped_24h}<small>bỏ qua/24h</small></button>`:'';
+    const errCell=(er.failed?`<button class="wt-err" onclick="App.showWatcherErrors(${w.id})" title="Xem lỗi chi tiết"><i></i>${er.failed.toLocaleString('vi-VN')}${er.failed_24h?`<small>${er.failed_24h}/24h</small>`:''}</button>`:'')+skipHtml||'<span class="wt-muted">—</span>';
     return`<tr class="${w.is_active?'':'wt-off'}"><td><label class="toggle"><input type="checkbox" ${w.is_active?'checked':''} onchange="App.toggleWatcher(${w.id})"><span class="toggle-slider"></span></label></td><td><div class="wt-name">${esc(w.name)}${paused}</div><div class="wt-meta">${meta}</div></td><td><div class="wt-chips">${kwHtml}</div></td><td>${accHtml}</td><td>${errCell}</td><td><div class="wt-actions"><button class="acc-ib" onclick="App.openTestDM(${w.id})" title="Test DM">🧪</button><button class="acc-ib" onclick="App.editWatcher(${w.id})" title="Sửa">✏️</button><button class="acc-ib" onclick="App.cloneWatcher(${w.id})" title="Nhân bản rule (bản sao tạo ở trạng thái tắt)">📑</button><button class="acc-ib is-danger" onclick="App.deleteWatcher(${w.id})" title="Xóa">🗑</button></div></td></tr>`}).join('')
 
 }catch(e){this.toast('Lỗi: '+e.message,'error')}},

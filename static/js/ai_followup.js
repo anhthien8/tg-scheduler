@@ -468,6 +468,7 @@ const AIFollowUp = {
     set('aifu-stat-onboarded', this._chats.filter(c => this.inFunnel(c) && this.stepRank(this.stepOf(c)) >= 3).length);
     set('aifu-stat-total', this._chats.length);
     set('aifu-stat-nudged', this._chats.filter(c => c.nudged).length);
+    this.renderTodo();
     this.renderStepCards();
     this.loadSupportedCount();
   },
@@ -499,19 +500,103 @@ const AIFollowUp = {
       ['paused_admin', '⏸ Chat tay'],
       ['bot_ignored', '🚫 Ignored']
     ];
-    let html = chips.map(([v, l]) =>
-      `<button class="btn btn-sm ${this._statusFilter === v && !this._stepFilter ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.filterByStatus('${v}')">${l}</button>`
+    const noFilter = !this._statusFilter && !this._stepFilter;
+    let html = chips.map(([v, l]) => v === ''
+      ? `<button class="btn btn-sm ${noFilter ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.clearFilters()" title="Bỏ mọi bộ lọc">${l}</button>`
+      : `<button class="btn btn-sm ${this._statusFilter === v ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.filterByStatus('${v}')">${l}</button>`
     ).join('');
+    const todo = this.TODO.find(t => t.key === this._statusFilter && t.key.startsWith('__'));
+    if (todo) html += `<button class="btn btn-sm btn-primary" onclick="AIFollowUp.filterByStatus('')" title="Bỏ lọc này">${todo.icon} ${todo.label} ✕</button>`;
     if (this._stepFilter) {
       const lbl = this._stepFilter === 'link_confirmed+' ? '🔗 Đã gắn link trở lên' : this.stepLabel(this._stepFilter);
       html += `<button class="btn btn-sm btn-primary" onclick="AIFollowUp.filterByStep('')" title="Bỏ lọc bước">Bước: ${lbl} ✕</button>`;
     }
     const owed = this._chats.filter(c => this.isOwed(c));
     const late = owed.filter(c => this.owedHours(c) >= this.OWED_DEADLINE_HOURS).length;
-    const owedOn = this._statusFilter === this.OWED_FILTER && !this._stepFilter;
+    const owedOn = this._statusFilter === this.OWED_FILTER;
     html += `<button class="btn btn-sm ${owedOn ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.filterByStatus('${this.OWED_FILTER}')"${late && !owedOn ? ' style="color:var(--red);font-weight:700"' : ''}>⏳ Nợ trả lời (${owed.length}${late ? ` · ${late} quá hạn` : ''})</button>`
       + `<span class="info-i" tabindex="0" data-tip="Các KOL mà bên mình (AI hoặc admin) đã hứa “team sẽ xem và báo lại” nhưng chưa có người thật trả lời. Hạn trả lời là 24 giờ; quá hạn sẽ tô đỏ và bot nhắc admin (tối đa 3 lần cho mỗi lời hứa). Lead tự ra khỏi danh sách khi admin nhắn cho KOL, hoặc khi bạn bấm “✅ Đã trả lời”.">i</span>`;
+    if (this._statusFilter && this._stepFilter) html += `<span style="font-size:12px;color:var(--text2);align-self:center">Đang lọc kết hợp trạng thái + bước</span>`;
     el.innerHTML = html;
+  },
+
+  // ── "Việc cần làm": the lists a human has to work through, most urgent first ──
+  // Built from this._chats (already loaded) — no extra request, no polling.
+  HOT_SILENT_HOURS: 48,
+  TODO: [
+    { key: 'needs_human', icon: '⚠️', label: 'Cần người thật trả lời', urgent: true,
+      tip: 'AI đã dừng và chuyển cho người thật (KOL hỏi điều AI không được tự quyết, hoặc đã hết số câu AI). Mở chat và trả lời.',
+      test: (c, A) => c.status === 'needs_human' },
+    { key: '__owed_late', icon: '⏳', label: 'Lời hứa quá hạn 24 giờ', urgent: true,
+      tip: 'Bên mình đã nói “team sẽ xem và báo lại” hơn 24 giờ trước mà chưa có người thật trả lời KOL.',
+      test: (c, A) => A.isOwed(c) && A.owedHours(c) >= A.OWED_DEADLINE_HOURS,
+      sort: (a, b, A) => A.owedHours(b) - A.owedHours(a) },
+    { key: '__proof', icon: '🧾', label: 'Proof chờ duyệt',
+      tip: 'KOL đã gửi ảnh/video chứng minh volume hoặc kênh; cần người xem và bấm Verified hoặc Từ chối trong cửa sổ chat.',
+      test: (c, A) => A.inFunnel(c) && c.verification_status === 'submitted' },
+    { key: '__ops', icon: '🔗', label: 'Đã nhận UID, chờ gắn link',
+      tip: 'KOL đã gửi UID. Việc tiếp theo là của bên mình: cấp vipCode / link affiliate và xác nhận đã gắn link, rồi chuyển bước.',
+      test: (c, A) => A.inFunnel(c) && A.stepOf(c) === 'uid_received' },
+    { key: '__hot_silent', icon: '⭐', label: 'Tier A im lặng quá 2 ngày',
+      tip: 'Lead Tier A chưa gắn link, AI vẫn đang phụ trách nhưng KOL đã không nhắn gì hơn 48 giờ. Nên có người thật nhắn một câu riêng.',
+      test: (c, A) => A.inFunnel(c) && c.lead_tier === 'Tier A' && c.status === 'active'
+        && A.stepRank(A.stepOf(c)) >= 0 && A.stepRank(A.stepOf(c)) < 3 && A.silentHours(c) >= A.HOT_SILENT_HOURS,
+      sort: (a, b, A) => A.silentHours(b) - A.silentHours(a) }
+  ],
+
+  _utcHoursAgo(ts) {
+    // SQLite UTC "YYYY-MM-DD HH:MM:SS"
+    const t = Date.parse(String(ts || '').replace(' ', 'T') + 'Z');
+    return Number.isFinite(t) ? Math.max(0, (Date.now() - t) / 3600000) : 0;
+  },
+
+  silentHours(c) { return this._utcHoursAgo(c.last_user_message_at || c.updated_at); },
+
+  _tierRank(c) { return c.lead_tier === 'Tier A' ? 0 : (c.lead_tier === 'Tier B' ? 1 : 2); },
+
+  _todoRows(t) {
+    const rows = this._chats.filter(c => t.test(c, this));
+    // Tier A first; inside a tier the list's own order (longest wait) or most recent.
+    return rows.sort((a, b) => (this._tierRank(a) - this._tierRank(b)) || (t.sort ? t.sort(a, b, this) : 0));
+  },
+
+  renderTodo() {
+    const el = document.getElementById('aifu-todo');
+    if (!el) return;
+    if (!this._chats.length) { el.innerHTML = ''; return; }
+    const items = this.TODO.map(t => ({ t, rows: this._todoRows(t) }));
+    const total = items.reduce((n, i) => n + i.rows.length, 0);
+    const head = `<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+        <strong style="font-size:14px">📌 Việc cần làm</strong>
+        <span class="info-i" tabindex="0" data-tip="Những lead đang chờ NGƯỜI THẬT xử lý, xếp theo mức gấp. Bấm một ô để lọc bảng bên dưới đúng các lead đó (Tier A nằm trên cùng). Một lead có thể nằm ở nhiều ô. Danh sách tính từ dữ liệu đã tải, bấm 🔄 để cập nhật.">i</span>
+        <span style="font-size:12px;color:var(--text2)">${total ? '' : 'Không có việc tồn đọng 🎉'}</span>
+      </div>`;
+    const name = c => c.name || (c.username ? '@' + c.username : 'ID ' + c.user_id);
+    const cards = items.map(({ t, rows }) => {
+      const n = rows.length;
+      const on = this._statusFilter === t.key;
+      const color = !n ? 'var(--text3)' : (t.urgent ? 'var(--red)' : 'var(--accent)');
+      const who = n ? rows.slice(0, 2).map(name).join(', ') + (n > 2 ? ` +${n - 2}` : '') : 'Không có';
+      return `<button type="button" class="stat-card" ${n ? '' : 'disabled'} onclick="AIFollowUp.filterByStatus('${t.key}')" title="${esc(t.tip)}"
+          aria-pressed="${on}" aria-label="${esc(t.label)}: ${n} lead"
+          style="text-align:left;padding:10px 12px;font:inherit;color:inherit;cursor:${n ? 'pointer' : 'default'};opacity:${n ? 1 : .55};${on ? 'border-color:var(--accent);' : (n && t.urgent ? 'border-color:var(--red);' : '')}">
+          <div class="stat-label" style="font-size:11px">${t.icon} ${t.label}</div>
+          <div class="stat-value" style="font-size:20px;color:${color}">${n}</div>
+          <div style="font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(who)}</div>
+        </button>`;
+    }).join('');
+    el.innerHTML = `<div class="card" style="padding:12px 14px;margin-bottom:var(--sp-4)">${head}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">${cards}</div></div>`;
+  },
+
+  clearFilters() {
+    this._statusFilter = '';
+    this._stepFilter = '';
+    this._page = 1;
+    this.renderTodo();
+    this.renderChips();
+    this.renderStepCards();
+    this.renderPage();
   },
 
   // ── Owed answers: we promised "the team will get back to you" ──
@@ -552,10 +637,12 @@ const AIFollowUp = {
     }
   },
 
+  // Status and step filters combine (e.g. "Cần người thật" + "Đồng ý deal").
+  // Clicking the active one again turns it off; "Tất cả" clears both.
   filterByStatus(s) {
-    this._statusFilter = s;
-    this._stepFilter = '';
+    this._statusFilter = (s && this._statusFilter === s) ? '' : s;
     this._page = 1;
+    this.renderTodo();
     this.renderChips();
     this.renderStepCards();
     this.renderPage();
@@ -563,7 +650,6 @@ const AIFollowUp = {
 
   filterByStep(s) {
     this._stepFilter = (this._stepFilter === s) ? '' : s;
-    this._statusFilter = '';
     this._page = 1;
     this.renderChips();
     this.renderStepCards();
@@ -572,10 +658,12 @@ const AIFollowUp = {
 
   _filtered() {
     const s = this._statusFilter;
+    const todo = s ? this.TODO.find(t => t.key === s) : null;
     let rows = !s ? this._chats
-      : (s === this.OWED_FILTER
-        ? this._chats.filter(c => this.isOwed(c)).sort((a, b) => this.owedHours(b) - this.owedHours(a))
-        : this._chats.filter(c => c.status === s));
+      : (todo ? this._todoRows(todo)
+        : (s === this.OWED_FILTER
+          ? this._chats.filter(c => this.isOwed(c)).sort((a, b) => this.owedHours(b) - this.owedHours(a))
+          : this._chats.filter(c => c.status === s)));
     const st = this._stepFilter;
     if (st) rows = rows.filter(c => this.inFunnel(c));
     if (st === 'link_confirmed+') rows = rows.filter(c => this.stepRank(this.stepOf(c)) >= 3);
@@ -590,7 +678,7 @@ const AIFollowUp = {
     this.renderChats(filtered.slice((this._page - 1) * this.PAGE_SIZE, this._page * this.PAGE_SIZE), filtered.length === 0);
     this.renderSelectionBar();
     const cnt = document.getElementById('aifu-count');
-    if (cnt) cnt.textContent = this._statusFilter
+    if (cnt) cnt.textContent = (this._statusFilter || this._stepFilter)
       ? `Hiển thị: ${filtered.length}/${this._chats.length}`
       : (this._chats.length ? `Tổng: ${this._chats.length} lead` : '');
     const pager = document.getElementById('aifu-pager');
@@ -607,6 +695,10 @@ const AIFollowUp = {
   renderChats(rows, isEmpty) {
     const tb = document.getElementById('aifu-chats-table-body');
     if (!tb) return;
+    if (isEmpty && this._chats.length && (this._statusFilter || this._stepFilter)) {
+      tb.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:28px"><div style="color:var(--text);font-weight:600;margin-bottom:6px">Không có lead nào khớp bộ lọc đang chọn</div><button class="btn btn-ghost btn-sm" onclick="AIFollowUp.clearFilters()">Bỏ mọi bộ lọc</button></td></tr>`;
+      return;
+    }
     if (isEmpty) {
       tb.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:32px"><div style="font-size:2rem;margin-bottom:8px">📭</div><div style="color:var(--text);font-weight:600;margin-bottom:4px">Chưa có lead nào</div><div style="color:var(--text2);font-size:.85rem">Khi có người trả lời DM, AI Agent sẽ tự chat và lead xuất hiện tại đây.</div></td></tr>`;
       return;
@@ -703,18 +795,121 @@ const AIFollowUp = {
     return [...this._selected].map(key => this._chats.find(c => `${c.account_id}:${c.user_id}` === key)).filter(Boolean);
   },
 
+  // ── One form instead of a chain of browser prompt() boxes ──
+  // formDialog({title, intro, fields:[{key,label,type,value,placeholder,hint,tip,required,wide}], submitLabel})
+  // → Promise<{key: value}> or null when cancelled. Nothing is saved until the user presses the submit button,
+  // every field stays visible and editable, Esc / Huỷ cancels, Enter submits (Ctrl+Enter inside a textarea).
+  formDialog({ title, intro = '', fields = [], submitLabel = 'Lưu', validate = null }) {
+    return new Promise(resolve => {
+      const prevFocus = document.activeElement;
+      const uid = 'aifu-fd-' + Date.now();
+      const ov = document.createElement('div');
+      ov.className = 'modal-overlay open';
+      ov.style.zIndex = '400';
+      const fieldHtml = fields.map((f, i) => {
+        const id = `${uid}-${i}`;
+        const tip = f.tip ? ` <span class="info-i" tabindex="0" data-tip="${esc(f.tip)}">i</span>` : '';
+        const hint = f.hint ? `<div id="${id}-h" style="font-size:11px;color:var(--text2);margin-top:4px;line-height:1.45">${esc(f.hint)}</div>` : '';
+        const aria = f.hint ? ` aria-describedby="${id}-h"` : '';
+        const span = (f.wide || f.type === 'textarea' || f.type === 'checkbox') ? 'grid-column:1/-1;' : '';
+        if (f.type === 'checkbox') {
+          return `<div style="${span}"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+              <input type="checkbox" id="${id}" data-key="${esc(f.key)}" ${f.value ? 'checked' : ''}${aria} style="width:16px;height:16px;flex:none">
+              <span>${esc(f.label)}</span>${tip}</label>${hint}</div>`;
+        }
+        const req = f.required ? ' required aria-required="true"' : '';
+        const ph = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
+        const input = f.type === 'textarea'
+          ? `<textarea class="form-input form-textarea" id="${id}" data-key="${esc(f.key)}" rows="${f.rows || 5}"${ph}${req}${aria} style="width:100%;resize:vertical">${esc(f.value || '')}</textarea>`
+          : `<input class="form-input" type="text" id="${id}" data-key="${esc(f.key)}" value="${esc(f.value || '')}" autocomplete="off"${ph}${req}${aria} style="width:100%">`;
+        return `<div style="${span}min-width:0"><label class="form-label" for="${id}" style="display:flex;align-items:center;gap:6px">${esc(f.label)}${f.required ? ' <span style="color:var(--red)" aria-hidden="true">*</span>' : ''}${tip}</label>${input}${hint}</div>`;
+      }).join('');
+      ov.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="${uid}-t" style="width:620px;overflow:visible;display:flex;flex-direction:column">
+          <div class="modal-header"><span class="modal-title" id="${uid}-t">${esc(title)}</span><button type="button" class="modal-close" data-fd="cancel" aria-label="Đóng">&times;</button></div>
+          <form novalidate style="display:flex;flex-direction:column;min-height:0">
+            <div class="modal-body" style="overflow-y:auto;max-height:calc(85vh - 140px)">
+              ${intro ? `<div style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.5">${intro}</div>` : ''}
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 14px">${fieldHtml}</div>
+              <div data-fd="error" role="alert" style="display:none;margin-top:12px;font-size:13px;color:var(--red)"></div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--border)">
+              <button type="button" class="btn btn-ghost" data-fd="cancel">Huỷ</button>
+              <button type="submit" class="btn btn-primary">${esc(submitLabel)}</button>
+            </div>
+          </form>
+        </div>`;
+      document.body.appendChild(ov);
+      const form = ov.querySelector('form');
+      const errEl = ov.querySelector('[data-fd="error"]');
+      const done = result => {
+        document.removeEventListener('keydown', onKey, true);
+        ov.remove();
+        try { prevFocus && prevFocus.focus && prevFocus.focus(); } catch (_) {}
+        resolve(result);
+      };
+      const collect = () => {
+        const out = {};
+        ov.querySelectorAll('[data-key]').forEach(el => { out[el.dataset.key] = el.type === 'checkbox' ? el.checked : el.value.trim(); });
+        return out;
+      };
+      const submit = () => {
+        const values = collect();
+        const missing = fields.find(f => f.required && !values[f.key]);
+        const msg = missing ? `Chưa nhập “${missing.label}”.` : (validate ? validate(values) : '');
+        if (msg) {
+          errEl.textContent = msg; errEl.style.display = 'block';
+          const bad = missing && ov.querySelector(`[data-key="${missing.key}"]`);
+          if (bad) bad.focus();
+          return;
+        }
+        done(values);
+      };
+      const onKey = e => {
+        if (!document.body.contains(ov)) return;
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); return; }
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.tagName === 'TEXTAREA') { e.preventDefault(); submit(); return; }
+        if (e.key === 'Tab') {   // keep focus inside the dialog
+          const f = [...ov.querySelectorAll('input,textarea,button,[tabindex="0"]')].filter(x => !x.disabled);
+          if (!f.length) return;
+          const first = f[0], last = f[f.length - 1];
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+          else if (!ov.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+        }
+      };
+      document.addEventListener('keydown', onKey, true);
+      form.addEventListener('submit', e => { e.preventDefault(); submit(); });
+      ov.querySelectorAll('[data-fd="cancel"]').forEach(b => b.addEventListener('click', () => done(null)));
+      const firstField = ov.querySelector('[data-key]:not([type="checkbox"])') || ov.querySelector('[data-key]');
+      if (firstField) { firstField.focus(); if (firstField.select && firstField.tagName === 'INPUT') firstField.select(); }
+    });
+  },
+
+  _csv(v) { return String(v || '').split(',').map(x => x.trim()).filter(Boolean); },
+
+  _leadNames(list, max = 4) {
+    const name = c => c.name || (c.username ? '@' + c.username : 'ID ' + c.user_id);
+    return list.slice(0, max).map(name).join(', ') + (list.length > max ? ` và ${list.length - max} lead khác` : '');
+  },
+
   async assignSelected() {
     const selected = this._selectedChats();
     if (!selected.length) return;
-    const regions = window.prompt('Khu vực (phân cách dấu phẩy):', '');
-    if (regions === null) return;
-    const campaigns = window.prompt('Campaign (phân cách dấu phẩy):', '');
-    if (campaigns === null) return;
-    const payload = {
-      distribution_enabled: window.confirm('Bật phân phối cho các lead đã chọn?'),
-      distribution_regions: regions.split(',').map(v => v.trim()).filter(Boolean),
-      distribution_campaigns: campaigns.split(',').map(v => v.trim()).filter(Boolean)
-    };
+    const v = await this.formDialog({
+      title: `📍 Phân công ${selected.length} lead`,
+      intro: `Áp dụng cho: <strong>${esc(this._leadNames(selected))}</strong>.`,
+      submitLabel: `Lưu cho ${selected.length} lead`,
+      fields: [
+        { key: 'regions', label: 'Khu vực phân phối', placeholder: 'VD: Vietnam, SEA', hint: 'Phân cách bằng dấu phẩy. Để trống = giữ nguyên khu vực hiện có của từng lead.' },
+        { key: 'campaigns', label: 'Campaign phân phối', placeholder: 'VD: Futures Q4', hint: 'Phân cách bằng dấu phẩy. Để trống = giữ nguyên.' },
+        { key: 'enabled', type: 'checkbox', label: 'Bật phân phối cho các lead này', value: true,
+          tip: 'Khi bật, lead được đưa vào danh sách nhận thông tin campaign theo khu vực / campaign đã gán. Bỏ chọn để tắt phân phối cho các lead đã chọn.' }
+      ]
+    });
+    if (!v) return;
+    const payload = { distribution_enabled: v.enabled };
+    if (v.regions) payload.distribution_regions = this._csv(v.regions);
+    if (v.campaigns) payload.distribution_campaigns = this._csv(v.campaigns);
     try {
       const responses = await Promise.all(selected.map(c => fetch(`/api/ai-followup/chats/${c.account_id}/${c.user_id}/profile`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) })));
       if (responses.some(r => !r.ok)) throw new Error('Một số lead cập nhật thất bại');
@@ -726,10 +921,18 @@ const AIFollowUp = {
   async bulkSendSelected() {
     const selected = this._selectedChats();
     if (!selected.length) return;
-    const message = window.prompt(`Tin nhắn gửi tới ${selected.length} lead:`);
-    if (!message?.trim()) return;
+    const v = await this.formDialog({
+      title: `✉️ Gửi tin cho ${selected.length} lead`,
+      intro: `Gửi tới: <strong>${esc(this._leadNames(selected))}</strong>.<br>Tin được gửi ngay, cùng một nội dung, từ nick đang phụ trách từng lead.`,
+      submitLabel: `Gửi tới ${selected.length} lead`,
+      fields: [
+        { key: 'message', type: 'textarea', label: 'Nội dung tin nhắn', required: true, rows: 6,
+          hint: 'Xuống dòng bằng Enter. Bấm Ctrl+Enter để gửi.' }
+      ]
+    });
+    if (!v) return;
     try {
-      const res = await fetch('/api/ai-followup/bulk-send', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ recipients:selected.map(c => ({account_id:c.account_id, user_id:c.user_id})), message:message.trim() }) });
+      const res = await fetch('/api/ai-followup/bulk-send', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ recipients:selected.map(c => ({account_id:c.account_id, user_id:c.user_id})), message:v.message }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Gửi thất bại');
       App.toast(`Đã gửi ${data.sent?.length || 0}; bỏ qua ${data.skipped?.length || 0}; lỗi ${data.errors?.length || 0}`, data.errors?.length ? 'error' : 'success');
@@ -755,15 +958,44 @@ const AIFollowUp = {
       const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/profile`);
       if (!res.ok) throw new Error('Không thể tải hồ sơ lead');
       const p = await res.json();
-      const uid = window.prompt(`${p.exchange || 'WEEX'} UID của KOL (để trống nếu chưa có):`, p.weex_uid || ''); if (uid === null) return;
-      const volume = window.prompt('Volume KOL khai (M USD/tháng, VD 15 hoặc 15M; để trống = chưa biết):', p.volume_claimed || ''); if (volume === null) return;
-      const vip = window.prompt('VIP code:', p.vip_code || ''); if (vip === null) return;
-      const affiliate = window.prompt('Affiliate link:', p.affiliate_link || ''); if (affiliate === null) return;
-      const selCampaign = window.prompt('Campaign KOL đã chọn (1 campaign):', p.selected_campaign || ''); if (selCampaign === null) return;
-      const firstPost = window.prompt('Link bài đầu tiên (nếu đã có):', p.first_post_link || ''); if (firstPost === null) return;
-      const regions = window.prompt('Khu vực phân phối (phân cách dấu phẩy):', (p.distribution_regions || []).join(', ')); if (regions === null) return;
-      const campaigns = window.prompt('Campaign phân phối (phân cách dấu phẩy):', (p.distribution_campaigns || []).join(', ')); if (campaigns === null) return;
-      const save = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/profile`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ weex_uid:uid.trim(), volume_claimed:volume.trim(), vip_code:vip.trim(), affiliate_link:affiliate.trim(), selected_campaign:selCampaign.trim(), first_post_link:firstPost.trim(), distribution_enabled:window.confirm('Bật phân phối lead này?'), distribution_regions:regions.split(',').map(v=>v.trim()).filter(Boolean), distribution_campaigns:campaigns.split(',').map(v=>v.trim()).filter(Boolean) }) });
+      const ex = p.exchange || 'WEEX';
+      const chat = this._chats.find(x => x.account_id === accountId && x.user_id === userId);
+      const cur = {
+        weex_uid: p.weex_uid || '', volume_claimed: p.volume_claimed || '', vip_code: p.vip_code || '',
+        affiliate_link: p.affiliate_link || '', selected_campaign: p.selected_campaign || '',
+        first_post_link: p.first_post_link || '',
+        distribution_regions: (p.distribution_regions || []).join(', '),
+        distribution_campaigns: (p.distribution_campaigns || []).join(', '),
+        distribution_enabled: !!p.distribution_enabled
+      };
+      const v = await this.formDialog({
+        title: '📍 Hồ sơ & phân công' + (chat ? ` — ${this._leadNames([chat])}` : ''),
+        intro: 'Sửa ô nào cần sửa rồi bấm <strong>Lưu hồ sơ</strong>. Ô để trống nghĩa là chưa có thông tin.',
+        submitLabel: 'Lưu hồ sơ',
+        fields: [
+          { key: 'weex_uid', label: `${ex} UID của KOL`, value: cur.weex_uid, placeholder: 'Chưa có',
+            tip: `Nhập UID ở đây nghĩa là admin xác nhận UID này đúng. Lead đang ở bước “Đồng ý deal” sẽ tự chuyển sang “Đã nhận UID”.` },
+          { key: 'volume_claimed', label: 'Volume KOL khai (triệu USD/tháng)', value: cur.volume_claimed, placeholder: 'VD: 15 hoặc 15M',
+            tip: 'Con số KOL tự khai, dùng để chọn bậc deal khởi điểm. Đây chưa phải volume đã xác minh qua proof.' },
+          { key: 'vip_code', label: 'VIP code', value: cur.vip_code, placeholder: 'Chưa cấp',
+            tip: `Mã mời (vipCode) bên mình cấp cho KOL để ${ex} ghi nhận người dùng KOL mang về.` },
+          { key: 'affiliate_link', label: 'Affiliate link', value: cur.affiliate_link, placeholder: 'https://…' },
+          { key: 'selected_campaign', label: 'Campaign KOL đã chọn', value: cur.selected_campaign, hint: 'Chỉ một campaign.' },
+          { key: 'first_post_link', label: 'Link bài đăng đầu tiên', value: cur.first_post_link, placeholder: 'https://…', hint: 'Điền khi KOL đã đăng bài.' },
+          { key: 'distribution_regions', label: 'Khu vực phân phối', value: cur.distribution_regions, placeholder: 'VD: Vietnam, SEA', hint: 'Phân cách bằng dấu phẩy.' },
+          { key: 'distribution_campaigns', label: 'Campaign phân phối', value: cur.distribution_campaigns, hint: 'Phân cách bằng dấu phẩy.' },
+          { key: 'distribution_enabled', type: 'checkbox', label: 'Bật phân phối cho lead này', value: cur.distribution_enabled,
+            tip: 'Khi bật, lead được đưa vào danh sách nhận thông tin campaign theo khu vực / campaign đã gán ở trên.' }
+        ]
+      });
+      if (!v) return;
+      // Only what actually changed is sent, so an untouched UID does not re-trigger the step change.
+      const payload = {};
+      Object.keys(cur).forEach(k => { if (v[k] !== cur[k]) payload[k] = v[k]; });
+      if ('distribution_regions' in payload) payload.distribution_regions = this._csv(v.distribution_regions);
+      if ('distribution_campaigns' in payload) payload.distribution_campaigns = this._csv(v.distribution_campaigns);
+      if (!Object.keys(payload).length) { App.toast('Không có thay đổi nào để lưu', 'info'); return; }
+      const save = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/profile`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
       if (!save.ok) throw new Error('Lưu hồ sơ thất bại');
       App.toast('Đã lưu hồ sơ và phân công lead', 'success');
       if (this._modalChat && this._modalChat.account_id === accountId && this._modalChat.user_id === userId) this.loadStepPanel(accountId, userId);
@@ -839,8 +1071,14 @@ const AIFollowUp = {
     if (!step) return;
     const label = this.stepLabel(step);
     if (reason === undefined) {
-      reason = window.prompt(`Chuyển lead sang bước "${label}". Lý do (tuỳ chọn):`, '');
-      if (reason === null) return;
+      const v = await this.formDialog({
+        title: `Chuyển lead sang bước “${label}”`,
+        submitLabel: 'Chuyển bước',
+        fields: [{ key: 'reason', label: 'Lý do (không bắt buộc)', wide: true, placeholder: 'VD: KOL đã xác nhận qua gọi điện',
+          hint: 'Lý do được lưu vào lịch sử chuyển bước của lead.' }]
+      });
+      if (!v) return;
+      reason = v.reason;
     }
     try {
       const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/step`, {

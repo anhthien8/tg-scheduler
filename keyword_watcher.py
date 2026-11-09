@@ -539,29 +539,48 @@ async def _do_send_dm_with_fallback(
             )
             return False, None, _translate_dm_error(err_msg)
 
+    # Why each sender was passed over WITHOUT an attempt. If nobody even tries,
+    # this becomes one 'skipped' log row so the rule shows a reason instead of "—".
+    skip_reasons: list[str] = []
+
+    async def _skip(acc_id: int, why: str):
+        try:
+            _a = await db.get_account(acc_id)
+            _name = (_a or {}).get("name") or f"Nick #{acc_id}"
+        except Exception:
+            _name = f"Nick #{acc_id}"
+        skip_reasons.append(f"{_name}: {why}")
+
     for acc_id in account_ids:
         client = tg.get_client(acc_id)
         if not client:
             logger.warning(f"[Watcher {watcher_id}] Account {acc_id} client not found, trying next")
+            await _skip(acc_id, "chưa đăng nhập / chưa kết nối")
             continue
         if not await tg.ensure_connected(client, acc_id):
             logger.warning(f"[Watcher {watcher_id}] Account {acc_id} offline/unreachable, trying next")
+            await _skip(acc_id, "mất kết nối")
             continue
 
         # Skip accounts that are in PeerFlood cooldown
         if _is_peerflood_blocked(acc_id):
             logger.warning(f"[Watcher {watcher_id}] Account {acc_id} in PeerFlood cooldown, skipping")
+            await _skip(acc_id, "đang nghỉ sau PeerFlood")
             continue
 
         # Skip auto-paused accounts
         if await db.is_account_paused(acc_id):
-            logger.debug(f"[Watcher {watcher_id}] Skipping paused account {acc_id}")
+            logger.info(f"[Watcher {watcher_id}] Skipping paused account {acc_id}")
+            _acc_paused = await db.get_account(acc_id)
+            _why = ((_acc_paused or {}).get("pause_reason") or "").strip()
+            await _skip(acc_id, "đang tạm dừng" + (f" ({_why})" if _why else ""))
             continue
 
         # C3: Skip accounts outside their active hours
         _acc_data = await db.get_account(acc_id)
         if not db.check_account_active_hours(_acc_data):
             logger.debug(f"[Watcher {watcher_id}] Account {acc_id} outside active hours, skipping")
+            await _skip(acc_id, "ngoài giờ hoạt động")
             continue
 
         # ── Daily DM limit check ─────────────────────────────────────────────
@@ -571,6 +590,7 @@ async def _do_send_dm_with_fallback(
                 f"[Watcher {watcher_id}] Account {acc_id} reached daily DM limit "
                 f"({dm_count}/{dm_limit}), skipping this account"
             )
+            await _skip(acc_id, f"đã hết giới hạn DM trong ngày ({dm_count}/{dm_limit})")
             continue
 
         try:
@@ -838,6 +858,18 @@ async def _do_send_dm_with_fallback(
         )
     elif last_error:
         logger.error(f"[Watcher {watcher_id}] All accounts failed DM to {user_id}: {last_error}")
+    elif skip_reasons:
+        # Nobody attempted: every sender was unavailable. 'skipped' (not 'failed')
+        # so it neither counts against the target nor auto-pauses the rule.
+        last_error = "Không gửi: không có nick gửi nào sẵn sàng — " + "; ".join(skip_reasons[:4])
+        logger.warning(f"[Watcher {watcher_id}] {last_error} (user {user_id})")
+        try:
+            await db.add_watcher_dm_log(
+                watcher_id, None, user_id, username,
+                group_id, group_title, matched_keyword, "skipped", last_error[:500]
+            )
+        except Exception as e:
+            logger.debug(f"[Watcher {watcher_id}] could not log skipped DM: {e}")
 
     return False, None, last_error
 
