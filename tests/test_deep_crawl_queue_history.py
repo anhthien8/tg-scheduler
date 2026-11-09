@@ -42,8 +42,9 @@ def iso(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "_deep_crawl_stop_flag", {"stopped": False})
     monkeypatch.setattr(m, "_contact_cache_loaded", True)
     monkeypatch.setattr(m, "_results_cache_key", None)
+    monkeypatch.setattr(m, "_kol_rescored", True)  # one-time KOL rescore is not under test here
     monkeypatch.setattr(m.tg, "is_bot_account", lambda *a, **k: False, raising=False)
-    monkeypatch.setattr(m.tg, "score_community_trading", lambda **k: {}, raising=False)
+    monkeypatch.setattr(m.tg, "score_community_trading", lambda *a, **k: {}, raising=False)
     monkeypatch.setattr(m.tg, "seed_channel_about_cache", lambda *a, **k: None, raising=False)
     monkeypatch.setattr(m.tg, "export_contact_kind_cache", lambda: {}, raising=False)
     monkeypatch.setattr(m.tg, "import_contact_kind_cache", lambda *a, **k: None, raising=False)

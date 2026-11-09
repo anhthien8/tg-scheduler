@@ -293,6 +293,42 @@ async def test_second_crawl_skips_account_still_limited(crawl):
     assert limited.count("resolve") == 0  # the limit is remembered across crawls
 
 
+class SlowRecsClient(FakeClient):
+    """Recommendation calls take a few event-loop turns, so overlapping calls are visible."""
+    in_flight = 0
+    peak = 0
+
+    async def __call__(self, req):
+        if isinstance(req, GetChannelRecommendationsRequest):
+            cls = SlowRecsClient
+            cls.in_flight += 1
+            cls.peak = max(cls.peak, cls.in_flight)
+            try:
+                for _ in range(5):
+                    await asyncio.sleep(0)
+                return await super().__call__(req)
+            finally:
+                cls.in_flight -= 1
+        return await super().__call__(req)
+
+
+@pytest.mark.parametrize("parallel,expect_peak", [(3, 2), (1, 1)])
+async def test_accounts_crawl_in_parallel_without_duplicates(crawl, parallel, expect_peak):
+    SlowRecsClient.in_flight = SlowRecsClient.peak = 0
+    accs = [SlowRecsClient(1, known=[100]), SlowRecsClient(2), SlowRecsClient(3)]
+    leads, state = await crawl.run(accs, parallel=parallel)
+
+    assert state["status"] == "completed"
+    assert {lead["channel_id"] for lead in leads} == {201, 202, 301, 302}
+    assert len(leads) == 4  # no channel saved twice
+    assert sum(a.count("recs") for a in accs) == 5  # every node crawled exactly once
+    if parallel == 1:
+        assert SlowRecsClient.peak == 1
+    else:
+        assert expect_peak <= SlowRecsClient.peak <= parallel
+        assert sum(1 for a in accs if a.count("recs")) >= 2  # work spread over accounts
+
+
 @pytest.mark.parametrize("page,kind", [
     ('<div class="tgme_page"><div class="tgme_page_title"><span dir="auto">Chan</span></div>'
      '<div class="tgme_page_extra">12 345 subscribers</div>'

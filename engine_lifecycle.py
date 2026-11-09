@@ -147,6 +147,17 @@ async def start_engines() -> asyncio.Task:
     try:
         import command_bot
         await command_bot.start_command_bot()
+        # v3.33.0: reconnect the bot when it drops (it was silently down for 3 days).
+        from apscheduler.triggers.interval import IntervalTrigger as _BotCheckTrigger
+        sch.get_scheduler().add_job(
+            command_bot.supervise_command_bot,
+            trigger=_BotCheckTrigger(seconds=command_bot.SUPERVISOR_INTERVAL),
+            id="command_bot_supervisor",
+            name="Command Bot Supervisor",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
     except Exception as e:
         logger.warning("Command bot startup error: %s", e)
 

@@ -116,7 +116,7 @@ def test_admin_ids_are_loaded_from_command_bot_setting_source():
     """Pin bằng chứng code-reading: quyền /kol lấy từ nguồn env-first (v3.10.2)."""
     import inspect
 
-    source = inspect.getsource(cb.start_command_bot)
+    source = inspect.getsource(cb._start_command_bot_locked)
     assert "get_command_bot_admin_ids_str()" in source
     assert "_admin_ids = {int(" in source
     # Helper phải env-first với fallback settings cũ
@@ -141,7 +141,7 @@ def test_command_bot_startup_has_explicit_disabled_and_missing_config_guards():
     """Bot không chạy nếu disabled/thiếu token/thiếu admin; startup đều log lý do."""
     import inspect
 
-    source = inspect.getsource(cb.start_command_bot)
+    source = inspect.getsource(cb._start_command_bot_locked)
     assert 'get_setting("command_bot_enabled"' in source
     assert "get_command_bot_token()" in source
     assert "get_command_bot_admin_ids_str()" in source

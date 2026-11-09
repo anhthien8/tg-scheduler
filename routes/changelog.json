@@ -1,10 +1,281 @@
 [
     {
+        "version": "3.34.0",
+        "date": "10/11/2026",
+        "title": "✍️ Campaign tự đề xuất tin nhắn, nhân bản campaign, proof về topic KOL",
+        "summary": "Chọn danh sách đã cào là campaign tự điền nội dung tin nhắn, Remix, Agent và Dịch, bạn chỉ cần xem lại rồi bấm Lưu. Thêm nút nhân bản campaign, @SpamBot được hỏi lại mỗi lần chạy, và ảnh/video proof của lead tự chuyển vào đúng topic trong nhóm Weex KOL Support.",
+        "is_latest": true,
+        "badge": "LATEST",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Tự đề xuất tin nhắn theo danh sách đã cào",
+                "desc": "Chọn danh sách người nhận là campaign tự điền tin nhắn mẫu hợp với tệp (ngôn ngữ, loại cộng đồng), đồng thời bật Remix, chọn Agent và bật Dịch sang tiếng của người nhận. Bạn vẫn sửa được trước khi Lưu."
+            },
+            {
+                "type": "feature",
+                "title": "Nhân bản campaign",
+                "desc": "Tạo bản sao campaign với cùng tin nhắn, tài khoản gửi, Agent và cài đặt Dịch, để chạy lại cho danh sách khác mà không phải nhập lại."
+            },
+            {
+                "type": "feature",
+                "title": "Proof của lead tự chuyển vào topic KOL",
+                "desc": "Ảnh, video, file proof (trading volume…) lead gửi được forward vào đúng topic của lead trong nhóm Weex KOL Support. Ảnh hiện ngay trong khung chat của app; video và file hiện link t.me tới tin trong topic."
+            },
+            {
+                "type": "improvement",
+                "title": "KOL Nga dùng thang hoa hồng như Việt Nam",
+                "desc": "KOL ở Nga, hoặc có cộng đồng ở Nga / nói tiếng Nga (\"Russian speaking\"), không còn nhận gói 60% + Deposit mà dùng thang 55–80% như Việt Nam, Hàn Quốc, Trung Quốc. Ukraine, Belarus, Kazakhstan, Uzbekistan và câu trả lời chung \"CIS\" vẫn nhận gói 60% + Deposit."
+            },
+            {
+                "type": "improvement",
+                "title": "Hỏi lại @SpamBot mỗi lần chạy campaign",
+                "desc": "Mỗi lần chạy, tài khoản gửi đều được hỏi lại @SpamBot (kết quả dùng chung trong 10 phút). Giới hạn SpamBot đã quá ngày hết hạn thì không còn hiện là đang bị giới hạn."
+            },
+            {
+                "type": "improvement",
+                "title": "Lưu lại contact chỉ nằm trong danh sách chưa chạy campaign",
+                "desc": "Khi lưu contact từ Deep Crawl, chỉ bỏ qua người đã có trong danh sách mà một campaign DM đang dùng. Người chỉ nằm trong danh sách chưa chạy campaign nào sẽ được lưu lại, và thông báo cho biết đã lấy lại bao nhiêu người."
+            },
+            {
+                "type": "improvement",
+                "title": "Tag 📈 Cộng đồng Crypto trong Deep Crawl",
+                "desc": "Kênh/nhóm crypto chung (điểm 30–44) có tag và bộ lọc riêng, kể cả trong các tab kết quả đã lưu."
+            },
+            {
+                "type": "improvement",
+                "title": "Join DM: hiện tên nhóm và báo lỗi dễ hiểu",
+                "desc": "Hiện tên nhóm thay cho ID, cách kích hoạt và thời gian chờ gọn trên một dòng. Lỗi nói rõ cần làm gì, ví dụ nick theo dõi phải là admin thì Telegram mới gửi sự kiện người mới vào ở nhóm lớn."
+            },
+            {
+                "type": "fix",
+                "title": "Lưu đủ Agent và Dịch khi tạo campaign",
+                "desc": "Trước đây tạo campaign mới làm mất Agent AI và cài đặt Dịch sang tiếng người nhận; giờ được lưu đúng."
+            }
+        ]
+    },
+    {
+        "version": "3.33.0",
+        "date": "09/11/2026",
+        "title": "🗂️ Forum Inbox báo đúng trạng thái và Command Bot tự kết nối lại",
+        "summary": "Từ 06/11 đến 09/11 Forum Inbox vẫn hiện \"Đang bật\" nhưng Command Bot tắt, nên tin của lead không vào group và cảnh báo HANDOVER không tới admin, cũng không có dòng log nào. Giờ thẻ báo đúng trạng thái bot, mỗi lần bỏ qua đều có cảnh báo trong log, và bot tự kết nối lại khi rớt.",
+        "is_latest": false,
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Thẻ Forum Inbox báo đúng trạng thái",
+                "desc": "Hiện \"Đang chạy\" khi Forum Inbox bật và Command Bot đang kết nối. Hiện \"⚠️ Command Bot đang tắt\" hoặc \"⚠️ Bot mất kết nối\" (màu đỏ) khi tin không vào được group. Có ô (i) giải thích."
+            },
+            {
+                "type": "improvement",
+                "title": "Ghi log khi tin hoặc cảnh báo bị bỏ qua vì bot không chạy",
+                "desc": "Tin của lead không vào group, hoặc cảnh báo HANDOVER không tới admin, thì log có WARNING kèm số lần bị bỏ qua. Tối đa 1 dòng mỗi 10 phút cho mỗi loại để không làm ngập log."
+            },
+            {
+                "type": "feature",
+                "title": "Command Bot tự kết nối lại",
+                "desc": "Mỗi 60 giây kiểm tra bot; khi bot đang chạy thì việc này gần như không tốn gì. Nếu bot đang bật mà mất kết nối 2 lần kiểm tra liên tiếp thì tự khởi động lại; nếu thất bại thì thử lại thưa dần, tối đa 30 phút một lần. Bot bị tắt trong Cài đặt thì không tự bật."
+            }
+        ]
+    },
+    {
+        "version": "3.32.0",
+        "date": "09/11/2026",
+        "title": "🌐 Ưu đãi 60% + Deposit cho mọi thị trường trừ Việt Nam, Hàn Quốc, Trung Quốc",
+        "summary": "Gói 60% revshare + campaign Deposit 10%/20% mở rộng thêm Nam Á, châu Phi, Nga/CIS, Thổ Nhĩ Kỳ, Nhật, Canada, Úc, New Zealand. Chỉ còn Việt Nam, Hàn Quốc, thị trường Trung Quốc và các nước bị cấm vận dùng thang 55–80%.",
+        "is_latest": false,
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Thêm Nam Á, châu Phi, Nga/CIS, Thổ Nhĩ Kỳ, Nhật, Canada, Úc, New Zealand",
+                "desc": "Ấn Độ, Pakistan, Bangladesh, Sri Lanka, Nepal; Nigeria, Kenya, Ghana, Nam Phi, Uganda, Tanzania, Ethiopia, Cameroon, Senegal, Bờ Biển Ngà; Nga, Ukraine, Belarus, Kazakhstan, Uzbekistan; Thổ Nhĩ Kỳ, Nhật, Canada, Úc, New Zealand. Câu trả lời chung như \"South Asia\", \"Africa\", \"Russian speaking\" cũng được tính."
+            },
+            {
+                "type": "improvement",
+                "title": "Chỉ còn loại trừ Việt Nam, Hàn Quốc, Trung Quốc và nước bị cấm vận",
+                "desc": "Iran, Syria, Cuba, Triều Tiên vẫn bị loại. Nước chưa có trong danh sách thì AI hỏi KOL ở đâu trước khi chào gói."
+            },
+            {
+                "type": "fix",
+                "title": "Tiếng Nhật không bị nhầm là tiếng Trung",
+                "desc": "Tin nhắn có chữ Kana được tính là tiếng Nhật nên KOL Nhật nhận gói vùng."
+            }
+        ]
+    },
+    {
+        "version": "3.31.0",
+        "date": "09/11/2026",
+        "title": "🌍 Ưu đãi 60% + campaign Deposit cho SEA, LATAM, MENA, Châu Âu, UK, US",
+        "summary": "Gói 60% revshare + campaign Deposit 10%/20% của Indonesia & UAE nay áp dụng cho KOL ở Đông Nam Á (trừ Việt Nam), LATAM, MENA, Châu Âu, UK và US. Việt Nam, Hàn Quốc và thị trường Trung Quốc vẫn dùng thang 55–80%.",
+        "is_latest": false,
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Mở rộng danh sách khu vực",
+                "desc": "Khoảng 80 nước và vùng: Đông Nam Á (trừ Việt Nam), LATAM, MENA, EU cùng Na Uy, Iceland, Liechtenstein, Thuỵ Sĩ, UK và US. AI nhận ra nước qua tên nước, tên người dân, thành phố lớn, cờ, chữ Ả Rập/Thái; KOL trả lời chung chung như \"Latin America\", \"Europe\", \"Middle East\" cũng được tính."
+            },
+            {
+                "type": "feature",
+                "title": "Loại trừ Việt Nam, Hàn Quốc, thị trường Trung Quốc",
+                "desc": "KOL ở Việt Nam, Hàn Quốc, Trung Quốc đại lục, Hồng Kông, Đài Loan, Macau, hoặc KOL nhắn chủ yếu bằng tiếng Việt, Hàn, Trung (kể cả khi đang sống ở nước được áp dụng) đều dùng thang hoa hồng chuẩn. Các nước ngoài danh sách (Ấn Độ, Pakistan, Thổ Nhĩ Kỳ, Nga, Nhật, Canada, Úc, Nigeria…) cũng vậy; Iran, Syria, Cuba bị loại vì lệnh trừng phạt."
+            },
+            {
+                "type": "improvement",
+                "title": "Thứ tự xét quốc gia",
+                "desc": "Thứ tự: (1) ngôn ngữ Việt/Hàn/Trung; (2) quốc gia của KOL; (3) quốc gia của cộng đồng; (4) các trường khác trong hồ sơ và tin nhắn của lead. Nếu tin nhắn nhắc cả nước được áp dụng lẫn nước không được áp dụng (ví dụ \"USA và India\") thì AI chưa chào gói vùng mà hỏi KOL ở đâu trước."
+            },
+            {
+                "type": "improvement",
+                "title": "Không gợi ý VPN",
+                "desc": "Nếu KOL hỏi thành viên ở nước bị hạn chế có tham gia được không, hoặc hỏi về VPN/cách lách giới hạn quốc gia, AI không gợi ý gì mà chuyển cho người ([HANDOVER_REQUIRED]) để team xác nhận."
+            }
+        ]
+    },
+    {
+        "version": "3.30.0",
+        "date": "09/11/2026",
+        "title": "🇮🇩🇦🇪 Ưu đãi riêng cho KOL Indonesia & UAE: 60% + campaign Deposit",
+        "is_latest": false,
+        "summary": "Lead WEEX ở Indonesia hoặc UAE không còn nhận thang 55–80%. AI chào hoa hồng cố định 60% (trả hằng ngày) và lấy campaign Deposit làm mũi nhọn: thưởng nạp 10% cho cộng đồng; 20% nếu KOL chứng minh 30M+ volume/tháng trong 3 tháng gần nhất, hoặc nếu lần chạy đầu tốt. AI hỏi thẳng KOL ở đâu và cộng đồng từ đâu; quốc gia của chính KOL được ưu tiên.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Hỏi thẳng KOL ở đâu, cộng đồng từ đâu",
+                "desc": "Khi chưa biết, AI hỏi một lần, sớm, trước khi chào % hoa hồng: \"bạn ở đâu, thành viên cộng đồng chủ yếu từ đâu?\". Hồ sơ KOL lưu kol_country và community_country. Quốc gia của chính KOL quyết định trước (ví dụ KOL ở Singapore, cộng đồng Indonesia → thang chuẩn); chỉ khi KOL không nói thì mới xét cộng đồng. Chưa có hai thông tin này thì dựa vào tin của lead: tên nước, thành phố, cờ 🇮🇩/🇦🇪, hoặc từ 3 từ tiếng Bahasa Indonesia trở lên. Người nói tiếng Mã Lai không bị tính nhầm."
+            },
+            {
+                "type": "feature",
+                "title": "Khối ưu đãi thay cho thang hoa hồng",
+                "desc": "AI mở đầu bằng campaign Deposit rồi mới tới 60% revshare trả hằng ngày. Có hai cách lên 20%: (a) bằng chứng 3 tháng gần nhất ở sàn hiện tại với khoảng 30M+ volume/tháng thì được ngay; (b) bắt đầu 10%, lần chạy đầu tốt thì team mở khoá 20%. AI nhắc lại campaign khi KOL lưỡng lự, so sánh hay im lặng, và gợi ý cách chạy: ghim bài, video/livestream, hạn chót. AI không nói về tier. Revshare trên 60%, thưởng nạp trên 20% hoặc ngoại lệ → chuyển cho người."
+            },
+            {
+                "type": "feature",
+                "title": "Gửi kèm ảnh campaign 10% Deposit",
+                "desc": "Với lead Indo/UAE, ở tin đầu tiên chào thưởng nạp 10%, AI gửi kèm ảnh \"10% Deposit Rewards\" (deposit10.jpg). Mỗi chat chỉ gửi một lần; AI không gõ lại các mốc USDT có trong ảnh. AI không gửi ảnh Double Gain 20% (ảnh còn ghi tháng 7/2026) và ảnh tier S/A/B/C cho các lead này; mức 20% chỉ được nói bằng lời."
+            },
+            {
+                "type": "improvement",
+                "title": "Bộ chặn con số theo vùng",
+                "desc": "Với lead Indonesia/UAE, tin AI chỉ được có 60%, 10% và 20%. Các mức 55/65/70/80% của thang bị chặn và chuyển cho người. Lead ở vùng khác giữ nguyên thang cũ."
+            },
+            {
+                "type": "improvement",
+                "title": "Drip, nhắc bước, chăm sóc KOL cũng theo vùng",
+                "desc": "Tin drip dùng khối ưu đãi vùng. Tin nhắc bước không đưa ra tier dự đoán. Tin chăm sóc KOL hằng tháng lấy campaign Deposit làm điểm nhấn."
+            }
+        ]
+    },
+    {
+        "version": "v3.29.0",
+        "date": "09/11/2026",
+        "title": "🌏 Tên miền WEEX thay thế cho Ấn Độ/Pakistan",
+        "is_latest": false,
+        "summary": "weex.com bị chặn ở Ấn Độ và Pakistan. Với lead ở đó, hoặc lead báo không vào được web WEEX, link WEEX trong tin AI tự đổi sang tên miền chính thức thay thế (www.weex.io, wcicisx.online, wqayejx.site, www.wnenatx.online) (giữ nguyên đường dẫn và vipCode).",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Tự đổi link sang tên miền thay thế",
+                "desc": "Lead nhắc tới Ấn Độ/Pakistan (hoặc thành phố lớn, chữ Hindi/Urdu), hồ sơ KOL có ghi Ấn Độ/Pakistan, hay báo web/link không vào được: mọi link weex.com, www.weex.com trong tin AI gửi (trả lời, nhắc bước, drip, chăm sóc) đổi sang 1 tên miền thay thế. Ví dụ weex.com/vi/register?vipCode=ybsv → wcicisx.online/vi/register?vipCode=ybsv. Mỗi lead luôn nhận cùng 1 tên miền. affiliates.weex.com giữ nguyên; tin nhân viên tự gửi không bị đổi."
+            },
+            {
+                "type": "feature",
+                "title": "AI biết đưa tên miền dự phòng",
+                "desc": "Agent WEEX được dặn: dùng tên miền thay thế cho lead này, nếu lead báo vẫn không vào được thì đưa tên miền kế tiếp; không bàn lý do bị chặn, không gợi ý VPN."
+            },
+            {
+                "type": "improvement",
+                "title": "Sửa danh sách tên miền trong Cấu hình AI",
+                "desc": "Ô “🌏 Tên miền WEEX thay thế” cạnh phần Chăm sóc KOL. Mặc định: www.weex.io (tên miền chính chủ, đứng đầu), wcicisx.online, wqayejx.site, www.wnenatx.online. Để trống = tắt. vipCode cũng được gắn trên link tên miền thay thế."
+            }
+        ]
+    },
+    {
+        "version": "v3.28.0",
+        "date": "08/11/2026",
+        "title": "⚡ Deep Crawl chạy song song nhiều tài khoản",
+        "is_latest": false,
+        "summary": "Deep Crawl giờ cho tối đa 3 tài khoản cào cùng lúc thay vì lần lượt từng acc. Nhanh hơn khoảng 2–3 lần, mỗi acc vẫn giữ nhịp an toàn của riêng nó.",
+        "changes": [
+            {
+                "type": "improvement",
+                "title": "Cào song song tối đa 3 acc",
+                "desc": "Mỗi tài khoản cào một kênh riêng, lấy từ hàng đợi chung; danh sách kênh đã cào dùng chung nên không bị trùng. Trước đây độ trễ sau mỗi kênh chặn cả lần crawl, các acc còn lại chỉ ngồi chờ."
+            },
+            {
+                "type": "improvement",
+                "title": "Nhịp an toàn tính theo từng acc",
+                "desc": "Mỗi acc cách tối thiểu 5–8 giây giữa hai lần lấy kênh tương tự, vẫn nghỉ 30–60 giây sau mỗi 20 request, vẫn giới hạn 300 request/lần crawl và tự né FloodWait. Acc nào nghỉ hoặc bị giới hạn thì acc khác thay vào."
+            },
+            {
+                "type": "improvement",
+                "title": "Tra t.me vẫn giới hạn chung",
+                "desc": "Phần tra trang t.me công khai (chạy từ IP máy, không qua acc) vẫn dùng chung một giới hạn số request đồng thời, nên chạy song song không làm t.me chặn IP."
+            },
+            {
+                "type": "improvement",
+                "title": "Hiện các acc đang cào",
+                "desc": "Ô “Tài khoản” trong tiến trình Deep Crawl hiện tất cả acc đang làm việc, ví dụ “Account #3, Account #6, Account #12”."
+            }
+        ]
+    },
+    {
+        "version": "v3.27.0",
+        "date": "08/11/2026",
+        "title": "⏰ Hẹn giờ chạy campaign + đếm ngược acc bị hạn chế",
+        "is_latest": false,
+        "summary": "Đặt giờ tự chạy cho DM campaign và xem mỗi acc bị flag/PeerFlood/SpamBot còn bao lâu mới gửi lại được, để chọn giờ chạy khớp.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Hẹn giờ chạy campaign",
+                "desc": "Trong modal tạo/sửa campaign có mục ⏰ Hẹn giờ chạy: chọn ngày giờ + múi giờ. Campaign đã hẹn vẫn sửa được (đổi giờ), chạy ngay hoặc hủy lịch. Nếu app tắt lúc đến giờ thì chạy ngay khi app bật lại."
+            },
+            {
+                "type": "feature",
+                "title": "Đếm ngược acc bị hạn chế",
+                "desc": "Chip tài khoản hiện “còn 2h14m” cho acc bị flag, PeerFlood hoặc SpamBot giới hạn (rê chuột xem giờ chính xác từng lý do). Acc không rõ hạn hiện “không rõ hạn”."
+            },
+            {
+                "type": "feature",
+                "title": "Nút ⏱ Khớp giờ",
+                "desc": "Tự đặt giờ chạy = lúc acc hạn chế cuối cùng (trong các acc đã chọn) hết hạn + 5 phút. Dòng gợi ý cảnh báo acc nào vẫn còn bị hạn chế tại giờ đã chọn."
+            },
+            {
+                "type": "improvement",
+                "title": "Flag tự gỡ khi hết hạn",
+                "desc": "Flag (≥5 lỗi trong 24h) giờ tự gỡ khi số lỗi trong 24h tụt dưới 5, thay vì treo mãi."
+            },
+            {
+                "type": "fix",
+                "title": "Mở lại acc PeerFlood đúng giờ",
+                "desc": "Kết quả SpamBot “limited until …” đã quá hạn không còn được dùng lại từ cache; trước giờ hẹn, acc PeerFlood được hỏi lại @SpamBot để vào chạy ngay từ tin đầu. Giờ hẹn trong danh sách campaign hiển thị đúng múi giờ."
+            }
+        ]
+    },
+    {
+        "version": "v3.26.1",
+        "date": "08/11/2026",
+        "title": "🔁 AI không lặp lại tin \"để mình check lại với team\"",
+        "is_latest": false,
+        "summary": "Khi AI đã gửi tin chờ (fallback) cho KOL thì không gửi lại lần nữa; chat giữ cho người xử lý.",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Không gửi fallback 2 lần",
+                "desc": "Nếu câu trả lời của AI bị chặn (sai con số hoặc lộ AI) mà tin fallback đã từng gửi trong chat, AI im lặng và giữ chat ở needs_human thay vì gửi lại y hệt."
+            },
+            {
+                "type": "fix",
+                "title": "Tự bật lại sau 12h bỏ qua chat đang chờ check",
+                "desc": "Chat mà tin cuối của mình là fallback sẽ không tự bật lại AI sau 12h, vì AI chỉ lặp lại câu trả lời đã bị chặn. Chủ tài khoản đã được báo để vào xử lý."
+            }
+        ]
+    },
+    {
         "version": "v3.26.0",
         "date": "07/11/2026",
         "title": "⚡ Campaign DM: mỗi tài khoản giữ nhịp delay riêng, nhiều acc gửi nhanh gấp N lần",
-        "is_latest": true,
-        "badge": "LATEST",
+        "is_latest": false,
         "summary": "Delay tối thiểu/tối đa giờ tính riêng cho từng tài khoản thay vì cho cả campaign. Có 3 tài khoản thì campaign gửi nhanh khoảng gấp 3, còn mỗi tài khoản vẫn nghỉ đúng delay đã cài. Tài khoản lỗi 3 lần liên tiếp chỉ dừng riêng nó.",
         "changes": [
             {

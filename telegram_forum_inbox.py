@@ -230,25 +230,43 @@ async def relay_general_alert(bot, cfg: ForumConfig, text: str) -> bool:
     return True
 
 
+async def ensure_topic(db, bot, cfg: ForumConfig, *, account_id: int, user_id: int,
+                       username: str | None, name: str | None, last_text: str | None = None) -> dict | None:
+    """The lead's topic, created on first need. None when we never reached out to them."""
+    async with _topic_lock(cfg.group_id, account_id, user_id):
+        topic = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
+        if topic:
+            if last_text is not None:
+                await db.update_telegram_topic_last_message(cfg.group_id, int(topic["topic_id"]), last_text)
+            return topic
+        proof = await db.get_telegram_outreach_proof(account_id, user_id)
+        if not proof:
+            return None
+        topic_id = await bot.create_forum_topic(cfg.group_id, _topic_title(account_id, user_id, username, name))
+        topic = {"group_id": cfg.group_id, "topic_id": int(topic_id), "account_id": account_id,
+                 "user_id": user_id, "username": username, "name": name,
+                 "campaign_name": proof.get("name"), "status": "active", "last_lead_message": last_text}
+        await db.upsert_telegram_topic(topic)
+        return topic
+
+
+def topic_message_link(group_id: int, topic_id: int, message_id: int) -> str:
+    """t.me link that opens a message inside a forum topic (members of the group only)."""
+    internal = str(abs(int(group_id)))
+    if internal.startswith("100") and len(internal) > 10:
+        internal = internal[3:]
+    return f"https://t.me/c/{internal}/{int(topic_id)}/{int(message_id)}"
+
+
 async def relay_inbound(db, bot, cfg: ForumConfig, *, account_id: int, user_id: int,
                         username: str | None, name: str | None, text: str,
                         has_media: bool = False) -> str:
     if not cfg.enabled:
         return "disabled"
-    proof = await db.get_telegram_outreach_proof(account_id, user_id)
-    if not proof:
+    topic = await ensure_topic(db, bot, cfg, account_id=account_id, user_id=user_id,
+                               username=username, name=name, last_text=text)
+    if not topic:
         return "no_outreach_proof"
-
-    async with _topic_lock(cfg.group_id, account_id, user_id):
-        topic = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
-        if not topic:
-            topic_id = await bot.create_forum_topic(cfg.group_id, _topic_title(account_id, user_id, username, name))
-            topic = {"group_id": cfg.group_id, "topic_id": int(topic_id), "account_id": account_id,
-                     "user_id": user_id, "username": username, "name": name,
-                     "campaign_name": proof.get("name"), "status": "active", "last_lead_message": text}
-            await db.upsert_telegram_topic(topic)
-        else:
-            await db.update_telegram_topic_last_message(cfg.group_id, int(topic["topic_id"]), text)
 
     _label = await _account_label(db, account_id)
     await bot.send_topic_message(cfg.group_id, int(topic["topic_id"]), _format_inbound(_label, user_id, username, name, text, has_media))

@@ -31,7 +31,7 @@ def account_health(acc: dict, spam: dict | None = None, now: float | None = None
     if pf_ts > now:
         until = datetime.fromtimestamp(pf_ts, tz=timezone.utc).isoformat(timespec="minutes")
         return {"ok": False, "label": "PeerFlood", "detail": f"Hết hạn {until} UTC"}
-    if spam and spam.get("status") == "limited":
+    if spam and spam.get("status") == "limited" and not spam.get("expired"):
         return {"ok": False, "label": "SpamBot giới hạn",
                 "detail": f"kiểm tra lúc {spam.get('checked_at') or '?'}"}
     return {"ok": True, "label": "Hoạt động", "detail": ""}

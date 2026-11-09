@@ -837,6 +837,8 @@ const Members = {
         actions += `<button class="btn btn-danger btn-sm" onclick="Members.stopCampaign(${c.id})" title="Dừng campaign">⏸</button>`;
       }
       if (c.status === 'scheduled') {
+        actions += `<button class="btn btn-primary btn-sm" onclick="Members.startCampaign(${c.id})" title="Chạy ngay (bỏ lịch hẹn)">▶</button>`;
+        actions += `<button class="btn btn-ghost btn-sm" onclick="Members.editCampaignMessages(${c.id})" title="Sửa campaign / đổi giờ chạy">✏️</button>`;
         actions += `<button class="btn btn-ghost btn-sm" onclick="Members.cancelSchedule(${c.id})" title="Hủy lịch hẹn giờ" style="color:var(--danger)">🚫</button>`;
       }
       actions += `<button class="btn btn-ghost btn-sm" onclick="Members.cloneCampaign(${c.id})" title="Nhân bản campaign">📑</button>`;
@@ -849,9 +851,13 @@ const Members = {
       const metaParts = [`<span title="Nguồn: ${esc(sourceFull)}">📁 ${esc(sourceShort)}</span>`];
 
       if (c.status === 'scheduled' && c.scheduled_at) {
-        const time = new Date(c.scheduled_at + 'Z').toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+        // scheduled_at is wall-clock time in target_timezone (not UTC).
+        const [d, t] = String(c.scheduled_at).replace('T', ' ').split(' ');
+        const [yy, mm, dd] = (d || '').split('-');
+        const time = `${(t || '').slice(0, 5)} ${dd}/${mm}/${yy}`;
         const tz = c.target_timezone ? ` ${Members._tzLabel(c.target_timezone)}` : '';
-        metaParts.push(`<span style="color:var(--accent)">⏰ ${time}${tz}</span>`);
+        const left = Members._fmtLeft(Members._wallToUnix(c.scheduled_at, c.target_timezone || 'Asia/Ho_Chi_Minh') - Date.now() / 1000);
+        metaParts.push(`<span style="color:var(--accent)" title="Tự chạy sau ${left}">⏰ ${time}${tz}</span>`);
       }
       if (c.status === 'paused_auto') {
         metaParts.push(autoResume
@@ -1091,12 +1097,14 @@ const Members = {
       const d = await MembersAPI.getCampaign(id);
       const c = d.campaign;
       if (!c) { App.toast('Campaign không tồn tại', 'error'); return; }
-      if (!['draft', 'paused', 'paused_auto', 'error', 'completed'].includes(c.status)) {
+      if (!['draft', 'paused', 'paused_auto', 'error', 'completed', 'scheduled'].includes(c.status)) {
         App.toast('Chỉ sửa được khi campaign tạm dừng, chưa chạy hoặc đã hoàn thành', 'error');
         return;
       }
 
       this._editingCampaignId = id;
+      this._cmpSuggestSeq++;
+      (document.getElementById('cmp-suggest-note') || me_dummy).style.display = 'none';
 
       // Set modal title to edit mode
       (document.getElementById('campaign-modal-title') || me_dummy).textContent = `✏️ Sửa Campaign: ${c.name}`;
@@ -1152,6 +1160,14 @@ const Members = {
       }
 
       await this._renderCampaignAccountPicker(c.sender_account_ids || []);
+
+      // Schedule
+      const schedToggle = document.getElementById('cmp-schedule-toggle');
+      const isSched = c.status === 'scheduled' && !!c.scheduled_at;
+      (document.getElementById('cmp-target-timezone') || me_dummy).value = (isSched && c.target_timezone) || 'Asia/Ho_Chi_Minh';
+      (document.getElementById('cmp-scheduled-at') || me_dummy).value = isSched ? String(c.scheduled_at).replace(' ', 'T').slice(0, 16) : '';
+      if (schedToggle) { schedToggle.checked = isSched; this.toggleScheduleSection(); }
+      this._editingWasScheduled = isSched;
 
       // Fill messages
       const msgList = document.getElementById('cmp-messages-list');
@@ -1218,6 +1234,10 @@ const Members = {
     const minLeadScore = parseInt(document.getElementById('cmp-min-lead-score')?.value) || 0;
 
     if (!jobId) { App.toast('Vui lòng chọn nguồn members', 'error'); return; }
+    const schedOn = document.getElementById('cmp-schedule-toggle')?.checked || false;
+    const schedAt = document.getElementById('cmp-scheduled-at')?.value;
+    const schedTz = document.getElementById('cmp-target-timezone')?.value || 'Asia/Ho_Chi_Minh';
+    if (schedOn && !schedAt) { App.toast('Vui lòng chọn ngày giờ chạy', 'error'); return; }
 
     // Collect sender accounts
     const accCheckboxes = document.querySelectorAll('.cmp-acc-checkbox:checked');
@@ -1258,7 +1278,13 @@ const Members = {
         auto_resume: autoResume,
         min_lead_score: minLeadScore,
       });
-      App.toast('✅ Đã cập nhật Campaign (nguồn, tài khoản & tin nhắn)!', 'success');
+      if (schedOn || this._editingWasScheduled) {
+        await API.put(`/api/members/campaigns/${id}/schedule`, {
+          scheduled_at: schedOn ? schedAt : null,
+          target_timezone: schedOn ? schedTz : null,
+        });
+      }
+      App.toast(schedOn ? '✅ Đã cập nhật Campaign & lịch hẹn giờ!' : '✅ Đã cập nhật Campaign (nguồn, tài khoản & tin nhắn)!', 'success');
       this._editingCampaignId = null;
       this.closeCampaignModal();
       this.loadCampaigns();
@@ -1336,14 +1362,15 @@ const Members = {
     const limitInput = document.getElementById('cmp-daily-limit') || document.getElementById('cmp-daily-limit-premium');
     if (limitInput) limitInput.value = '50';
     (document.getElementById('cmp-ai-remix') || me_dummy).checked = false;
-    if (typeof AIAgents !== 'undefined' && AIAgents.populateAgentDropdown) {
-      AIAgents.populateAgentDropdown('cmp-ai-agent', null);
-    }
+    (document.getElementById('cmp-auto-translate-native') || me_dummy).checked = true;
+    this._cmpAgentsReady = (typeof AIAgents !== 'undefined' && AIAgents.populateAgentDropdown)
+      ? AIAgents.populateAgentDropdown('cmp-ai-agent', null) : Promise.resolve();
     const excludePrevEl = document.getElementById('cmp-exclude-previous');
     if (excludePrevEl) excludePrevEl.checked = true;
     const minLeadScoreEl = document.getElementById('cmp-min-lead-score');
     if (minLeadScoreEl) minLeadScoreEl.value = 0;
     (document.getElementById('cmp-messages-list') || me_dummy).innerHTML = '';
+    this._cmpLastSuggest = null;
 
     const schedToggle = document.getElementById('cmp-schedule-toggle');
     if (schedToggle) {
@@ -1352,6 +1379,8 @@ const Members = {
     }
     const schedAt = document.getElementById('cmp-scheduled-at');
     if (schedAt) schedAt.value = '';
+    (document.getElementById('cmp-target-timezone') || me_dummy).value = 'Asia/Ho_Chi_Minh';
+    this._availCache = null; // fresh countdowns each time the modal opens
 
     // Populate scrape jobs dropdown
     const jobSel = document.getElementById('cmp-scrape-job');
@@ -1379,14 +1408,99 @@ const Members = {
 
     await this._renderCampaignAccountPicker(null);
 
-    // Add one empty message by default
+    // Add one empty message by default, then fill it from the picked list
     this.addCampaignMessage();
 
     (document.getElementById('campaign-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open');
+    this._applyCampaignSuggestion();
+  },
+
+  // ── Auto-suggest message + Remix/Agent/Dịch from the picked list ──
+  // Backend picks the best past campaign (reply rate) in the list's language;
+  // we only overwrite textareas the user has not edited since the last fill.
+  _cmpSuggestSeq: 0,
+  _cmpLastSuggest: null,
+
+  _onCampaignJobChange() {
+    if (!this._editingCampaignId) this._applyCampaignSuggestion();
+  },
+
+  _cmpSenderBrand() {
+    const E = typeof Engagement !== 'undefined' ? Engagement : null;
+    if (!E?._accBrand) return '';
+    const ids = new Set([...document.querySelectorAll('#cmp-accounts-list .cmp-acc-checkbox:checked')].map(cb => +cb.value));
+    const cnt = {};
+    (this._accounts || []).filter(a => ids.has(a.id)).forEach(a => {
+      const b = (E._accBrand(a) || '').trim().toLowerCase();
+      if (b) cnt[b] = (cnt[b] || 0) + 1;
+    });
+    return Object.entries(cnt).sort((x, y) => y[1] - x[1])[0]?.[0] || '';
+  },
+
+  _cmpMessagesUntouched() {
+    const prev = (this._cmpLastSuggest?.messages || []).map(m => (m.content || '').trim());
+    return [...document.querySelectorAll('#cmp-messages-list .cmp-msg-item')].every((it, i) => {
+      const v = it.querySelector('.cmp-msg-content')?.value.trim() || '';
+      return !it.querySelector('.cmp-msg-media-path')?.value && (!v || v === (prev[i] || ''));
+    });
+  },
+
+  async _applyCampaignSuggestion(force = false) {
+    const note = document.getElementById('cmp-suggest-note');
+    const jobId = document.getElementById('cmp-scrape-job')?.value;
+    if (!jobId || this._editingCampaignId) { if (note) note.style.display = 'none'; return; }
+    if (force && !this._cmpMessagesUntouched()
+        && !confirm('Thay nội dung bạn đã sửa bằng đề xuất mới?')) return;
+    const seq = ++this._cmpSuggestSeq;
+    if (note) {
+      note.style.display = 'block';
+      note.innerHTML = '<span style="color:var(--text2)">⏳ Đang đề xuất nội dung theo tệp đã cào…</span>';
+    }
+    let s;
+    try {
+      const brand = this._cmpSenderBrand();
+      s = await API.get(`/api/members/campaigns/suggest?job_id=${encodeURIComponent(jobId)}` +
+        (brand ? `&brand=${encodeURIComponent(brand)}` : ''));
+    } catch (e) {
+      if (seq === this._cmpSuggestSeq && note) note.innerHTML = `<span style="color:var(--danger)">Chưa đề xuất được: ${esc(e.message)}</span>`;
+      return;
+    }
+    if (seq !== this._cmpSuggestSeq || this._editingCampaignId) return;
+
+    const list = document.getElementById('cmp-messages-list');
+    const filled = force || this._cmpMessagesUntouched();
+    if (filled && list) {
+      list.innerHTML = '';
+      (s.messages?.length ? s.messages : [{ content: '' }]).forEach(m => {
+        this.addCampaignMessage();
+        const ta = list.lastElementChild?.querySelector('.cmp-msg-content');
+        if (ta) { ta.value = m.content || ''; this.updateMsgCharCounter(ta); }
+      });
+      this._cmpLastSuggest = s;
+    }
+    (document.getElementById('cmp-ai-remix') || me_dummy).checked = !!s.use_ai_remix;
+    (document.getElementById('cmp-auto-translate-native') || me_dummy).checked = !!s.auto_translate_native;
+    try { await this._cmpAgentsReady; } catch (e) {}
+    if (seq !== this._cmpSuggestSeq) return;
+    const agentSel = document.getElementById('cmp-ai-agent');
+    if (agentSel) agentSel.value = s.ai_agent_id ? String(s.ai_agent_id) : '';
+
+    if (note) {
+      const tip = 'Đề xuất dựa trên ngôn ngữ của tệp và tỉ lệ trả lời thật của các chiến dịch cũ (người đã trả lời ÷ tin đã gửi). Hệ thống chỉ điền vào ô bạn chưa sửa; bấm “Đề xuất lại” sau khi chọn tài khoản gửi để khớp brand của tài khoản.';
+      note.innerHTML = `
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:4px">
+          <span>✨ Đã tự đề xuất — bạn chỉ cần xem lại rồi bấm Lưu</span>
+          <span class="info-i" tabindex="0" data-tip="${esc(tip)}">i</span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="Members._applyCampaignSuggestion(true)" style="margin-left:auto;font-size:11px;padding:2px 8px;border:1px solid var(--border)">↺ Đề xuất lại</button>
+        </div>
+        ${filled ? '' : '<div style="color:var(--orange);margin-bottom:2px">Giữ nguyên nội dung bạn đã sửa — chỉ cập nhật Remix / Agent / Dịch.</div>'}
+        <ul style="margin:0;padding-left:18px;color:var(--text2);line-height:1.55">${(s.reasons || []).map(r => `<li>${esc(r)}</li>`).join('')}</ul>`;
+    }
   },
 
   closeCampaignModal() {
     (document.getElementById('campaign-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
+    clearInterval(this._cmpTimer);
     
     const schedToggle = document.getElementById('cmp-schedule-toggle');
     if (schedToggle) {
@@ -1424,11 +1538,32 @@ const Members = {
       try { this._spamCache = (await API.get('/api/members/accounts/spam-status')).statuses || {}; this._spamCacheAt = now; }
       catch (e) { this._spamCache = this._spamCache || {}; }
     }
+    // When restricted accounts can send again — fetched once per modal open (60s cache), no polling.
+    if (!this._availCache || now - this._availAt > 60000) {
+      try { this._availCache = (await API.get('/api/members/accounts/availability')).accounts || {}; this._availAt = now; }
+      catch (e) { this._availCache = this._availCache || {}; }
+    }
+    // A SpamBot limit whose date has passed is stale → ask @SpamBot again in the
+    // background (once per 10 min, only those accounts) and redraw the picker.
+    const expiredIds = Object.keys(this._spamCache || {}).filter(k => this._spamCache[k]?.expired);
+    if (expiredIds.length && !(this._spamRecheckAt && now - this._spamRecheckAt < 600000)) {
+      this._spamRecheckAt = now;
+      API.post('/api/members/accounts/spam-recheck-expired', {}).then(r => {
+        if (!r?.checked) return;
+        Object.assign(this._spamCache, r.statuses || {});
+        App._spamStatus = Object.assign(App._spamStatus || {}, r.statuses || {});
+        this._availAt = 0;  // availability depends on the SpamBot answer
+        if (document.getElementById('campaign-modal')?.classList.contains('open')) {
+          this._renderCampaignAccountPicker([...document.querySelectorAll('#cmp-accounts-chips .cmp-acc-checkbox:checked')].map(cb => +cb.value));
+        }
+      }).catch(() => {});
+    }
     const E = typeof Engagement !== 'undefined' ? Engagement : null;
     const rows = (this._accounts || []).filter(a => a && a.id).map(a => {
       let st = E ? E._accStatus(a) : { ok: !!a.is_logged_in, color: a.is_logged_in ? 'var(--success,#3fb950)' : 'var(--text3)', label: a.is_logged_in ? 'Hoạt động' : 'Offline' };
       const sp = this._spamCache[a.id] || this._spamCache[String(a.id)];
-      if (st.ok && sp && sp.status === 'limited') st = { ok: false, color: 'var(--red)', label: 'SpamBot giới hạn', detail: sp.message };
+      if (st.ok && sp && sp.status === 'limited' && !sp.expired) st = { ok: false, color: 'var(--red)', label: 'SpamBot giới hạn', detail: sp.message };
+      else if (st.ok && sp?.expired) st = { ...st, detail: 'giới hạn SpamBot đã hết hạn — hỏi lại @SpamBot khi chạy' };
       return { a, st, sp, brand: E ? E._accBrand(a) : '' };
     });
     rows.sort((x, y) => (y.st.ok - x.st.ok) || ((y.a.is_premium || 0) - (x.a.is_premium || 0)));
@@ -1456,15 +1591,120 @@ const Members = {
       const a = r.a, st = r.st;
       const name = (a.user_info ? [a.user_info.first_name, a.user_info.last_name].filter(Boolean).join(' ') : '') || a.name || a.phone || ('#' + a.id);
       let tip = `${name} — ${st.label}${st.detail ? ': ' + st.detail : ''}`;
-      if (r.sp) tip += ` · SpamBot: ${r.sp.status}${r.sp.checked_at ? ' (' + new Date(r.sp.checked_at).toLocaleString('vi-VN') + ')' : ''}`;
+      if (r.sp) tip += ` · SpamBot: ${r.sp.expired ? 'hết hạn giới hạn' : r.sp.status}${r.sp.checked_at ? ' (' + new Date(r.sp.checked_at).toLocaleString('vi-VN') + ')' : ''}`;
+      tip += ' · Mỗi lần chạy campaign đều hỏi lại @SpamBot';
+      const av = this._availCache?.[String(a.id)];
+      if (av) tip += ` · ${this._cmpAvailTip(av)}`;
       return `<label class="cmp-acc-chip" data-ok="${st.ok ? 1 : 0}" data-premium="${a.is_premium ? 1 : 0}" data-brand="${esc(r.brand)}" title="${esc(tip)}"
           style="${a.is_premium ? 'border-color:var(--orange);' : ''}${st.ok ? '' : 'opacity:.55;'}">
         <input type="checkbox" class="cmp-acc-checkbox" value="${a.id}" ${isChecked(r) ? 'checked' : ''} onchange="Members._cmpAccCount()">
         <span style="width:7px;height:7px;border-radius:50%;background:${st.color};flex:none"></span>
-        <span>${a.is_premium ? '⭐ ' : ''}${esc(shortName(name))}${st.ok ? '' : ` <span style="color:${st.color};font-size:.85em">· ${esc(st.label)}</span>`}</span>
+        <span>${a.is_premium ? '⭐ ' : ''}${esc(shortName(name))}${st.ok ? '' : ` <span style="color:${st.color};font-size:.85em">· ${esc(st.label)}</span>`}${av ? ` <span class="cmp-acc-cd" data-acc="${a.id}" style="font-size:.85em;color:var(--text2)"></span>` : ''}</span>
       </label>`;
     }).join('') || '<span style="color:var(--text3)">Chưa có tài khoản</span>';
     this._cmpAccCount();
+    this._cmpTick();
+    // Local 30s re-render of the countdown text only while the modal is open (no server calls).
+    clearInterval(this._cmpTimer);
+    this._cmpTimer = setInterval(() => {
+      if (!document.getElementById('campaign-modal')?.classList.contains('open')) { clearInterval(this._cmpTimer); return; }
+      this._cmpTick();
+    }, 30000);
+  },
+
+  // ── Countdown / schedule helpers ──
+  _fmtLeft(sec) {
+    sec = Math.max(0, Math.round(sec));
+    const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+    if (d) return `${d}d${h}h`;
+    if (h) return `${h}h${String(m).padStart(2, '0')}m`;
+    return `${Math.max(1, m)}m`;
+  },
+
+  // Wall clock 'YYYY-MM-DD HH:MM' in IANA tz → unix seconds.
+  _wallToUnix(wall, tz) {
+    const [d, t] = String(wall).replace('T', ' ').split(' ');
+    const [Y, M, D] = d.split('-').map(Number), [h, mi] = (t || '0:0').split(':').map(Number);
+    const guess = Date.UTC(Y, M - 1, D, h, mi) / 1000;
+    return guess - (this._unixToWall(guess, tz, true) - guess);
+  },
+
+  // unix seconds → 'YYYY-MM-DDTHH:MM' in tz (asUnix: that wall clock read as UTC, for offset math).
+  _unixToWall(ts, tz, asUnix) {
+    const p = {};
+    new Intl.DateTimeFormat('en-GB', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      .formatToParts(new Date(ts * 1000)).forEach(x => { p[x.type] = x.value; });
+    if (asUnix) return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) / 1000;
+    return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+  },
+
+  _cmpCdText(av, now) {
+    if (av.unknown) return '· không rõ hạn';
+    if (av.available_at && av.available_at > now) return `· còn ${this._fmtLeft(av.available_at - now)}`;
+    return '· mở lại khi chạy';
+  },
+
+  _cmpAvailTip(av) {
+    const names = { flag: 'Flag (≥5 lỗi/24h)', peerflood: 'PeerFlood', spambot: 'SpamBot', paused: 'Tạm dừng' };
+    const parts = (av.reasons || []).map(r => names[r.kind] + (r.until
+      ? ` đến ${new Date(r.until * 1000).toLocaleString('vi-VN')}`
+      : r.kind === 'paused' ? (r.auto ? ' (hỏi lại SpamBot trước khi chạy)' : ' (thủ công)') : ' (không rõ hạn)'));
+    return 'Hạn chế: ' + parts.join(', ');
+  },
+
+  _cmpTick() {
+    const now = Date.now() / 1000;
+    document.querySelectorAll('#cmp-accounts-chips .cmp-acc-cd').forEach(el => {
+      const av = this._availCache?.[el.dataset.acc];
+      if (av) el.textContent = this._cmpCdText(av, now);
+    });
+    this._cmpScheduleHint();
+  },
+
+  // Ticked accounts that are restricted, with their release info.
+  _cmpSelectedRestricted() {
+    return [...document.querySelectorAll('#cmp-accounts-chips .cmp-acc-checkbox:checked')]
+      .map(cb => ({ id: cb.value, av: this._availCache?.[cb.value], name: (cb.closest('.cmp-acc-chip')?.textContent || '').trim().split('·')[0].trim() }))
+      .filter(x => x.av);
+  },
+
+  alignScheduleToAccounts() {
+    const sel = this._cmpSelectedRestricted();
+    const now = Date.now() / 1000;
+    const timed = sel.filter(x => !x.av.unknown && x.av.available_at && x.av.available_at > now);
+    if (!timed.length) {
+      App.toast(sel.some(x => x.av.unknown)
+        ? 'Acc hạn chế đã chọn không rõ hạn — không khớp giờ được'
+        : 'Các acc đã chọn không còn hạn chế có thời hạn — chạy ngay được', 'info');
+      return;
+    }
+    const target = Math.ceil((Math.max(...timed.map(x => x.av.available_at)) + 300) / 300) * 300; // +5 min, round to 5 min
+    const toggle = document.getElementById('cmp-schedule-toggle');
+    if (toggle && !toggle.checked) { toggle.checked = true; this.toggleScheduleSection(); }
+    const tz = document.getElementById('cmp-target-timezone')?.value || 'Asia/Ho_Chi_Minh';
+    document.getElementById('cmp-scheduled-at').value = this._unixToWall(target, tz);
+    this._cmpScheduleHint();
+  },
+
+  _cmpScheduleHint() {
+    const hint = document.getElementById('cmp-schedule-hint');
+    if (!hint) return;
+    const at = document.getElementById('cmp-scheduled-at')?.value;
+    const tz = document.getElementById('cmp-target-timezone')?.value || 'Asia/Ho_Chi_Minh';
+    const now = Date.now() / 1000;
+    const sel = this._cmpSelectedRestricted();
+    const bits = [];
+    if (at) {
+      const ts = this._wallToUnix(at, tz);
+      bits.push(ts <= now ? '<span style="color:var(--red)">Giờ này đã qua</span>' : `Chạy sau <b>${this._fmtLeft(ts - now)}</b>`);
+      const late = sel.filter(x => x.av.unknown || (x.av.available_at && x.av.available_at > ts));
+      if (late.length) bits.push(`<span style="color:var(--orange)">⚠ ${late.length} acc vẫn bị hạn chế lúc đó: ${late.map(x => esc(x.name)).join(', ')} — bị bỏ qua tới khi hết hạn</span>`);
+      else if (sel.length) bits.push('<span style="color:var(--green)">✓ Acc đã chọn đều hết hạn chế trước giờ chạy</span>');
+    } else {
+      const timed = sel.filter(x => !x.av.unknown && x.av.available_at > now);
+      if (timed.length) bits.push(`Acc hạn chế cuối cùng hết hạn sau <b>${this._fmtLeft(Math.max(...timed.map(x => x.av.available_at)) - now)}</b>`);
+    }
+    hint.innerHTML = bits.join(' · ');
   },
 
   quickPickCampaignAccounts(sel) {
@@ -1483,6 +1723,7 @@ const Members = {
     const on = [...all].filter(c => c.checked);
     const bad = on.filter(c => c.closest('.cmp-acc-chip').dataset.ok !== '1').length;
     el.innerHTML = `Đã chọn <b>${on.length}</b>/${all.length}${bad ? ` · <span style="color:var(--orange)">${bad} không khỏe</span>` : ''}`;
+    this._cmpScheduleHint();
   },
 
   loadOutreachTemplate(type) {
@@ -1762,11 +2003,9 @@ const Members = {
     const fields = document.getElementById('cmp-schedule-fields');
     if (enabled) {
       fields.style.display = 'block';
-      // Auto-set target timezone to system timezone if not set
       const tzSelect = document.getElementById('cmp-target-timezone');
-      if (tzSelect && !tzSelect.value) {
-        tzSelect.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      }
+      if (tzSelect && !tzSelect.value) tzSelect.value = 'Asia/Ho_Chi_Minh';
+      this._cmpScheduleHint();
     } else {
       fields.style.display = 'none';
     }
@@ -2649,6 +2888,10 @@ const Members = {
       lead.category = "potential_bd";
       lead.category_label = "💎 Tiềm năng BD";
       lead.badge_color = "var(--accent)";
+    } else if (lead.trading_score >= 30) {
+      lead.category = "crypto_community";
+      lead.category_label = "📈 Cộng đồng Crypto";
+      lead.badge_color = "#6366f1";
     } else {
       lead.category = "low_relevance";
       lead.category_label = "⚠️ Ít liên quan";
@@ -2712,7 +2955,7 @@ const Members = {
     container.classList.remove('hidden');
 
     // ── Single-pass accumulator for all tab counts (P6 optimization) ──
-    let contactCount = 0, vipCount = 0, tradeCount = 0, potentialCount = 0, newsCount = 0;
+    let contactCount = 0, vipCount = 0, tradeCount = 0, potentialCount = 0, communityCount = 0, newsCount = 0;
     const depthCounts = {};
     leads.forEach(l => {
       const hasC = l.contacts && l.contacts.length > 0;
@@ -2724,6 +2967,7 @@ const Members = {
         if (s >= 80) vipCount++;
         else if (s >= 60) tradeCount++;
         else if (s >= 45) potentialCount++;
+        if (this._isCryptoCommunity(l)) communityCount++;
         if (l.category === 'news_general') newsCount++;
       }
     });
@@ -2738,6 +2982,7 @@ const Members = {
       vipCount = c.trading_vip ?? vipCount;
       tradeCount = c.trading_all ?? tradeCount;
       potentialCount = c.potential_bd ?? potentialCount;
+      communityCount = c.crypto_community ?? communityCount;
       newsCount = c.news ?? newsCount;
       noContactCount = c.no_contacts ?? noContactCount;
       allCount = c.all ?? opts.total ?? allCount;
@@ -2750,6 +2995,7 @@ const Members = {
         <button class="tab-btn btn-sm ${this._tradingFilter === 'trading_vip' ? 'active' : ''}" onclick="Members.filterByTrading('trading_vip')" style="border-left:3px solid var(--green)">🔥 VIP Signals (${vipCount})</button>
         <button class="tab-btn btn-sm ${this._tradingFilter === 'trading_all' ? 'active' : ''}" onclick="Members.filterByTrading('trading_all')" style="border-left:3px solid var(--purple)">📈 Trading & Scalping (${tradeCount})</button>
         <button class="tab-btn btn-sm ${this._tradingFilter === 'potential_bd' ? 'active' : ''}" onclick="Members.filterByTrading('potential_bd')" style="border-left:3px solid var(--accent)">💎 Tiềm năng BD (${potentialCount})</button>
+        <button class="tab-btn btn-sm ${this._tradingFilter === 'crypto_community' ? 'active' : ''}" onclick="Members.filterByTrading('crypto_community')" style="border-left:3px solid #6366f1" title="Kênh/nhóm crypto chung (điểm 30–44): có nói về crypto nhưng chưa thấy dấu hiệu futures/signal rõ ràng">📈 Cộng đồng Crypto (${communityCount})</button>
         <button class="tab-btn btn-sm ${this._tradingFilter === 'news' ? 'active' : ''}" onclick="Members.filterByTrading('news')" style="border-left:3px solid var(--orange)">📰 Tin tức (${newsCount})</button>
         <button class="tab-btn btn-sm ${this._tradingFilter === 'no_contacts' ? 'active' : ''}" onclick="Members.filterByTrading('no_contacts')" style="border-left:3px solid var(--text3);opacity:0.75">❌ Chưa có Contact (${noContactCount})</button>
         <button class="tab-btn btn-sm ${this._tradingFilter === 'all' ? 'active' : ''}" onclick="Members.filterByTrading('all')" style="opacity:0.65">🌐 Xem tất cả (${allCount})</button>
@@ -2939,7 +3185,8 @@ const Members = {
   // Tab key → short tag used in list names / titles
   _SIM_TAB_TAGS: {
     has_contacts: ['Contacts', 'Tất cả có contact'], trading_vip: ['VIP', 'VIP Signals'],
-    trading_all: ['Trading', 'Trading & Scalping'], potential_bd: ['BD', 'Tiềm năng BD'],
+    trading_all: ['Trading', 'Trading & Scalping'], crypto_community: ['Community', 'Cộng đồng Crypto'],
+    potential_bd: ['BD', 'Tiềm năng BD'],
     news: ['News', 'Tin tức'], no_contacts: ['NoContact', 'Chưa có contact'], all: ['All', 'Tất cả'],
   },
 
@@ -3042,12 +3289,19 @@ const Members = {
       filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 60 && (l.trading_score || 0) < 80);
     } else if (this._tradingFilter === 'potential_bd') {
       filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 45 && (l.trading_score || 0) < 60);
+    } else if (this._tradingFilter === 'crypto_community') {
+      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && this._isCryptoCommunity(l));
     } else if (this._tradingFilter === 'news') {
       filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && l.category === 'news_general');
     } else if (this._tradingFilter === 'no_contacts') {
       filtered = filtered.filter(l => !l.contacts || l.contacts.length === 0);
     }
     return filtered;
+  },
+
+  // "Cộng đồng Crypto" (score 30–44). Older snapshots stored it under crypto_trading.
+  _isCryptoCommunity(l) {
+    return l.category === 'crypto_community' || (l.category === 'crypto_trading' && (l.trading_score || 0) < 60);
   },
 
   // ── Filter results by depth ──
@@ -3083,23 +3337,7 @@ const Members = {
   },
 
   toggleSelectAllChannels(el) {
-    let filtered = this._similarLeads;
-    if (this._depthFilter !== 'all') {
-      filtered = filtered.filter(l => l.depth === this._depthFilter);
-    }
-    if (this._tradingFilter === 'has_contacts') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0);
-    } else if (this._tradingFilter === 'trading_vip') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 80);
-    } else if (this._tradingFilter === 'trading_all') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 60 && (l.trading_score || 0) < 80);
-    } else if (this._tradingFilter === 'potential_bd') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && (l.trading_score || 0) >= 45 && (l.trading_score || 0) < 60);
-    } else if (this._tradingFilter === 'news') {
-      filtered = filtered.filter(l => l.contacts && l.contacts.length > 0 && l.category === 'news_general');
-    } else if (this._tradingFilter === 'no_contacts') {
-      filtered = filtered.filter(l => !l.contacts || l.contacts.length === 0);
-    }
+    const filtered = this._applySimFilters(this._similarLeads);
 
     filtered.forEach(lead => {
       if (lead.contacts) {
@@ -3211,7 +3449,7 @@ const Members = {
         { value: cleanContacts.length, label: 'contact đã chọn' },
         { value: nCh, label: 'kênh', hint: `/${allWithContacts} kênh trong tab` },
       ],
-      note: 'Chỉ lưu contact đã tick trong tab đang xem. Contact đã có ở danh sách khác hoặc đã DM sẽ tự bỏ qua. Muốn lấy nhiều hơn: chọn tab "Tất cả có contact" rồi tick hết.',
+      note: 'Chỉ lưu contact đã tick trong tab đang xem. Tự bỏ qua contact đã DM/đang chat hoặc đang nằm trong danh sách có chiến dịch; contact chỉ nằm ở danh sách chưa chạy chiến dịch nào vẫn được lưu. Muốn lấy nhiều hơn: chọn tab "Tất cả có contact" rồi tick hết.',
       okText: 'Lưu contact', cancelText: 'Huỷ',
     })) return;
 
@@ -3241,12 +3479,13 @@ const Members = {
       const skips = [];
       if (d.skipped_existing > 0) {
         const where = (d.existing_jobs || []).slice(0, 2).map(([j, n]) => `${j}: ${n}`).join(', ');
-        skips.push(`${d.skipped_existing} đã có trong danh sách khác${where ? ` (${where})` : ''}`);
+        skips.push(`${d.skipped_existing} đã có trong danh sách đang chạy chiến dịch${where ? ` (${where})` : ''}`);
       }
       if (d.skipped_dmd > 0) skips.push(`${d.skipped_dmd} đã DM/đang trò chuyện`);
       if (d.skipped_dupe > 0) skips.push(`${d.skipped_dupe} trùng trong lựa chọn`);
+      const resaved = d.resaved_unused > 0 ? ` (gồm ${d.resaved_unused} lấy lại từ danh sách chưa chạy)` : '';
       const msg = d.count > 0
-        ? `✅ Đã lưu ${d.count} contact mới vào "${groupTitle}"${skips.length ? ` · Bỏ qua ${skips.join(', ')}` : ''}`
+        ? `✅ Đã lưu ${d.count} contact vào "${groupTitle}"${resaved}${skips.length ? ` · Bỏ qua ${skips.join(', ')}` : ''}`
         : `ℹ️ Không có contact mới — tất cả đã có sẵn${skips.length ? `: ${skips.join(', ')}` : ''}`;
       App.toast(msg, d.count > 0 ? 'success' : 'info');
       if (d.kol_upserted) App.toast(`📇 Đã cập nhật ${d.kol_upserted} kênh vào Danh bạ KOL`, 'info');
@@ -3258,13 +3497,15 @@ const Members = {
       this._renderDeepCrawlResults(this._similarLeads);
 
       // Shortcut: go straight from imported contacts to a DM campaign on that job
-      const skippedTotal = (d.skipped_existing || 0) + (d.skipped_dmd || 0) + (d.skipped_dupe || 0);
+      const topJobs = ((d.existing_jobs || [])[0] || [])[0] || '';
       if (d.count > 0 && await App.confirmDialog({
         icon: '🚀', title: 'Tạo DM campaign luôn?',
         message: `Danh sách "${groupTitle}" đã sẵn sàng.`,
         stats: [
-          { value: d.count, label: 'contact mới' },
-          ...(skippedTotal ? [{ value: skippedTotal, label: 'bỏ qua', hint: 'đã có / đã DM / trùng' }] : []),
+          { value: d.count, label: 'contact mới', ...(d.resaved_unused ? { hint: `gồm ${d.resaved_unused} từ list chưa chạy` } : {}) },
+          ...(d.skipped_existing ? [{ value: d.skipped_existing, label: 'đã có ở list đang chạy', hint: topJobs || 'list đã có chiến dịch' }] : []),
+          ...(d.skipped_dmd ? [{ value: d.skipped_dmd, label: 'đã DM / đang chat', hint: 'không nhắn lại lần 2' }] : []),
+          ...(d.skipped_dupe ? [{ value: d.skipped_dupe, label: 'trùng', hint: 'lặp trong lựa chọn' }] : []),
         ],
         okText: 'Tạo campaign', cancelText: 'Để sau',
       })) {
@@ -3913,19 +4154,20 @@ const Members = {
   // SpamBot result badge. A result is only a snapshot: older than 12h it is
   // shown faded with its age ("Sạch · 1 ngày trước") so it is not mistaken
   // for the current state. Click = re-check this account now.
-  _spamBadgeHtml(status, message, checkedAt, accountId) {
+  _spamBadgeHtml(status, message, checkedAt, accountId, expired) {
     const map = {
       free: { text: '✅ Sạch', c: 'var(--green)' },
       limited: { text: '🚫 Bị giới hạn', c: 'var(--red)' },
+      expired: { text: '⌛ Hết hạn giới hạn', c: 'var(--orange)' },
       unknown: { text: '⚠️ Không rõ', c: 'var(--orange)' },
     };
-    const info = map[status] || map.unknown;
+    const info = map[status === 'limited' && expired ? 'expired' : status] || map.unknown;
     const ts = checkedAt ? new Date(checkedAt).getTime() : 0;
     const ageH = ts ? (Date.now() - ts) / 3600000 : null;
     const stale = ageH !== null && ageH > 12;
     const ago = ageH === null ? '' : ageH < 1 ? 'vừa xong' : ageH < 24 ? `${Math.floor(ageH)} giờ trước` : `${Math.floor(ageH / 24)} ngày trước`;
     const c = stale ? 'var(--text3)' : info.c;
-    const tip = `SpamBot lúc ${ts ? new Date(ts).toLocaleString('vi-VN') : '?'}${message ? ' — ' + message : ''}${accountId ? ' · Bấm để kiểm tra lại ngay' : ''}`;
+    const tip = `SpamBot lúc ${ts ? new Date(ts).toLocaleString('vi-VN') : '?'}${message ? ' — ' + message : ''}${status === 'limited' && expired ? ' · Ngày hết giới hạn đã qua — lần chạy campaign tới sẽ hỏi lại @SpamBot' : ''}${accountId ? ' · Bấm để kiểm tra lại ngay' : ''}`;
     const click = accountId ? ` onclick="event.stopPropagation();Members.recheckSpam(${accountId},this)" ` : ' ';
     return `<span${click}style="cursor:${accountId ? 'pointer' : 'default'};background:color-mix(in srgb, ${c} 16%, transparent);border:1px ${stale ? 'dashed' : 'solid'} color-mix(in srgb, ${c} 50%, transparent);border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600;color:${c}" title="${esc(tip)}">${info.text}${stale ? ` <span style="font-weight:400">· ${ago}</span>` : ''}</span>`;
   },

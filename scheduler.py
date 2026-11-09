@@ -1,6 +1,7 @@
 """
 Scheduler - APScheduler with hourly, daily, weekly, monthly, once.
 """
+import asyncio
 import logging
 import os
 from datetime import datetime
@@ -130,12 +131,31 @@ async def _auto_start_campaign(campaign_id: int):
             logger.info(f"Campaign {campaign_id} status is '{campaign['status']}', skipping auto-start")
             return
 
-        # Import and start the campaign
-        from routes.members import _active_campaigns, _run_campaign
-        await db.update_dm_campaign_status(campaign_id, "running")
-        _active_campaigns[campaign_id] = True
+        # Senders auto-paused by PeerFlood whose limit has passed are only lifted by
+        # the 150-min job — ask @SpamBot now so they join from the first DM.
+        try:
+            import telegram_client as tg
+            for aid in campaign.get("sender_account_ids") or []:
+                acc = await db.get_account(aid)
+                if acc and acc.get("is_paused") and str(acc.get("pause_reason") or "").startswith("PeerFlood"):
+                    client = tg.get_client(aid)
+                    if client and client.is_connected():
+                        await tg.check_spam_status(aid)
+                        await asyncio.sleep(2)
+        except Exception as e:
+            logger.warning(f"[Campaign {campaign_id}] pre-start unpause check failed: {e}")
+
+        # Same guarded start as the manual Start button (lock + background task),
+        # so Stop can cancel it and a double start is impossible.
+        from routes.members import _active_campaigns, _active_campaign_lock, _run_campaign
+        async with _active_campaign_lock:
+            existing = _active_campaigns.get(campaign_id)
+            if existing is True or (isinstance(existing, asyncio.Task) and not existing.done()):
+                logger.info(f"Campaign {campaign_id} already running, skipping auto-start")
+                return
+            await db.update_dm_campaign_status(campaign_id, "running")
+            _active_campaigns[campaign_id] = asyncio.create_task(_run_campaign(campaign_id))
         logger.info(f"🚀 Campaign {campaign_id} auto-started by scheduler")
-        await _run_campaign(campaign_id)
     except Exception as e:
         logger.error(f"Error auto-starting campaign {campaign_id}: {e}", exc_info=True)
 
@@ -168,7 +188,8 @@ def add_campaign_schedule_job(campaign_id: int, scheduled_at: str, target_timezo
         id=job_id,
         name=f"DM Campaign #{campaign_id}",
         replace_existing=True,
-        misfire_grace_time=300  # 5 min grace for missed schedules
+        misfire_grace_time=None,  # app was down at start time → run as soon as it is back
+        coalesce=True,
     )
 
     next_run = scheduler.get_job(job_id)
@@ -207,6 +228,10 @@ _AUTO_RESUME_INTERVAL_MINUTES = 150
 async def _auto_unpause_flooded_accounts():
     """Re-check PeerFlood-paused accounts; check_spam_status unpauses the clean ones."""
     import telegram_client as tg
+    try:
+        await db.clear_stale_flags()  # flag = ≥5 failures in 24h; lift it once that window passes
+    except Exception as e:
+        logger.warning(f"[AutoUnpause] clear_stale_flags failed: {e}")
     for acc in await db.get_all_accounts():
         if not acc.get("is_paused") or not str(acc.get("pause_reason") or "").startswith("PeerFlood"):
             continue

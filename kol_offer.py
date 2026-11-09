@@ -27,6 +27,7 @@ from datetime import date
 from functools import lru_cache
 
 import database as db
+import kol_region_offer
 
 logger = logging.getLogger("kol_offer")
 
@@ -264,7 +265,7 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None) 
     lines = [
         f"--- OFFICIAL WEEX KOL COMMISSION LADDER (v{ladder['version']}, effective {ladder['effective_from']}) ---",
         f"Headline you may use: \"{ladder.get('headline') or 'up to 80% revshare'}\". When the KOL asks for details, use EXACTLY this ladder. "
-        "It is the SAME for every KOL, every region and every language — there is no other offer.",
+        "It is the SAME for every KOL, every region and every language (KOLs outside Vietnam, Korea and the China market get their own region offer block instead) — there is no other offer.",
         _first_pitch_rule(ladder),
         "| Tier | Condition (monthly) | RevShare | Bonus per 1M TAKER volume |",
         "|---|---|---|---|",
@@ -409,16 +410,18 @@ def allowed_figures(ladder: dict | None = None) -> tuple[set[float], set[float]]
     ladder = _normalize_ladder(ladder or DEFAULT_LADDER)
     pcts: set[float] = set()
     dollars: set[float] = set()
+    r = ladder["rules"]
+    only = r.get("percents_only")  # region offer (kol_region_offer): its figures replace the tier %
     for t in ladder["tiers"]:
-        pcts.add(float(t["revshare_pct"]))
+        if only is None:
+            pcts.add(float(t["revshare_pct"]))
         dollars.add(float(t["bonus_per_1m_taker_usd"]))
         vol = float(t["min_volume_m"])
         if vol > 0:
             # '10M' / '$10M' volume thresholds are legitimate dollar figures.
             dollars.add(vol * 1_000_000)
     dollars.add(1_000_000)  # 'per 1M taker volume'
-    r = ladder["rules"]
-    for p in r.get("extra_allowed_percents") or []:
+    for p in list(only or []) + list(r.get("extra_allowed_percents") or []):
         try:
             pcts.add(float(p))
         except (TypeError, ValueError):
@@ -555,10 +558,17 @@ def render_agent_offer_prompt(exchange: str) -> str:
     ])
 
 
-async def offer_block_for(exchange: str | None, volume_claimed=None) -> tuple[str, dict | None]:
-    """(prompt block, ladder or None) for the exchange the chat sells."""
+async def offer_block_for(exchange: str | None, volume_claimed=None,
+                          region: str | None = None) -> tuple[str, dict | None]:
+    """(prompt block, ladder or None) for the exchange the chat sells.
+
+    `region` ('ID' / 'AE', from kol_region_offer.detect_region) swaps the WEEX ladder
+    for the region offer (flat revshare + deposit bonus campaign) and its guard figures."""
     if uses_ladder(exchange):
         ladder = await get_ladder()
+        if region in kol_region_offer.REGIONS:
+            block = kol_region_offer.render_prompt(region, ladder, volume_claimed) + "\n" + UPFRONT_PROOF_RULE
+            return block, kol_region_offer.guard_ladder(ladder)
         block = render_offer_ladder_prompt(ladder, volume_claimed)
         est_d = estimate_dollars(value_estimate(ladder, volume_claimed))
         if est_d:  # let the guard pass the pre-computed estimate figures for this KOL only

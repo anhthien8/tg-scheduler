@@ -34,14 +34,19 @@ import kb_select
 import database as db
 import kol_offer
 import telegram_client as tg
+import weex_mirror
+import kol_region_offer
 
 logger = logging.getLogger("tg-scheduler.inbox")
+
+# Incoming DMs older than this (delivered late after downtime) go to a human.
+STALE_REPLY_HOURS = 3
 
 WEEX_LINK_RE = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
 
 
 def personalize_weex_links(text: str, vip_code: str) -> str:
-    """Replace/add vipCode only on weex.com links."""
+    """Replace/add vipCode only on weex.com links (and the WEEX mirror domains)."""
     if not text or not vip_code:
         return text
 
@@ -56,7 +61,7 @@ def personalize_weex_links(text: str, vip_code: str) -> str:
         except Exception:
             return match.group(0)
         host = (parts.netloc or "").split("@")[-1].split(":", 1)[0].lower()
-        if host != "weex.com" and not host.endswith(".weex.com"):
+        if not weex_mirror.is_weex_host(host):
             return match.group(0)
         query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k.lower() != "vipcode"]
         query.append(("vipCode", vip_code.strip()))
@@ -119,6 +124,31 @@ def contains_source_leak(text: str) -> bool:
 def contains_ai_disclosure(text: str) -> bool:
     """Block model output that exposes internal AI/automation implementation."""
     return bool(_AI_DISCLOSURE_RE.search(text or "")) or contains_source_leak(text)
+
+
+def _norm_msg(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "")).strip().lower()
+
+
+def _already_said(history: list, reply: str) -> bool:
+    """True when an earlier assistant message in `history` is the same text as `reply`."""
+    target = _norm_msg(reply)
+    return bool(target) and any(
+        m.get("role") == "assistant" and _norm_msg(m.get("content")) == target
+        for m in (history or []) if isinstance(m, dict))
+
+
+def _last_assistant_is_fallback(history: list) -> bool:
+    """True when our last message was a safe "let me check with the team" fallback."""
+    last = next((m for m in reversed(history or [])
+                 if isinstance(m, dict) and m.get("role") == "assistant"), None)
+    if not last:
+        return False
+    text = _norm_msg(last.get("content"))
+    fallbacks = {_norm_msg(kol_offer.get_safe_offer_fallback_reply(l)) for l in ("en", "vi")}
+    return text in fallbacks or any(p in text for p in (
+        "double-check the exact numbers", "double-check the latest details",
+        "check lại con số chính xác", "check lại thông tin mới nhất"))
 
 
 def get_safe_fallback_reply(bad_reply: str) -> str:
@@ -649,7 +679,8 @@ async def _agent_exchange(agent_config: dict | None, account_id: int, user_id: i
             or await db.get_chat_exchange(account_id, user_id))
 
 
-async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | None = None) -> str:
+async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | None = None,
+                                 region: str | None = None) -> str:
     """'ĐÃ CÓ / CÒN THIẾU' block injected into every AI turn (spec B2)."""
     state = await db.get_kol_state(account_id, user_id)
     step = state["step"]
@@ -696,7 +727,7 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
     lines.append("GUIDANCE: " + _exch(_STEP_GUIDANCE.get(step, "")))
     try:  # the ladder is WEEX's: never predict a WEEX tier for a BloFin / Bitget KOL
         pred = (kol_offer.predicted_tier(await kol_offer.get_ladder(), profile.get("volume_claimed"))
-                if kol_offer.uses_ladder(ex) else None)
+                if kol_offer.uses_ladder(ex) and not region else None)  # region leads have no tiers
     except Exception:
         pred = None
     marketing = ("from the knowledge base, with its concrete numbers (e.g. up to $200/month marketing fee, ads for their community, seeding accounts). "
@@ -827,7 +858,8 @@ async def process_step_reminders() -> dict:
                     ask = db.uid_ask_for(exchange) if item == "weex_uid" else meta.get("ask")
                     combined = (
                         (agent_config.get("system_prompt") or "")
-                        + "\n\n" + await render_kol_step_prompt(account_id, user_id, profile)
+                        + "\n\n" + await render_kol_step_prompt(
+                            account_id, user_id, profile, region=kol_region_offer.detect_region(history, profile))
                         + f"\n\n[STEP REMINDER INSTRUCTION]: The KOL has gone quiet. Write ONE short, warm, "
                           f"natural message (1-2 sentences, same language as the KOL's last message) that asks "
                           f"ONLY for: {ask or item}. No pitching, no other questions, no pressure, "
@@ -1030,6 +1062,26 @@ def sanitize_telegram_html(text: str) -> str:
     return s.strip()
 
 
+async def _mirror_weex_links_for(account_id: int, user_id: int, text: str, history) -> str:
+    """weex.com is blocked in India/Pakistan: give those leads the official mirror domain."""
+    if not text or "weex.com" not in text.lower():
+        return text
+    try:
+        if isinstance(history, str):
+            history = json.loads(history or "[]")
+        profile = await db.get_kol_profile(account_id, user_id) or {}
+        if not weex_mirror.needs_mirror(history, profile):
+            return text
+        mirrors = await weex_mirror.get_mirrors()
+        mirrored = weex_mirror.rewrite_to_mirror(text, weex_mirror.pick_mirror(user_id, mirrors))
+        if mirrored != text:
+            logger.info("[AIFollowUp] 🌏 WEEX links → mirror domain for user %d (blocked region)", user_id)
+        return mirrored
+    except Exception as e:
+        logger.warning("[AIFollowUp] WEEX mirror rewrite skipped for user %d: %s", user_id, e)
+        return text
+
+
 async def _send_ai_message(account_id: int, user_id: int, text: str,
                            new_status: str = "active", drip_stage: int | None = None) -> bool:
     from telegram_forum_inbox import get_send_lock
@@ -1053,6 +1105,7 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
             return False
         import kol_banners
         text, banner_keys = kol_banners.extract(text)
+        text = await _mirror_weex_links_for(account_id, user_id, text, chat.get("history"))
         banner = None
         for k in banner_keys[:1]:
             p = kol_banners.banner_path(k)
@@ -1130,7 +1183,7 @@ async def _event_images(event) -> list[str]:
 
 
 _COMMISSION_RULE_LADDER = (
-    "7. COMMISSION QUOTING MANDATE: The ONLY commission figures you may quote are in the OFFICIAL WEEX KOL COMMISSION LADDER block below (same ladder for every KOL, every region). Follow that block's FIRST PITCH rule for the first offer; give the full tier table only when the KOL asks for details. Never invent a tier, a % or a $ figure that is not in that block.\n"
+    "7. COMMISSION QUOTING MANDATE: The ONLY commission figures you may quote are in the OFFICIAL WEEX KOL COMMISSION LADDER block below (same ladder for every KOL in every region, EXCEPT KOLs outside Vietnam, Korea and the China market: for those leads an OFFICIAL WEEX KOL OFFER FOR <country> block replaces the ladder and is the only offer). Follow that block's FIRST PITCH rule for the first offer; give the full tier table only when the KOL asks for details. Never invent a tier, a % or a $ figure that is not in that block.\n"
 )
 _COMMISSION_RULE_AGENT = (
     "7. COMMISSION QUOTING MANDATE: The ONLY commission figures you may quote are in the OFFICIAL {ex} KOL COMMISSION TERMS block below, i.e. the terms written in your own instructions and knowledge base. Lead with the starting offer they define and explain the tiers only when the KOL asks for details. Never invent a tier, a % or a $ figure that is not written there.\n"
@@ -1370,9 +1423,16 @@ async def generate_and_send_ai_reply_for_chat(
     # setting, replaces the old per-language 50-60 / 70-80 rule.
     # Non-WEEX agents get their own terms block instead (kol_offer.offer_block_for).
     offer_ladder = None
+    lead_region = None  # e.g. 'ID' / 'US' / 'IN': flat revshare + deposit bonus campaign instead of the ladder
     try:
-        offer_block, offer_ladder = await kol_offer.offer_block_for(exchange, kol_prof.get("volume_claimed"))
+        lead_region = (kol_region_offer.detect_region(full_history, kol_prof)
+                       if kol_offer.uses_ladder(exchange) else None)
+        offer_block, offer_ladder = await kol_offer.offer_block_for(exchange, kol_prof.get("volume_claimed"),
+                                                                    region=lead_region)
         combined_prompt += "\n\n" + offer_block
+        if kol_offer.uses_ladder(exchange) and not kol_region_offer.origin_known(kol_prof):
+            # Region offer (all markets except Vietnam / Korea / China): ask where the KOL and their community are from.
+            combined_prompt += "\n\n" + kol_region_offer.ORIGIN_QUESTION_RULE
     except Exception as _ladder_err:
         logger.error("[AIFollowUp] Could not render offer ladder: %s", _ladder_err)
 
@@ -1387,9 +1447,16 @@ async def generate_and_send_ai_reply_for_chat(
     # 5-step onboarding state (spec B2): "ĐÃ CÓ / CÒN THIẾU" block so the AI
     # only asks for the single missing item and never re-asks known facts.
     try:
-        combined_prompt += "\n\n" + await render_kol_step_prompt(account_id, user_id, kol_prof)
+        combined_prompt += "\n\n" + await render_kol_step_prompt(account_id, user_id, kol_prof, region=lead_region)
     except Exception as _step_err:
         logger.error("[AIFollowUp] Could not render KOL step block: %s", _step_err)
+
+    # weex.com is blocked in India/Pakistan: tell the WEEX agent to use the mirror
+    # domains (links are also rewritten deterministically in _send_ai_message).
+    if kol_offer.uses_ladder(exchange) and weex_mirror.needs_mirror(full_history, kol_prof):
+        _block = weex_mirror.prompt_block(user_id, await weex_mirror.get_mirrors())
+        if _block:
+            combined_prompt += "\n\n" + _block
 
     if agent_config and agent_config.get("id"):
         # Relevance-ranked instead of blind newest-30 (v3.7.6): with 800+ rules
@@ -1509,6 +1576,15 @@ async def generate_and_send_ai_reply_for_chat(
                     account_id, user_id, sender_username,
                     reason=f"AI reply blocked: off-ladder figures {', '.join(off_ladder)}"
                 ))
+
+        # A safe fallback ("let me check with the team") is a promise, not an
+        # answer: sending it twice reads as a bot. If it was already sent in this
+        # chat, stay silent and leave the chat with the human.
+        if new_status == "needs_human" and _already_said(full_history, ai_reply):
+            logger.warning("[AIFollowUp] 🔁 Fallback already sent to user %d — not repeating, holding for human",
+                           user_id)
+            await db.update_followup_chat_status(account_id, user_id, "needs_human")
+            return False
 
         delay = min(22.0, max(8.0, len(ai_reply) * 0.04 + random.uniform(5.0, 10.0)))
         logger.info("[AIFollowUp] Simulating human reading & typing for %.1fs before sending AI reply to user %d...", delay, user_id)
@@ -1950,6 +2026,14 @@ def _make_handler(account_id: int):
 
                 # Always append incoming user message
                 chat = await db.append_followup_chat_message(account_id, sender_id, "user", message_text)
+                # Volume proof → lead's forum topic + inline in the dashboard (background).
+                if chat and (has_photo or has_video or has_document) and not is_reaction:
+                    try:
+                        import proof_relay
+                        proof_relay.schedule(account_id, sender_id, sender_username, sender_name,
+                                             event.message, (chat.get("history") or [{}])[-1].get("timestamp"))
+                    except Exception as _pr_err:
+                        logger.debug("[Inbox] Proof relay schedule error: %s", _pr_err)
 
                 if current_status in ("paused_admin", "onboarded", "needs_human", "bot_ignored"):
                     logger.info("[AIFollowUp] User %d status '%s' (<24h since human takeover) — recorded msg, skipping AI reply",
@@ -2006,6 +2090,24 @@ def _make_handler(account_id: int):
                         reason=f"Max replies ({max_replies_val}) reached"
                     ))
                     return
+
+                # ── Stale message: delivered hours late (server down, catch-up
+                # after restart). A reply this late reads as a bot — let a human
+                # pick it up instead.
+                _msg_date = getattr(getattr(event, "message", None), "date", None)
+                if isinstance(_msg_date, datetime):
+                    if _msg_date.tzinfo is None:
+                        _msg_date = _msg_date.replace(tzinfo=timezone.utc)
+                    _age_h = (datetime.now(timezone.utc) - _msg_date).total_seconds() / 3600
+                    if _age_h > STALE_REPLY_HOURS:
+                        logger.warning("[AIFollowUp] Message from user %d is %.1fh old — handover instead of AI reply",
+                                       sender_id, _age_h)
+                        await db.update_followup_chat_status(account_id, sender_id, "needs_human")
+                        _spawn_background(_notify_main_account_handover(
+                            account_id, sender_id, sender_username,
+                            reason=f"Tin nhắn tồn {_age_h:.0f}h chưa trả lời — cần người xử lý"
+                        ))
+                        return
 
                 # Trigger AI Reply!
                 await generate_and_send_ai_reply_for_chat(
@@ -2339,6 +2441,10 @@ async def process_drip_followups() -> dict:
 
         for t in to_chats:
             hist = json.loads(t.get("history_json", "[]"))
+            if _last_assistant_is_fallback(hist):
+                # We promised the KOL a human check; the AI resuming would only
+                # repeat the blocked answer. Keep it with the owner (already alerted).
+                continue
             if hist and hist[-1].get("role") == "user" and (hist[-1].get("content") or "").strip():
                 logger.info("[AIFollowUp] ⏰ 24h timeout: Human admin silent after user msg for user @%s (%d) — auto-resuming & generating AI reply!",
                             t.get("username", "?"), t["user_id"])
@@ -2457,8 +2563,14 @@ async def process_drip_followups() -> dict:
             sys_p = agent_config.get("system_prompt", "") if agent_config else ""
             exchange = await _agent_exchange(agent_config, account_id, user_id)
             try:
+                drip_prof = await db.get_kol_profile(account_id, user_id) or {}
+                try:
+                    drip_hist = json.loads(chat.get("history_json") or "[]")
+                except (TypeError, ValueError):
+                    drip_hist = []
                 offer_block, offer_ladder = await kol_offer.offer_block_for(
-                    exchange, (await db.get_kol_profile(account_id, user_id) or {}).get("volume_claimed"))
+                    exchange, drip_prof.get("volume_claimed"),
+                    region=kol_region_offer.detect_region(drip_hist, drip_prof) if kol_offer.uses_ladder(exchange) else None)
             except Exception as offer_exc:
                 logger.error("[DripEngine] Could not load offer ladder for user %d: %s", user_id, offer_exc)
                 continue
@@ -2536,9 +2648,16 @@ _KOL_CARE_INSTRUCTION_OTHER = (
 )
 
 
-def _kol_care_instruction(exchange: str | None, days: int, events: str) -> str:
+def _kol_care_instruction(exchange: str | None, days: int, events: str, region: str | None = None) -> str:
     if kol_offer.uses_ladder(exchange):
-        return _KOL_CARE_INSTRUCTION.format(days=days, events=events)
+        text = _KOL_CARE_INSTRUCTION.format(days=days, events=events)
+        if region in kol_region_offer.REGIONS:  # region offer: the deposit campaign is the main hook
+            o = kol_region_offer.OFFER
+            text += (f"\nFor this KOL ({kol_region_offer.REGIONS[region]}) make the DEPOSIT BONUS CAMPAIGN the highlight of 2): "
+                     f"their members get a {o['deposit_bonus_pct']}% deposit bonus through their link "
+                     f"({o['deposit_bonus_strong_pct']}% for KOLs with strong proven volume) - suggest running it again "
+                     "this month with a pinned post or a short video. Quote no other % figure.")
+        return text
     return _KOL_CARE_INSTRUCTION_OTHER.format(days=days, ex=exchange)
 
 
@@ -2655,13 +2774,16 @@ async def process_monthly_kol_care() -> dict:
             if not ai_keys:
                 continue
             exchange = await _agent_exchange(agent_config, account_id, user_id)
+            care_region = (kol_region_offer.detect_region(history, await db.get_kol_profile(account_id, user_id) or {})
+                           if kol_offer.uses_ladder(exchange) else None)
+            care_ladder = (kol_region_offer.guard_ladder(await kol_offer.get_ladder()) if care_region else None)
             combined = ((agent_config.get("system_prompt", "") if agent_config else "")
-                        + "\n\n" + _kol_care_instruction(exchange, days, events))
+                        + "\n\n" + _kol_care_instruction(exchange, days, events, care_region))
             msg = await ai_rmx.generate_chat_response(history[-8:], combined, ai_provider, ai_keys, **kwargs)
             if not msg:
                 continue
             msg = sanitize_telegram_html(msg)
-            if contains_ai_disclosure(msg) or kol_offer.find_off_offer_figures(msg, exchange, agent_config):
+            if contains_ai_disclosure(msg) or kol_offer.find_off_offer_figures(msg, exchange, agent_config, care_ladder):
                 logger.warning("[KolCare] 🚫 Blocked unsafe care message for user %d", user_id)
                 continue
             if await _send_ai_message(account_id, user_id, msg):

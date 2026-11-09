@@ -13,7 +13,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TG Scheduler">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/css/style.css?v=493">
+  <link rel="stylesheet" href="/static/css/style.css?v=494">
   <link rel="stylesheet" href="/static/css/themes.css?v=494">
   <script src="/static/js/theme.js?v=492"></script>
   <!-- Boot splash: paints instantly (CSS-only, no JS) so the user never sees a
@@ -782,7 +782,7 @@
           <div class="form-group" style="margin-bottom:0">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
               <label class="form-label" style="font-size:15px;font-weight:600;margin:0">🗂️ Forum Inbox (Sales War Room)</label>
-              <span id="forum-inbox-badge" class="badge badge-gray" style="font-size:11px">Đang tắt</span>
+              <span style="display:flex;align-items:center;gap:6px"><span id="forum-inbox-badge" class="badge badge-gray" style="font-size:11px">Đang tắt</span><span class="info-i" tabindex="0" data-tip="Đang chạy: Forum Inbox bật và Command Bot đang kết nối, tin của lead vào group ngay. ⚠️ Command Bot đang tắt / mất kết nối: tin KHÔNG vào group và cảnh báo HANDOVER không tới admin. Bật Command Bot ở thẻ phía trên; nếu chỉ rớt mạng, hệ thống tự kết nối lại sau khoảng 2 phút.">i</span></span>
             </div>
             <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
               Đưa toàn bộ hội thoại lead vào 1 group Telegram dạng Forum (Topics) — mỗi lead 1 topic riêng.
@@ -1644,13 +1644,36 @@
 
         <div class="form-group" style="margin:0">
           <label class="form-label" style="font-weight:600;font-size:0.85rem;">Nguồn Members (Scrape Job)</label>
-          <select id="cmp-scrape-job" class="form-select" style="font-size:0.9rem;"></select>
+          <select id="cmp-scrape-job" class="form-select" style="font-size:0.9rem;" onchange="Members._onCampaignJobChange()"></select>
         </div>
 
         <div class="form-group" style="margin:0">
           <label class="form-label" style="font-weight:600;font-size:0.85rem;">Tài khoản gửi</label>
           <div id="cmp-accounts-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;"></div>
           <p class="form-hint" style="margin-top:6px;font-size:0.78rem;">Các tài khoản được chọn sẽ luân phiên xoay vòng gửi DM anti-ban</p>
+        </div>
+
+        <!-- Scheduled start -->
+        <div class="set-list set-compact" style="flex-direction:column;align-items:stretch">
+          <div class="set-row"><span class="set-name">⏰ Hẹn giờ chạy <span class="info-i" tabindex="0" data-tip="Campaign tự bắt đầu đúng giờ này (theo múi giờ đã chọn). Nếu app tắt lúc đến giờ thì chạy ngay khi app bật lại. Trước khi chạy, các acc bị PeerFlood được hỏi lại @SpamBot để mở khóa kịp. Bấm “Khớp giờ” để tự đặt giờ = lúc acc bị hạn chế cuối cùng (trong các acc đã chọn) hết hạn + 5 phút.">i</span></span><label class="toggle"><input type="checkbox" id="cmp-schedule-toggle" onchange="Members.toggleScheduleSection()"><span class="toggle-slider"></span></label></div>
+          <div id="cmp-schedule-fields" style="display:none">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <input type="datetime-local" id="cmp-scheduled-at" class="form-input set-ctrl" style="max-width:none;width:auto" oninput="Members._cmpScheduleHint()">
+              <select id="cmp-target-timezone" class="form-select set-ctrl" style="max-width:none;width:auto" onchange="Members._cmpScheduleHint()">
+                <option value="Asia/Ho_Chi_Minh">Việt Nam (GMT+7)</option>
+                <option value="UTC">UTC</option>
+                <option value="Asia/Singapore">Singapore (GMT+8)</option>
+                <option value="Asia/Shanghai">Trung Quốc (GMT+8)</option>
+                <option value="Asia/Tokyo">Nhật / Hàn (GMT+9)</option>
+                <option value="Europe/Moscow">Moscow (GMT+3)</option>
+                <option value="Europe/Istanbul">Istanbul (GMT+3)</option>
+                <option value="Europe/London">London</option>
+                <option value="America/New_York">New York</option>
+              </select>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="Members.alignScheduleToAccounts()" style="font-size:11px;padding:2px 8px;border:1px solid var(--border)">⏱ Khớp giờ acc hết hạn chế</button>
+            </div>
+            <div id="cmp-schedule-hint" style="font-size:11px;color:var(--text2);margin-top:4px"></div>
+          </div>
         </div>
 
         <div class="form-group" style="margin:0">
@@ -1664,6 +1687,7 @@
             <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{full_name}</code>
             <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{username}</code>
           </div>
+          <div id="cmp-suggest-note" style="display:none;font-size:12px;background:color-mix(in srgb, var(--violet) 8%, transparent);border:1px solid color-mix(in srgb, var(--violet) 25%, transparent);border-radius:8px;padding:8px 10px;margin-bottom:6px"></div>
           <div id="cmp-messages-list" style="display:flex;flex-direction:column;gap:12px;margin-top:6px;"></div>
           <button class="btn btn-ghost btn-sm" onclick="Members.addCampaignMessage()" style="margin-top:10px;border:1px dashed color-mix(in srgb, var(--violet) 40%, transparent);color:var(--violet);width:100%;justify-content:center;padding:8px 0;font-weight:600;">
             + Thêm tin nhắn
@@ -2021,34 +2045,28 @@
           <p class="form-hint">Nick này phải <b>đang ở trong nhóm</b> để nhận sự kiện thành viên mới join. Nick gửi DM ở trên <b>không cần</b> ở trong nhóm. Bỏ trống = dùng luôn nick gửi DM làm nick theo dõi.</p>
         </div>
 
-        <!-- Trigger type -->
+        <!-- Trigger type + join delay: one line -->
         <div class="form-group">
-          <label class="form-label">Loại trigger</label>
-          <div class="seg-control" id="w-watch-type-seg">
-            <button type="button" class="seg-btn active" id="w-type-keyword" onclick="App.setWatcherType('keyword')">🔑 Từ khóa</button>
-            <button type="button" class="seg-btn" id="w-type-join" onclick="App.setWatcherType('join')">👋 Thành viên mới join</button>
-          </div>
-        </div>
-
-        <!-- Join delay (only for watch_type=join) -->
-        <div class="form-group hidden" id="w-join-delay-block">
-          <label class="form-label">Delay gửi DM sau khi join</label>
-          <div style="display:flex;gap:12px;align-items:center">
-            <div>
-              <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Delay tối thiểu (phút)</label>
-              <input type="number" class="form-input" id="w-join-delay-min" min="1" max="120" value="3" style="width:120px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px">
+            <label class="form-label" style="margin:0">Trigger</label>
+            <div class="seg-control" id="w-watch-type-seg">
+              <button type="button" class="seg-btn active" id="w-type-keyword" onclick="App.setWatcherType('keyword')">🔑 Từ khóa</button>
+              <button type="button" class="seg-btn" id="w-type-join" onclick="App.setWatcherType('join')">👋 Thành viên mới join</button>
             </div>
-            <div>
-              <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Delay tối đa (phút)</label>
-              <input type="number" class="form-input" id="w-join-delay-max" min="1" max="120" value="15" style="width:120px">
+            <div class="hidden" id="w-join-delay-block" style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2)">
+              <span>DM sau</span>
+              <input type="number" class="form-input" id="w-join-delay-min" min="1" max="120" value="3" style="width:64px;padding:6px 8px" aria-label="Delay tối thiểu (phút)">
+              <span>–</span>
+              <input type="number" class="form-input" id="w-join-delay-max" min="1" max="120" value="15" style="width:64px;padding:6px 8px" aria-label="Delay tối đa (phút)">
+              <span>phút</span>
+              <span class="info-i" tabindex="0" data-tip="DM được gửi sau khi user join một khoảng ngẫu nhiên trong khoảng này (chống bị flag spam). Lưu ý: Telegram chỉ báo sự kiện join cho ADMIN ở nhóm lớn — nick theo dõi nên là admin của nhóm.">i</span>
             </div>
           </div>
-          <p class="form-hint">DM sẽ gửi sau khi user join một khoảng ngẫu nhiên trong khoảng này (chống spam-flag)</p>
         </div>
 
         <!-- Keywords -->
         <div class="wf-grid2">
-          <div class="form-group">
+          <div class="form-group" id="w-keywords-block">
             <label class="form-label wf-label">Từ khóa kích hoạt <span class="info-i" tabindex="0" data-tip="Ai nhắn trong nhóm có chứa từ khóa này sẽ được DM. Không phân biệt hoa/thường. Nhấn Enter để thêm.">i</span></label>
             <div class="wf-inline">
               <input type="text" class="form-input" id="w-keyword-input" placeholder="VD: BD Weex"
@@ -2198,14 +2216,14 @@
   <script defer src="/static/js/api.js?v=492"></script>
   <script defer src="/static/js/discord.js?v=492"></script>
   <script defer src="/static/js/zalo.js?v=495"></script>
-  <script defer src="/static/js/members.js?v=508"></script>
+  <script defer src="/static/js/members.js?v=509"></script>
   <script defer src="/static/js/analytics.js?v=492"></script>
   <script defer src="/static/js/ai_agents.js?v=492"></script>
-  <script defer src="/static/js/ai_followup.js?v=498"></script>
+  <script defer src="/static/js/ai_followup.js?v=499"></script>
   <script defer src="/static/js/changelog.js?v=492"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=506"></script>
-  <script defer src="/static/js/app.js?v=513"></script>
+  <script defer src="/static/js/app.js?v=516"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

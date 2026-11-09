@@ -328,6 +328,10 @@ if(page==='ai-followup'){
               <label style="display:flex;align-items:center;gap:6px">Chu kỳ <select id="aifu-care-days" class="form-input" style="width:auto;padding:4px 8px"><option value="30">30 ngày</option><option value="45">45 ngày</option><option value="60">60 ngày</option></select></label>
               <label style="display:flex;align-items:center;gap:6px">Tối đa/ngày/tài khoản <input type="number" id="aifu-care-cap" class="form-input" min="0" max="50" style="width:64px;padding:4px 8px"> <span class="info-i" tabindex="0" data-tip="Giới hạn số tin chăm sóc mỗi tài khoản Telegram gửi trong 1 ngày để tránh bị báo spam. 0 = tạm dừng.">i</span></label>
             </div>
+            <div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <label class="form-label" for="aifu-weex-mirrors" style="margin:0;font-weight:600;white-space:nowrap">🌏 Tên miền WEEX thay thế <span class="info-i" tabindex="0" data-tip="weex.com bị chặn ở Ấn Độ/Pakistan. Khi lead nhắc tới Ấn Độ/Pakistan (hoặc viết chữ Hindi/Urdu), hay báo web/link WEEX không vào được, mọi link weex.com trong tin AI gửi sẽ đổi sang 1 tên miền dưới đây (giữ nguyên đường dẫn và vipCode; mỗi lead luôn nhận cùng 1 tên miền) và AI được dặn đưa tên miền kế tiếp nếu lead báo vẫn không vào được. Tin nhân viên tự gửi không bị đổi. Để trống = tắt.">i</span></label>
+              <input type="text" id="aifu-weex-mirrors" class="form-input" style="flex:1;min-width:260px;padding:4px 8px" placeholder="https://www.weex.io, https://wcicisx.online, https://wqayejx.site, https://www.wnenatx.online">
+            </div>
           </div>
           <div style="text-align:right;margin-top:16px">
             <button class="btn btn-primary" onclick="AIFollowUp.saveSettings()">💾 Lưu cấu hình</button>
@@ -1230,7 +1234,7 @@ renderAccounts(){
 </div>`}).join('');
 },
 
-_spamBadge(id){const r=(this._spamStatus||{})[id];if(!r||typeof Members==='undefined')return '';return Members._spamBadgeHtml(r.status,r.message,r.checked_at,id)},
+_spamBadge(id){const r=(this._spamStatus||{})[id];if(!r||typeof Members==='undefined')return '';return Members._spamBadgeHtml(r.status,r.message,r.checked_at,id,r.expired)},
 
 openAddAccountModal(){this._bulkQueue=null;document.getElementById('acc-step-parallel')?.classList.add('hidden');document.getElementById('acc-step-relogin')?.classList.add('hidden');this._bulkDone=[];this._bulkFailed=[];(document.getElementById('acc-step-info')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');(document.getElementById('acc-step-otp')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-step-2fa')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');(document.getElementById('acc-phone') || me_dummy).value = '';const proxyEl=document.getElementById('acc-proxy');if(proxyEl)proxyEl.value='';const bulk=document.getElementById('acc-bulk-input');if(bulk)bulk.value='';document.getElementById('acc-bulk-progress')?.classList.add('hidden');document.getElementById('acc-bulk-skip')?.classList.add('hidden');this.setAccountAddMode('single');(document.getElementById('account-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('open')},
 
@@ -1726,11 +1730,12 @@ async loadWatchers(){try{
     const accHtml=accs.length?`<div class="wt-accs" title="${esc(accs.join('\n'))}"><div class="wt-stack">${accs.slice(0,3).map(ava).join('')}${accs.length>3?`<span class="wt-ava wt-more">+${accs.length-3}</span>`:''}</div><span class="wt-acc-name">${esc(accs[0])}${accs.length>1?` <em>+${accs.length-1}</em>`:''}</span></div>`:'<span class="wt-muted">—</span>';
     const paused=er.paused_reason?`<span class="wt-paused" title="${esc(er.paused_reason)}" onclick="App.showWatcherErrors(${w.id})">Tự dừng do lỗi</span>`:'';
     const errCell=er.failed?`<button class="wt-err" onclick="App.showWatcherErrors(${w.id})" title="Xem lỗi chi tiết"><i></i>${er.failed.toLocaleString('vi-VN')}${er.failed_24h?`<small>${er.failed_24h}/24h</small>`:''}</button>`:'<span class="wt-muted">—</span>';
-    return`<tr class="${w.is_active?'':'wt-off'}"><td><label class="toggle"><input type="checkbox" ${w.is_active?'checked':''} onchange="App.toggleWatcher(${w.id})"><span class="toggle-slider"></span></label></td><td><div class="wt-name">${esc(w.name)}${paused}</div><div class="wt-meta">${meta}</div></td><td><div class="wt-chips">${kwHtml}</div></td><td>${accHtml}</td><td>${errCell}</td><td><div class="wt-actions"><button class="acc-ib" onclick="App.openTestDM(${w.id})" title="Test DM">🧪</button><button class="acc-ib" onclick="App.editWatcher(${w.id})" title="Sửa">✏️</button><button class="acc-ib is-danger" onclick="App.deleteWatcher(${w.id})" title="Xóa">🗑</button></div></td></tr>`}).join('')
+    return`<tr class="${w.is_active?'':'wt-off'}"><td><label class="toggle"><input type="checkbox" ${w.is_active?'checked':''} onchange="App.toggleWatcher(${w.id})"><span class="toggle-slider"></span></label></td><td><div class="wt-name">${esc(w.name)}${paused}</div><div class="wt-meta">${meta}</div></td><td><div class="wt-chips">${kwHtml}</div></td><td>${accHtml}</td><td>${errCell}</td><td><div class="wt-actions"><button class="acc-ib" onclick="App.openTestDM(${w.id})" title="Test DM">🧪</button><button class="acc-ib" onclick="App.editWatcher(${w.id})" title="Sửa">✏️</button><button class="acc-ib" onclick="App.cloneWatcher(${w.id})" title="Nhân bản rule (bản sao tạo ở trạng thái tắt)">📑</button><button class="acc-ib is-danger" onclick="App.deleteWatcher(${w.id})" title="Xóa">🗑</button></div></td></tr>`}).join('')
 
 }catch(e){this.toast('Lỗi: '+e.message,'error')}},
 
 async openWatcherModal(){
+  this._watcherCloning=false;
 
   (document.getElementById('watcher-modal-title') || me_dummy).textContent = 'Tạo Keyword DM Rule';
 
@@ -1770,6 +1775,7 @@ async openWatcherModal(){
   this._renderWatcherObservers([]);},
 
 async editWatcher(id){try{
+  this._watcherCloning=false;
 
   const w=await API.getWatcher(id);
 
@@ -1813,7 +1819,18 @@ async editWatcher(id){try{
 
 }catch(e){this.toast(e.message,'error')}},
 
-closeWatcherModal(){(document.getElementById('watcher-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')},
+// Clone = open the edit form pre-filled, but saving creates a NEW rule (switched off,
+// so it never DMs the same groups twice before you review it).
+async cloneWatcher(id){
+  await this.editWatcher(id);
+  if(!document.getElementById('watcher-modal')?.classList.contains('open'))return;
+  const idEl=document.getElementById('edit-watcher-id'); if(idEl) idEl.value='';
+  const nameEl=document.getElementById('w-name'); if(nameEl) nameEl.value=(nameEl.value||'')+' (bản sao)';
+  const t=document.getElementById('watcher-modal-title'); if(t) t.textContent='Nhân bản rule';
+  this._watcherCloning=true;
+},
+
+closeWatcherModal(){this._watcherCloning=false;(document.getElementById('watcher-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')},
 
 async _loadWatcherAccounts(selected=[]){try{
 
@@ -2082,12 +2099,13 @@ async saveWatcher(){
   const replyInGroup=document.getElementById('w-reply-in-group')?.checked;
   const groupReplyText=(document.getElementById('w-group-reply-text')?.value || "").trim()||'Check my DM 😊';
 
-  const payload={name,sender_account_ids:accIds,observer_account_ids:watchType==='join'?observerIds:[],keywords:watchType==='join'?[]:this._watcherKeywords,excluded_usernames:this._watcherExcludes,group_ids:[...this._watcherSelectedGroups],cooldown_hours:cooldown,dm_once:dmOnce,reply_in_group:replyInGroup,group_reply_text:groupReplyText,is_active:1,messages,watch_type:watchType,join_dm_delay_min:joinDelayMin,join_dm_delay_max:joinDelayMax,ai_remix:!!document.getElementById('w-ai-remix')?.checked,ai_agent_id:parseInt(document.getElementById('w-ai-agent')?.value)||null};
+  const payload={name,sender_account_ids:accIds,observer_account_ids:watchType==='join'?observerIds:[],keywords:watchType==='join'?[]:this._watcherKeywords,excluded_usernames:this._watcherExcludes,group_ids:[...this._watcherSelectedGroups],cooldown_hours:cooldown,dm_once:dmOnce,reply_in_group:replyInGroup,group_reply_text:groupReplyText,is_active:(!editId&&this._watcherCloning)?0:1,messages,watch_type:watchType,join_dm_delay_min:joinDelayMin,join_dm_delay_max:joinDelayMax,ai_remix:!!document.getElementById('w-ai-remix')?.checked,ai_agent_id:parseInt(document.getElementById('w-ai-agent')?.value)||null};
 
   try{
     const savedId = editId ? parseInt(editId) : null;
     if(editId) await API.updateWatcher(editId,payload); else { const r = await API.createWatcher(payload); }
-    this.toast(editId?'Đã cập nhật rule':'Đã tạo rule mới','success');
+    this.toast(editId?'Đã cập nhật rule':(this._watcherCloning?'Đã tạo bản sao — đang TẮT, bật khi sẵn sàng':'Đã tạo rule mới'),'success');
+    const titleMap = new Map((this._watcherChats||[]).map(c => [Number(c.chat_id), c.chat_title]));
     this.closeWatcherModal();
     this.loadWatchers();
     // ── Membership check: warn if any account not in the group ──────────────
@@ -2095,87 +2113,157 @@ async saveWatcher(){
       // Join rules only need the OBSERVER nick(s) inside the group — the sender DMs
       // from outside. Keyword rules listen with the sender nick, so check those.
       const chkAccs = (watchType==='join' && observerIds.length) ? observerIds : accIds;
-      const chkRes = await API.checkMembership(chkAccs, [...this._watcherSelectedGroups]);
+      const chkRes = await API.checkMembership(chkAccs, payload.group_ids);
       if(chkRes && chkRes.warnings && chkRes.warnings.length > 0) {
-        this._showMembershipWarning(chkRes.warnings, payload.name);
+        this._showMembershipWarning(chkRes.warnings, payload.name, {watchType, titleMap});
       }
     } catch(_) {}
   }catch(e){this.toast(e.message,'error')}},
 
-_showMembershipWarning(warnings, ruleName) {
-  // Build the warning modal content
-  let html = `<div style="background:color-mix(in srgb, var(--orange) 8%, transparent);border:1px solid color-mix(in srgb, var(--orange) 40%, transparent);border-radius:12px;padding:1.2rem;margin-bottom:1rem;">
-    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.8rem;">
-      <span style="font-size:1.4rem;">⚠️</span>
-      <strong style="color:var(--orange);font-size:1rem;">Cảnh báo: Tài khoản chưa join nhóm</strong>
+_showMembershipWarning(warnings, ruleName, opts = {}) {
+  const isJoin = opts.watchType === 'join';
+  const titleMap = opts.titleMap || new Map();
+  // The checked nick may never have seen the group → fall back to the title the
+  // rule form already knows from the group picker.
+  warnings.forEach(w => w.missing_groups.forEach(g => {
+    const known = titleMap.get(Number(g.group_id));
+    if (known && (!g.group_title || /^(Nhóm #|Group ID )/.test(g.group_title))) g.group_title = known;
+  }));
+  const why = isJoin
+    ? 'Rule <b>Join DM</b> dùng nick <b>quan sát</b> để thấy ai vừa vào nhóm. Nick dưới đây chưa ở trong nhóm nên rule <b>sẽ không chạy</b> với nhóm đó.'
+    : 'Rule <b>Keyword</b> nghe tin nhắn bằng chính nick gửi DM. Nick chưa ở trong nhóm thì <b>không thấy tin nhắn nào</b> để phản hồi.';
+  let html = `<div style="background:color-mix(in srgb, var(--orange) 8%, transparent);border:1px solid color-mix(in srgb, var(--orange) 40%, transparent);border-radius:12px;padding:1.1rem;margin-bottom:.6rem;">
+    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.6rem;">
+      <span style="font-size:1.3rem;">⚠️</span>
+      <strong style="color:var(--orange);font-size:1rem;">Nick chưa ở trong nhóm</strong>
     </div>
-    <p style="color:var(--text-secondary);font-size:.88rem;margin-bottom:.8rem;">
-      Rule <strong style="color:var(--text)">"${this._esc(ruleName)}"</strong> có tài khoản chưa tham gia nhóm đang theo dõi.
-      Các tài khoản này sẽ không thể DM user từ nhóm đó.
+    <p style="color:var(--text-secondary);font-size:.86rem;margin:0 0 .5rem;">
+      Rule <strong style="color:var(--text)">"${this._esc(ruleName)}"</strong> đã được lưu. ${why}
+    </p>
+    <p style="color:var(--text-secondary);font-size:.84rem;margin:0 0 .8rem;">
+      👉 <b>Cách xử lý:</b> bấm <b>Join</b> cho từng nhóm (hoặc <b>Join tất cả</b>). Nhóm private không join thẳng được — khi đó sẽ hiện ô để dán <b>link mời</b> (t.me/+…).${isJoin ? ' Sau khi join, nên cho nick quan sát làm <b>admin</b> nhóm: Telegram chỉ báo sự kiện "có người vào" của nhóm lớn cho admin.' : ''}
     </p>`;
   warnings.forEach(w => {
     html += `<div style="background:rgba(0,0,0,.2);border-radius:8px;padding:.7rem .9rem;margin-bottom:.5rem;">
-      <div style="font-weight:600;color:var(--orange);margin-bottom:.3rem;">📱 ${this._esc(w.account_name)} (ID: ${w.account_id})</div>`;
+      <div style="font-weight:600;color:var(--orange);margin-bottom:.35rem;">📱 ${this._esc(w.account_name)} <span style="color:var(--text-secondary);font-weight:400;font-size:.8rem">· nick #${w.account_id}</span></div>`;
     w.missing_groups.forEach(g => {
-      const btnId = `join-btn-${w.account_id}-${g.group_id}`;
-      html += `<div style="display:flex;align-items:center;gap:.5rem;padding-left:.5rem;margin-bottom:2px;">
-        <span style="color:var(--text-secondary);font-size:.83rem;flex:1;">• Chưa join: <span style="color:var(--red)">${this._esc(g.group_title)}</span></span>
-        <button id="${btnId}" onclick="App._joinFromWarning(this,${w.account_id},'${g.group_id}')"
-          style="background:var(--violet);color:#fff;border:none;border-radius:6px;padding:2px 10px;font-size:.75rem;cursor:pointer;white-space:nowrap;font-weight:600;">
-          Join
-        </button>
+      const key = `${w.account_id}-${String(g.group_id).replace(/[^0-9]/g, '')}`;
+      const uname = g.username ? ` <span style="color:var(--text-secondary);font-size:.78rem">@${this._esc(g.username)}</span>` : '';
+      const leftBadge = g.left ? ' <span style="color:var(--text-secondary);font-size:.75rem">(đã rời nhóm)</span>' : '';
+      html += `<div style="padding-left:.4rem;margin-bottom:6px;">
+        <div style="display:flex;align-items:center;gap:.5rem;">
+          <span style="font-size:.84rem;flex:1;min-width:0;">• <span style="color:var(--text)">${this._esc(g.group_title)}</span>${uname}${leftBadge}</span>
+          <button id="join-btn-${key}" onclick="App._joinFromWarning(this,${w.account_id},'${g.group_id}')"
+            style="background:var(--violet);color:#fff;border:none;border-radius:6px;padding:2px 12px;font-size:.75rem;cursor:pointer;white-space:nowrap;font-weight:600;">Join</button>
+        </div>
+        <div id="join-hint-${key}" style="display:none;font-size:.78rem;margin:.3rem 0 0 .8rem;"></div>
       </div>`;
     });
     html += `</div>`;
   });
-  // "Join tất cả" bulk button
   html += `<div style="margin-top:.8rem;display:flex;align-items:center;gap:.6rem;">
-    <button id="join-all-missing-btn" onclick="App._joinAllMissing()" 
-      style="background:var(--violet);color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:.85rem;cursor:pointer;font-weight:600;">
-      🚀 Join tất cả
-    </button>
-    <span style="color:var(--text-secondary);font-size:.82rem;">Tự động join tất cả nhóm còn thiếu</span>
+    <button id="join-all-missing-btn" onclick="App._joinAllMissing()"
+      style="background:var(--violet);color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:.85rem;cursor:pointer;font-weight:600;">🚀 Join tất cả</button>
+    <span style="color:var(--text-secondary);font-size:.8rem;">Join lần lượt, cách nhau 2 giây để tránh bị Telegram hạn chế</span>
   </div></div>`;
 
-  // Store warnings data for bulk join
   this._membershipWarnings = warnings;
 
-  // Show in a modal
   const modal = document.getElementById('membership-warn-modal');
   if(modal) {
-    (document.getElementById('membership-warn-body') || me_dummy).innerHTML = html;
+    const body = document.getElementById('membership-warn-body');
+    if(body) body.innerHTML = html;
     modal.classList.add('open');
   } else {
-    // Fallback: create and show ad-hoc modal
     const div = document.createElement('div');
     div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem';
-    div.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:1.5rem;max-width:500px;width:100%;max-height:80vh;overflow-y:auto">
+    div.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:1.5rem;max-width:560px;width:100%;max-height:80vh;overflow-y:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-        <h3 style="margin:0;font-size:1.1rem">Cảnh báo Membership</h3>
+        <h3 style="margin:0;font-size:1.1rem">Kiểm tra nick trong nhóm</h3>
         <button onclick="this.closest('[style*=fixed]').remove()" style="background:none;border:none;color:var(--text-secondary);font-size:1.4rem;cursor:pointer">×</button>
       </div>
       ${html}
       <div style="text-align:right;margin-top:1rem">
-        <button onclick="this.closest('[style*=fixed]').remove()" class="btn btn-primary">Đã hiểu</button>
+        <button onclick="this.closest('[style*=fixed]').remove()" class="btn btn-primary">Để sau</button>
       </div>
     </div>`;
     document.body.appendChild(div);
   }
 },
 
+// Raw Telegram/Telethon join errors → what happened + what to do, in plain words.
+_friendlyJoinError(raw) {
+  const m = String(raw || '');
+  const wait = m.match(/(?:wait of|wait|FLOOD_WAIT_?)\s*(\d+)/i);
+  if (/NOT_RESOLVABLE_PRIVATE|Cannot resolve|Could not find the input entity|No user has|Nobody is using|USERNAME_(INVALID|NOT_OCCUPIED)/i.test(m))
+    return { text: 'Nick này chưa từng thấy nhóm (nhóm private, không có @username).', fix: 'Dán link mời của nhóm (t.me/+…) vào ô bên dưới rồi bấm Join bằng link.', needLink: true };
+  if (/INVITE_REQUEST_SENT|request.*sent/i.test(m))
+    return { text: 'Đã gửi yêu cầu tham gia — nhóm cần admin duyệt.', fix: 'Nhờ admin nhóm duyệt, rồi bấm Join lại để kiểm tra.', pending: true };
+  if (/CHANNELS_TOO_MUCH|too many channels/i.test(m))
+    return { text: 'Nick đã ở tối đa 500 nhóm/kênh.', fix: 'Vào tab Kênh của nick này, rời bớt nhóm không dùng rồi Join lại.' };
+  if (/PEER_FLOOD/i.test(m))
+    return { text: 'Nick đang bị SpamBot giới hạn nên không join được.', fix: 'Dùng nick khác cho rule này, hoặc đợi hết hạn giới hạn.' };
+  if (/FLOOD/i.test(m))
+    return { text: 'Telegram tạm chặn join vì thao tác quá nhanh.', fix: wait ? `Đợi khoảng ${Math.ceil(+wait[1] / 60)} phút rồi bấm Join lại.` : 'Đợi vài phút rồi bấm Join lại.' };
+  if (/USER_BANNED|banned|CHANNEL_PRIVATE|kicked/i.test(m))
+    return { text: 'Nick bị chặn khỏi nhóm hoặc nhóm đã chuyển private.', fix: 'Nhờ admin bỏ chặn, dùng link mời mới, hoặc đổi sang nick khác.', needLink: true };
+  if (/INVITE_HASH_(EXPIRED|INVALID)/i.test(m))
+    return { text: 'Link mời đã hết hạn hoặc sai.', fix: 'Xin link mời mới từ admin nhóm rồi dán lại.', needLink: true };
+  if (/not connected|not found/i.test(m))
+    return { text: 'Nick đang offline.', fix: 'Kết nối lại nick ở tab Tài khoản rồi thử lại.' };
+  return { text: 'Không join được.', fix: `Chi tiết từ Telegram: ${m.slice(0, 160)}` };
+},
+
+_showJoinHint(accountId, groupId, err) {
+  const key = `${accountId}-${String(groupId).replace(/[^0-9]/g, '')}`;
+  const el = document.getElementById(`join-hint-${key}`);
+  if (!el) return err ? this._friendlyJoinError(err) : null;
+  if (!err) { el.style.display = 'none'; el.innerHTML = ''; return null; }
+  const f = this._friendlyJoinError(err);
+  const color = f.pending ? 'var(--orange)' : 'var(--red)';
+  el.style.display = 'block';
+  el.innerHTML = `<div style="color:${color}">${this._esc(f.text)}</div><div style="color:var(--text-secondary)">👉 ${this._esc(f.fix)}</div>`
+    + (f.needLink ? `<div style="display:flex;gap:.4rem;margin-top:.35rem">
+        <input id="join-link-${key}" class="form-input" style="flex:1;padding:4px 8px;font-size:.78rem" placeholder="t.me/+mã mời hoặc @username">
+        <button onclick="App._joinWithLink(this,${accountId},'${groupId}')" style="background:var(--violet);color:#fff;border:none;border-radius:6px;padding:2px 10px;font-size:.75rem;cursor:pointer;font-weight:600">Join bằng link</button>
+      </div>` : '');
+  return f;
+},
+
+_markJoinBtn(btn, state, title) {
+  if (!btn) return;
+  const st = { busy: ['⏳', '#555', true], ok: ['✅ Đã join', 'var(--green)', true], pending: ['🕒 Chờ duyệt', 'var(--orange)', false], fail: ['Thử lại', 'var(--red)', false] }[state];
+  btn.textContent = st[0]; btn.style.background = st[1]; btn.disabled = st[2]; btn.title = title || '';
+},
+
 async _joinFromWarning(btn, accountId, groupId) {
-  btn.disabled = true;
-  btn.textContent = '⏳';
-  btn.style.background = '#555';
+  this._markJoinBtn(btn, 'busy');
   try {
     await API.joinChannel(accountId, groupId);
-    btn.textContent = '✅ Joined';
-    btn.style.background = 'var(--green)';
+    this._markJoinBtn(btn, 'ok');
+    this._showJoinHint(accountId, groupId, null);
+    return true;
   } catch(e) {
-    btn.textContent = '❌ Lỗi';
-    btn.style.background = 'var(--red)';
-    btn.title = e.message || 'Join failed';
-    setTimeout(() => { btn.disabled = false; btn.textContent = 'Join'; btn.style.background = 'var(--violet)'; }, 3000);
+    const f = this._showJoinHint(accountId, groupId, e.message || 'Join failed');
+    this._markJoinBtn(btn, f && f.pending ? 'pending' : 'fail', e.message || '');
+    return false;
+  }
+},
+
+async _joinWithLink(btn, accountId, groupId) {
+  const key = `${accountId}-${String(groupId).replace(/[^0-9]/g, '')}`;
+  const link = (document.getElementById(`join-link-${key}`)?.value || '').trim();
+  if (!link) return this.toast('Dán link mời của nhóm trước đã', 'error');
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    await API.joinChannel(accountId, link);
+    this._markJoinBtn(document.getElementById(`join-btn-${key}`), 'ok');
+    this._showJoinHint(accountId, groupId, null);
+    this.toast('Đã join nhóm', 'success');
+  } catch(e) {
+    btn.disabled = false; btn.textContent = 'Join bằng link';
+    const f = this._friendlyJoinError(e.message);
+    this.toast(`${f.text} ${f.fix}`, 'error');
   }
 },
 
@@ -2188,23 +2276,17 @@ async _joinAllMissing() {
   let ok = 0, fail = 0;
   for(const w of this._membershipWarnings) {
     for(const g of w.missing_groups) {
-      const itemBtn = document.getElementById(`join-btn-${w.account_id}-${g.group_id}`);
-      if(itemBtn && itemBtn.textContent.includes('✅')) continue; // Already joined
-      if(itemBtn) { itemBtn.disabled = true; itemBtn.textContent = '⏳'; itemBtn.style.background = '#555'; }
-      try {
-        await API.joinChannel(w.account_id, String(g.group_id));
-        ok++;
-        if(itemBtn) { itemBtn.textContent = '✅ Joined'; itemBtn.style.background = 'var(--green)'; }
-      } catch(e) {
-        fail++;
-        if(itemBtn) { itemBtn.textContent = '❌ Lỗi'; itemBtn.style.background = 'var(--red)'; itemBtn.title = e.message || ''; }
-      }
-      await new Promise(r => setTimeout(r, 2000)); // Delay between joins
+      const key = `${w.account_id}-${String(g.group_id).replace(/[^0-9]/g, '')}`;
+      const itemBtn = document.getElementById(`join-btn-${key}`);
+      if(itemBtn && itemBtn.textContent.includes('✅')) continue;
+      if(await this._joinFromWarning(itemBtn, w.account_id, String(g.group_id))) ok++; else fail++;
+      await new Promise(r => setTimeout(r, 2000));
     }
   }
-  btn.textContent = `✅ Xong (${ok} joined, ${fail} lỗi)`;
-  btn.style.background = ok > 0 ? 'var(--green)' : 'var(--red)';
-  if(ok > 0) this.toast(`Đã join ${ok} nhóm thành công${fail ? `, ${fail} lỗi` : ''}`, 'success');
+  btn.disabled = false;
+  btn.textContent = fail ? `Xong: ${ok} đã join · ${fail} cần xử lý (xem hướng dẫn ở từng nhóm)` : `✅ Xong: đã join ${ok} nhóm`;
+  btn.style.background = fail ? 'var(--orange)' : 'var(--green)';
+  if(ok > 0) this.toast(`Đã join ${ok} nhóm${fail ? ` · ${fail} nhóm cần xử lý thêm` : ''}`, fail ? 'info' : 'success');
 },
 
 
@@ -4012,11 +4094,21 @@ App.toggleForumInboxEnabled = function(enabled) {
   }
 };
 
-App.setForumInboxBadge = function(enabled) {
+// v3.33.0: "Đang bật" alone hid a dead inbox for 3 days — the Command Bot that
+// does the relay was off. botRunning: true/false, or null when unknown (split mode).
+App.setForumInboxBadge = function(enabled, botRunning = null, botEnabled = true) {
   const badge = document.getElementById('forum-inbox-badge');
   if (!badge) return;
-  badge.className = 'badge ' + (enabled ? 'badge-success' : 'badge-gray');
-  badge.textContent = enabled ? 'Đang bật' : 'Đang tắt';
+  let cls = 'badge-gray', text = 'Đang tắt';
+  if (enabled && botRunning === false) {
+    cls = 'badge-red';
+    text = botEnabled ? '⚠️ Bot mất kết nối' : '⚠️ Command Bot đang tắt';
+  } else if (enabled) {
+    cls = 'badge-success';
+    text = botRunning ? 'Đang chạy' : 'Đang bật';
+  }
+  badge.className = 'badge ' + cls;
+  badge.textContent = text;
 };
 
 App.loadForumInboxConfig = async function() {
@@ -4030,7 +4122,7 @@ App.loadForumInboxConfig = async function() {
     if (enabled) enabled.checked = !!cfg.enabled;
     if (group) group.value = cfg.group_id ? String(cfg.group_id) : '';
     if (topic) topic.value = cfg.general_topic_id ? String(cfg.general_topic_id) : '1';
-    App.setForumInboxBadge(!!cfg.enabled);
+    App.setForumInboxBadge(!!cfg.enabled, cfg.bot_running ?? null, !!cfg.bot_enabled);
     App.loadForumInboxTopicCount();
   } catch (e) {
     console.warn('loadForumInboxConfig failed', e);
@@ -4091,7 +4183,7 @@ App.saveForumInboxConfig = async function() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
-    App.setForumInboxBadge(payload.enabled);
+    App.loadForumInboxConfig();  // re-read so the badge reflects the bot, not just the toggle
     if (msg) msg.textContent = payload.enabled
       ? '✅ Đã lưu và bật Forum Inbox.'
       : '✅ Đã lưu (trạng thái: Đang tắt).';

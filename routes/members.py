@@ -29,6 +29,10 @@ from account_busy import AccountBusy, acquire as acquire_account_busy
 logger = logging.getLogger("tg-scheduler.members")
 router = APIRouter(prefix="/api/members", tags=["members"])
 
+# Each campaign run re-asks @SpamBot; an answer younger than this is shared
+# (several campaigns started at once, or the modal's re-check just before Start).
+SPAMBOT_RECHECK_HOURS = 10 / 60
+
 # ── Active campaign tracking ──
 _active_campaigns: dict[int, bool] = {}  # campaign_id -> is_running
 _active_campaign_lock = asyncio.Lock()  # serialize check-and-start for all callers
@@ -993,9 +997,14 @@ async def import_contacts(req: ImportContactsRequest):
         # People already chatting with one of our accounts (AI chats, inbound DMs)
         already_dmd |= (await db.get_existing_conversation_sets())[1]
 
-        # Usernames already saved in some list (this job included)
+        # Usernames already in a list some DM campaign uses (or in this job).
+        # A contact parked only in a list nobody ever ran is saved again —
+        # the runner's cross-campaign dedup still prevents a second DM.
         wanted = [str(c.get("username", "")).strip().lstrip("@") for c in req.contacts]
-        saved_in = await db.find_saved_usernames(wanted) if req.skip_existing else {}
+        saved_in, parked_in = {}, {}
+        if req.skip_existing:
+            saved_in = await db.find_saved_usernames(wanted, used_only=True, also_job=req.scrape_job_id)
+            parked_in = await db.find_saved_usernames(wanted)
 
         # ── Step 2: Build members list, filtering out bots and already-DM'd ──
         members_list = []
@@ -1003,6 +1012,7 @@ async def import_contacts(req: ImportContactsRequest):
         skipped_bots = 0
         skipped_existing = 0
         skipped_dupe = 0
+        resaved_unused = 0
         existing_jobs: dict[str, int] = {}
         seen_in_req: set[str] = set()
         for c in req.contacts:
@@ -1031,12 +1041,14 @@ async def import_contacts(req: ImportContactsRequest):
                 skipped_count += 1
                 continue
 
-            # Already saved in a list (any job) — saving again only creates double DMs
+            # Already in a list a campaign runs (or this one) — saving again only creates double DMs
             job_hit = saved_in.get(username.lower())
             if job_hit:
                 skipped_existing += 1
                 existing_jobs[job_hit] = existing_jobs.get(job_hit, 0) + 1
                 continue
+            if username.lower() in parked_in:
+                resaved_unused += 1
 
             # Generate deterministic negative ID based on username hash to satisfy UNIQUE(scrape_job_id, user_id)
             h = zlib.crc32(username.encode("utf-8")) & 0x7fffffff
@@ -1079,7 +1091,9 @@ async def import_contacts(req: ImportContactsRequest):
         if skipped_count:
             details.append(f"bỏ qua {skipped_count} đã DM trước đó")
         if skipped_existing:
-            details.append(f"bỏ qua {skipped_existing} đã có trong danh sách khác")
+            details.append(f"bỏ qua {skipped_existing} đã có trong danh sách đang chạy chiến dịch")
+        if resaved_unused:
+            details.append(f"lưu lại {resaved_unused} từ danh sách chưa chạy")
         if skipped_bots:
             details.append(f"lọc {skipped_bots} tài khoản bot")
         detail_msg = f" ({', '.join(details)})" if details else ""
@@ -1091,6 +1105,7 @@ async def import_contacts(req: ImportContactsRequest):
             "skipped_bots": skipped_bots,
             "skipped_existing": skipped_existing,
             "skipped_dupe": skipped_dupe,
+            "resaved_unused": resaved_unused,
             "existing_jobs": sorted(existing_jobs.items(), key=lambda x: -x[1])[:5],
             "kol_upserted": kol_upserted,
             "message": f"Imported {len(members_list)} contacts{detail_msg}"
@@ -1731,7 +1746,8 @@ async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50, 
     # Counts must cover ALL leads (the tabs are global), but the payload only
     # carries the requested page — that is the whole point of this branch.
     counts = {"all": len(leads), "has_contacts": 0, "trading_vip": 0,
-              "trading_all": 0, "potential_bd": 0, "news": 0, "no_contacts": 0}
+              "trading_all": 0, "potential_bd": 0, "crypto_community": 0, "news": 0,
+              "no_contacts": 0}
     for lead in ([] if fresh else leads):
         has_c = bool(lead.get("contacts"))
         if not has_c:
@@ -1745,6 +1761,8 @@ async def get_deep_crawl_results(slim: int = 0, page: int = 0, limit: int = 50, 
             counts["trading_all"] += 1
         elif s >= 45:
             counts["potential_bd"] += 1
+        if lead.get("category") == "crypto_community":
+            counts["crypto_community"] += 1
         if lead.get("category") == "news_general":
             counts["news"] += 1
 
@@ -1994,7 +2012,8 @@ async def create_campaign(req: CampaignCreate):
 
     # Determine status: scheduled if scheduled_at provided, else draft
     status = "draft"
-    if req.scheduled_at and req.target_timezone:
+    if req.scheduled_at:
+        req.scheduled_at, req.target_timezone = _parse_schedule(req.scheduled_at, req.target_timezone)
         status = "scheduled"
 
     campaign_id = await db.create_dm_campaign({
@@ -2014,6 +2033,8 @@ async def create_campaign(req: CampaignCreate):
         "target_timezone": req.target_timezone,
         "auto_resume": req.auto_resume,
         "min_lead_score": req.min_lead_score,
+        "ai_agent_id": req.ai_agent_id,
+        "auto_translate_native": req.auto_translate_native,
     })
 
     # Register APScheduler job if scheduled
@@ -2069,6 +2090,7 @@ async def clone_campaign(campaign_id: int, req: Optional[CampaignCloneRequest] =
         "exclude_previous_dms": bool(source_cmp.get("exclude_previous_dms", 1)),
         "total_targets": adjusted_total,
         "ai_agent_id": source_cmp.get("ai_agent_id"),
+        "auto_translate_native": source_cmp.get("auto_translate_native", 1),
         "auto_resume": bool(source_cmp.get("auto_resume", 1)),
         "min_lead_score": source_cmp.get("min_lead_score", 0) or 0,
     })
@@ -2091,6 +2113,16 @@ async def clone_campaign(campaign_id: int, req: Optional[CampaignCloneRequest] =
         "excluded_count": excluded_count,
         "source_campaign_id": campaign_id
     }
+
+
+@router.get("/campaigns/suggest")
+async def suggest_campaign(job_id: str, brand: Optional[str] = None):
+    """Draft message + Remix/Agent/Translate settings for a scraped list,
+    based on the list's language/audience and past campaigns' reply rates."""
+    import campaign_suggest
+    if not await db.count_scraped_members(job_id):
+        raise HTTPException(status_code=404, detail="Tệp chưa có người nhận")
+    return await campaign_suggest.suggest(job_id, brand)
 
 
 @router.get("/campaigns")
@@ -2134,6 +2166,10 @@ async def start_campaign(campaign_id: int, background_tasks: BackgroundTasks):
     campaign = await db.get_dm_campaign(campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign không tồn tại")
+
+    if campaign["status"] == "scheduled":
+        import scheduler as sch
+        sch.remove_campaign_schedule_job(campaign_id)  # started by hand → drop the pending timer
 
     async with _active_campaign_lock:
         if campaign["status"] == "running":
@@ -2201,8 +2237,58 @@ async def cancel_campaign_schedule(campaign_id: int):
 
     import scheduler as sch
     sch.remove_campaign_schedule_job(campaign_id)
-    await db.update_dm_campaign_status(campaign_id, "draft")
+    await db.set_dm_campaign_schedule(campaign_id, _unscheduled_status(campaign), None, None)
     return {"status": "ok", "message": "Đã hủy lịch hẹn giờ"}
+
+
+def _unscheduled_status(campaign: dict) -> str:
+    """Status after a schedule is cancelled: keep progress visible as paused."""
+    done = (campaign.get("sent_count") or 0) + (campaign.get("failed_count") or 0) + (campaign.get("skipped_count") or 0)
+    return "paused" if done else "draft"
+
+
+def _parse_schedule(scheduled_at: str, target_timezone: str | None) -> tuple[str, str]:
+    """Validate a wall-clock start time in `target_timezone`. Returns (normalized, tz) or raises 400."""
+    import pytz
+    tz_name = target_timezone or "Asia/Ho_Chi_Minh"
+    try:
+        tz = pytz.timezone(tz_name)
+    except pytz.UnknownTimeZoneError:
+        raise HTTPException(status_code=400, detail=f"Múi giờ không hợp lệ: {tz_name}")
+    norm = (scheduled_at or "").replace("T", " ").strip()[:16]
+    try:
+        run_dt = tz.localize(datetime.strptime(norm, "%Y-%m-%d %H:%M"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Giờ chạy không hợp lệ (định dạng YYYY-MM-DD HH:MM)")
+    if run_dt <= datetime.now(timezone.utc) + timedelta(seconds=30):
+        raise HTTPException(status_code=400, detail="Giờ chạy phải ở tương lai")
+    return norm, tz_name
+
+
+class CampaignScheduleUpdate(BaseModel):
+    scheduled_at: Optional[str] = None     # wall clock in target_timezone; None = cancel schedule
+    target_timezone: Optional[str] = None
+
+
+@router.put("/campaigns/{campaign_id}/schedule")
+async def set_campaign_schedule(campaign_id: int, req: CampaignScheduleUpdate):
+    """Schedule (or re-schedule / cancel) an existing campaign's start time."""
+    import scheduler as sch
+    campaign = await db.get_dm_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign không tồn tại")
+    if not req.scheduled_at:
+        if campaign["status"] == "scheduled":
+            sch.remove_campaign_schedule_job(campaign_id)
+            await db.set_dm_campaign_schedule(campaign_id, _unscheduled_status(campaign), None, None)
+        return {"status": "ok", "scheduled": False}
+    task = _active_campaigns.get(campaign_id)
+    if campaign["status"] == "running" and (task is True or (isinstance(task, asyncio.Task) and not task.done())):
+        raise HTTPException(status_code=409, detail="Campaign đang chạy — dừng trước khi hẹn giờ")
+    when, tz_name = _parse_schedule(req.scheduled_at, req.target_timezone)
+    await db.set_dm_campaign_schedule(campaign_id, "scheduled", when, tz_name)
+    sch.add_campaign_schedule_job(campaign_id, when, tz_name)
+    return {"status": "ok", "scheduled": True, "scheduled_at": when, "target_timezone": tz_name}
 
 
 @router.delete("/campaigns/{campaign_id}")
@@ -2218,7 +2304,7 @@ async def update_campaign_messages(campaign_id: int, req: CampaignUpdateMessages
     campaign = await db.get_dm_campaign(campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign không tồn tại")
-    if campaign["status"] not in ("draft", "paused", "paused_auto", "error", "completed"):
+    if campaign["status"] not in ("draft", "paused", "paused_auto", "error", "completed", "scheduled"):
         raise HTTPException(status_code=400,
                             detail="Chỉ có thể sửa campaign khi tạm dừng, chưa chạy hoặc đã hoàn thành")
     if not req.messages:
@@ -2282,12 +2368,102 @@ async def check_account_spam(account_id: int):
 
 @router.get("/accounts/spam-status")
 async def get_spam_status_cache():
-    """Last known @SpamBot result per account (from manual checks and campaign pre-checks)."""
+    """Last known @SpamBot result per account (from manual checks and campaign pre-checks).
+
+    Limited entries carry `until` and `expired` (the limit date has passed → stale).
+    """
     import json as _json
     try:
-        return {"statuses": _json.loads(await db.get_setting("spam_status_cache", "{}") or "{}")}
+        raw = _json.loads(await db.get_setting("spam_status_cache", "{}") or "{}")
     except Exception:
         return {"statuses": {}}
+    now = time.time()
+    return {"statuses": {k: tg.spam_entry_view(v, now) for k, v in raw.items() if isinstance(v, dict)}}
+
+
+@router.post("/accounts/spam-recheck-expired")
+async def recheck_expired_spam_limits():
+    """Ask @SpamBot again only for accounts whose cached limit date has passed.
+
+    Called once when the campaign modal opens, so an account that was limited
+    yesterday is not shown (or skipped) as limited today. Usually 0–2 accounts.
+    """
+    try:
+        raw = json.loads(await db.get_setting("spam_status_cache", "{}") or "{}")
+    except Exception:
+        raw = {}
+    now = time.time()
+    stale = [int(k) for k, v in raw.items()
+             if isinstance(v, dict) and str(k).isdigit() and tg.spam_entry_view(v, now).get("expired")]
+    results = {}
+    for i, aid in enumerate(stale):
+        client = tg.get_client(aid)
+        if not client or not client.is_connected():
+            continue
+        if i:
+            await asyncio.sleep(2)  # don't rate-limit SpamBot itself
+        try:
+            r = await tg.check_spam_status(aid)
+            results[str(aid)] = tg.spam_entry_view({k: r.get(k) for k in ("status", "message", "checked_at")})
+        except Exception as e:
+            logger.warning(f"[SpamCheck] re-check of expired limit failed for {aid}: {e}")
+    return {"checked": len(results), "statuses": results}
+
+
+@router.get("/accounts/availability")
+async def get_accounts_availability():
+    """When each restricted account can send again (flag / PeerFlood / SpamBot limit).
+
+    available_at: unix seconds (null = free now or unknown — see `unknown`).
+    Used by the campaign modal to show countdowns and align the scheduled start.
+    """
+    await db.clear_stale_flags()
+    accounts = await db.get_all_accounts()
+    try:
+        spam = json.loads(await db.get_setting("spam_status_cache", "{}") or "{}")
+    except Exception:
+        spam = {}
+    now = int(datetime.now(timezone.utc).timestamp())
+    out = {}
+    for a in accounts:
+        aid = a["id"]
+        reasons, times, unknown = [], [], False
+        if a.get("is_flagged"):
+            exp = await db.get_flag_expiry(aid)
+            if exp:
+                ts = int(datetime.strptime(exp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
+                reasons.append({"kind": "flag", "until": ts})
+                times.append(ts)
+        pf = int(a.get("peerflood_until") or 0)
+        if pf > now:
+            reasons.append({"kind": "peerflood", "until": pf})
+            times.append(pf)
+        sp = spam.get(str(aid)) or {}
+        if sp.get("status") == "limited":
+            ts = tg.parse_spambot_until(sp.get("message", ""))
+            if ts and ts <= now:
+                pass  # limit date passed → stale; the next run asks @SpamBot again
+            elif ts:
+                reasons.append({"kind": "spambot", "until": ts})
+                times.append(ts)
+            else:
+                reasons.append({"kind": "spambot", "until": None})
+                unknown = True
+        if a.get("is_paused"):
+            # PeerFlood pauses are lifted by the 150-min auto-unpause job once SpamBot says free.
+            # A scheduled start re-asks @SpamBot for these first (scheduler._auto_start_campaign).
+            auto = "peerflood" in (a.get("pause_reason") or "").lower()
+            reasons.append({"kind": "paused", "auto": auto, "until": None})
+            if not auto:
+                unknown = True  # paused by hand → only a human turns it back on
+        if not reasons:
+            continue
+        out[str(aid)] = {
+            "available_at": None if unknown or not times else max(times),
+            "unknown": unknown,
+            "reasons": reasons,
+        }
+    return {"now": now, "accounts": out}
 
 
 @router.post("/accounts/spam-check-all")
@@ -2575,13 +2751,21 @@ async def _run_campaign(campaign_id: int):
         # Automatically exclude accounts that are currently spam-limited
         for sid in [s for s in sender_ids if s not in dead_senders]:
             try:
-                # At most one @SpamBot check per account per day, shared by all campaigns.
-                spam_result = await tg.check_spam_status(sid, max_age_hours=24)
+                # Every run asks @SpamBot again; the 10-min window only stops several
+                # campaigns started together from asking the same thing twice.
+                spam_result = await tg.check_spam_status(sid, max_age_hours=SPAMBOT_RECHECK_HOURS)
                 if spam_result["status"] == "limited":
+                    until = tg.parse_spambot_until(spam_result.get("message", ""))
+                    if until and until > time.time():
+                        # Rejoins this run by itself once SpamBot's own deadline passes.
+                        flooded_accounts[sid] = until + 60
+                        when = datetime.fromtimestamp(until, tz=timezone.utc).strftime("%d/%m %H:%M UTC")
+                        note = f"SpamBot: tài khoản bị giới hạn tới {when} — tự gửi tiếp sau giờ đó"
+                    else:
+                        flooded_accounts[sid] = float('inf')
+                        note = f"SpamBot: tài khoản đang bị giới hạn — {spam_result['message'][:80]}"
                     logger.warning(f"[Campaign {campaign_id}] ⚠️ Account {sid} is spam-limited, excluding from senders")
-                    flooded_accounts[sid] = float('inf')
-                    await db.add_dm_campaign_log(campaign_id, sid, 0, None, "skipped",
-                                                f"SpamBot: tài khoản đang bị giới hạn — {spam_result['message'][:80]}")
+                    await db.add_dm_campaign_log(campaign_id, sid, 0, None, "skipped", note)
                 if not spam_result.get("cached"):
                     await asyncio.sleep(2)  # Delay between SpamBot checks
             except Exception as e:

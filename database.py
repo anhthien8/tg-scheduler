@@ -2141,18 +2141,30 @@ async def delete_kol_channels(ids: list[int]) -> int:
         return cur.rowcount
 
 
-async def find_saved_usernames(usernames: list[str]) -> dict[str, str]:
-    """lower(username) -> scrape_job_id for usernames already saved in any list."""
+async def find_saved_usernames(usernames: list[str], used_only: bool = False,
+                                also_job: str | None = None) -> dict[str, str]:
+    """lower(username) -> scrape_job_id for usernames already saved in a list.
+
+    used_only: only lists some DM campaign targets (plus `also_job`, the list
+    being saved into) — a contact parked in a list nobody ever ran can be saved
+    again; the runner still skips anyone already DM'd or chatting.
+    """
     found: dict[str, str] = {}
     names = sorted({u.lower() for u in usernames if u})
     if not names:
         return found
+    extra, extra_args = "", []
+    if used_only:
+        extra = (" AND (scrape_job_id IN (SELECT scrape_job_id FROM dm_campaigns WHERE scrape_job_id IS NOT NULL)"
+                 " OR scrape_job_id = ?)")
+        extra_args.append(also_job or "")
     async with get_db() as db:
         for i in range(0, len(names), 500):
             chunk = names[i:i + 500]
             cur = await db.execute(
                 f"SELECT LOWER(username), MIN(scrape_job_id) FROM scraped_members "
-                f"WHERE LOWER(username) IN ({','.join('?' * len(chunk))}) GROUP BY LOWER(username)", chunk)
+                f"WHERE LOWER(username) IN ({','.join('?' * len(chunk))}){extra} GROUP BY LOWER(username)",
+                chunk + extra_args)
             for u, job in await cur.fetchall():
                 found[u] = job
     return found
@@ -3535,6 +3547,51 @@ async def get_account_warnings(account_id: int) -> dict:
         }
 
 
+FLAG_FAIL_THRESHOLD = 5  # failures in the last 24h that flag an account
+
+
+async def get_flag_expiry(account_id: int) -> str | None:
+    """UTC 'YYYY-MM-DD HH:MM:SS' when the account drops below the flag threshold
+    (oldest failures age out of the 24h window), or None if it already has."""
+    async with get_db() as db:
+        rows = await (await db.execute("""
+            SELECT sent_at FROM send_logs
+            WHERE account_id=? AND status='failed' AND sent_at >= datetime('now', '-24 hours')
+            ORDER BY sent_at
+        """, (account_id,))).fetchall()
+        n = len(rows)
+        if n < FLAG_FAIL_THRESHOLD:
+            return None
+        # Count drops below the threshold once the (n-threshold+1)-th oldest failure ages out.
+        row = await (await db.execute(
+            "SELECT datetime(?, '+24 hours')", (rows[n - FLAG_FAIL_THRESHOLD][0],))).fetchone()
+        return row[0]
+
+
+async def clear_stale_flags() -> list[int]:
+    """Unflag accounts whose 24h failure count fell below the threshold. Returns their ids."""
+    async with get_db() as db:
+        flagged = [r[0] for r in await (await db.execute(
+            "SELECT id FROM accounts WHERE is_flagged=1")).fetchall()]
+    cleared = []
+    for aid in flagged:
+        if await get_flag_expiry(aid) is None:
+            await unflag_account(aid)
+            cleared.append(aid)
+    if cleared:
+        logger.info("[Flag] Auto-cleared stale flags (<%d failures in 24h): %s", FLAG_FAIL_THRESHOLD, cleared)
+    return cleared
+
+
+async def set_dm_campaign_schedule(campaign_id: int, status: str,
+                                   scheduled_at: str | None, target_timezone: str | None) -> None:
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE dm_campaigns SET status=?, scheduled_at=?, target_timezone=?, updated_at=datetime('now') WHERE id=?",
+            (status, scheduled_at, target_timezone, campaign_id))
+        await db.commit()
+
+
 async def unflag_account(account_id: int):
     async with get_db() as db:
         await db.execute(
@@ -4277,8 +4334,9 @@ async def create_dm_campaign(data: dict) -> int:
             (name, scrape_job_id, sender_account_ids, messages,
              delay_min, delay_max, daily_limit_premium, daily_limit_normal,
              use_ai_remix, exclude_previous_dms, total_targets, status,
-             scheduled_at, target_timezone, ai_agent_id, auto_resume, min_lead_score)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             scheduled_at, target_timezone, ai_agent_id, auto_resume, min_lead_score,
+             auto_translate_native)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["name"], data["scrape_job_id"],
             json.dumps(data.get("sender_account_ids", [])),
@@ -4295,6 +4353,7 @@ async def create_dm_campaign(data: dict) -> int:
             data.get("ai_agent_id"),
             1 if data.get("auto_resume", True) else 0,
             data.get("min_lead_score", 0) or 0,
+            1 if data.get("auto_translate_native", 1) else 0,
         ))
         await db.commit()
         return cursor.lastrowid
@@ -5754,6 +5813,30 @@ async def get_or_create_followup_chat(
         res = dict(row) if row else {}
         res["history"] = []
         return res
+
+
+async def set_followup_message_media(account_id: int, user_id: int, timestamp: str, media: dict) -> bool:
+    """Attach media info (image url / topic link) to the history entry with this timestamp."""
+    async with get_db() as db:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute(
+            "SELECT history_json FROM ai_followup_chats WHERE account_id = ? AND user_id = ?",
+            (account_id, user_id))
+        row = await cursor.fetchone()
+        if not row:
+            await db.rollback()
+            return False
+        history = json.loads(row[0] or "[]")
+        for entry in reversed(history):
+            if entry.get("timestamp") == timestamp:
+                entry["media"] = {**(entry.get("media") or {}), **media}
+                await db.execute(
+                    "UPDATE ai_followup_chats SET history_json = ? WHERE account_id = ? AND user_id = ?",
+                    (json.dumps(history), account_id, user_id))
+                await db.commit()
+                return True
+        await db.rollback()
+        return False
 
 
 async def append_followup_chat_message(

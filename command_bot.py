@@ -55,6 +55,33 @@ _admin_ids: set[int] = set()
 _STATES: dict[int, dict] = {}       # user_id → state machine
 _STATE_TTL = 300                     # 5 minutes
 
+# ── Offline visibility + self-healing (v3.33.0) ────────────────────────────
+# 06–09/11/2026 the bot was off for 3 days: every lead message returned
+# "bot_offline" and every HANDOVER alert was dropped without one log line.
+_DROP_LOG_INTERVAL = 600.0           # max one WARNING per kind per 10 minutes
+_drop_counts: dict[str, int] = {}
+_drop_logged_at: dict[str, float] = {}
+
+SUPERVISOR_INTERVAL = 60             # seconds between health checks
+_SUPERVISOR_MAX_BACKOFF = 1800       # cap between failed restarts (30 min)
+_lifecycle_lock = asyncio.Lock()     # serializes start / stop / supervisor restarts
+_down_checks = 0
+_restart_failures = 0
+_next_restart_at = 0.0
+
+
+def _note_drop(kind: str, detail: str) -> None:
+    """Rate-limited WARNING for work skipped because the bot is not connected."""
+    _drop_counts[kind] = _drop_counts.get(kind, 0) + 1
+    now = time.monotonic()
+    last = _drop_logged_at.get(kind)
+    if last is not None and now - last < _DROP_LOG_INTERVAL:
+        return
+    _drop_logged_at[kind] = now
+    skipped = _drop_counts.pop(kind)
+    logger.warning("[CommandBot] OFFLINE — %s bị bỏ qua (%d lần từ cảnh báo trước): %s",
+                   kind, skipped, detail)
+
 # Nút Hủy dùng chung cho bước nhập nội dung tin nhắn (handler: data == "send:cancel").
 _CANCEL_BUTTONS = [[Button.inline("❌ Hủy", data="send:cancel")]]
 
@@ -1119,6 +1146,10 @@ class _TelethonForumBot:
     async def send_topic_message(self, group_id: int, topic_id: int, text: str, buttons=None):
         return await self._client.send_message(group_id, text, reply_to=topic_id, buttons=buttons)
 
+    async def send_topic_file(self, group_id: int, topic_id: int, path: str, caption: str):
+        return await self._client.send_file(group_id, path, caption=caption, reply_to=topic_id,
+                                            supports_streaming=True)
+
 
 def _forum_bot() -> "_TelethonForumBot | None":
     return _TelethonForumBot(_bot) if (_bot and _bot.is_connected()) else None
@@ -1137,12 +1168,15 @@ async def relay_inbound_to_forum(account_id: int, user_id: int, username: str | 
                                  name: str | None, text: str, has_media: bool = False) -> str:
     """Called by dm_reply_tracker on inbound lead messages. Never raises."""
     try:
-        bot = _forum_bot()
-        if not bot:
-            return "bot_offline"
         cfg = await _load_forum_config()
         if not cfg.enabled:
-            return "disabled"
+            return "disabled"  # deliberately off — nothing to warn about
+        bot = _forum_bot()
+        if not bot:
+            _note_drop("forum_inbound",
+                       f"Forum Inbox đang bật nhưng Command Bot không chạy — tin của "
+                       f"acc={account_id} user={user_id} KHÔNG vào group")
+            return "bot_offline"
         result = await fx.relay_inbound(db, bot, cfg, account_id=account_id, user_id=user_id,
                                         username=username, name=name, text=text, has_media=has_media)
         # Surface why a conversation did NOT reach the group. Silence here is what
@@ -1153,6 +1187,34 @@ async def relay_inbound_to_forum(account_id: int, user_id: int, username: str | 
     except Exception as e:
         logger.warning("[ForumInbox] inbound relay failed (acc=%s user=%s): %s", account_id, user_id, e)
         return "error"
+
+
+async def relay_proof_to_forum(account_id: int, user_id: int, username: str | None,
+                               name: str | None, path: str, kind: str) -> dict:
+    """Post a lead's proof file into their forum topic. Never raises.
+
+    Returns {"link": t.me link} on success, else {"reason": ...}.
+    """
+    try:
+        bot = _forum_bot()
+        if not bot:
+            return {"reason": "bot_offline"}
+        cfg = await _load_forum_config()
+        if not cfg.enabled:
+            return {"reason": "disabled"}
+        topic = await fx.ensure_topic(db, bot, cfg, account_id=account_id, user_id=user_id,
+                                      username=username, name=name)
+        if not topic:
+            return {"reason": "no_outreach_proof"}
+        label = {"photo": "🖼️ Ảnh proof", "video": "🎬 Video proof"}.get(kind, "📎 File proof")
+        lead = f"@{username}" if username else (name or str(user_id))
+        msg = await bot.send_topic_file(cfg.group_id, int(topic["topic_id"]), path,
+                                        caption=f"{label} từ {lead} (ID {user_id})")
+        return {"link": fx.topic_message_link(cfg.group_id, int(topic["topic_id"]), int(msg.id))}
+    except Exception as e:
+        logger.warning("[ForumInbox] proof relay failed (acc=%s user=%s): %s: %s",
+                       account_id, user_id, type(e).__name__, e)
+        return {"reason": "error"}
 
 
 async def backfill_forum_topics(days: int = 90, limit: int = 500) -> dict:
@@ -1247,7 +1309,7 @@ async def send_forum_general_alert(text: str) -> bool:
         cfg = await _load_forum_config()
         return await fx.relay_general_alert(bot, cfg, text)
     except Exception as e:
-        logger.debug("[ForumInbox] general alert skipped: %s", e)
+        logger.warning("[ForumInbox] general alert failed: %s: %s", type(e).__name__, e)
         return False
 
 
@@ -1613,6 +1675,7 @@ async def send_handover_alert(account_name: str, sender_username: str,
     Called from dm_reply_tracker._notify_main_account_handover.
     """
     if not _bot or not _bot.is_connected():
+        _note_drop("handover_alert", f"cảnh báo HANDOVER cho @{sender_username} không gửi được tới admin")
         return False
 
     for admin_id in _admin_ids:
@@ -1649,10 +1712,34 @@ async def send_handover_alert(account_name: str, sender_username: str,
 # ════════════════════════════════════════════════════════════════════════════
 
 async def start_command_bot():
-    """Start the command bot if configured and enabled."""
+    """Start the command bot if configured and enabled.
+
+    Idempotent (a live bot is left alone) and serialized with stop/supervisor,
+    so two clients can never open the same session file.
+    """
+    async with _lifecycle_lock:
+        if is_running():
+            return True
+        return await _start_command_bot_locked()
+
+
+async def _discard_client() -> None:
+    """Drop a dead client so its session file is released before a restart."""
+    global _bot
+    old, _bot = _bot, None
+    if old is not None:
+        try:
+            await old.disconnect()
+        except Exception as e:
+            logger.debug("[CommandBot] discarding old client: %s", e)
+
+
+async def _start_command_bot_locked():
+    """Body of start_command_bot. Caller must hold _lifecycle_lock."""
     global _bot, _admin_ids
 
     try:
+        await _discard_client()
         enabled = await db.get_setting("command_bot_enabled", "0")
         if enabled != "1":
             logger.info("[CommandBot] Disabled (set command_bot_enabled=1 in settings)")
@@ -1767,9 +1854,54 @@ def is_running() -> bool:
 async def stop_command_bot():
     """Gracefully stop the command bot."""
     global _bot
-    if _bot and _bot.is_connected():
-        await _bot.disconnect()
-        logger.info("[CommandBot] Stopped")
-    _bot = None
-    _admin_ids.clear()
-    _STATES.clear()
+    async with _lifecycle_lock:
+        if _bot and _bot.is_connected():
+            await _bot.disconnect()
+            logger.info("[CommandBot] Stopped")
+        _bot = None
+        _admin_ids.clear()
+        _STATES.clear()
+
+
+async def supervise_command_bot() -> str:
+    """Bring the bot back when it is enabled but not connected (runs every 60s).
+
+    Healthy path costs one is_connected() call — no DB read. A restart needs two
+    failed checks in a row so Telethon's own auto-reconnect gets a chance first;
+    failed restarts back off exponentially up to 30 minutes.
+    """
+    global _down_checks, _restart_failures, _next_restart_at
+    if is_running():
+        _down_checks = 0
+        _restart_failures = 0
+        _next_restart_at = 0.0
+        return "ok"
+    if _lifecycle_lock.locked():
+        return "busy"  # a start/stop is in progress right now
+    if (await db.get_setting("command_bot_enabled", "0")) != "1":
+        _down_checks = 0
+        return "disabled"  # deliberately off; the UI badge says so
+    _down_checks += 1
+    if _down_checks < 2:
+        return "waiting"
+    now = time.monotonic()
+    if now < _next_restart_at:
+        return "backoff"
+    logger.warning("[CommandBot] Đang bật nhưng không kết nối — tự khởi động lại (lần %d)",
+                   _restart_failures + 1)
+    async with _lifecycle_lock:
+        if is_running():
+            ok = True
+        else:
+            ok = await _start_command_bot_locked()
+    if ok:
+        logger.info("[CommandBot] Supervisor: bot đã chạy lại")
+        _down_checks = 0
+        _restart_failures = 0
+        _next_restart_at = 0.0
+        return "restarted"
+    _restart_failures += 1
+    delay = min(SUPERVISOR_INTERVAL * (2 ** _restart_failures), _SUPERVISOR_MAX_BACKOFF)
+    _next_restart_at = now + delay
+    logger.warning("[CommandBot] Supervisor: khởi động lại thất bại, thử lại sau %ds", delay)
+    return "failed"

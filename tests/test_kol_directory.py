@@ -37,21 +37,32 @@ async def test_list_filters_and_bad_status():
         await db.update_kol_channel(res["items"][0]["id"], {"status": "hacked"})
 
 
-def test_import_skips_contacts_already_in_other_lists(client):
-    r = client.post("/api/members/import-contacts", json={
-        "scrape_job_id": "kol_job_1", "group_title": "L1",
-        "contacts": [{"username": "@dupe_user"}, {"username": "only_first"}]})
-    assert r.status_code == 200 and r.json()["count"] == 2
+def test_import_skips_only_contacts_in_lists_a_campaign_uses(client):
+    import asyncio
 
-    r = client.post("/api/members/import-contacts", json={
-        "scrape_job_id": "kol_job_2", "group_title": "L2",
-        "contacts": [{"username": "DUPE_USER"}, {"username": "fresh_one"}, {"username": "@fresh_one"}],
-        "channels": [_lead("kolchan", contacts=["@fresh_one"])]})
-    d = r.json()
-    assert d["count"] == 1
-    assert d["skipped_existing"] == 1 and d["existing_jobs"][0][0] == "kol_job_1"
-    assert d["skipped_dupe"] == 1
+    def save(job, names, **extra):
+        return client.post("/api/members/import-contacts", json={
+            "scrape_job_id": job, "group_title": job, "contacts": [{"username": n} for n in names], **extra}).json()
+
+    assert save("kol_job_1", ["@dupe_user", "only_first"])["count"] == 2
+
+    # kol_job_1 has no campaign yet -> its contacts can be saved again
+    d = save("kol_job_2", ["DUPE_USER", "fresh_one", "@fresh_one"],
+             channels=[_lead("kolchan", contacts=["@fresh_one"])])
+    assert d["count"] == 2 and d["resaved_unused"] == 1
+    assert d["skipped_existing"] == 0 and d["skipped_dupe"] == 1
     assert d["kol_upserted"] == 1
+
+    # once a campaign targets kol_job_1, its contacts are skipped elsewhere
+    asyncio.run(db.create_dm_campaign({"name": "c", "scrape_job_id": "kol_job_1", "sender_account_ids": [1],
+                                       "messages": [{"msg_type": "text", "content": "hi"}]}))
+    d = save("kol_job_3", ["dupe_user", "only_first", "new_guy"])
+    assert d["count"] == 1 and d["resaved_unused"] == 0
+    assert d["skipped_existing"] == 2 and d["existing_jobs"][0][0] == "kol_job_1"
+
+    # saving into the same (unused) list twice never duplicates
+    d = save("kol_job_3", ["new_guy"])
+    assert d["count"] == 0 and d["skipped_existing"] == 1
 
     r = client.get("/api/members/kol-directory", params={"q": "kolchan"})
     assert r.json()["items"][0]["saved_job"] == "kol_job_2"

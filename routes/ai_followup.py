@@ -38,6 +38,8 @@ class AIFollowUpSettings(BaseModel):
     kol_care_enabled: Optional[bool] = None
     kol_care_interval_days: Optional[int] = None
     kol_care_daily_cap: Optional[int] = None
+    # WEEX alternative domains for India/Pakistan (None = keep current list).
+    weex_mirror_domains: Optional[list[str]] = None
 
 
 class UpdateChatStatusRequest(BaseModel):
@@ -347,6 +349,8 @@ async def get_settings():
 
     from dm_reply_tracker import _kol_care_settings
     care_enabled, care_days, care_cap = await _kol_care_settings()
+    import weex_mirror
+    mirrors = await weex_mirror.get_mirrors()
 
     return {
         "enabled": enabled_str.lower() in ("true", "1"),
@@ -363,6 +367,7 @@ async def get_settings():
         "kol_care_enabled": care_enabled,
         "kol_care_interval_days": care_days,
         "kol_care_daily_cap": care_cap,
+        "weex_mirror_domains": mirrors,
     }
 
 
@@ -383,6 +388,9 @@ async def save_settings(req: AIFollowUpSettings):
         await db.set_setting("kol_care_interval_days", str(req.kol_care_interval_days if req.kol_care_interval_days in (30, 45, 60) else 30))
     if req.kol_care_daily_cap is not None:
         await db.set_setting("kol_care_daily_cap", str(min(50, max(0, req.kol_care_daily_cap))))
+    if req.weex_mirror_domains is not None:
+        import weex_mirror
+        await weex_mirror.save_mirrors(req.weex_mirror_domains)
     # Validate + persist the drip cadences (hours, increasing, positive).
     cadence = _parse_cadence_or_default(req.drip_cadence_hours, [24, 72, 168])
     tier_a = _parse_cadence_or_default(req.drip_cadence_tier_a, [12, 24, 48, 96])
@@ -491,6 +499,17 @@ async def trigger_ai_reply(account_id: int, user_id: int):
         watcher_id=(wlog or {}).get("watcher_id") or chat.get("watcher_id"),
     )
     return {"success": bool(sent)}
+
+
+@router.get("/proof-media/{name}")
+async def get_proof_media(name: str):
+    """Proof image a lead sent in DM (stored by proof_relay)."""
+    from fastapi.responses import FileResponse
+    import proof_relay
+    path = proof_relay.safe_media_path(name)
+    if not path:
+        raise HTTPException(status_code=404, detail="Không tìm thấy ảnh")
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=604800, immutable"})
 
 
 @router.post("/trigger-drip")

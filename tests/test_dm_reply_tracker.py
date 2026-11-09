@@ -458,3 +458,17 @@ async def test_stale_delayed_unlock_does_not_release_newer_ai_lock(monkeypatch):
     assert key in drt._pending_ai_sends
     await drt._remove_ai_send_after_delay(*key, drt._pending_ai_gen[key])
     assert key not in drt._pending_ai_sends
+
+
+def test_fallback_not_repeated_helpers():
+    import kol_offer
+    import dm_reply_tracker as t
+    fb = kol_offer.get_safe_offer_fallback_reply("en")
+    hist = [{"role": "assistant", "content": "Hi"}, {"role": "user", "content": "details?"},
+            {"role": "assistant", "content": fb}, {"role": "user", "content": "Okay"}]
+    assert t._already_said(hist, "  " + fb.upper())
+    assert not t._already_said(hist, "Here are the details")
+    assert t._last_assistant_is_fallback(hist)
+    assert not t._last_assistant_is_fallback(hist[:2])
+    vi = [{"role": "assistant", "content": kol_offer.get_safe_offer_fallback_reply("vi")}]
+    assert t._last_assistant_is_fallback(vi)

@@ -261,6 +261,8 @@ const AIFollowUp = {
     if (careDays) careDays.value = String(this.settings.kol_care_interval_days || 30);
     const careCap = document.getElementById('aifu-care-cap');
     if (careCap) careCap.value = this.settings.kol_care_daily_cap ?? 5;
+    const mirrorEl = document.getElementById('aifu-weex-mirrors');
+    if (mirrorEl) mirrorEl.value = (this.settings.weex_mirror_domains || []).join(', ');
   },
 
   // ── KOL Channel Auto-Forward Settings ──────────────────────────────
@@ -388,7 +390,8 @@ const AIFollowUp = {
       drip_cadence_tier_c: this._parseHoursInput('aifu-drip-tier-c', [48, 168]),
       kol_care_enabled: document.getElementById('aifu-care-enabled')?.checked ?? true,
       kol_care_interval_days: parseInt(document.getElementById('aifu-care-days')?.value || '30', 10),
-      kol_care_daily_cap: parseInt(document.getElementById('aifu-care-cap')?.value || '5', 10)
+      kol_care_daily_cap: parseInt(document.getElementById('aifu-care-cap')?.value || '5', 10),
+      weex_mirror_domains: (document.getElementById('aifu-weex-mirrors')?.value || '').split(/[\s,;]+/).map(s => s.trim()).filter(Boolean)
     };
   },
 
@@ -804,6 +807,26 @@ const AIFollowUp = {
   },
 
   // ── Status update ─────────────────────────────────────────────────
+  // Proof a lead sent: photo inline (click = full size), video/file = link to the forum topic message.
+  _mediaHtml(media) {
+    if (!media) return '';
+    const safeUrl = u => (typeof u === 'string' && /^(\/api\/ai-followup\/proof-media\/|https:\/\/t\.me\/)/.test(u)) ? u : '';
+    const img = safeUrl(media.image_url);
+    const link = safeUrl(media.topic_link);
+    const parts = [];
+    if (img) {
+      parts.push(`<a href="${esc(img)}" target="_blank" rel="noopener"><img src="${esc(img)}" loading="lazy" alt="Ảnh proof" style="display:block;max-width:260px;max-height:260px;border-radius:8px;margin-bottom:6px;object-fit:contain;background:var(--bg2)"></a>`);
+    }
+    if (link) {
+      const label = media.type === 'video' ? '🎬 Xem video trong topic' : media.type === 'photo' ? '🗂️ Mở trong topic' : '📎 Mở file trong topic';
+      parts.push(`<a href="${esc(link)}" target="_blank" rel="noopener" style="display:inline-block;margin-bottom:6px;color:var(--accent);font-weight:600">${label}</a>`);
+    } else if (!img && (media.forward || media.error)) {
+      const why = media.error === 'too_large' ? 'file quá lớn (>200MB)' : 'chưa forward được vào nhóm';
+      parts.push(`<div style="font-size:12px;color:var(--text2);margin-bottom:6px" title="${esc(media.forward || media.error || '')}">⚠️ Proof ${why}</div>`);
+    }
+    return parts.length ? `<div style="white-space:normal">${parts.join('')}</div>` : '';
+  },
+
   async updateStatus(accountId, userId, status) {
     try {
       const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/status`, {
@@ -1003,7 +1026,7 @@ const AIFollowUp = {
           return `
             <div style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-start' : 'flex-end'};margin-bottom:12px">
               <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${isUser ? '👤 ' + esc(uName) : '🤖 ' + esc(accountLabel) + ' · AI'} • ${timeText}</div>
-              <div style="background:${isUser ? 'var(--accent-dim)' : 'var(--purple-dim)'};border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(msg.content || '')}<div class="aifu-tr" data-tr-idx="${i}" hidden style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border-hover);font-size:12px;font-style:italic;color:var(--text2)"></div></div>
+              <div style="background:${isUser ? 'var(--accent-dim)' : 'var(--purple-dim)'};border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${this._mediaHtml(msg.media)}${esc(msg.content || '')}<div class="aifu-tr" data-tr-idx="${i}" hidden style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border-hover);font-size:12px;font-style:italic;color:var(--text2)"></div></div>
             </div>`;
         }).join('');
         box.scrollTop = box.scrollHeight;

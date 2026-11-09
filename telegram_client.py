@@ -175,7 +175,7 @@ def score_community_trading(
     Returns:
         {
             "trading_score": int (0-100),
-            "category": str ("trading_signals" | "crypto_trading" | "potential_bd" | "news_general" | "low_relevance"),
+            "category": str ("trading_signals" | "crypto_trading" | "potential_bd" | "crypto_community" | "news_general" | "airdrop_bonus" | "low_relevance"),
             "category_label": str,
             "badge_color": str,
             "matched_keywords": list[str],
@@ -279,7 +279,7 @@ def score_community_trading(
         category_label = "💎 Tiềm năng BD"
         badge_color = "#8b5cf6"
     elif score >= 30:
-        category = "crypto_trading"
+        category = "crypto_community"
         category_label = "📈 Cộng đồng Crypto"
         badge_color = "#6366f1"
     else:
@@ -929,6 +929,24 @@ async def get_dialogs(account_id: int, timeout: float = 20.0, force_refresh: boo
 
 
 
+def _known_chat(chat_id) -> dict | None:
+    """Look a group up in ANY account's cached dialog list (no API call).
+
+    The account being checked often has never seen the group (that is why it
+    is "missing"), but the observer/another nick usually has — so its title
+    and @username are still known locally.
+    """
+    try:
+        cid = abs(int(str(chat_id).replace("-100", "", 1)))
+    except (TypeError, ValueError):
+        return None
+    for _ts, chats in list(_dialogs_cache.values()):
+        for c in chats:
+            if abs(int(c.get("chat_id") or 0)) == cid:
+                return c
+    return None
+
+
 async def check_accounts_in_groups(account_ids: list[int], group_ids: list[int]) -> dict:
     """
     Check which accounts are NOT members of the specified groups.
@@ -937,12 +955,18 @@ async def check_accounts_in_groups(account_ids: list[int], group_ids: list[int])
             {
                 "account_id": 2,
                 "account_name": "BD Phạm",
-                "missing_groups": [{"group_id": 123, "group_title": "WEEX English"}]
+                "missing_groups": [{"group_id": 123, "group_title": "WEEX English",
+                                    "username": "weex_en", "left": False}]
             }
         ],
         "all_ok": bool
     }
+    A group is only reported missing after a direct check: get_dialogs() stops
+    at 200 chats, so a busy nick can be a member of a group that is simply not
+    in its recent list.
     """
+    from telethon.tl.types import PeerChannel
+
     warnings = []
     for acc_id in account_ids:
         client = _clients.get(acc_id)
@@ -952,15 +976,30 @@ async def check_accounts_in_groups(account_ids: list[int], group_ids: list[int])
             dialogs = await get_dialogs(acc_id)
             joined_ids = {abs(d["chat_id"]) for d in dialogs}
 
-            # Build a map of id -> title from dialogs
-            id_to_title = {abs(d["chat_id"]): d.get("chat_title", "") for d in dialogs}
-
             missing = []
             for gid in group_ids:
-                clean_gid = abs(int(str(gid).replace("-100", "")))
-                if clean_gid not in joined_ids:
-                    title = id_to_title.get(clean_gid, f"Group ID {gid}")
-                    missing.append({"group_id": gid, "group_title": title})
+                clean_gid = abs(int(str(gid).replace("-100", "", 1)))
+                if clean_gid in joined_ids:
+                    continue
+                known = _known_chat(clean_gid) or {}
+                title = known.get("chat_title") or ""
+                username = known.get("username") or ""
+                left = None
+                try:
+                    ent = await asyncio.wait_for(client.get_entity(PeerChannel(clean_gid)), timeout=8)
+                    title = title or getattr(ent, "title", "") or ""
+                    username = username or getattr(ent, "username", "") or ""
+                    left = bool(getattr(ent, "left", True))
+                    if not left:
+                        continue  # member, just outside the 200 most recent chats
+                except Exception:
+                    pass  # this nick has never seen the group
+                missing.append({
+                    "group_id": gid,
+                    "group_title": title or f"Nhóm #{clean_gid}",
+                    "username": username,
+                    "left": left,
+                })
 
             if missing:
                 # Get account name
@@ -1145,7 +1184,17 @@ async def join_channel(account_id: int, channel_link: str | int) -> dict:
                 try:
                     entity = await client.get_entity(PeerChannel(clean_id))
                 except Exception:
-                    entity = await client.get_entity(PeerChat(clean_id))
+                    try:
+                        entity = await client.get_entity(PeerChat(clean_id))
+                    except Exception:
+                        # This nick never saw the group. A public group can still
+                        # be joined through the @username another nick knows.
+                        known = _known_chat(clean_id) or {}
+                        if known.get("username"):
+                            entity = await client.get_entity(known["username"])
+                        else:
+                            return {"success": False, "error": "NOT_RESOLVABLE_PRIVATE",
+                                    "title": known.get("chat_title") or ""}
             else:
                 raise Exception(f"Cannot resolve entity: {channel_link}")
 
@@ -1426,6 +1475,11 @@ def is_peerflood_pause(acc: dict | None) -> bool:
     return str((acc or {}).get("pause_reason") or "").startswith("PeerFlood")
 
 
+# Accounts that crawl at the same time in one Deep Crawl. Telegram limits are per account,
+# so each one keeps its own pacing; more parallel accounts = faster, same per-account load.
+DEEP_CRAWL_PARALLEL = 3
+
+
 async def deep_crawl_similar_channels(
     account_ids: list[int],
     channel_link: str,
@@ -1434,6 +1488,7 @@ async def deep_crawl_similar_channels(
     stop_flag: dict | None = None,
     min_expand_score: int = 40,
     per_account_budget: int = 300,
+    parallel: int = DEEP_CRAWL_PARALLEL,
 ) -> list[dict]:
     """
     BFS deep crawl of similar channels up to max_depth layers.
@@ -1448,6 +1503,7 @@ async def deep_crawl_similar_channels(
         min_expand_score: only channels with trading_score >= this are crawled
             further (the rest are still saved as leads, their branch is pruned)
         per_account_budget: max Telegram requests per account in one crawl
+        parallel: how many accounts crawl their own node at the same time
     """
     import re
     from collections import deque
@@ -1529,6 +1585,9 @@ async def deep_crawl_similar_channels(
     # channel id -> {account id: access_hash}. Hashes are per account: the account that
     # discovered a channel opens it with no username lookup.
     known_hash: dict[int, dict[int, int]] = {}
+    REC_GAP = (5.0, 8.0)  # min seconds between two recommendation calls of the same account
+    rec_ready_at: dict[int, float] = {}
+    busy: set[int] = set()  # accounts crawling a node right now (parallel workers)
 
     # Progress state
     state = {
@@ -1616,7 +1675,7 @@ async def deep_crawl_similar_channels(
         username lookups would) are dropped and counted."""
         nonlocal account_idx
         n = len(valid_clients)
-        ready = [(i, aid, c) for i, (aid, c) in enumerate(valid_clients) if _usable(aid)]
+        ready = [(i, aid, c) for i, (aid, c) in enumerate(valid_clients) if _usable(aid) and aid not in busy]
         if not ready:
             return None
         least = min(_cnt(aid) for _, aid, _ in ready)
@@ -1785,37 +1844,21 @@ async def deep_crawl_similar_channels(
     queue.clear()
     queue.append(((src_peer.channel_id, src_peer.access_hash, src_uname), 0, src_title))
 
-    logger.info(f"[DeepCrawl] Starting BFS from '{channel_link}', max_depth={max_depth}, accounts={len(valid_clients)}")
+    parallel = max(1, min(int(parallel or 1), len(valid_clients)))
+    logger.info(f"[DeepCrawl] Starting BFS from '{channel_link}', max_depth={max_depth}, "
+                f"accounts={len(valid_clients)}, parallel={parallel}")
 
-    while queue:
-        # Check stop flag
-        if stop_flag and stop_flag.get("stopped"):
-            state["status"] = "stopped"
-            await _update_progress()
-            logger.info(f"[DeepCrawl] Stopped by user. Found {len(all_leads)} channels.")
-            break
-
-        job = _next_job()
-        if job is None:
-            if not queue:  # every remaining node was dropped
-                break
-            if not await _wait_for_any_account():
-                state["status"] = "stopped"
-                break
-            continue
-        qi, aid, client = job
-        channel_ref, depth, node_title = queue[qi]
-        del queue[qi]
-
+    async def _process_node(channel_ref, depth, node_title, aid, client):
+        """Crawl one node with one account. Up to `parallel` of these run at once, each on
+        its own account; shared state is only touched between awaits (single event loop)."""
         # Don't go deeper than max_depth
         if depth > max_depth:
-            continue
+            return
 
         # Depth 0 = source channel, just get its recommendations
         # Depth 1-4 = similar channels found at that depth
         state["current_depth"] = depth
         ch_id_q, _ch_hash_q, ch_uname_q = channel_ref
-        state["current_account"] = f"Account #{aid}"
 
         # Open the channel: hash this account already knows → its session cache → username lookup
         h = known_hash.get(ch_id_q, {}).get(aid)
@@ -1828,13 +1871,13 @@ async def deep_crawl_similar_channels(
             except errors.FloodWaitError as e:
                 _mark_resolve_flood(aid, e.seconds)
                 queue.appendleft((channel_ref, depth, node_title))  # a holder or another account takes it
-                continue
+                return
             except Exception as e:
                 state["errors"].append(f"Không mở được kênh '{node_title}': {str(e)[:60]}")
-                continue
+                return
         if not isinstance(peer, InputPeerChannel) or peer.channel_id != ch_id_q:
             state["errors"].append(f"Bỏ qua kênh '{node_title}': không mở được (username đã đổi?)")
-            continue
+            return
         known_hash.setdefault(ch_id_q, {})[aid] = peer.access_hash
 
         ch_title = node_title
@@ -1842,20 +1885,25 @@ async def deep_crawl_similar_channels(
         logger.info(f"[DeepCrawl] Depth {depth}: '{ch_title}' (id={ch_id_q}) via account #{aid}")
         await _update_progress()
 
-        # Similar channels of this node
+        # Similar channels of this node. Each account keeps its own gap between these calls,
+        # whatever the other accounts are doing.
+        gap = rec_ready_at.get(aid, 0) - time.time()
+        if gap > 0:
+            await asyncio.sleep(gap)
         try:
             res = await client(GetChannelRecommendationsRequest(channel=peer))
             account_request_count[aid] = _cnt(aid) + 1
+            rec_ready_at[aid] = time.time() + random.uniform(*REC_GAP)
         except errors.FloodWaitError as e:
             _mark_flood(aid, e.seconds)
             logger.warning(f"[DeepCrawl] FloodWait {e.seconds}s on GetRecommendations for account #{aid} "
                            "— another account redoes the node")
             queue.appendleft((channel_ref, depth, node_title))
-            continue
+            return
         except Exception as e:
             state["errors"].append(f"Recommendations error for '{ch_title}': {str(e)[:80]}")
             logger.warning(f"[DeepCrawl] Recommendations error for '{ch_title}': {e}")
-            continue
+            return
 
         # Anti-ban: delay after recommendation request
         await _safe_delay(3.0, 5.0)
@@ -2043,6 +2091,54 @@ async def deep_crawl_similar_channels(
             rest_until[aid] = time.time() + rest
             logger.info(f"[DeepCrawl] Anti-ban break for account #{aid}: {rest:.0f}s")
 
+    async def _run_node(item, aid, client):
+        try:
+            await _process_node(*item, aid, client)
+        except Exception as e:
+            logger.exception(f"[DeepCrawl] Node '{item[2]}' failed on account #{aid}")
+            state["errors"].append(f"Lỗi khi cào '{item[2]}': {str(e)[:80]}")
+        finally:
+            busy.discard(aid)
+
+    # Dispatcher: hand nodes to free accounts, up to `parallel` at once.
+    tasks: set = set()
+    try:
+        while True:
+            if stop_flag and stop_flag.get("stopped"):
+                state["status"] = "stopped"
+                break
+            while len(tasks) < parallel and queue:
+                job = _next_job()
+                if job is None:
+                    break
+                qi, aid, client = job
+                item = queue[qi]
+                del queue[qi]
+                busy.add(aid)
+                tasks.add(asyncio.create_task(_run_node(item, aid, client)))
+            if busy:
+                state["current_account"] = ", ".join(f"Account #{a}" for a in sorted(busy))
+            if not tasks:
+                if not queue:  # done, or every remaining node was dropped
+                    break
+                if not await _wait_for_any_account():
+                    state["status"] = "stopped"
+                    break
+                continue
+            # Wake when a node finishes, or after 1s to give work to an account that came
+            # back from a break (local check, no Telegram call).
+            done, _ = await asyncio.wait(tasks, timeout=1, return_when=asyncio.FIRST_COMPLETED)
+            tasks -= done
+    except asyncio.CancelledError:
+        for t in tasks:
+            t.cancel()
+        raise
+    if tasks:  # stopped: let running nodes finish (they check the stop flag)
+        await asyncio.gather(*tasks, return_exceptions=True)
+    if stop_flag and stop_flag.get("stopped"):
+        await _update_progress()
+        logger.info(f"[DeepCrawl] Stopped by user. Found {len(all_leads)} channels.")
+
     # Done
     if state["nodes_skipped"]:
         state["errors"].append(f"Bỏ qua {state['nodes_skipped']} kênh: chỉ mở được bằng tra username, "
@@ -2142,6 +2238,38 @@ async def _check_spam_status_raw(account_id: int) -> dict:
         }
 
 
+_SPAMBOT_UNTIL_RE = _re.compile(r"limited until\s+(\d{1,2}\s+\w{3,9}\s+\d{4}),?\s+(\d{1,2}:\d{2})\s*UTC", _re.I)
+
+
+def parse_spambot_until(message: str) -> int | None:
+    """'…limited until 8 Nov 2026, 08:44 UTC…' → unix seconds (None if no date)."""
+    from datetime import datetime, timezone
+    m = _SPAMBOT_UNTIL_RE.search(message or "")
+    if not m:
+        return None
+    for fmt in ("%d %b %Y %H:%M", "%d %B %Y %H:%M"):
+        try:
+            return int(datetime.strptime(f"{m.group(1)} {m.group(2)}", fmt).replace(tzinfo=timezone.utc).timestamp())
+        except ValueError:
+            continue
+    return None
+
+
+def spam_entry_view(entry: dict, now: float | None = None) -> dict:
+    """Cached @SpamBot entry + `until` (unix, when the limit lifts) and `expired`.
+
+    expired=True: SpamBot said "limited until X" and X has passed — the entry is
+    stale, the account is treated as usable and @SpamBot is asked again on the
+    next campaign run (or by the campaign modal).
+    """
+    out = dict(entry or {})
+    if out.get("status") == "limited":
+        until = parse_spambot_until(out.get("message", ""))
+        out["until"] = until
+        out["expired"] = bool(until and until <= (time.time() if now is None else now))
+    return out
+
+
 async def get_cached_spam_status(account_id: int, max_age_hours: float = 24) -> dict | None:
     """Last @SpamBot result if it is recent and conclusive, else None."""
     try:
@@ -2152,6 +2280,10 @@ async def get_cached_spam_status(account_id: int, max_age_hours: float = 24) -> 
         entry = cache.get(str(account_id)) or {}
         if entry.get("status") not in ("free", "limited") or not entry.get("checked_at"):
             return None
+        if entry["status"] == "limited":
+            until = parse_spambot_until(entry.get("message", ""))
+            if until and until <= time.time():
+                return None  # the limit has already expired → ask @SpamBot again
         checked = datetime.fromisoformat(entry["checked_at"])
         if checked.tzinfo is None:
             checked = checked.replace(tzinfo=timezone.utc)
@@ -2166,7 +2298,8 @@ async def check_spam_status(account_id: int, max_age_hours: float = 0) -> dict:
     """Check @SpamBot and remember the result so the Accounts page can show it.
 
     max_age_hours > 0 reuses a cached result younger than that instead of
-    messaging @SpamBot again (campaign starts use 24h: at most one check a day).
+    messaging @SpamBot again (campaign starts use 10 min, so every run asks
+    afresh but several campaigns started together share one answer).
     """
     if max_age_hours > 0:
         cached = await get_cached_spam_status(account_id, max_age_hours)

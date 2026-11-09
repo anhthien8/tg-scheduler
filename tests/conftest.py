@@ -238,6 +238,8 @@ tg_mock.is_bot_account = is_bot_account
 import telegram_client as real_tg
 
 tg_mock.score_community_trading = real_tg.score_community_trading
+tg_mock.parse_spambot_until = real_tg.parse_spambot_until
+tg_mock.spam_entry_view = real_tg.spam_entry_view
 
 async def disconnect_all():
     pass

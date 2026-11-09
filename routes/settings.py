@@ -581,13 +581,23 @@ async def get_forum_inbox_config():
         "forum_inbox_group_id": "0",
         "forum_inbox_general_topic_id": "1",
         "forum_inbox_enabled": "0",
+        "command_bot_enabled": "0",
     })
     raw_group = (s["forum_inbox_group_id"] or "0").strip()
     raw_topic = (s["forum_inbox_general_topic_id"] or "1").strip()
+    # v3.33.0: the card used to say "Đang bật" while the bot that does the relay
+    # was off for 3 days. Report the bot too so the badge tells the truth.
+    try:
+        import command_bot
+        bot_running = command_bot.is_running()
+    except Exception:
+        bot_running = None  # split mode: bot lives in the worker, unknown here
     return {
         "enabled": s["forum_inbox_enabled"] == "1",
         "group_id": int(raw_group) if raw_group.lstrip("-").isdigit() else 0,
         "general_topic_id": int(raw_topic) if raw_topic.lstrip("-").isdigit() else 1,
+        "bot_enabled": s["command_bot_enabled"] == "1",
+        "bot_running": bot_running,
     }
 
 
