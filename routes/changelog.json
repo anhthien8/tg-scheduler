@@ -1,11 +1,45 @@
 [
     {
+        "version": "3.36.0",
+        "date": "10/11/2026",
+        "title": "⏳ Follow-up tự động chạy lại + danh sách “Nợ trả lời”",
+        "summary": "Sửa lỗi follow-up tự động (drip) bị kẹt khiến gần 600 lead không được nhắc lại, và thêm danh sách các KOL mà bên mình đã hứa “team sẽ xem và báo lại” kèm nhắc admin khi quá 24 giờ.",
+        "is_latest": true,
+        "badge": "LATEST",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Follow-up tự động không còn bị kẹt",
+                "desc": "Trước đây mỗi 5 phút hệ thống lấy lại đúng 30 lead cũ nhất; lead nào gửi lỗi (không tìm thấy người nhận trong session) thì nằm mãi ở đầu hàng và chặn mọi lead phía sau. Giờ lead nào không gửi được sẽ được hẹn lại (24 giờ, sau 3 lần thì 30 ngày) để hàng đợi đi tiếp. Ưu tiên Tier A → B → lead mới im lặng gần đây."
+            },
+            {
+                "type": "improvement",
+                "title": "Không tốn lượt AI cho lead không gửi được",
+                "desc": "Kiểm tra người nhận còn nhắn được hay không TRƯỚC khi gọi AI soạn tin (thử thêm bằng @username nếu session chưa biết người đó). Trước đây mỗi lần lỗi vẫn tốn một lượt AI."
+            },
+            {
+                "type": "improvement",
+                "title": "Giãn nhịp follow-up để an toàn cho nick",
+                "desc": "Mỗi nick gửi tối đa 1 follow-up mỗi 5 phút và 20 follow-up mỗi 24 giờ (cài đặt ai_followup_drip_daily_cap). Lead im lặng lâu không bị dồn mọi lượt nhắc liên tiếp: hai lượt cách nhau ít nhất 12 giờ. Khi KOL trả lời, chu kỳ nhắc bắt đầu lại từ đầu."
+            },
+            {
+                "type": "feature",
+                "title": "Danh sách “⏳ Nợ trả lời”",
+                "desc": "Khi AI hoặc admin nói với KOL kiểu “team sẽ xem và báo lại”, lead được gắn nhãn ⏳ Nợ trả lời kèm số giờ đã chờ và câu đã hứa (tiếng Anh, Việt, Nga). Bấm chip “⏳ Nợ trả lời” ở AI Follow-up để lọc, lead chờ lâu nhất nằm trên cùng, quá 24 giờ tô đỏ. Nhãn tự mất khi admin nhắn cho KOL hoặc bấm “✅ Đã trả lời”. Các lời hứa trong 30 ngày gần đây được quét bổ sung một lần."
+            },
+            {
+                "type": "feature",
+                "title": "Nhắc admin khi lời hứa quá 24 giờ",
+                "desc": "Bot gửi một bản tổng hợp vào nhóm quản trị (tối đa 6 giờ một lần, 15 KOL mỗi bản, Tier A trước), mỗi lời hứa được nhắc tối đa 3 lần, cách nhau 24 giờ."
+            }
+        ]
+    },
+    {
         "version": "3.35.0",
         "date": "10/11/2026",
         "title": "🤝 AI deal WEEX: bậc khởi điểm theo volume, hỏi deal hiện tại, không từ chối upfront",
         "summary": "AI chốt deal WEEX theo 3 quy tắc mới: bậc khởi điểm dựa trên volume KOL chứng minh ở sàn khác, hỏi một lần về deal sàn hiện tại để team xin deal tốt hơn, và không còn từ chối upfront mà báo team sẽ review.",
-        "is_latest": true,
-        "badge": "LATEST",
+        "is_latest": false,
         "changes": [
             {
                 "type": "feature",

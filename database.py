@@ -5,6 +5,7 @@ Multi-account + hourly schedule + max sends support
 import asyncio
 import contextvars
 import json
+import owed_answers
 import logging
 import os
 import re
@@ -1085,6 +1086,16 @@ async def init_db():
             ("last_step_reminder_at", "TEXT"),
             # Monthly KOL care check-in (process_monthly_kol_care).
             ("last_care_at", "TEXT"),
+            # Drip queue (v3.36): when the last drip went out, when this chat may be
+            # tried again, and how often the user could not be reached.
+            ("last_drip_at", "TEXT"),
+            ("drip_retry_after", "TEXT"),
+            ("drip_fail_count", "INTEGER DEFAULT 0"),
+            # Owed answer (v3.36): our side promised "the team will get back to you".
+            ("owed_since", "TEXT"),
+            ("owed_note", "TEXT"),
+            ("owed_reminders_sent", "INTEGER DEFAULT 0"),
+            ("owed_last_reminder_at", "TEXT"),
         ]:
             await _add_column(db, "ai_followup_chats", col_name, col_def)
         # @username / invite link so a schedule can auto-join a group before posting.
@@ -5875,6 +5886,21 @@ async def append_followup_chat_message(
 
         reply_count = chat.get("reply_count", 0) + (1 if inc_reply_count else 0)
 
+        # Owed answer: a promise from our side ("the team will get back to you") opens
+        # it; a human admin message closes it.
+        if role == "assistant":
+            if owed_answers.is_human_message(content):
+                await db.execute(
+                    "UPDATE ai_followup_chats SET owed_since = NULL, owed_note = NULL, owed_reminders_sent = 0, "
+                    "owed_last_reminder_at = NULL WHERE account_id = ? AND user_id = ?", (account_id, user_id))
+            elif not chat.get("owed_since"):
+                owed_note = owed_answers.detect_promise(content)
+                if owed_note:
+                    await db.execute(
+                        "UPDATE ai_followup_chats SET owed_since = datetime('now'), owed_note = ?, "
+                        "owed_reminders_sent = 0, owed_last_reminder_at = NULL "
+                        "WHERE account_id = ? AND user_id = ?", (owed_note, account_id, user_id))
+
         # last_user_message_at anchors the drip cadence to the USER's real
         # silence (it must NOT be bumped by our own outgoing messages, or the
         # day 1/3/7 cadence resets on every follow-up we send).
@@ -5882,7 +5908,8 @@ async def append_followup_chat_message(
             await db.execute("""
                 UPDATE ai_followup_chats
                 SET history_json = ?, reply_count = ?, updated_at = datetime('now'),
-                    last_user_message_at = datetime('now')
+                    last_user_message_at = datetime('now'),
+                    last_drip_stage = 0, drip_retry_after = NULL, drip_fail_count = 0
                 WHERE account_id = ? AND user_id = ?
             """, (json.dumps(history), reply_count, account_id, user_id))
         else:
@@ -5897,6 +5924,28 @@ async def append_followup_chat_message(
         chat["history_json"] = json.dumps(history)
         chat["reply_count"] = reply_count
         return chat
+
+
+async def set_owed_answer(account_id: int, user_id: int, note: str = "", since: str | None = None) -> bool:
+    """Mark the chat as waiting on OUR answer (keeps an older open promise untouched)."""
+    async with get_db() as db:
+        cur = await db.execute(
+            "UPDATE ai_followup_chats SET owed_since = COALESCE(?, datetime('now')), owed_note = ?, "
+            "owed_reminders_sent = 0, owed_last_reminder_at = NULL "
+            "WHERE account_id = ? AND user_id = ? AND owed_since IS NULL",
+            (since, (note or "")[:200], account_id, user_id))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def clear_owed_answer(account_id: int, user_id: int) -> bool:
+    async with get_db() as db:
+        cur = await db.execute(
+            "UPDATE ai_followup_chats SET owed_since = NULL, owed_note = NULL, owed_reminders_sent = 0, "
+            "owed_last_reminder_at = NULL WHERE account_id = ? AND user_id = ? AND owed_since IS NOT NULL",
+            (account_id, user_id))
+        await db.commit()
+        return cur.rowcount > 0
 
 
 async def update_followup_chat_status(account_id: int, user_id: int, status: str) -> bool:
@@ -6170,6 +6219,7 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
                    c.lead_tier, c.summary, c.last_drip_stage, c.human_takeover_at, c.verification_status,
                    COALESCE(c.kol_step, 'prospect') AS kol_step, c.kol_step_updated_at,
                    COALESCE(c.step_reminders_sent, 0) AS step_reminders_sent,
+                   c.owed_since, c.owed_note,
                    p.weex_uid, p.vip_code, p.volume_claimed, p.missing_items,
                    a.name AS account_name,
                    CASE WHEN n.status = 'sent' THEN 1 ELSE 0 END AS nudged,

@@ -361,6 +361,36 @@ async def _get_entity_safe(client: TelegramClient, chat_id: int):
         ) from final_err
 
 
+async def ensure_user_entity(account_id: int, user_id: int, username: str | None = None) -> bool:
+    """True when `account_id` can address the DM user `user_id` (cheap check before spending an AI call).
+
+    A user id is only usable when its access hash sits in the account's session. After a
+    session is re-created that hash is gone and every send fails with "Cannot resolve
+    entity". Fallback: resolve the @username once (Telethon then caches it) — accepted
+    only if it still belongs to the SAME user id, since usernames change hands.
+    """
+    client = _clients.get(account_id)
+    if not client:
+        return False
+    try:
+        await client.get_input_entity(user_id)
+        return True
+    except errors.FloodWaitError:
+        raise
+    except Exception:
+        pass
+    uname = (username or "").strip().lstrip("@")
+    if not uname:
+        return False
+    try:
+        ent = await client.get_entity(uname)
+    except errors.FloodWaitError:
+        raise
+    except Exception:
+        return False
+    return getattr(ent, "id", None) == user_id
+
+
 def _marked_id_from_entity(entity) -> int | None:
     """Return the -100... supergroup id for a Telethon Channel/Chat entity."""
     try:

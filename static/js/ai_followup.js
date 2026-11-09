@@ -506,7 +506,50 @@ const AIFollowUp = {
       const lbl = this._stepFilter === 'link_confirmed+' ? '🔗 Đã gắn link trở lên' : this.stepLabel(this._stepFilter);
       html += `<button class="btn btn-sm btn-primary" onclick="AIFollowUp.filterByStep('')" title="Bỏ lọc bước">Bước: ${lbl} ✕</button>`;
     }
+    const owed = this._chats.filter(c => this.isOwed(c));
+    const late = owed.filter(c => this.owedHours(c) >= this.OWED_DEADLINE_HOURS).length;
+    const owedOn = this._statusFilter === this.OWED_FILTER && !this._stepFilter;
+    html += `<button class="btn btn-sm ${owedOn ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.filterByStatus('${this.OWED_FILTER}')"${late && !owedOn ? ' style="color:var(--red);font-weight:700"' : ''}>⏳ Nợ trả lời (${owed.length}${late ? ` · ${late} quá hạn` : ''})</button>`
+      + `<span class="info-i" tabindex="0" data-tip="Các KOL mà bên mình (AI hoặc admin) đã hứa “team sẽ xem và báo lại” nhưng chưa có người thật trả lời. Hạn trả lời là 24 giờ; quá hạn sẽ tô đỏ và bot nhắc admin (tối đa 3 lần cho mỗi lời hứa). Lead tự ra khỏi danh sách khi admin nhắn cho KOL, hoặc khi bạn bấm “✅ Đã trả lời”.">i</span>`;
     el.innerHTML = html;
+  },
+
+  // ── Owed answers: we promised "the team will get back to you" ──
+  OWED_FILTER: '__owed',
+  OWED_DEADLINE_HOURS: 24,
+
+  isOwed(c) {
+    return !!c.owed_since && c.status !== 'bot_ignored';
+  },
+
+  owedHours(c) {
+    // owed_since is SQLite UTC ("YYYY-MM-DD HH:MM:SS")
+    const t = Date.parse(String(c.owed_since || '').replace(' ', 'T') + 'Z');
+    return Number.isFinite(t) ? Math.max(0, (Date.now() - t) / 3600000) : 0;
+  },
+
+  owedBadge(c) {
+    if (!this.isOwed(c)) return '';
+    const h = this.owedHours(c);
+    const late = h >= this.OWED_DEADLINE_HOURS;
+    const age = h >= 48 ? `${Math.floor(h / 24)} ngày` : `${Math.floor(h)} giờ`;
+    const tip = `Đã hứa với KOL: “${c.owed_note || 'sẽ báo lại'}” — chờ ${age}${late ? ' (quá hạn 24 giờ)' : ''}`;
+    const style = late ? 'background:var(--red-dim, rgba(239,68,68,.15));color:var(--red);font-weight:700' : '';
+    return `<div style="margin-top:3px"><span class="badge ${late ? '' : 'badge-gray'}" style="font-size:10px;${style}" title="${esc(tip)}">⏳ Nợ trả lời · ${age}</span></div>`;
+  },
+
+  async resolveOwed(accountId, userId) {
+    try {
+      const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/owed?owed=false`, { method: 'POST' });
+      if (!res.ok) throw new Error('Không cập nhật được');
+      const c = this._chats.find(x => x.account_id === accountId && x.user_id === userId);
+      if (c) { c.owed_since = null; c.owed_note = null; }
+      App.toast('Đã đánh dấu là đã trả lời', 'success');
+      this.renderChips();
+      this.renderPage();
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
   },
 
   filterByStatus(s) {
@@ -529,7 +572,10 @@ const AIFollowUp = {
 
   _filtered() {
     const s = this._statusFilter;
-    let rows = s ? this._chats.filter(c => c.status === s) : this._chats;
+    let rows = !s ? this._chats
+      : (s === this.OWED_FILTER
+        ? this._chats.filter(c => this.isOwed(c)).sort((a, b) => this.owedHours(b) - this.owedHours(a))
+        : this._chats.filter(c => c.status === s));
     const st = this._stepFilter;
     if (st) rows = rows.filter(c => this.inFunnel(c));
     if (st === 'link_confirmed+') rows = rows.filter(c => this.stepRank(this.stepOf(c)) >= 3);
@@ -580,6 +626,9 @@ const AIFollowUp = {
         : `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')" title="Bật AI chat tiếp" aria-label="Bật AI cho ${esc(uName)}">▶️ Bật AI</button>`;
       const blacklistBtn = `<button class="btn btn-danger btn-sm" data-acc="${c.account_id}" data-uid="${c.user_id}" data-username="${esc(c.username||'')}" onclick="AIFollowUp.addToBlacklistDirect(Number(this.dataset.acc),Number(this.dataset.uid),this.dataset.username)" title="Đưa vào Blacklist (Cấm AI 100%)">🚫 Blacklist</button>`;
       const accLabel = c.account_name || `Acc #${c.account_id}`;
+      const owedBtn = this.isOwed(c)
+        ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.resolveOwed(${c.account_id},${c.user_id})" title="Đã trả lời KOL về việc đã hứa — bỏ khỏi danh sách Nợ trả lời" aria-label="Đã trả lời ${esc(uName)}">✅ Đã trả lời</button>`
+        : '';
       const step = this.stepOf(c);
       const sm = this.STEP_META[step] || { label: step, emoji: '', color: 'var(--text2)' };
       const missing = Array.isArray(c.missing_items) ? c.missing_items : [];
@@ -592,9 +641,9 @@ const AIFollowUp = {
         <td><div style="display:flex;align-items:center;gap:6px">${tierBadge}<span style="font-size:11px;color:var(--text2)">${score}%</span></div><div style="width:70px;height:4px;background:color-mix(in srgb, var(--text) 8%, transparent);border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:${Math.min(100, Math.max(0, score))}%;height:100%;background:${score >= 80 ? 'var(--orange)' : score >= 50 ? 'var(--accent)' : 'var(--text3)'}"></div></div></td>
         <td>${c.reply_count || 0}</td>
         <td>${stepCell}</td>
-        <td><span class="${meta.badge}">${meta.label}</span></td>
+        <td><span class="${meta.badge}">${meta.label}</span>${this.owedBadge(c)}</td>
         <td style="font-size:12px;color:var(--text2);white-space:nowrap">${updated}</td>
-        <td><div style="display:flex;gap:4px">${toggleBtn}${blacklistBtn}<button class="btn btn-primary btn-sm" onclick="AIFollowUp.openChat(${c.account_id},${c.user_id})">💬 Chat</button></div></td>
+        <td><div style="display:flex;gap:4px">${owedBtn}${toggleBtn}${blacklistBtn}<button class="btn btn-primary btn-sm" onclick="AIFollowUp.openChat(${c.account_id},${c.user_id})">💬 Chat</button></div></td>
       </tr>`;
     }).join('');
   },

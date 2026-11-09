@@ -520,6 +520,25 @@ async def trigger_drip_followup():
     return {"status": "ok", "result": res}
 
 
+@router.post("/chats/{account_id}/{user_id}/owed")
+async def set_chat_owed(account_id: int, user_id: int, owed: bool = Query(..., description="true = đang nợ câu trả lời")):
+    """Đánh dấu / xoá "đang nợ câu trả lời" (đã hứa team sẽ báo lại) cho một lead."""
+    if not await db.get_followup_chat(account_id, user_id):
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    if owed:
+        await db.set_owed_answer(account_id, user_id, "Admin đánh dấu thủ công")
+    else:
+        await db.clear_owed_answer(account_id, user_id)
+    return {"status": "ok", "owed": owed}
+
+
+@router.post("/trigger-owed-reminder")
+async def trigger_owed_reminder():
+    """Gửi ngay bản nhắc admin về các lời hứa quá 24 giờ chưa trả lời."""
+    import dm_reply_tracker
+    return {"status": "ok", "result": await dm_reply_tracker.process_owed_answer_reminders(force=True)}
+
+
 @router.post("/trigger-nudge")
 async def trigger_outreach_nudge():
     """Trigger outreach nudge for KOLs who received DM but never replied."""

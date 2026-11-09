@@ -36,6 +36,7 @@ import kol_offer
 import telegram_client as tg
 import weex_mirror
 import kol_region_offer
+import owed_answers
 
 logger = logging.getLogger("tg-scheduler.inbox")
 
@@ -1135,8 +1136,10 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
                 await db.update_followup_chat_status(account_id, user_id, new_status)
             if drip_stage is not None:
                 async with db.get_db() as conn:
-                    await conn.execute("UPDATE ai_followup_chats SET last_drip_stage = ? WHERE account_id = ? AND user_id = ?",
-                                       (drip_stage, account_id, user_id))
+                    await conn.execute(
+                        "UPDATE ai_followup_chats SET last_drip_stage = ?, last_drip_at = datetime('now'), "
+                        "drip_retry_after = NULL, drip_fail_count = 0 WHERE account_id = ? AND user_id = ?",
+                        (drip_stage, account_id, user_id))
                     await conn.commit()
             return True
         finally:
@@ -2181,6 +2184,10 @@ async def _followup_periodic_loop():
                 await process_monthly_kol_care()
             except Exception as e_care:
                 logger.error("[KolCare] Error in monthly care batch: %s", e_care)
+            try:
+                await process_owed_answer_reminders()
+            except Exception as e_owed:
+                logger.error("[OwedAnswer] Error in owed-answer reminder: %s", e_owed)
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -2420,6 +2427,213 @@ async def _resolve_ai_provider(agent_config: dict | None) -> tuple[str | None, l
     return ai_provider, ai_keys, kwargs
 
 
+# ── Drip queue (v3.36) ──────────────────────────────────────────────────────
+# The old loop took the 30 oldest silent chats every cycle. Chats that could not be
+# sent (user unreachable, cadence exhausted, blacklisted...) never left that window,
+# so they blocked everyone behind them and burned one AI call per failure per cycle.
+# Now every chat that is looked at and NOT sent gets `drip_retry_after`, exhausted
+# chats are filtered in SQL, the user is checked for reachability BEFORE the AI call,
+# and sending is paced (one drip per account per cycle, a daily cap per account).
+DRIP_DAILY_CAP_DEFAULT = 20        # per sending account / 24h (setting ai_followup_drip_daily_cap)
+_DRIP_CANDIDATES_PER_ACCOUNT = 3
+_DRIP_UNREACHABLE_MAX = 3          # after this many failed lookups: retry monthly only
+_DRIP_MIN_GAP_HOURS = 12           # never two drips to one lead closer than this
+
+
+async def _drip_defer(chat_row_id: int, hours: float, failed: bool = False) -> None:
+    """Take a chat out of the drip queue for `hours` (so the queue keeps moving)."""
+    minutes = max(30, int(hours * 60))
+    async with db.get_db() as conn:
+        await conn.execute(
+            "UPDATE ai_followup_chats SET drip_retry_after = datetime('now', ?)"
+            + (", drip_fail_count = COALESCE(drip_fail_count, 0) + 1" if failed else "")
+            + " WHERE id = ?", (f"+{minutes} minutes", chat_row_id))
+        await conn.commit()
+
+
+async def _drip_user_reachable(account_id: int, user_id: int, username: str | None) -> bool:
+    """Can this account still message the user? Checked before spending an AI call."""
+    fn = getattr(tg, "ensure_user_entity", None)
+    if fn is None:
+        return True
+    return bool(await fn(account_id, user_id, username))
+
+
+async def _drip_daily_cap() -> int:
+    try:
+        cap = int(await db.get_setting("ai_followup_drip_daily_cap", str(DRIP_DAILY_CAP_DEFAULT)) or 0)
+    except (TypeError, ValueError):
+        cap = DRIP_DAILY_CAP_DEFAULT
+    return cap if cap > 0 else DRIP_DAILY_CAP_DEFAULT
+
+
+async def _process_drip_queue() -> tuple[int, list[str]]:
+    import aiosqlite
+    sent, errs = 0, []
+    cadences = {t: await _load_drip_cadence_for_tier(t) for t in ("Tier A", "Tier B", "Tier C")}
+    other_cadence = await _load_drip_cadence()  # "Cold" / unknown tier → global cadence
+    daily_cap = await _drip_daily_cap()
+
+    async with db.get_db() as db_conn:
+        db_conn.row_factory = aiosqlite.Row
+        cur = await db_conn.execute("""
+            SELECT account_id,
+                   SUM(CASE WHEN last_drip_at IS NOT NULL
+                             AND datetime(last_drip_at) > datetime('now', '-24 hours') THEN 1 ELSE 0 END) AS n
+            FROM ai_followup_chats GROUP BY account_id
+        """)
+        sent_24h = {r["account_id"]: r["n"] or 0 for r in await cur.fetchall()}
+        # Only accounts that can send right now and are under today's cap.
+        eligible = []
+        for acc_id, n in sent_24h.items():
+            if n >= daily_cap:
+                continue
+            if await db.is_account_paused(acc_id):
+                continue  # auto-paused (PeerFlood...) nicks send nothing proactive
+            client = tg.get_client(acc_id)
+            if client and client.is_connected():
+                eligible.append(acc_id)
+        if not eligible:
+            return 0, []
+        # Anchor silence on COALESCE(last_user_message_at, updated_at): our own
+        # follow-ups must not reset the cadence clock. Leads past `prospect` are
+        # handled by process_step_reminders(). Priority: Tier A, then B, then the
+        # most recently active leads; a few candidates per account so one deferred
+        # chat does not cost the account its turn.
+        marks = ",".join("?" * len(eligible))
+        cursor = await db_conn.execute(f"""
+            SELECT * FROM (
+                SELECT id, account_id, user_id, username, lead_tier, last_drip_stage,
+                       last_user_message_at, updated_at, last_drip_at, drip_fail_count,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY account_id
+                           ORDER BY CASE COALESCE(lead_tier, 'Tier C')
+                                        WHEN 'Tier A' THEN 0 WHEN 'Tier B' THEN 1 ELSE 2 END,
+                                    COALESCE(last_user_message_at, updated_at) DESC
+                       ) AS rn
+                FROM ai_followup_chats
+                WHERE status = 'active'
+                  AND account_id IN ({marks})
+                  AND COALESCE(NULLIF(kol_step, ''), 'prospect') = 'prospect'
+                  AND last_user_message_at IS NOT NULL
+                  AND datetime(COALESCE(last_user_message_at, updated_at)) <= datetime('now', ?)
+                  AND COALESCE(last_drip_stage, 0) < CASE COALESCE(lead_tier, 'Tier C')
+                        WHEN 'Tier A' THEN ? WHEN 'Tier B' THEN ? WHEN 'Tier C' THEN ? ELSE ? END
+                  AND (drip_retry_after IS NULL OR datetime(drip_retry_after) <= datetime('now'))
+            ) WHERE rn <= ?
+            ORDER BY account_id, rn
+        """, (*eligible, f"-{_MIN_FIRST_STAGE_HOURS} hours",
+              len(cadences["Tier A"]), len(cadences["Tier B"]), len(cadences["Tier C"]),
+              len(other_cadence), _DRIP_CANDIDATES_PER_ACCOUNT))
+        rows = [dict(r) for r in await cursor.fetchall()]
+
+    done_accounts: set[int] = set()  # one drip (or one network lookup) per account per cycle
+    for row in rows:
+        account_id, user_id, row_id = row["account_id"], row["user_id"], row["id"]
+        if account_id in done_accounts:
+            continue
+        tier = row.get("lead_tier") or "Tier C"
+        cadence = cadences.get(tier) or other_cadence
+        total_stages = len(cadence)
+        last_stage = row.get("last_drip_stage") or 0
+        stage = max(last_stage + 1, 1)
+        if stage > total_stages:
+            continue  # cadence exhausted (also filtered in SQL)
+
+        silence = _silence_hours(row.get("last_user_message_at") or row.get("updated_at"))
+        if silence < cadence[stage - 1]:
+            await _drip_defer(row_id, cadence[stage - 1] - silence)  # not due yet
+            continue
+        if stage > 1 and row.get("last_drip_at"):
+            # A long-silent lead must not get every stage back to back.
+            gap = max(_DRIP_MIN_GAP_HOURS, cadence[stage - 1] - cadence[stage - 2])
+            since_last = _silence_hours(row["last_drip_at"])
+            if since_last < gap:
+                await _drip_defer(row_id, gap - since_last)
+                continue
+
+        if await db.is_user_blacklisted(user_id=user_id, username=row.get("username") or ""):
+            await _drip_defer(row_id, 24 * 7)
+            continue
+
+        try:
+            reachable = await _drip_user_reachable(account_id, user_id, row.get("username"))
+        except Exception as e_reach:  # FloodWait etc. — leave this account alone this cycle
+            logger.warning("[DripEngine] Reachability check failed for acc %d: %s", account_id, e_reach)
+            done_accounts.add(account_id)
+            continue
+        if not reachable:
+            fails = (row.get("drip_fail_count") or 0) + 1
+            await _drip_defer(row_id, 24 if fails < _DRIP_UNREACHABLE_MAX else 24 * 30, failed=True)
+            logger.warning("[DripEngine] User %d unreachable from acc %d (attempt %d) — skipped without AI call",
+                           user_id, account_id, fails)
+            done_accounts.add(account_id)  # the lookup may have cost a username resolve
+            continue
+
+        chat = await db.get_followup_chat(account_id, user_id)
+        if not chat or chat.get("status") != "active":
+            continue
+        account_obj = await db.get_account(account_id)
+        agent_id = account_obj.get("ai_agent_id") if account_obj else None
+        agent_config = await db.get_ai_agent(agent_id) if agent_id else None
+
+        drip_instruction = _drip_instruction_for_stage(stage, total_stages, tier)
+        sys_p = agent_config.get("system_prompt", "") if agent_config else ""
+        exchange = await _agent_exchange(agent_config, account_id, user_id)
+        history = chat.get("history") or []
+        try:
+            drip_prof = await db.get_kol_profile(account_id, user_id) or {}
+            offer_block, offer_ladder = await kol_offer.offer_block_for(
+                exchange, drip_prof.get("volume_claimed"),
+                region=kol_region_offer.detect_region(history, drip_prof) if kol_offer.uses_ladder(exchange) else None,
+                volume_stated=drip_prof.get("monthly_volume"))
+        except Exception as offer_exc:
+            logger.error("[DripEngine] Could not load offer ladder for user %d: %s", user_id, offer_exc)
+            await _drip_defer(row_id, 6)
+            continue
+        combined = (sys_p + "\n\n" + offer_block
+                    + f"\n\n[DRIP FOLLOWUP STAGE {stage}/{total_stages} — {tier} INSTRUCTION]: "
+                    + drip_instruction)
+
+        try:
+            ai_provider, ai_keys, kwargs = await _resolve_ai_provider(agent_config)
+            if not ai_keys:
+                await _drip_defer(row_id, 2)
+                continue
+
+            msg = await ai_rmx.generate_chat_response(history[-5:], combined, ai_provider, ai_keys, **kwargs)
+            msg = sanitize_telegram_html(msg) if msg else ""
+            if not msg:
+                await _drip_defer(row_id, 6)
+                continue
+            if contains_ai_disclosure(msg):
+                logger.warning("[DripEngine] 🚫 Blocked AI-disclosure drip for user %d", user_id)
+                await _drip_defer(row_id, 6)
+                continue
+            # Off-ladder guard (spec A2) — same policy as the interactive
+            # reply path: a drip message may never quote unapproved figures.
+            off_ladder = kol_offer.find_off_offer_figures(msg, exchange, agent_config, offer_ladder)
+            if off_ladder:
+                logger.warning("[DripEngine] 🚫 Blocked off-ladder figures %s in drip for user %d",
+                               off_ladder, user_id)
+                await _drip_defer(row_id, 6)
+                continue
+            if await _send_ai_message(account_id, user_id, msg, drip_stage=stage):
+                sent += 1
+                done_accounts.add(account_id)
+            else:
+                await _drip_defer(row_id, 12)  # admin active / status changed / nothing to send
+        except Exception as e:
+            logger.error("[DripEngine] Failed drip for user %d: %s", user_id, e)
+            errs.append(str(e))
+            unreachable = "Cannot resolve entity" in str(e)
+            fails = (row.get("drip_fail_count") or 0) + 1
+            await _drip_defer(row_id, (24 if fails < _DRIP_UNREACHABLE_MAX else 24 * 30) if unreachable else 6,
+                              failed=unreachable)
+            done_accounts.add(account_id)  # flood / send trouble: do not push this account further now
+    return sent, errs
+
+
 async def process_drip_followups() -> dict:
     """
     1. Scan human takeover chats (>12h since update) where user is waiting for a reply -> Auto-resume & Send AI Reply!
@@ -2509,111 +2723,144 @@ async def process_drip_followups() -> dict:
 
     # ── 3. Process Drip Follow-ups (per-tier multi-step cadence) ──
     try:
-        # Pre-filter: fetch chats silent for at least the minimum first-stage
-        # across all tiers (12h for Tier A). Per-chat tier cadence is checked
-        # in the loop below to avoid fetching tier-specific settings N times.
-        async with db.get_db() as db_conn:
-            db_conn.row_factory = aiosqlite.Row
-            # Anchor silence on COALESCE(last_user_message_at, updated_at):
-            # last_user_message_at is only bumped by inbound user messages, so
-            # our own follow-ups no longer reset the cadence clock.
-            # Leads past `prospect` are handled by process_step_reminders()
-            # (one missing item, capped) instead of the tier drip.
-            cursor = await db_conn.execute("""
-                SELECT * FROM ai_followup_chats
-                WHERE status = 'active'
-                  AND COALESCE(NULLIF(kol_step, ''), 'prospect') = 'prospect'
-                  AND last_user_message_at IS NOT NULL
-                  AND datetime(COALESCE(last_user_message_at, updated_at)) <= datetime('now', ?)
-                ORDER BY COALESCE(last_user_message_at, updated_at) ASC
-                LIMIT 30
-            """, (f"-{_MIN_FIRST_STAGE_HOURS} hours",))
-            drip_chats = [dict(r) for r in await cursor.fetchall()]
-
-        for chat in drip_chats:
-            account_id = chat["account_id"]
-            user_id = chat["user_id"]
-            tier = chat.get("lead_tier") or "Tier C"
-            silence = _silence_hours(chat.get("last_user_message_at") or chat.get("updated_at"))
-
-            # Load tier-specific cadence
-            cadence = await _load_drip_cadence_for_tier(tier)
-            total_stages = len(cadence)
-
-            # Skip if all stages exhausted for this tier
-            last_stage = chat.get("last_drip_stage", 0)
-            if last_stage >= total_stages:
-                continue
-
-            # Determine the highest cadence stage whose threshold has been crossed,
-            # then advance one past last_drip_stage so we never skip or repeat.
-            due_stage = sum(1 for h in cadence if silence >= h)
-            stage = max(last_stage + 1, 1)
-            if stage > due_stage:
-                continue  # not yet due for the next stage
-            if stage > total_stages:
-                continue  # cadence exhausted
-
-            if await db.is_user_blacklisted(user_id=user_id, username=chat.get("username", "")):
-                continue
-
-            client = tg.get_client(account_id)
-            if not client or not client.is_connected():
-                continue
-
-            account_obj = await db.get_account(account_id)
-            agent_id = account_obj.get("ai_agent_id") if account_obj else None
-            agent_config = await db.get_ai_agent(agent_id) if agent_id else None
-
-            drip_instruction = _drip_instruction_for_stage(stage, total_stages, tier)
-
-            sys_p = agent_config.get("system_prompt", "") if agent_config else ""
-            exchange = await _agent_exchange(agent_config, account_id, user_id)
-            try:
-                drip_prof = await db.get_kol_profile(account_id, user_id) or {}
-                try:
-                    drip_hist = json.loads(chat.get("history_json") or "[]")
-                except (TypeError, ValueError):
-                    drip_hist = []
-                offer_block, offer_ladder = await kol_offer.offer_block_for(
-                    exchange, drip_prof.get("volume_claimed"),
-                    region=kol_region_offer.detect_region(drip_hist, drip_prof) if kol_offer.uses_ladder(exchange) else None,
-                    volume_stated=drip_prof.get("monthly_volume"))
-            except Exception as offer_exc:
-                logger.error("[DripEngine] Could not load offer ladder for user %d: %s", user_id, offer_exc)
-                continue
-            combined = (sys_p + "\n\n" + offer_block
-                        + f"\n\n[DRIP FOLLOWUP STAGE {stage}/{total_stages} — {tier} INSTRUCTION]: "
-                        + drip_instruction)
-
-            try:
-                history = json.loads(chat.get("history_json", "[]"))
-                ai_provider, ai_keys, kwargs = await _resolve_ai_provider(agent_config)
-                if not ai_keys:
-                    continue
-
-                msg = await ai_rmx.generate_chat_response(history[-5:], combined, ai_provider, ai_keys, **kwargs)
-                if msg:
-                    msg = sanitize_telegram_html(msg)
-                    if contains_ai_disclosure(msg):
-                        logger.warning("[DripEngine] 🚫 Blocked AI-disclosure drip for user %d", user_id)
-                        continue
-                    # Off-ladder guard (spec A2) — same policy as the interactive
-                    # reply path: a drip message may never quote unapproved figures.
-                    off_ladder = kol_offer.find_off_offer_figures(msg, exchange, agent_config, offer_ladder)
-                    if off_ladder:
-                        logger.warning("[DripEngine] 🚫 Blocked off-ladder figures %s in drip for user %d",
-                                       off_ladder, user_id)
-                        continue
-                    if await _send_ai_message(account_id, user_id, msg, drip_stage=stage):
-                        sent_count += 1
-            except Exception as e:
-                logger.error("[DripEngine] Failed drip for user %d: %s", user_id, e)
-                errors.append(str(e))
+        drip_sent, drip_errors = await _process_drip_queue()
+        sent_count += drip_sent
+        errors.extend(drip_errors)
     except Exception as e_drip:
         logger.error("[DripEngine] Error in drip batch: %s", e_drip)
 
     return {"sent": sent_count, "errors": errors}
+
+
+# ── Owed answers (v3.36) ────────────────────────────────────────────────────
+# Our side said "the team will review and get back to you" → the chat waits on US.
+# database.append_followup_chat_message opens/closes the debt; here: a one-off
+# backfill of older chats and one digest to the admin for promises past 24h.
+OWED_DIGEST_EVERY_HOURS = 6     # at most one digest per this many hours
+OWED_MAX_REMINDERS = 3          # per promise
+_OWED_DIGEST_SIZE = 15
+_OWED_BACKFILL_MAX_AGE_DAYS = 30  # older promises are history, not a to-do
+_TIER_RANK_SQL = "CASE COALESCE(lead_tier, 'Tier C') WHEN 'Tier A' THEN 0 WHEN 'Tier B' THEN 1 ELSE 2 END"
+
+
+def _history_ts_to_utc_sql(ts: str | None) -> str | None:
+    """History timestamps are naive LOCAL time; owed_since is stored like datetime('now') (UTC)."""
+    try:
+        return datetime.fromisoformat(str(ts)).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return None
+
+
+async def backfill_owed_answers(force: bool = False) -> int:
+    """One-off: find promises still open in chats that predate owed-answer tracking."""
+    if not force and await db.get_setting("owed_answers_backfilled", "0") == "1":
+        return 0
+    import aiosqlite
+    async with db.get_db() as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute(
+            "SELECT account_id, user_id, history_json FROM ai_followup_chats "
+            "WHERE owed_since IS NULL AND status != 'bot_ignored' "
+            "AND COALESCE(NULLIF(kol_step, ''), 'prospect') != 'declined'")
+        rows = [dict(r) for r in await cur.fetchall()]
+    found = 0
+    for r in rows:
+        try:
+            hist = json.loads(r.get("history_json") or "[]")
+        except (TypeError, ValueError):
+            continue
+        owed = owed_answers.owed_from_history(hist)
+        if not owed:
+            continue
+        since = _history_ts_to_utc_sql(owed["since"])
+        if not since or _silence_hours(since) > _OWED_BACKFILL_MAX_AGE_DAYS * 24:
+            continue
+        if await db.set_owed_answer(r["account_id"], r["user_id"], owed["note"], since=since):
+            found += 1
+    await db.set_setting("owed_answers_backfilled", "1")
+    if found:
+        logger.info("[OwedAnswer] Backfill: %d chats are waiting on our answer", found)
+    return found
+
+
+def _owed_age_text(hours: float) -> str:
+    return f"{int(hours // 24)} ngày" if hours >= 48 else f"{int(hours)} giờ"
+
+
+async def process_owed_answer_reminders(force: bool = False) -> dict:
+    """One digest to the admin listing promises older than 24h that nobody answered."""
+    await backfill_owed_answers()
+    last = _parse_sqlite_utc(await db.get_setting("owed_digest_last_at", ""))
+    if not force and last and (datetime.now(timezone.utc) - last).total_seconds() < OWED_DIGEST_EVERY_HOURS * 3600:
+        return {"reminded": 0, "skipped": "cooldown"}
+
+    import aiosqlite
+    async with db.get_db() as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute(f"""
+            SELECT c.id, c.account_id, c.user_id, c.username, c.name, c.lead_tier, c.owed_since, c.owed_note,
+                   a.name AS account_name
+            FROM ai_followup_chats c LEFT JOIN accounts a ON a.id = c.account_id
+            WHERE c.owed_since IS NOT NULL
+              AND datetime(c.owed_since) <= datetime('now', ?)
+              AND c.status != 'bot_ignored'
+              AND COALESCE(NULLIF(c.kol_step, ''), 'prospect') != 'declined'
+              AND COALESCE(c.owed_reminders_sent, 0) < ?
+              AND (c.owed_last_reminder_at IS NULL OR datetime(c.owed_last_reminder_at) <= datetime('now', '-24 hours'))
+            ORDER BY {_TIER_RANK_SQL.replace('lead_tier', 'c.lead_tier')}, c.owed_since ASC
+            LIMIT ?
+        """, (f"-{owed_answers.OWED_DEADLINE_HOURS} hours", OWED_MAX_REMINDERS, _OWED_DIGEST_SIZE * 2))
+        rows = [dict(r) for r in await cur.fetchall()]
+
+    due = []
+    for r in rows:
+        if await db.is_user_blacklisted(user_id=r["user_id"], username=r.get("username") or ""):
+            await db.clear_owed_answer(r["account_id"], r["user_id"])
+            continue
+        due.append(r)
+        if len(due) >= _OWED_DIGEST_SIZE:
+            break
+    if not due:
+        return {"reminded": 0}
+
+    lines = [f"⏳ ĐANG NỢ CÂU TRẢ LỜI — {len(due)} KOL chờ quá {owed_answers.OWED_DEADLINE_HOURS} giờ", ""]
+    for r in due:
+        who = f"@{r['username']}" if r.get("username") else (r.get("name") or f"user_id={r['user_id']}")
+        tier = (r.get("lead_tier") or "Tier C").replace("Tier ", "")
+        age = _owed_age_text(_silence_hours(r.get("owed_since")))
+        note = (r.get("owed_note") or "").strip()
+        lines.append(f"• [{tier}] {who} · chờ {age} · {r.get('account_name') or 'Acc #' + str(r['account_id'])}")
+        if note:
+            lines.append(f"   ↳ Đã hứa: “{note[:120]}”")
+    lines += ["", "Trả lời KOL (hoặc bấm “✅ Đã trả lời” trong AI Follow-up) để xoá khỏi danh sách."]
+    text = "\n".join(lines)
+
+    delivered = False
+    try:
+        import command_bot
+        delivered = bool(await command_bot.send_forum_general_alert(text))
+    except Exception as e:
+        logger.debug("[OwedAnswer] Forum alert skipped: %s", e)
+    if not delivered:
+        try:
+            main_client = tg.get_client(MAIN_ACCOUNT_ID)
+            if main_client and main_client.is_connected():
+                await main_client.send_message("me", text)
+                delivered = True
+        except Exception as e:
+            logger.debug("[OwedAnswer] Saved Messages reminder failed: %s", e)
+    if not delivered:
+        logger.warning("[OwedAnswer] %d overdue promises but no channel to remind the admin", len(due))
+        return {"reminded": 0, "undelivered": len(due)}
+
+    async with db.get_db() as conn:
+        await conn.executemany(
+            "UPDATE ai_followup_chats SET owed_reminders_sent = COALESCE(owed_reminders_sent, 0) + 1, "
+            "owed_last_reminder_at = datetime('now') WHERE id = ?", [(r["id"],) for r in due])
+        await conn.commit()
+    await db.set_setting("owed_digest_last_at", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+    logger.info("[OwedAnswer] Reminded admin about %d overdue promises", len(due))
+    return {"reminded": len(due)}
 
 
 # ── Monthly KOL care ───────────────────────────────────────────────────────
