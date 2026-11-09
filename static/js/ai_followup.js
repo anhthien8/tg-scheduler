@@ -45,6 +45,7 @@ const AIFollowUp = {
   },
   HAVE_LABELS: {
     channel_link: 'Kênh', platform: 'Nền tảng', followers: 'Followers', volume_claimed: 'Volume khai',
+    monthly_volume: 'Volume/tháng (AI ghi từ chat)',
     offer_version: 'Phiên bản offer', vip_code: 'vipCode', affiliate_link: 'Link affiliate'
   },
 
@@ -758,7 +759,15 @@ const AIFollowUp = {
     const haveLabel = k => k === 'weex_uid' ? (st.uid_label || this.MISSING_LABELS.weex_uid) : (this.HAVE_LABELS[k] || this.MISSING_LABELS[k] || k);
     const haveTxt = Object.entries(have).filter(([, v]) => v).map(([k, v]) => `${esc(haveLabel(k))}: ${esc(String(v)).slice(0, 40)}`).join(' · ');
     const pred = st.predicted_tier;
-    const predTxt = pred ? `Bậc dự kiến: Tier ${pred.tier} (${Number(pred.revshare_pct)}% + $${Number(pred.bonus_per_1m_taker_usd)}/1M taker) với ~${Number(pred.volume_m)}M/tháng khai` : 'Bậc dự kiến: chưa có volume khai → tháng đầu Tier 1';
+    const predTip = 'Bậc khởi điểm theo volume TRUNG BÌNH/THÁNG của 3 tháng gần nhất ở sàn KOL đang làm (video quay màn hình dashboard), đối chiếu bảng bậc (VD 10–20M → Tier 2). Không có bằng chứng → Tier 1. AI chỉ nói “nhiều khả năng”; team xem video xác minh rồi mới áp dụng. Nếu volume thật ở WEEX thấp hơn thì điều chỉnh ở kỳ review quý.';
+    const predTxt = (pred
+      ? `Bậc khởi điểm dự kiến: Tier ${pred.tier} (${Number(pred.revshare_pct)}% + $${Number(pred.bonus_per_1m_taker_usd)}/1M taker) với ~${Number(pred.volume_m)}M/tháng khai — chờ team xác minh dashboard 3 tháng`
+      : 'Bậc khởi điểm: chưa có volume → bắt đầu Tier 1')
+      + ` <span class="info-i" tabindex="0" data-tip="${esc(predTip)}">i</span>`;
+    const deal = st.current_deal || {};
+    const dealVal = [deal.current_cex, deal.current_deal].filter(Boolean).map(v => esc(String(v)).slice(0, 160)).join(' — ');
+    const dealTip = 'Deal KOL đang nhận ở sàn hiện tại (revshare/rebate, bonus volume, phí cố định/upfront, thời hạn/độc quyền, lịch trả). AI hỏi 1 lần khi KOL nhắc sàn khác, đòi deal tốt hơn hoặc đòi upfront, rồi tự ghi vào đây. Dùng để team xin deal tốt hơn; AI không hứa match.';
+    const dealTxt = dealVal ? `<div style="color:var(--text2)"><b>💼 Deal hiện tại:</b> ${dealVal} <span class="info-i" tabindex="0" data-tip="${esc(dealTip)}">i</span></div>` : '';
     const terminal = rank < 0 ? `<span class="badge badge-red" style="margin-left:6px">${this.stepLabel(cur)}</span>` : '';
     const rem = st.step_reminders_sent ? ` · đã nhắc ${st.step_reminders_sent}/2 ở bước này` : '';
     panel.innerHTML = `
@@ -771,6 +780,7 @@ const AIFollowUp = {
         <div style="font-size:12px;line-height:1.5">
           <div><b>Còn thiếu:</b> ${missing.length ? missing.map(esc).join(', ') : '<span style="color:var(--green)">không — sẵn sàng sang bước tiếp</span>'}</div>
           ${haveTxt ? `<div style="color:var(--text2)"><b>Đã có:</b> ${haveTxt}</div>` : ''}
+          ${dealTxt}
           <div style="color:var(--text2)">${predTxt}</div>
         </div>
       </div>`;

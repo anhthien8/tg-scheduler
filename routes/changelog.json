@@ -1,11 +1,40 @@
 [
     {
+        "version": "3.35.0",
+        "date": "10/11/2026",
+        "title": "🤝 AI deal WEEX: bậc khởi điểm theo volume, hỏi deal hiện tại, không từ chối upfront",
+        "summary": "AI chốt deal WEEX theo 3 quy tắc mới: bậc khởi điểm dựa trên volume KOL chứng minh ở sàn khác, hỏi một lần về deal sàn hiện tại để team xin deal tốt hơn, và không còn từ chối upfront mà báo team sẽ review.",
+        "is_latest": true,
+        "badge": "LATEST",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Bậc khởi điểm theo volume đã chứng minh",
+                "desc": "Không còn \"tháng đầu luôn 55%\". KOL quay video dashboard 3 tháng ở sàn đang hợp tác: dưới 10M → 55%, 10–20M → 60%, 20–50M → 65%, 50–100M → 70%, từ 100M → 80%. AI chỉ nói \"có thể bắt đầu ở bậc X sau khi team xác minh\", team chốt và rà lại theo quý nếu volume thực thấp hơn. Chưa có proof thì vẫn bắt đầu 55%."
+            },
+            {
+                "type": "feature",
+                "title": "Hỏi deal sàn hiện tại của KOL",
+                "desc": "Khi KOL nhắc/so sánh sàn khác, đòi deal tốt hơn hoặc hỏi upfront, AI hỏi một lần: % revshare/rebate, bonus volume, phí cố định/upfront, thời hạn hợp đồng/độc quyền, lịch trả, kèm ảnh trang hoa hồng. AI không nêu tên sàn và không hứa \"match\" deal. Deal được ghi lên thẻ lead (dòng 💼 Deal hiện tại) và vào thông báo bàn giao."
+            },
+            {
+                "type": "improvement",
+                "title": "Không từ chối upfront",
+                "desc": "Lần đầu KOL hỏi upfront, AI báo team sẽ review deal của họ; sau tháng đầu hợp tác tốt có thể có upfront gắn mốc (volume / số trader) và trả theo đợt, không nêu số tiền hay mốc cụ thể. Chỉ bàn giao cho người khi KOL đã gửi deal, từ chối gửi, vẫn đòi, hoặc hỏi con số. Áp dụng cho cả lead gói 60% + Deposit (riêng bậc khởi điểm thì không). Agent sàn khác (BloFin, PU Prime, Bitbase) giữ cách cũ."
+            },
+            {
+                "type": "improvement",
+                "title": "Volume KOL tự khai trong chat",
+                "desc": "AI ghi lại volume tháng KOL nói trong chat (vd 18–20M, tính theo mức thấp) để dự đoán bậc khởi điểm trên thẻ lead; số tiền ước tính vẫn chỉ dựa trên volume admin nhập."
+            }
+        ]
+    },
+    {
         "version": "3.34.0",
         "date": "10/11/2026",
         "title": "✍️ Campaign tự đề xuất tin nhắn, nhân bản campaign, proof về topic KOL",
         "summary": "Chọn danh sách đã cào là campaign tự điền nội dung tin nhắn, Remix, Agent và Dịch, bạn chỉ cần xem lại rồi bấm Lưu. Thêm nút nhân bản campaign, @SpamBot được hỏi lại mỗi lần chạy, và ảnh/video proof của lead tự chuyển vào đúng topic trong nhóm Weex KOL Support.",
-        "is_latest": true,
-        "badge": "LATEST",
+        "is_latest": false,
         "changes": [
             {
                 "type": "feature",

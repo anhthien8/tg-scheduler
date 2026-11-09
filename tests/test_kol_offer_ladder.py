@@ -70,8 +70,8 @@ def test_render_prompt_matches_ladder_json():
         assert f"| {t['revshare_pct']}% | ${t['bonus_per_1m_taker_usd']} |" in text
     assert ">= 10M total volume / month" in text
     assert "B-book" in text  # the ban is spelled out to the model
-    # No volume stated → the model is told NOT to predict a tier.
-    assert "do NOT predict a tier" in text
+    # No volume stated → the model is told not to guess a tier (Tier 1 without proof).
+    assert "do not guess a tier" in text
 
 
 def test_render_prompt_predicts_tier_only_when_volume_is_known():

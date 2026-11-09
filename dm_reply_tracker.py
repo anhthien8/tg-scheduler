@@ -320,6 +320,11 @@ async def _notify_main_account_handover(
             alert_text += f"🎯 Campaign: {campaign}\n"
         if performance != "Chưa cung cấp":
             alert_text += f"📊 Performance 1M: {performance}\n"
+        if profile.get("monthly_volume"):
+            alert_text += f"📈 Volume/tháng (KOL khai): {profile['monthly_volume']}\n"
+        if profile.get("current_deal") or profile.get("current_cex"):
+            deal = " — ".join(x for x in (profile.get("current_cex"), profile.get("current_deal")) if x)
+            alert_text += f"💼 Deal hiện tại: {deal}\n"
         # 5-step funnel line: where the KOL is + what is still missing (spec B4)
         try:
             step_line = await render_kol_step_line(account_id, sender_id)
@@ -726,7 +731,7 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
         lines.append("NOTHING MISSING.")
     lines.append("GUIDANCE: " + _exch(_STEP_GUIDANCE.get(step, "")))
     try:  # the ladder is WEEX's: never predict a WEEX tier for a BloFin / Bitget KOL
-        pred = (kol_offer.predicted_tier(await kol_offer.get_ladder(), profile.get("volume_claimed"))
+        pred = (kol_offer.predicted_tier(await kol_offer.get_ladder(), kol_offer.stated_volume(profile))
                 if kol_offer.uses_ladder(ex) and not region else None)  # region leads have no tiers
     except Exception:
         pred = None
@@ -734,8 +739,9 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
                  if kol_offer.uses_ladder(ex) else
                  "from the knowledge base, with its concrete numbers if it lists any (never borrow another exchange's package). ")
     if pred:
-        lines.append(f"PREDICTED TIER (only because the KOL stated ~{kol_offer._fmt_num(pred.get('volume_m'))}M monthly volume): "
-                     f"tier {pred.get('tier')} = {kol_offer._fmt_num(pred.get('revshare_pct'))}% revshare from the month after hitting it.")
+        lines.append(f"PREDICTED TIER — starting tier (only because the KOL stated ~{kol_offer._fmt_num(pred.get('volume_m'))}M monthly volume "
+                     f"on their current exchange): likely tier {pred.get('tier')} = {kol_offer._fmt_num(pred.get('revshare_pct'))}% "
+                     "revshare once our team verifies their last-3-months dashboard recording.")
     lines.append("IF THE KOL SAYS NOT INTERESTED OR OBJECTS TO THE TERMS (without asking you to stop): send at most ONE short reply "
                  "(2-3 sentences, their language): acknowledge their point, give ONE verified benefit taken only from the facts above "
                  "that directly answers their stated reason, and end with one easy question (yes/no or a quick choice). "
@@ -1396,7 +1402,7 @@ async def generate_and_send_ai_reply_for_chat(
         "   - Tier B (Intent 40-79): Interested in exchange benefits, asking detailed questions.\n"
         "   - Tier C (Intent 0-39): Casual question, low interest, or greeting.\n"
         "10. HANDOVER TRIGGER (CRITICAL): Append [HANDOVER_REQUIRED] on its own line (before METRICS) when ANY of these apply:\n"
-        "   - Prospect asks for fixed fee, upfront payment, retainer, or sponsorship budget AND has already sent (or refused) the 3-month trading-performance video. On the FIRST upfront ask, request that video instead (no tag).\n"
+        "   - Prospect asks for fixed fee, upfront payment, retainer, or sponsorship budget AND has already sent (or refused) the 3-month trading-performance video. On the FIRST upfront ask, follow the UPFRONT rule in the offer block (no tag).\n"
         "   - Prospect requests a call, meeting, or contract discussion.\n"
         "   - Prospect asks to speak with a human, admin, or manager.\n"
         "   - Prospect has ACTUALLY SENT volume proof (their message carries an [Attached ...] tag) that needs human verification.\n"
@@ -1428,7 +1434,8 @@ async def generate_and_send_ai_reply_for_chat(
         lead_region = (kol_region_offer.detect_region(full_history, kol_prof)
                        if kol_offer.uses_ladder(exchange) else None)
         offer_block, offer_ladder = await kol_offer.offer_block_for(exchange, kol_prof.get("volume_claimed"),
-                                                                    region=lead_region)
+                                                                    region=lead_region,
+                                                                    volume_stated=kol_prof.get("monthly_volume"))
         combined_prompt += "\n\n" + offer_block
         if kol_offer.uses_ladder(exchange) and not kol_region_offer.origin_known(kol_prof):
             # Region offer (all markets except Vietnam / Korea / China): ask where the KOL and their community are from.
@@ -2570,7 +2577,8 @@ async def process_drip_followups() -> dict:
                     drip_hist = []
                 offer_block, offer_ladder = await kol_offer.offer_block_for(
                     exchange, drip_prof.get("volume_claimed"),
-                    region=kol_region_offer.detect_region(drip_hist, drip_prof) if kol_offer.uses_ladder(exchange) else None)
+                    region=kol_region_offer.detect_region(drip_hist, drip_prof) if kol_offer.uses_ladder(exchange) else None,
+                    volume_stated=drip_prof.get("monthly_volume"))
             except Exception as offer_exc:
                 logger.error("[DripEngine] Could not load offer ladder for user %d: %s", user_id, offer_exc)
                 continue

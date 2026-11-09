@@ -153,7 +153,7 @@ async def get_chat_step(account_id: int, user_id: int):
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
     state = await db.get_kol_state(account_id, user_id)
     ladder = await kol_offer.get_ladder()
-    state["predicted_tier"] = kol_offer.predicted_tier(ladder, state["have"].get("volume_claimed"))
+    state["predicted_tier"] = kol_offer.predicted_tier(ladder, kol_offer.stated_volume(state["have"]))
     state["offer_version"] = ladder.get("version")
     state["events"] = await db.get_kol_step_events(account_id, user_id, limit=20)
     return state

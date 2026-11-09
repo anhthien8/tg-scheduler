@@ -8012,9 +8012,12 @@ async def get_kol_state(account_id: int, user_id: int) -> dict:
     exchange = await get_chat_exchange(account_id, user_id)
     uid_label = f"{exchange} UID"
     have = {k: profile.get(k) for k in ("channel_link", "platform", "followers", "weex_uid", "volume_claimed",
-                                        "volume_verified", "selected_campaign", "vip_code", "affiliate_link",
-                                        "first_post_link", "offer_version")
+                                        "monthly_volume", "volume_verified", "selected_campaign", "vip_code",
+                                        "affiliate_link", "first_post_link", "offer_version")
             if profile.get(k) not in (None, "", [])}
+    # The KOL's deal on their current exchange (deal rule 2): shown on the lead card for negotiation.
+    current_deal = {k: profile.get(k) for k in ("current_cex", "current_deal")
+                    if profile.get(k) not in (None, "", [])}
     return {
         "account_id": account_id,
         "user_id": user_id,
@@ -8027,6 +8030,7 @@ async def get_kol_state(account_id: int, user_id: int) -> dict:
         "missing_labels": [uid_label if m == "weex_uid" else MISSING_ITEM_META.get(m, {}).get("label", m)
                            for m in missing],
         "have": have,
+        "current_deal": current_deal,
         "exchange": exchange,
         "uid_label": uid_label,
         "status": chat.get("status") if chat else None,

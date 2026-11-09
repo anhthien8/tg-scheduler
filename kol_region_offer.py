@@ -405,7 +405,8 @@ def render_prompt(region: str, ladder: dict, volume_claimed=None, offer: dict | 
                      f"{dep_hi}% deposit bonus right away once their last-3-months proof is verified.")
     lines.append(
         f"YOU MUST END YOUR REPLY WITH [HANDOVER_REQUIRED] FOR: any revshare above {rev}%, a deposit bonus above {dep_hi}%, "
-        "any other %, bonus or threshold, upfront / fixed fees after the proof step, or any exception request."
+        "any other %, bonus or threshold, upfront / fixed fees at the step the UPFRONT rule below names (never on the "
+        "first ask), or any exception request."
     )
     lines.append(f"NEVER quote any % or $ figure except {rev}%, {dep}% and {dep_hi}% "
                  "(no tier figures, no internal estimates, no ranges, no 'total payout' maths).")

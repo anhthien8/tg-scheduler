@@ -1177,6 +1177,8 @@ async def extract_kol_profile(history: list[dict], provider: str, api_keys: list
         " - followers: (e.g. 30k subs, 50k members, or empty string)\n"
         " - current_cex: (e.g. Binance, Bybit, OKX, or empty string)\n"
         " - trading_performance_1m: (the KOL's explicit trading volume/performance over the last 1 month on other exchanges, or empty string)\n"
+        " - monthly_volume: (the AVERAGE MONTHLY trading volume of the KOL's referrals/community on the exchange they work with now, as they stated it, e.g. 18-20M, $500k, or empty string)\n"
+        " - current_deal: (one short line summarising the deal they say they get from their current exchange: revshare/rebate %, volume bonus, fixed/upfront fee, contract length/exclusivity, payout schedule — only the parts they stated, or empty string)\n"
         " - community_name: (explicit community/channel/group name, or empty string)\n"
         " - community_link: (Telegram/YouTube/Twitter/TikTok/community URL explicitly stated by the user, or empty string)\n"
         " - community_logo: (logo/avatar URL or empty string; never invent one)\n"
