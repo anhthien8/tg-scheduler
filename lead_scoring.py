@@ -26,9 +26,9 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 import aiosqlite
-from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger("tg-scheduler.lead_scoring")
 
@@ -239,7 +239,7 @@ async def score_lead_dynamic(user_id: int, account_id: int,
 
     Requires DB access (non-pure). Call after lead has interacted.
     """
-    from database import get_db   # local import to avoid circular at module level
+    from database import get_db  # local import to avoid circular at module level
 
     dynamic = 0
     reasons: list[str] = []

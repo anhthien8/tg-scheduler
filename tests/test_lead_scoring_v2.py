@@ -1,21 +1,21 @@
 """Tests for C2: Enhanced Lead Scoring with bio_keywords, tiers, and dynamic scoring."""
 import asyncio
 import json
-import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from lead_scoring import (
-    LeadScore,
-    assign_tier,
-    score_lead,
-    passes_icp,
-    score_lead_dynamic,
-    rescore_and_update,
     BIO_KEYWORDS_RE,
     W_BIO_KEYWORDS,
+    LeadScore,
+    assign_tier,
+    passes_icp,
+    rescore_and_update,
+    score_lead,
+    score_lead_dynamic,
 )
-
 
 # ── Static Scoring Tests ────────────────────────────────────────────
 

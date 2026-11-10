@@ -5,8 +5,8 @@ Each account gets its own Telethon client instance.
 import asyncio
 import logging
 import os
-import time
 import random
+import time
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, errors
@@ -1801,8 +1801,9 @@ async def get_cached_spam_status(account_id: int, max_age_hours: float = 24) -> 
     """Last @SpamBot result if it is recent and conclusive, else None."""
     try:
         import json as _json
-        import database as _db
         from datetime import datetime, timezone
+
+        import database as _db
         cache = _json.loads(await _db.get_setting("spam_status_cache", "{}") or "{}")
         entry = cache.get(str(account_id)) or {}
         if entry.get("status") not in ("free", "limited") or not entry.get("checked_at"):
@@ -1830,6 +1831,7 @@ async def check_spam_status(account_id: int, max_age_hours: float = 0) -> dict:
     result = await _check_spam_status_raw(account_id)
     try:
         import json as _json
+
         import database as _db
         cache = _json.loads(await _db.get_setting("spam_status_cache", "{}") or "{}")
         cache[str(account_id)] = {k: result.get(k) for k in ("status", "message", "checked_at")}

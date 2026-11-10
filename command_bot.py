@@ -1518,7 +1518,6 @@ async def _handle_forum_admin_message(event) -> None:
             return
         acc_id, uid = int(topic["account_id"]), int(topic["user_id"])
         chat = await db.get_followup_chat(acc_id, uid)
-        status = (chat or {}).get("status", "—")
 
         if cmd == "/ai":
             await _render_ai_status(event, acc_id, uid)

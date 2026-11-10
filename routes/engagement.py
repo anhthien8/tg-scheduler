@@ -261,6 +261,9 @@ async def join_stagger(req: JoinStaggerRequest):
                     await asyncio.sleep(delay)
                 try:
                     result = await tg.join_channel(acc_id, str(group_id))
+                    # join_channel reports failure in its result, it does not raise.
+                    if not result.get("success"):
+                        raise RuntimeError(result.get("error") or "join failed")
                     results.append({"account_id": acc_id, "group_id": group_id, "status": "joined"})
                     if req.campaign_id:
                         await db.create_engagement_log({

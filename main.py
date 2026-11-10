@@ -27,8 +27,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security.api_key import APIKeyHeader
-from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipResponder, IdentityResponder
 from starlette.responses import Response

@@ -40,8 +40,9 @@ def clean_db():
 @pytest.fixture
 def client(clean_db):
     """Create an async test client."""
-    from main import app
     import os
+
+    from main import app
     api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
     async def _make_client():
@@ -72,8 +73,9 @@ async def _create_campaign(client, **overrides):
 
 class TestCRUD:
     def test_create_campaign(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -97,8 +99,9 @@ class TestCRUD:
         asyncio.run(_test())
 
     def test_get_campaigns(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -121,8 +124,9 @@ class TestCRUD:
         asyncio.run(_test())
 
     def test_get_single_campaign(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -144,8 +148,9 @@ class TestCRUD:
         asyncio.run(_test())
 
     def test_get_nonexistent_campaign_404(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -160,8 +165,9 @@ class TestCRUD:
         asyncio.run(_test())
 
     def test_update_campaign(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -189,8 +195,9 @@ class TestCRUD:
         asyncio.run(_test())
 
     def test_delete_campaign(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -214,8 +221,9 @@ class TestCRUD:
 
 class TestValidation:
     def test_rate_limit_hard_cap_hour(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -235,8 +243,9 @@ class TestValidation:
         asyncio.run(_test())
 
     def test_rate_limit_hard_cap_day(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -256,8 +265,9 @@ class TestValidation:
         asyncio.run(_test())
 
     def test_min_gap_too_low(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -277,8 +287,9 @@ class TestValidation:
         asyncio.run(_test())
 
     def test_invalid_reply_mode(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -297,8 +308,9 @@ class TestValidation:
         asyncio.run(_test())
 
     def test_invalid_schedule_format(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -320,8 +332,9 @@ class TestValidation:
 
 class TestConsentGate:
     def test_activate_without_consent_409(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -344,8 +357,9 @@ class TestConsentGate:
         asyncio.run(_test())
 
     def test_activate_with_consent_succeeds(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -368,8 +382,9 @@ class TestConsentGate:
         asyncio.run(_test())
 
     def test_pause_campaign(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -395,8 +410,9 @@ class TestConsentGate:
 
 class TestLogsAndStats:
     def test_get_logs(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():
@@ -414,8 +430,9 @@ class TestLogsAndStats:
         asyncio.run(_test())
 
     def test_get_stats(self, clean_db):
-        from main import app
         import os
+
+        from main import app
         api_key = os.environ.get("DASHBOARD_SECRET_KEY", "test_secret_key")
 
         async def _test():

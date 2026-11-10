@@ -507,11 +507,8 @@ def _make_engagement_handler(campaign: dict):
                 return  # own account, or identity unknown → fail closed
 
             # 7. Filter bots
-            sender_username = ""
-            if sender:
-                if getattr(sender, "bot", False):
-                    return
-                sender_username = getattr(sender, "username", "") or ""
+            if sender and getattr(sender, "bot", False):
+                return
 
             # 8. Filter admins
             try:

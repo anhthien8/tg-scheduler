@@ -5,11 +5,10 @@ Round-robin rotation across multiple API keys per provider to avoid rate limits.
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
-
-import os
 from urllib.parse import urlsplit
 
 import httpx
@@ -944,7 +943,7 @@ async def _generate_chat_response_raw(
     # Try the provider's remaining keys before giving up on the whole provider.
     # NOTE: never `return` from inside this loop — a failing retry used to short-circuit
     # the fallback block below and surface as an empty reply in the UI.
-    for i in range(len(api_keys) if provider else 0):
+    for _ in range(len(api_keys) if provider else 0):
         idx2, key2 = _next_key(api_keys, provider)
         if idx2 == idx or not key2:
             continue
@@ -1009,6 +1008,7 @@ def _attach_images(messages: list[dict], images: list[str]) -> list[dict]:
 
 
 import contextvars as _cv
+
 _LAST_MODEL = _cv.ContextVar("ai_last_model", default="")
 
 

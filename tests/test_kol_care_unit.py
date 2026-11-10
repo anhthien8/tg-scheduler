@@ -26,7 +26,8 @@ def test_trivial_learned_rules_are_flagged():
 
 
 def test_blocked_user_ids_reads_list_and_fails_closed():
-    import asyncio, types
+    import asyncio
+    import types
 
     class Client:
         async def __call__(self, req):
