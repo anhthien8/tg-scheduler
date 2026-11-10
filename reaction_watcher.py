@@ -288,8 +288,10 @@ async def _react_all_accounts(target: dict, msg_id: int, channel_link: str) -> N
         client = tg.get_client(acc_id)
         if not client or not client.is_connected():
             continue
-        if await flood_state.blocked_reason(acc_id):
-            continue  # paused ("Tạm dừng" means no actions at all) or resting after a flood
+        if await db.is_account_paused(acc_id):
+            continue  # "Tạm dừng" means no actions at all
+        if flood_state.is_resting(acc_id) or flood_state.peerflood_blocked(acc_id):
+            continue  # resting after a FloodWait / PeerFlood hit in any engine
 
         # Apply delay between accounts (skip wait for first)
         if i > 0:
