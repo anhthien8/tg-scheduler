@@ -1254,10 +1254,15 @@ async def generate_and_send_ai_reply_for_chat(
     # Official commission ladder (spec A2): generated from the kol_offer_ladder
     # setting, replaces the old per-language 50-60 / 70-80 rule.
     offer_ladder = None
+    ladder_on = await kol_offer.applies_to_agent((agent_config or {}).get("id"))
     try:
-        offer_ladder = await kol_offer.get_ladder()
-        combined_prompt += "\n\n" + kol_offer.render_offer_ladder_prompt(
-            offer_ladder, kol_prof.get("volume_claimed"))
+        if ladder_on:
+            offer_ladder = await kol_offer.get_ladder()
+            combined_prompt += "\n\n" + kol_offer.render_offer_ladder_prompt(
+                offer_ladder, kol_prof.get("volume_claimed"))
+        else:
+            combined_prompt += ("\n\n--- COMMISSION ---\nNo commission ladder block is provided for this agent: "
+                                "quote only figures that appear in the KNOWLEDGE BASE, never invent one.")
     except Exception as _ladder_err:
         logger.error("[AIFollowUp] Could not render offer ladder: %s", _ladder_err)
 
@@ -1384,7 +1389,7 @@ async def generate_and_send_ai_reply_for_chat(
         else:
             # Off-ladder guard (spec A2): any % / $ figure not in the official
             # ladder is replaced by a safe fallback and escalated to a human.
-            off_ladder = kol_offer.find_off_ladder_figures(ai_reply, offer_ladder)
+            off_ladder = kol_offer.find_off_ladder_figures(ai_reply, offer_ladder) if ladder_on else []
             if off_ladder:
                 logger.warning("[AIFollowUp] 🚫 Blocked off-ladder figures %s for user %d — using safe fallback",
                                off_ladder, user_id)
@@ -2291,8 +2296,9 @@ async def process_drip_followups() -> dict:
             drip_instruction = _drip_instruction_for_stage(stage, total_stages, tier)
 
             sys_p = agent_config.get("system_prompt", "") if agent_config else ""
+            drip_ladder_on = await kol_offer.applies_to_agent(agent_id)
             try:
-                offer_block = kol_offer.render_offer_ladder_prompt(
+                offer_block = "" if not drip_ladder_on else kol_offer.render_offer_ladder_prompt(
                     await kol_offer.get_ladder(),
                     (await db.get_kol_profile(account_id, user_id) or {}).get("volume_claimed"),
                 )
@@ -2317,7 +2323,7 @@ async def process_drip_followups() -> dict:
                         continue
                     # Off-ladder guard (spec A2) — same policy as the interactive
                     # reply path: a drip message may never quote unapproved figures.
-                    off_ladder = kol_offer.find_off_ladder_figures(msg)
+                    off_ladder = kol_offer.find_off_ladder_figures(msg) if drip_ladder_on else []
                     if off_ladder:
                         logger.warning("[DripEngine] 🚫 Blocked off-ladder figures %s in drip for user %d",
                                        off_ladder, user_id)

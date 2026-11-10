@@ -1081,8 +1081,6 @@ async showAccountWarnings(accId){
 },
 async unflagAccount(accId){if(!await customConfirm('Bỏ cảnh báo tài khoản này?'))return;try{{const _r=await fetch(`/api/auth/accounts/${accId}/unflag`,{method:'POST'});if(!_r.ok)throw new Error('Máy chủ trả lỗi '+_r.status);}API.clearAccountsCache();this.toast('Đã bỏ cảnh báo','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
 
-async unpauseAccount(accId){if(!await customConfirm('Bỏ tạm dừng tài khoản này? Tài khoản sẽ hoạt động lại bình thường.'))return;try{{const _r=await fetch(`/api/auth/accounts/${accId}/unpause`,{method:'POST'});if(!_r.ok)throw new Error('Máy chủ trả lỗi '+_r.status);}API.clearAccountsCache();this.toast('Đã bỏ tạm dừng','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
-
 async _populateLogAccountFilter(){const sel=document.getElementById('log-filter-account');if(!sel)return;const accs=this.accounts||App._accounts||[];if(!sel.options.length||sel.options.length===1){while(sel.options.length>1)sel.remove(1);accs.forEach(a=>{const opt=document.createElement('option');opt.value=a.id;opt.textContent=a.name||a.phone;sel.appendChild(opt);});} },
 
 async loadBlacklist(){try{const res=await fetch('/api/blacklist');const raw=res.ok?await res.json():[];const data=Array.isArray(raw)?raw:[];this._blacklistData=data;const badge=document.getElementById('blacklist-badge');if(badge){if(data.length>0){badge.textContent=data.length;badge.classList.remove('hidden')}else{badge.classList.add('hidden')}}this._blPage=1;this._renderBlacklistPage()}catch(e){this._blacklistData=[];this._blPage=1;this._renderBlacklistPage();this.toast(e.message,'error')}},
@@ -2550,15 +2548,6 @@ App.fetchOaiModels = async function() {
   }
 };
 
-// Switch back to manual input mode
-App.switchToManualModelInput = function() {
-  const selectEl = document.getElementById('oai-compat-model-select');
-  const inputEl = document.getElementById('oai-compat-model');
-  selectEl.style.display = 'none';
-  inputEl.style.display = '';
-  inputEl.focus();
-};
-
 App.openChatgptOAuthModal = function() {
   const modal = document.getElementById('chatgpt-oauth-modal');
   if (!modal) return;
@@ -2904,19 +2893,6 @@ App.saveSettings = async function() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Lưu cài đặt';
-  }
-};
-
-App.applyAiPromptPreset = function(type) {
-  const el = document.getElementById('ai-custom-prompt');
-  if (!el) return;
-
-  if (type === 'curiosity') {
-    el.value = "Hãy viết lại tin nhắn theo phong cách cực kỳ ngắn gọn (1-2 câu max), giọng điệu tự nhiên như đồng nghiệp nhắn tin trao đổi kinh nghiệm. Đặt câu hỏi mở ở cuối để kích thích người nhận nhắn tin trả lời lại. Tuyệt đối không dùng từ ngữ chào hàng hay quảng cáo đơn phương.";
-  } else if (type === 'peer') {
-    el.value = "Hãy viết lại tin nhắn ngắn gọn, thân thiện như bạn bè/đồng nghiệp lâu ngày hỏi thăm công việc. Dùng ngôn từ tự nhiên, gần gũi, tuyệt đối không dùng emoji hay từ ngữ bán hàng.";
-  } else if (type === 'clear') {
-    el.value = "";
   }
 };
 
@@ -3558,18 +3534,6 @@ App.leaveSelected = async function() {
 
 
 
-App.leaveAllChannels = async function() {
-
-  // Redirect to select all then leave
-
-  App._toggleSelectAll(true);
-
-  App.leaveSelected();
-
-};
-
-
-
 App._showChBanner = function(msg, type) {
 
   const el = document.getElementById('ch-status-banner');
@@ -3665,13 +3629,6 @@ App.onAccountSelectChange = function() {
   const cnt = document.getElementById('acc-selected-count');
   if (bar) bar.classList.toggle('hidden', App._accSelected.size === 0);
   if (cnt) cnt.textContent = App._accSelected.size;
-};
-
-App.toggleSelectAllAccounts = function() {
-  const cbs = document.querySelectorAll('.acc-select-cb');
-  const allChecked = [...cbs].every(cb => cb.checked);
-  cbs.forEach(cb => cb.checked = !allChecked);
-  App.onAccountSelectChange();
 };
 
 App.clearAccountSelection = function() {
@@ -4012,31 +3969,6 @@ App.loadDailySummary = async function() {
     }
   } catch(e) {
     console.error('loadDailySummary error:', e);
-  }
-};
-
-App.saveDailySummary = async function() {
-  const statusEl = document.getElementById('daily-summary-status');
-  const enabled = document.getElementById('daily-summary-enabled')?.checked ? '1' : '0';
-  const time = document.getElementById('daily-summary-time')?.value || '21:00';
-  const accountId = document.getElementById('daily-summary-account')?.value;
-  statusEl.textContent = 'Đang lưu...';
-  try {
-    const headers = { ...API.getHeaders(), 'Content-Type': 'application/json' };
-    const resp = await fetch('/api/settings/daily-summary', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ enabled, time, account_id: accountId })
-    });
-    if (!resp.ok) {
-      const err = await resp.json();
-      throw new Error(err.detail || 'Lỗi lưu');
-    }
-    App.toast('Đã lưu cài đặt báo cáo!', 'success');
-    statusEl.textContent = enabled === '1' ? ('Gui luc ' + time + ' moi ngay') : 'Dang tat';
-  } catch(e) {
-    App.toast('Lỗi: ' + e.message, 'error');
-    statusEl.textContent = '';
   }
 };
 
@@ -4520,22 +4452,6 @@ Object.assign(App, {
     App.toast('Lead này chưa có trong AI Agent (chưa từng được AI theo dõi)', 'error');
   },
 
-  // ── Mark single as read ────────────────────────────────────────
-  async inboxMarkRead(id){
-    await fetch(`/api/inbox/${id}/read`, {method:'POST'});
-    const row = document.getElementById(`inbox-row-${id}`);
-    if(row){
-      row.style.background = '';
-      const td = row.querySelector('td:last-child');
-      if(td) td.innerHTML = '<span style="font-size:.75rem;color:var(--text2)">✓</span>';
-      const nameCell = row.querySelector('td:first-child');
-      if(nameCell) nameCell.style.fontWeight = '400';
-    }
-    // Refresh badge
-    if (Polling.isActive('inbox:badge')) Polling.run('inbox:badge');
-    this.startInboxBadgePolling();
-  },
-
   // ── Mark all as read ──────────────────────────────────────────
   async inboxReadAll(){
     await fetch('/api/inbox/read-all', {method:'POST'});
@@ -4556,108 +4472,6 @@ const _origShowDashboard = App.showDashboard.bind(App);
 App.showDashboard = function(user){
   _origShowDashboard(user);
   App.startInboxBadgePolling();
-};
-
-// ══════════════════════════════════════════════════════════
-//  PROXY POOL MANAGEMENT
-// ══════════════════════════════════════════════════════════
-
-App.switchProxyTab = function(tab) {
-  const wsTab = document.getElementById('proxy-webshare-tab');
-  const pasteTab = document.getElementById('proxy-paste-tab');
-  const wsBtn = document.getElementById('proxy-tab-webshare');
-  const pasteBtn = document.getElementById('proxy-tab-paste');
-  if (tab === 'webshare') {
-    wsTab.classList.remove('hidden');
-    pasteTab.classList.add('hidden');
-    wsBtn.style.background = 'var(--accent)'; wsBtn.style.color = '#fff'; wsBtn.className = 'btn btn-sm';
-    pasteBtn.style.background = ''; pasteBtn.style.color = ''; pasteBtn.className = 'btn btn-ghost btn-sm';
-  } else {
-    wsTab.classList.add('hidden');
-    pasteTab.classList.remove('hidden');
-    pasteBtn.style.background = 'var(--accent)'; pasteBtn.style.color = '#fff'; pasteBtn.className = 'btn btn-sm';
-    wsBtn.style.background = ''; wsBtn.style.color = ''; wsBtn.className = 'btn btn-ghost btn-sm';
-  }
-};
-
-App.fetchWebshare = async function() {
-  const apiKey = (document.getElementById('webshare-api-key')?.value || "").trim();
-  if (!apiKey) { App.toast('Nhập Webshare API Key', 'error'); return; }
-  const proxyType = document.getElementById('webshare-proxy-type')?.value;
-  const btn = document.getElementById('btn-fetch-webshare');
-  const progress = document.getElementById('proxy-progress');
-  const progressText = document.getElementById('proxy-progress-text');
-
-  btn.disabled = true;
-  btn.textContent = 'Đang xử lý...';
-  progress.classList.remove('hidden');
-  progressText.textContent = 'Đang fetch proxy từ Webshare → test → assign...';
-  (document.getElementById('proxy-test-results')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
-
-  try {
-    const resp = await fetch('/api/proxy/webshare', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...API.getHeaders() },
-      body: JSON.stringify({ api_key: apiKey, proxy_type: proxyType, auto_assign: true })
-    });
-    const data = await resp.json();
-    progress.classList.add('hidden');
-
-    if (data.success) {
-      App.toast(`✅ ${data.passed}/${data.fetched} proxy passed → đã assign!`, 'success');
-      App._renderProxyTestResults(data);
-      App.loadProxyStatus();
-    } else {
-      App.toast('❌ ' + (data.error || 'Lỗi không xác định'), 'error');
-      if (data.test_results) App._renderProxyTestResults(data);
-    }
-  } catch(e) {
-    progress.classList.add('hidden');
-    App.toast('Lỗi: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🚀 Fetch & Test & Assign';
-  }
-};
-
-App.importProxyList = async function() {
-  const rawText = (document.getElementById('proxy-paste-input')?.value || "").trim();
-  if (!rawText) { App.toast('Paste proxy list vào textarea', 'error'); return; }
-  const scheme = document.getElementById('paste-default-scheme')?.value;
-  const btn = document.getElementById('btn-import-proxies');
-  const progress = document.getElementById('proxy-progress');
-  const progressText = document.getElementById('proxy-progress-text');
-
-  btn.disabled = true;
-  btn.textContent = 'Đang xử lý...';
-  progress.classList.remove('hidden');
-  progressText.textContent = 'Đang parse → test → assign...';
-  (document.getElementById('proxy-test-results')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
-
-  try {
-    const resp = await fetch('/api/proxy/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...API.getHeaders() },
-      body: JSON.stringify({ raw_text: rawText, default_scheme: scheme, auto_assign: true })
-    });
-    const data = await resp.json();
-    progress.classList.add('hidden');
-
-    if (data.success) {
-      App.toast(`✅ ${data.passed}/${data.parsed} proxy passed → pool: ${data.pool_total}`, 'success');
-      App._renderProxyTestResults(data);
-      App.loadProxyStatus();
-    } else {
-      App.toast('❌ ' + (data.error || 'Lỗi không xác định'), 'error');
-      if (data.test_results) App._renderProxyTestResults(data);
-    }
-  } catch(e) {
-    progress.classList.add('hidden');
-    App.toast('Lỗi: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '📥 Import & Test & Assign';
-  }
 };
 
 App._renderProxyTestResults = function(data) {
@@ -4743,22 +4557,6 @@ App.removeAccountProxy = async function(accountId) {
       App.loadProxyStatus();
     } else {
       App.toast(data.error || 'Lỗi', 'error');
-    }
-  } catch(e) { App.toast(e.message, 'error'); }
-};
-
-App.clearProxyPool = async function() {
-  if (!await customConfirm('Xóa TẤT CẢ proxy khỏi tất cả accounts và pool?')) return;
-  try {
-    const resp = await fetch('/api/proxy/clear-pool', {
-      method: 'POST',
-      headers: API.getHeaders()
-    });
-    const data = await resp.json();
-    if (data.success) {
-      App.toast('Đã xoá tất cả proxy', 'success');
-      App.loadProxyStatus();
-      (document.getElementById('proxy-test-results')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
     }
   } catch(e) { App.toast(e.message, 'error'); }
 };

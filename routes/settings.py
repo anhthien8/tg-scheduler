@@ -9,6 +9,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+import ai_remix
 import database as db
 import secret_mask
 
@@ -83,7 +84,7 @@ async def test_remix(payload: TestRemixPayload):
         kwargs["model"] = payload.model
     elif payload.provider == "chatgpt_oauth":
         kwargs["base_url"] = _safe_ai_base(payload.base_url or "https://api.openai.com/v1")
-        kwargs["model"] = payload.model or "gpt-4o"
+        kwargs["model"] = payload.model or ai_remix.DEFAULT_MODELS["chatgpt_oauth"]
     try:
         remixed = await ai_rmx.remix_message(
             original_text=payload.text,
@@ -245,7 +246,7 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
                         "token": payload.access_token.strip(),  # echo what was sent, never the unmasked key
                         "token_type": "session",
                         "base_url": "https://api.openai.com/v1",
-                        "model": "gpt-4o",
+                        "model": ai_remix.DEFAULT_MODELS["chatgpt_oauth"],
                         "email": email,
                         "name": name,
                         "message": f"Xác thực thành công! Tài khoản: {email or name}"
@@ -295,7 +296,7 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
                     "token": payload.access_token.strip(),  # echo what was sent, never the unmasked key
                     "token_type": "session",
                     "base_url": "https://api.openai.com/v1",
-                    "model": "gpt-4o",
+                    "model": ai_remix.DEFAULT_MODELS["chatgpt_oauth"],
                     "message": "Token đã được chấp nhận (định dạng JWT hợp lệ). Sẽ xác thực khi sử dụng thực tế."
                 }
 
@@ -313,7 +314,7 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
                 "token": payload.access_token.strip(),  # echo what was sent, never the unmasked key
                 "token_type": "session",
                 "base_url": "https://api.openai.com/v1",
-                "model": "gpt-4o",
+                "model": ai_remix.DEFAULT_MODELS["chatgpt_oauth"],
                 "message": "Token đã được chấp nhận. Sẽ xác thực khi sử dụng thực tế."
             }
         return {"success": False, "error": f"Lỗi kết nối: {str(e)[:200]}"}
@@ -786,6 +787,12 @@ async def get_setting(key: str):
 @router.post("/{key}")
 async def set_setting(key: str, payload: SettingPayload):
     value = payload.value
+    if _is_secret_setting(key):
+        # Credentials have their own endpoints (command bot, proxy); the generic
+        # setter must not overwrite them.
+        raise HTTPException(status_code=403, detail="Khoá này không ghi được qua API cài đặt chung")
+    if key.lower().endswith("_base_url") and (value or "").strip():
+        value = _safe_ai_base(value.strip())  # every later AI call goes to this URL
     if key.lower().startswith("ai_keys_"):
         stored = secret_mask.loads_list(await db.get_setting(key, "[]"))
         keys = secret_mask.resolve(secret_mask.loads_list(value), stored)

@@ -392,6 +392,26 @@ UPFRONT_PROOF_RULE = (
 )
 
 
+LADDER_AGENTS_SETTING_KEY = "kol_offer_ladder_agent_ids"
+
+
+async def applies_to_agent(agent_id) -> bool:
+    """Does the commission ladder (and its number guard) apply to this agent?
+
+    Setting `kol_offer_ladder_agent_ids` is a JSON list of AI-agent ids, e.g.
+    "[2]". Unset or empty = every agent (the original behaviour). Use it when
+    agents serve different exchanges: only the listed ones get this ladder.
+    """
+    raw = await db.get_setting(LADDER_AGENTS_SETTING_KEY, "")
+    if not raw:
+        return True
+    try:
+        ids = {int(x) for x in json.loads(raw)}
+    except Exception:
+        return True
+    return not ids or (agent_id is not None and int(agent_id) in ids)
+
+
 async def get_ladder() -> dict:
     """Current ladder (setting) or the default when unset/invalid."""
     raw = await db.get_setting(LADDER_SETTING_KEY)

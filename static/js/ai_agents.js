@@ -311,18 +311,6 @@ const AIAgents = {
     el.innerHTML = html;
   },
 
-  async getAgentsForDropdown() {
-    if (!this._agents || this._agents.length === 0) {
-      try {
-        const res = await AIAgentsAPI.getAll();
-        this._agents = res.agents || [];
-      } catch (e) {
-        console.error('Failed to get agents for dropdown:', e);
-      }
-    }
-    return this._agents;
-  },
-
   // ── Self-Learning Rules Modal ──────────────────────────────────────
   async showLearnedRules(agentId) {
     const agent = this._agents.find(a => a.id == agentId);

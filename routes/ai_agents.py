@@ -219,7 +219,7 @@ async def test_agent(agent_id: int, req: AgentTestRequest):
         if not kwargs.get("base_url"):
             kwargs["base_url"] = "https://api.openai.com/v1"
         if not kwargs.get("model"):
-            kwargs["model"] = "gpt-4o"
+            kwargs["model"] = ai_rmx.DEFAULT_MODELS["chatgpt_oauth"]
 
     sys_prompt = agent.get("system_prompt", "")
     kb = agent.get("knowledge_base", "")

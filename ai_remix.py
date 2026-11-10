@@ -192,6 +192,13 @@ def _mark_key_failed(provider, idx):
 # gemini-2.0-flash was retired by Google (404); thinking is disabled so the
 # output budget is spent on the reply itself.
 # Tried in order; on 404/429/5xx/timeout the next model is used (tested 2026-11-02).
+# One place for every default model id (was scattered across files).
+DEFAULT_MODELS = {
+    "openai": "gpt-4o-mini",
+    "chatgpt_oauth": "gpt-4o",
+    "deepseek": "deepseek-chat",
+    "groq": "openai/gpt-oss-120b",
+}
 GEMINI_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite"]
 
 
@@ -239,7 +246,7 @@ async def _call_deepseek(api_key, prompt):
     headers = {"Authorization": "Bearer " + api_key,
                "Content-Type": "application/json"}
     payload = {
-        "model": "deepseek-chat",
+        "model": DEFAULT_MODELS["deepseek"],
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.9,
         "max_tokens": 1024
@@ -258,7 +265,7 @@ async def _call_openai(api_key, prompt):
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "gpt-4o-mini",
+        "model": DEFAULT_MODELS["openai"],
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.85,
         "max_tokens": 1500
@@ -270,7 +277,7 @@ async def _call_openai(api_key, prompt):
         return data["choices"][0]["message"]["content"].strip()
 
 
-GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
+GROQ_DEFAULT_MODEL = DEFAULT_MODELS["groq"]
 
 
 async def _groq_model() -> str:
@@ -403,7 +410,7 @@ async def _try_call(provider, api_key, prompt, **kwargs):
         return await _call_openai_compatible(api_key, prompt, base_url, model)
     elif provider == "chatgpt_oauth":
         base_url = (kwargs.get("base_url") or "").strip()
-        model = kwargs.get("model") or "gpt-4o"
+        model = kwargs.get("model") or DEFAULT_MODELS["chatgpt_oauth"]
         is_default_url = not base_url or base_url in ("https://api.openai.com/v1", "https://api.openai.com", "https://chatgpt.com", "https://chatgpt.com/backend-api")
         if is_default_url:
             try:
@@ -1082,7 +1089,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
         url = "https://api.openai.com/v1/chat/completions"
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
-            "model": kwargs.get("model", "gpt-4o-mini"),
+            "model": kwargs.get("model") or DEFAULT_MODELS["openai"],
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 1500
@@ -1096,7 +1103,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
 
     elif provider == "chatgpt_oauth":
         base_url = (kwargs.get("base_url") or "").strip()
-        model = kwargs.get("model") or "gpt-4o"
+        model = kwargs.get("model") or DEFAULT_MODELS["chatgpt_oauth"]
         is_default_url = not base_url or base_url in ("https://api.openai.com/v1", "https://api.openai.com", "https://chatgpt.com", "https://chatgpt.com/backend-api")
         if is_default_url:
             try:
@@ -1131,7 +1138,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
         url = "https://api.deepseek.com/chat/completions"
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
-            "model": "deepseek-chat",
+            "model": DEFAULT_MODELS["deepseek"],
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 1500
@@ -1196,7 +1203,7 @@ async def _call_chat_provider(provider: str, api_key: str, messages: list[dict],
 
     elif provider == "openai_compatible":
         base_url = kwargs.get("base_url") or "https://api.openai.com/v1"
-        model = kwargs.get("model") or "gpt-4o-mini"
+        model = kwargs.get("model") or DEFAULT_MODELS["openai"]
         url = base_url.rstrip('/') + '/chat/completions'
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
                    **_cf_access_headers(url)}
