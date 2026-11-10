@@ -2479,7 +2479,7 @@ async def _process_drip_queue() -> tuple[int, list[str]]:
         cur = await db_conn.execute("""
             SELECT account_id,
                    SUM(CASE WHEN last_drip_at IS NOT NULL
-                             AND datetime(last_drip_at) > datetime('now', '-24 hours') THEN 1 ELSE 0 END) AS n
+                             AND datetime(last_drip_at) > datetime('now', '-1 day') THEN 1 ELSE 0 END) AS n
             FROM ai_followup_chats GROUP BY account_id
         """)
         sent_24h = {r["account_id"]: r["n"] or 0 for r in await cur.fetchall()}
@@ -2817,7 +2817,7 @@ async def process_owed_answer_reminders(force: bool = False) -> dict:
               AND c.status != 'bot_ignored'
               AND COALESCE(NULLIF(c.kol_step, ''), 'prospect') != 'declined'
               AND COALESCE(c.owed_reminders_sent, 0) < ?
-              AND (c.owed_last_reminder_at IS NULL OR datetime(c.owed_last_reminder_at) <= datetime('now', '-24 hours'))
+              AND (c.owed_last_reminder_at IS NULL OR datetime(c.owed_last_reminder_at) <= datetime('now', '-1 day'))
             ORDER BY {_TIER_RANK_SQL.replace('lead_tier', 'c.lead_tier')}, c.owed_since ASC
             LIMIT ?
         """, (f"-{owed_answers.OWED_DEADLINE_HOURS} hours", OWED_MAX_REMINDERS, _OWED_DIGEST_SIZE * 2))
