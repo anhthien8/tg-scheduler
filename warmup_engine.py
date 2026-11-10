@@ -178,9 +178,11 @@ async def _warmup_react_emoji(acc_id: int, chat_id: int) -> bool:
                 msg_id=msg.id,
                 reaction=[ReactionEmoji(emoticon=emoji)],
             ))
-        except Exception:
-            # Fallback — some chats/messages don't allow reactions
-            pass
+        except Exception as e:
+            # Some chats/messages don't allow reactions. A failed reaction must not
+            # count toward graduation.
+            logger.debug("[Warmup] reaction not sent for acc %d: %s", acc_id, e)
+            return False
         return True
     except Exception as e:
         logger.debug("[Warmup] react_emoji failed for acc %d: %s", acc_id, e)
@@ -331,6 +333,7 @@ async def run_warmup_job(job_id: int):
                 # Check if already graduated
                 if progress and progress.get("graduated_at"):
                     logger.info("[Warmup] Job %d: Account %d already graduated, skipping", job_id, acc_id)
+                    await asyncio.sleep(30)  # was a sleepless spin when every account had graduated
                     continue
 
                 # Determine stage from progress

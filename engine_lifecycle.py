@@ -205,6 +205,16 @@ async def start_engines() -> asyncio.Task:
     )
     logger.info("DB backup scheduled daily at 03:00")
 
+    # Warmup daily counters: without this reset a job that reached its daily
+    # limit once stayed stopped forever.
+    sch.get_scheduler().add_job(
+        db.reset_warmup_daily_counts,
+        trigger=CronTrigger(hour=0, minute=0, timezone=sch.TZ),
+        id="warmup_daily_reset",
+        name="Warmup daily reset",
+        replace_existing=True,
+    )
+
     # Lead SLA check
     from apscheduler.triggers.interval import IntervalTrigger
     sch.get_scheduler().add_job(

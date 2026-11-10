@@ -3124,7 +3124,11 @@ App.testAiRemix = async function() {
 };
 
 
-function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+// HTML-escape for text AND attribute contexts (quotes included; 0 stays "0").
+function esc(s){if(s==null||s===false)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+// For a value placed inside a '...' JS string in an inline handler (onclick="f('${escJs(x)}')"):
+// JS-escape first, then HTML-escape, because the browser HTML-decodes the attribute before running it.
+function escJs(s){if(s==null)return'';return esc(String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/[\r\n]+/g,' '))}
 function _mix(c,p){return `color-mix(in srgb, ${c} ${p}%, transparent)`}
 function _cv(v,a){let c=getComputedStyle(document.documentElement).getPropertyValue(v).trim()||'#888';if(c[0]==='#'){if(c.length===4)c='#'+[...c.slice(1)].map(x=>x+x).join('');const n=parseInt(c.slice(1,7),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`}return c}
 
@@ -3462,7 +3466,7 @@ App._renderChannelTable = function(channels) {
 
       <td style="padding:.6rem .75rem;text-align:right;">
 
-        <button class="btn btn-sm btn-danger" onclick="App.leaveOne(${ch.chat_id}, '${esc(ch.chat_title).replace(/'/g, "\\'")}', '${ch.chat_type}')"
+        <button class="btn btn-sm btn-danger" onclick="App.leaveOne(${ch.chat_id}, '${escJs(ch.chat_title)}', '${ch.chat_type}')"
 
                 id="ch-btn-${ch.chat_id}">${ch.chat_type === 'bot' ? 'Xoá' : 'Rời'}</button>
 

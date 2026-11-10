@@ -396,9 +396,9 @@ const Members = {
         <td style="font-size:12px;color:var(--text2)">${date}</td>
         <td>
           <div class="btn-group">
-            <button class="btn btn-ghost btn-sm" onclick="Members.viewMembers('${esc(j.scrape_job_id)}','${esc(j.group_title || '')}')" title="Xem">👁 Xem</button>
-            <button class="btn btn-ghost btn-sm" onclick="window.open(AnalyticsAPI.exportMembers('${esc(j.scrape_job_id)}'),'_blank')" title="Export CSV">📥</button>
-            <button class="btn btn-danger btn-sm" onclick="Members.deleteScrapeJob('${esc(j.scrape_job_id)}')">🗑</button>
+            <button class="btn btn-ghost btn-sm" onclick="Members.viewMembers('${escJs(j.scrape_job_id)}','${escJs(j.group_title || '')}')" title="Xem">👁 Xem</button>
+            <button class="btn btn-ghost btn-sm" onclick="window.open(AnalyticsAPI.exportMembers('${escJs(j.scrape_job_id)}'),'_blank')" title="Export CSV">📥</button>
+            <button class="btn btn-danger btn-sm" onclick="Members.deleteScrapeJob('${escJs(j.scrape_job_id)}')">🗑</button>
           </div>
         </td>`;
 
@@ -622,7 +622,7 @@ const Members = {
         actions += `<button class="btn btn-ghost btn-sm" onclick="Members.cancelSchedule(${c.id})" title="Hủy lịch hẹn giờ" style="color:var(--danger)">🚫</button>`;
       }
       actions += `<button class="btn btn-ghost btn-sm" onclick="Members.cloneCampaign(${c.id})" title="Nhân bản campaign">📑</button>`;
-      actions += `<button class="btn btn-ghost btn-sm" onclick="Members.viewCampaignLogs(${c.id},'${esc(c.name)}')" title="Xem log gửi tin">📋</button>`;
+      actions += `<button class="btn btn-ghost btn-sm" onclick="Members.viewCampaignLogs(${c.id},'${escJs(c.name)}')" title="Xem log gửi tin">📋</button>`;
       actions += `<button class="btn btn-danger btn-sm" onclick="Members.deleteCampaign(${c.id})" title="Xóa campaign">🗑</button>`;
 
       // Sub-line under name: source + schedule + auto-resume state
@@ -2408,7 +2408,7 @@ const Members = {
           const isChecked = this._selectedContacts.has(c) ? 'checked' : '';
           return `
             <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:12px">
-              <input type="checkbox" class="sim-contact-checkbox" data-channel-title="${esc(lead.title)}" value="${esc(c)}" ${isChecked} onchange="Members.onContactCheckboxChange(this, '${esc(c)}', ${idx})">
+              <input type="checkbox" class="sim-contact-checkbox" data-channel-title="${esc(lead.title)}" value="${esc(c)}" ${isChecked} onchange="Members.onContactCheckboxChange(this, '${escJs(c)}', ${idx})">
               <span style="color:var(--accent);font-weight:500">${esc(c)}</span>
             </label>
           `;
@@ -2449,7 +2449,7 @@ const Members = {
             <div class="sim-contacts-list-cell">${contactsHtml}</div>
           </td>
           <td>
-            <button class="btn btn-ghost btn-sm" id="btn-sim-join-${idx}" onclick="Members.joinSimilarChannel(${idx}, '${esc(lead.username || lead.channel_id)}')">
+            <button class="btn btn-ghost btn-sm" id="btn-sim-join-${idx}" onclick="Members.joinSimilarChannel(${idx}, '${escJs(lead.username || lead.channel_id)}')">
               ➕ Join Kênh
             </button>
           </td>
@@ -2886,7 +2886,7 @@ const Members = {
       if (c.status === 'running') {
         actions += `<button class="btn btn-danger btn-sm" onclick="Members.stopInviteCampaign(${c.id})">⏸ Dừng</button>`;
       }
-      actions += `<button class="btn btn-ghost btn-sm" onclick="Members.viewInviteCampaignLogs(${c.id},'${esc(c.name)}')">📋</button>`;
+      actions += `<button class="btn btn-ghost btn-sm" onclick="Members.viewInviteCampaignLogs(${c.id},'${escJs(c.name)}')">📋</button>`;
       actions += `<button class="btn btn-danger btn-sm" onclick="Members.deleteInviteCampaign(${c.id})">🗑</button>`;
 
       const targetGroup = c.target_group_title || c.target_group || '—';

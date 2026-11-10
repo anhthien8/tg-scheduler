@@ -44,8 +44,11 @@ async def select_variant(messages_list: list, template_id: int | None = None,
             weights = []
             for i in range(len(messages_list)):
                 variant_perf = next((p for p in reliable if p["variant_index"] == i), None)
-                if variant_perf and variant_perf["response_rate"] > 0:
-                    weights.append(variant_perf["response_rate"] + 0.1)  # Base weight
+                if variant_perf:
+                    # Tested variant (response_rate is a 0-1 fraction). A proven 0%
+                    # variant gets 0.1 — it used to get the 0.2 exploration weight
+                    # and beat every variant replying under 10%.
+                    weights.append(variant_perf["response_rate"] + 0.1)
                 else:
                     weights.append(0.2)  # Exploration weight for untested variants
 

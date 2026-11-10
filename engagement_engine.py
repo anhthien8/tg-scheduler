@@ -109,7 +109,11 @@ async def _get_group_admin_ids(client, group_id: int) -> set:
         for u in result.users:
             admin_ids.add(u.id)
     except Exception as e:
+        # Do not cache a failure: an empty set cached for 24h switched the admin
+        # filter off after any transient error. Retry in 10 minutes instead.
         logger.debug(f"[Engagement] Could not get admins for {group_id}: {e}")
+        _admin_cache[group_id] = (admin_ids, _time.time() - _ADMIN_CACHE_TTL + 600)
+        return admin_ids
     _admin_cache[group_id] = (admin_ids, _time.time())
     return admin_ids
 
@@ -538,8 +542,8 @@ def _make_engagement_handler(campaign: dict):
                         # Check if the original message was from one of our accounts
                         async with db.get_db() as conn:
                             row = await (await conn.execute(
-                                "SELECT 1 FROM engagement_logs WHERE reply_msg_id=? AND status='success' LIMIT 1",
-                                (reply_msg_id,)
+                                "SELECT 1 FROM engagement_logs WHERE reply_msg_id=? AND group_id=? AND status='success' LIMIT 1",
+                                (reply_msg_id, chat_id)
                             )).fetchone()
                             if row:
                                 return  # Don't self-reply

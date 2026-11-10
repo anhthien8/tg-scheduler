@@ -81,14 +81,17 @@ async def run_invite_campaign(campaign_id: int):
         # Restore today's count from DB (survives restart)
         try:
             async with db.get_db() as _db:
-                row = await _db.execute_fetchone(
-                    "SELECT COUNT(*) as cnt FROM invite_campaign_logs "
-                    "WHERE campaign_id = ? AND status = 'success' "
-                    "AND created_at >= date('now')",
+                # Vietnam-day boundary, same as the DM daily limits.
+                cur = await _db.execute(
+                    "SELECT COUNT(*) FROM invite_campaign_logs "
+                    "WHERE campaign_id = ? AND status = 'invited' "
+                    "AND invited_at >= datetime('now', '+7 hours', 'start of day', '-7 hours')",
                     (campaign_id,)
                 )
-                daily_sent = row["cnt"] if row else 0
-        except Exception:
+                row = await cur.fetchone()
+                daily_sent = row[0] if row else 0
+        except Exception as e:
+            logger.warning("[Invite %s] could not restore today's count: %s", campaign_id, e)
             daily_sent = 0
         consecutive_errors = 0
         account_idx = 0

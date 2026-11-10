@@ -555,12 +555,12 @@ Ví dụ: "Tối nay ra CPI. Ra thấp hơn dự báo thì thị trường có t
                             <tr>
                                 <td style="white-space:nowrap">${this._formatTime(l.created_at)}</td>
                                 <td>${l.kind || ''}</td>
-                                <td>${l.group_title || l.group_id || ''}</td>
+                                <td>${this._esc(l.group_title || l.group_id || '')}</td>
                                 <td>${l.account_id || ''}</td>
                                 <td title="${this._esc(l.trigger_text || '')}">${this._truncate(l.trigger_text, 40)}</td>
                                 <td title="${this._esc(l.reply_text || '')}">${this._truncate(l.reply_text, 40)}</td>
                                 <td>${statusBadge(l.status)}</td>
-                                <td>${l.skip_reason || ''}</td>
+                                <td>${this._esc(l.skip_reason || '')}</td>
                             </tr>
                         `).join('')}
                     </tbody>

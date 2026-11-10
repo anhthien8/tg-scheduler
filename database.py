@@ -1048,12 +1048,14 @@ async def init_db():
             ON ai_followup_chats(account_id, user_id)
         """)
 
-        # Auto-pause / ignore any existing Telegram bot chats in ai_followup_chats
+        # Auto-pause / ignore any existing Telegram bot chats in ai_followup_chats.
+        # Same rule as dm_reply_tracker.is_bot_account ('_bot' in username): matching
+        # display names on '%bot%' flagged real people (Abbott, Botha) on every restart.
         try:
             await db.execute("""
                 UPDATE ai_followup_chats 
                 SET status = 'bot_ignored' 
-                WHERE LOWER(username) LIKE '%bot' OR LOWER(name) LIKE '%bot%' OR user_id IN (777000, 178220800, 4244000, 4244001, 1088515515)
+                WHERE LOWER(username) LIKE '%!_bot%' ESCAPE '!' OR user_id IN (777000, 178220800, 4244000, 4244001, 1088515515)
             """)
         except Exception:
             pass
@@ -1274,11 +1276,17 @@ async def init_db():
                 await db.execute(_fts_trigger)
             except Exception:
                 pass  # trigger already exists
-        # One-time FTS rebuild to index pre-existing data
+        # One-time FTS rebuild to index pre-existing data (flagged in settings so it
+        # no longer re-indexes the whole table on every startup).
         try:
-            await db.execute(
-                "INSERT INTO agent_learned_knowledge_fts(agent_learned_knowledge_fts) VALUES('rebuild')"
-            )
+            cur = await db.execute("SELECT 1 FROM settings WHERE key = 'fts_learned_rebuilt_v1'")
+            if not await cur.fetchone():
+                await db.execute(
+                    "INSERT INTO agent_learned_knowledge_fts(agent_learned_knowledge_fts) VALUES('rebuild')"
+                )
+                await db.execute(
+                    "INSERT OR REPLACE INTO settings (key, value, updated_at) "
+                    "VALUES ('fts_learned_rebuilt_v1', '1', datetime('now'))")
         except Exception:
             pass
 

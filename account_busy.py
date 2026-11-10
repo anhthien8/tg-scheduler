@@ -42,13 +42,17 @@ async def acquire(account_id: int, kind: str, ttl_secs: float = 90):
     """Mark an account as busy. Raises AccountBusy if already in use."""
     if is_busy(account_id):
         raise AccountBusy(account_id, _busy_kind.get(account_id, "?"))
-    _busy_until[account_id] = time.monotonic() + ttl_secs
+    until = time.monotonic() + ttl_secs
+    _busy_until[account_id] = until
     _busy_kind[account_id] = kind
     try:
         yield
     finally:
-        _busy_until.pop(account_id, None)
-        _busy_kind.pop(account_id, None)
+        # Only clear our own marker: if the TTL expired and another task took the
+        # account, popping here would wipe that task's marker.
+        if _busy_until.get(account_id) == until:
+            _busy_until.pop(account_id, None)
+            _busy_kind.pop(account_id, None)
 
 
 def release(account_id: int) -> None:

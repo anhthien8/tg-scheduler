@@ -1192,7 +1192,8 @@ async def extract_kol_profile(history: list[dict], provider: str, api_keys: list
     )
 
     try:
-        raw_res = await generate_chat_response(
+        # JSON task: skip the chat style rule and punctuation humanizer.
+        raw_res = await _generate_chat_response_raw(
             messages_history=[{"role": "user", "content": f"Conversation:\n{conv_text}"}],
             system_prompt=sys_prompt,
             provider=provider,
@@ -1238,7 +1239,8 @@ async def distill_human_takeover_rule(history: list[dict], human_reply: str, pro
     )
 
     try:
-        raw_res = await generate_chat_response(
+        # JSON task: skip the chat style rule and punctuation humanizer.
+        raw_res = await _generate_chat_response_raw(
             messages_history=[{"role": "user", "content": conv_context}],
             system_prompt=sys_prompt,
             provider=provider,

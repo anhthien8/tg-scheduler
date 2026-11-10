@@ -845,7 +845,7 @@ const AIFollowUp = {
     const body = document.getElementById('aifu-kol-body');
     if (!rows.length) { body.innerHTML = '<div style="text-align:center;color:var(--text2);padding:20px">Chưa có KOL nào</div>'; return; }
     const d = v => v ? new Date(String(v).replace(' ', 'T') + (String(v).includes('Z') || String(v).includes('+') ? '' : 'Z')).toLocaleDateString('vi-VN') : '–';
-    const link = (u, t) => u ? `<a href="${esc(u)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(t)}</a>` : '–';
+    const link = (u, t) => (u && /^https?:\/\//i.test(u)) ? `<a href="${esc(u)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(t)}</a>` : '–';
     body.innerHTML = `<table class="table" style="width:100%;font-size:12px"><thead><tr>
         <th>KOL</th><th>Account</th><th>Bước</th><th>UID / VIP</th><th>Kênh</th><th>Ngày chốt</th><th>Chăm sóc gần nhất</th>
       </tr></thead><tbody>${rows.map(k => {

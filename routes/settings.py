@@ -123,8 +123,9 @@ async def fetch_models(payload: FetchModelsPayload):
         ).rstrip("/")
     except UrlNotAllowed as e:
         return {"success": False, "error": f"URL bị chặn: {e}"}
-    except Exception:
-        base_url = payload.base_url.rstrip("/")
+    except Exception as e:
+        # Fail closed: an unparseable URL must not skip the SSRF guard.
+        return {"success": False, "error": f"URL không hợp lệ: {e}"}
     # Ensure we hit /models endpoint
     if base_url.endswith("/v1"):
         models_url = base_url + "/models"

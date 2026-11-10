@@ -26,7 +26,7 @@ const Zalo = (() => {
   function esc(s) {
     const d = document.createElement('div');
     d.textContent = s == null ? '' : String(s);
-    return d.innerHTML;
+    return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   const toast = (m, t = 'info') => (window.App && App.toast ? App.toast(m, t) : console.log(m));
   const el = (id) => document.getElementById(id);
@@ -63,11 +63,11 @@ const Zalo = (() => {
     const avatar = me.avatar || a.avatar;
     const head = `${avatar ? `<img src="${esc(avatar)}" alt="" style="width:36px;height:36px;border-radius:50%">` : '<div style="width:36px;height:36px;border-radius:50%;background:var(--border)"></div>'}
       <div style="min-width:160px"><b>${esc(name)}</b><div style="color:var(--text2);font-size:.8rem">${a.uid || me.uid ? 'UID ' + esc(me.uid || a.uid) : ''}</div></div>`;
-    const del = `<button class="btn btn-danger btn-sm" onclick="Zalo.removeAccount('${esc(a.id)}')">Xoá</button>`;
+    const del = `<button class="btn btn-danger btn-sm" onclick="Zalo.removeAccount('${escJs(a.id)}')">Xoá</button>`;
 
     if (!a.logged_in) {
       const rescan = LOGIN_BUSY.includes(l.state) ? ''
-        : `<button class="btn btn-primary btn-sm" onclick="Zalo.relogin('${esc(a.id)}')">Quét QR</button>`;
+        : `<button class="btn btn-primary btn-sm" onclick="Zalo.relogin('${escJs(a.id)}')">Quét QR</button>`;
       return `<div class="zalo-nick" style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
         ${a.pending ? '' : head}<div style="flex:1">${qrBlock(l)}</div>
         <div style="white-space:nowrap">${rescan} ${del}</div></div>`;
@@ -90,9 +90,9 @@ const Zalo = (() => {
         ${a.last_error && !a.resting ? `<div style="color:var(--red);font-size:.8rem">⚠️ ${esc(a.last_error)}</div>` : ''}
       </div>
       <div style="white-space:nowrap">
-        ${a.resting ? `<button class="btn btn-secondary btn-sm" onclick="Zalo.resumeAccount('${esc(a.id)}')">Cho chạy lại</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="Zalo.editCap('${esc(a.id)}')">Giới hạn</button>
-        <button class="btn btn-ghost btn-sm" onclick="Zalo.toggleAccount('${esc(a.id)}')">${a.enabled ? 'Tắt' : 'Bật'}</button>
+        ${a.resting ? `<button class="btn btn-secondary btn-sm" onclick="Zalo.resumeAccount('${escJs(a.id)}')">Cho chạy lại</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="Zalo.editCap('${escJs(a.id)}')">Giới hạn</button>
+        <button class="btn btn-ghost btn-sm" onclick="Zalo.toggleAccount('${escJs(a.id)}')">${a.enabled ? 'Tắt' : 'Bật'}</button>
         ${del}</div></div>`;
   }
 
@@ -215,10 +215,10 @@ const Zalo = (() => {
   function groupRow(g) {
     return `<tr data-name="${esc((g.name || '').toLowerCase())}"><td>${esc(g.name)}</td><td>${g.total}</td>
       <td style="text-align:right;white-space:nowrap">
-        <button class="btn btn-secondary btn-sm" onclick="Zalo.scrapeGroup('${esc(g.id)}', this)">Quét thành viên</button>
-        <button class="btn btn-secondary btn-sm" title="Chỉ lấy những người đã nhắn tin trong 1000 tin gần nhất của nhóm" onclick="Zalo.scrapeActive('${esc(g.id)}', this)">🔥 Quét active</button>
-        <button class="btn btn-ghost btn-sm" onclick="Zalo.openWatch('${esc(g.id)}')">${_watches.some((w) => w.group_id === g.id) ? '👁 Đang theo dõi' : '👁 Theo dõi người mới'}</button>
-        <button class="btn btn-ghost btn-sm" onclick="Zalo.toggleEvents('${esc(g.id)}', this)">Sự kiện ▾</button></td></tr>
+        <button class="btn btn-secondary btn-sm" onclick="Zalo.scrapeGroup('${escJs(g.id)}', this)">Quét thành viên</button>
+        <button class="btn btn-secondary btn-sm" title="Chỉ lấy những người đã nhắn tin trong 1000 tin gần nhất của nhóm" onclick="Zalo.scrapeActive('${escJs(g.id)}', this)">🔥 Quét active</button>
+        <button class="btn btn-ghost btn-sm" onclick="Zalo.openWatch('${escJs(g.id)}')">${_watches.some((w) => w.group_id === g.id) ? '👁 Đang theo dõi' : '👁 Theo dõi người mới'}</button>
+        <button class="btn btn-ghost btn-sm" onclick="Zalo.toggleEvents('${escJs(g.id)}', this)">Sự kiện ▾</button></td></tr>
       <tr class="hidden" id="zalo-ev-${esc(g.id)}"><td colspan="3"></td></tr>`;
   }
 
@@ -290,8 +290,8 @@ const Zalo = (() => {
         <span>nghe bằng nick</span>
         <select class="form-input" id="zw-acc-${esc(id)}" style="width:170px">${nicks.map((a) =>
           `<option value="${esc(a.id)}" ${a.id === acc ? 'selected' : ''}>${esc(nickName(a.id))}</option>`).join('')}</select>
-        <button class="btn btn-primary btn-sm" onclick="Zalo.saveWatch('${esc(id)}')">${w ? 'Lưu' : 'Bật theo dõi'}</button>
-        ${w ? `<button class="btn btn-ghost btn-sm" onclick="Zalo.deleteWatch('${esc(id)}')">Bỏ theo dõi</button>` : ''}
+        <button class="btn btn-primary btn-sm" onclick="Zalo.saveWatch('${escJs(id)}')">${w ? 'Lưu' : 'Bật theo dõi'}</button>
+        ${w ? `<button class="btn btn-ghost btn-sm" onclick="Zalo.deleteWatch('${escJs(id)}')">Bỏ theo dõi</button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="this.closest('tr').classList.add('hidden')">Đóng</button></div>`;
   }
 
@@ -356,8 +356,8 @@ const Zalo = (() => {
           <td>${camp}</td><td>${esc(w.account_id ? nickName(w.account_id) : 'Nick mặc định')}</td><td>${st}</td>
           <td>${w.joined_count || 0}${w.last_join_at ? `<div style="font-size:.8rem;color:var(--text2)">gần nhất ${esc(w.last_join_at)}</div>` : ''}</td>
           <td style="text-align:right;white-space:nowrap">
-            <label class="toggle" title="Bật/tắt theo dõi"><input type="checkbox" ${w.enabled ? 'checked' : ''} onchange="Zalo.toggleWatch('${esc(w.group_id)}', this.checked)"><span class="toggle-slider"></span></label>
-            <button class="btn btn-ghost btn-sm" onclick="Zalo.deleteWatch('${esc(w.group_id)}')">Xoá</button></td></tr>`;
+            <label class="toggle" title="Bật/tắt theo dõi"><input type="checkbox" ${w.enabled ? 'checked' : ''} onchange="Zalo.toggleWatch('${escJs(w.group_id)}', this.checked)"><span class="toggle-slider"></span></label>
+            <button class="btn btn-ghost btn-sm" onclick="Zalo.deleteWatch('${escJs(w.group_id)}')">Xoá</button></td></tr>`;
       }).join('')}</tbody></table>`;
   }
 
@@ -378,7 +378,7 @@ const Zalo = (() => {
           <span style="color:var(--text2);font-size:.8rem">${ev.start_time ? new Date(ev.start_time).toLocaleString('vi-VN') : ''}
           ${ev.accept_count != null ? ` · ${ev.accept_count} tham gia` : ''}</span></span>
         <button class="btn btn-secondary btn-sm" data-title="${esc(ev.title)}" data-creator="${esc(ev.creator_id || '')}"
-          onclick="Zalo.scrapeEvent('${esc(ev.id)}','${esc(id)}',this)">Lấy người tham gia</button></div>`).join('');
+          onclick="Zalo.scrapeEvent('${escJs(ev.id)}','${escJs(id)}',this)">Lấy người tham gia</button></div>`).join('');
     } catch (e) {
       cell.innerHTML = `<div class="empty-state">⚠️ ${esc(e.message)}</div>`;
     }
@@ -417,7 +417,7 @@ const Zalo = (() => {
       ? `<table class="data-table" style="width:100%"><thead><tr><th>Nguồn</th><th>Loại</th><th>Tổng</th><th>Chưa liên hệ</th><th>Quét lúc</th><th></th></tr></thead><tbody>
         ${_sources.map((s) => `<tr><td>${esc(s.source_name)}</td><td>${s.source_type === 'event' ? 'Sự kiện' : 'Nhóm'}</td>
           <td>${s.total}</td><td>${s.pending}</td><td>${esc(s.last_scraped || '')}</td>
-          <td><button class="btn btn-ghost btn-sm" onclick="Zalo.filterSource('${esc(s.source_type)}:${esc(s.source_id)}')">Xem</button></td></tr>`).join('')}
+          <td><button class="btn btn-ghost btn-sm" onclick="Zalo.filterSource('${escJs(s.source_type)}:${escJs(s.source_id)}')">Xem</button></td></tr>`).join('')}
         </tbody></table>`
       : '<div class="empty-state">Chưa quét nguồn nào.</div>';
     if (sel) sel.value = '';
@@ -465,8 +465,8 @@ const Zalo = (() => {
           <td style="font-size:.8rem">${c.account_id ? esc(nickName(c.account_id)) : ''}</td>
           <td style="font-size:.8rem">${esc(c.updated_at || '')}</td>
           <td>${c.status === 'blocked'
-            ? `<button class="btn btn-ghost btn-sm" onclick="Zalo.blockContact('${esc(c.uid)}', false)">Bỏ chặn</button>`
-            : c.status === 'new' ? `<button class="btn btn-ghost btn-sm" title="Không nick nào được liên hệ người này" onclick="Zalo.blockContact('${esc(c.uid)}', true)">Chặn</button>` : ''}</td></tr>`;
+            ? `<button class="btn btn-ghost btn-sm" onclick="Zalo.blockContact('${escJs(c.uid)}', false)">Bỏ chặn</button>`
+            : c.status === 'new' ? `<button class="btn btn-ghost btn-sm" title="Không nick nào được liên hệ người này" onclick="Zalo.blockContact('${escJs(c.uid)}', true)">Chặn</button>` : ''}</td></tr>`;
       }).join('')}</tbody></table></div>`;
   }
 

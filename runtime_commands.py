@@ -31,6 +31,7 @@ ALLOWED_COMMANDS = frozenset({
     "invite.run",
     "reaction.run",
     "warmup.run",
+    "forum.resolve_link",  # has a worker handler in ipc_dispatcher.HANDLERS
 })
 _SENSITIVE_PARTS = ("password", "passwd", "secret", "otp", "api_hash", "session", "token", "code")
 
