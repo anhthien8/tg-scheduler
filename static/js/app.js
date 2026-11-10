@@ -96,7 +96,7 @@ await this._finishFirstLogin(code,this._first2fa,'btn-verify')},
 async verify2FAFirst(){const pw=document.getElementById('login-password')?.value||'';if(!pw)return this.toast('Nhập mật khẩu 2FA','error');
 await this._finishFirstLogin((document.getElementById('login-code')?.value||'').trim(),pw,'btn-verify-2fa')},
 
-navigate(page){this.currentPage=page;try{if(page==='channels'){this._populateChAccountSelect();}}catch(e){console.error('channels populate error:',e);}try{if(page==='members'){Members.populateAccounts();}}catch(e){console.error('members populate error:',e);}document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
+navigate(page){try{if(this.currentPage==='warmup'&&page!=='warmup'&&window.Warmup){Warmup.cleanup();const _c=document.getElementById('warmup-log-autorefresh');if(_c)_c.checked=false;}if(this.currentPage==='members'&&page!=='members'&&window.Polling){Polling.stop('members:campaigns');Polling.stop('members:inviteCampaigns');}}catch(e){}this.currentPage=page;try{if(page==='channels'){this._populateChAccountSelect();}}catch(e){console.error('channels populate error:',e);}try{if(page==='members'){Members.populateAccounts();}}catch(e){console.error('members populate error:',e);}document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
 // Close sidebar on mobile after navigation
 if(window.innerWidth<=768){const sb=document.getElementById('sidebar');const ov=document.getElementById('sidebar-overlay');if(sb)sb.classList.remove('open');if(ov)ov.classList.remove('open');}
 
@@ -822,14 +822,14 @@ if(page==='warmup'){
             <div class="form-group"><label class="form-label">Link nhóm <span class="info-i" title="Dán link t.me/..., @username, link mời t.me/+... hoặc chat ID. Hệ thống tự lấy ID, tên nhóm và tự join nếu cần.">i</span></label><input type="text" id="wg-link" class="form-input" placeholder="t.me/cryptovn hoặc @cryptovn" onkeydown="if(event.key==='Enter')Warmup.saveGroup()"></div>
             <div class="form-group"><label class="form-label">Tên hiển thị <span style="color:var(--text2);font-weight:400">(tuỳ chọn — mặc định lấy tên nhóm)</span></label><input type="text" id="wg-name" class="form-input" placeholder="Để trống = tên nhóm trên Telegram"></div>
           </div>
-          <div class="modal-footer"><button class="btn btn-primary" onclick="Warmup.saveGroup()">Luu</button></div>
+          <div class="modal-footer"><button class="btn btn-primary" onclick="Warmup.saveGroup()">Lưu</button></div>
         </div>
       </div>
 
       <!-- Add Script Modal -->
       <div id="warmup-script-modal" class="modal-overlay">
         <div class="modal">
-          <div class="modal-header"><h3 class="modal-title">Them script</h3><button class="modal-close" onclick="(document.getElementById('warmup-script-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
+          <div class="modal-header"><h3 class="modal-title">Thêm script</h3><button class="modal-close" onclick="(document.getElementById('warmup-script-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
           <div class="modal-body">
             <div class="form-group"><label class="form-label">Mẫu 1 click <span style="font-weight:400;color:var(--text3);font-size:.8em">(bấm để thêm cả gói câu vào ô bên dưới)</span></label>
               <div id="ws-presets" style="display:flex;flex-wrap:wrap;gap:6px"></div>
@@ -840,7 +840,7 @@ if(page==='warmup'){
               <label for="ws-ai-remix" style="cursor:pointer">AI Remix</label>
             </div>
           </div>
-          <div class="modal-footer"><button class="btn btn-primary" onclick="Warmup.saveScript()">Luu</button></div>
+          <div class="modal-footer"><button class="btn btn-primary" onclick="Warmup.saveScript()">Lưu</button></div>
         </div>
       </div>
 
@@ -871,7 +871,7 @@ if(page==='warmup'){
       <div id="warmup-logs-modal" class="modal-overlay">
         <div class="modal" style="max-width:700px">
           <div class="modal-header"><h3 class="modal-title">Job Logs</h3><button class="modal-close" onclick="(document.getElementById('warmup-logs-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open')">x</button></div>
-          <div class="modal-body"><div class="table-wrap"><table><thead><tr><th>Thoi gian</th><th>Account</th><th>Noi dung</th><th>Trang thai</th></tr></thead><tbody id="warmup-job-logs-body"></tbody></table></div></div>
+          <div class="modal-body"><div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Account</th><th>Nội dung</th><th>Trạng thái</th></tr></thead><tbody id="warmup-job-logs-body"></tbody></table></div></div>
         </div>
       </div>
 
@@ -886,160 +886,6 @@ if(page==='warmup'){
   return;
 }
 
-// ── Changelog page ──
-if(page==='changelog'){
-  if(!document.getElementById('view-changelog')){
-    const CHANGELOG = [
-      {
-        version: '2.11.0', date: '2026-09-29', tag: 'latest',
-        changes: [
-          { type: 'new', text: 'Forum Inbox: dán link nhóm là tự lấy ID — hỗ trợ t.me/c/<id>/<topic> (offline), t.me/<username> và link mời t.me/+... (resolve qua account đang kết nối)' },
-          { type: 'new', text: 'Lọc Lead Chất Lượng (ICP Score) — chấm điểm lead TRƯỚC khi gửi (username, tên, Premium, hoạt động gần đây) và bỏ qua lead dưới ngưỡng; đặt ở ô "🎯 Lọc Lead Chất Lượng" trong campaign (0 = tắt)' },
-          { type: 'new', text: 'Nhịp follow-up tùy chỉnh — từ 2 bước cố định thành cadence cấu hình được (mặc định Ngày 1/3/7) trong AI Follow-Up Settings' },
-          { type: 'new', text: 'Tự động xoay Proxy khi bị ban — PeerFlood sẽ tự đổi IP mới từ pool để gỡ giới hạn (tắt bằng setting proxy_rotate_on_ban=0)' },
-          { type: 'new', text: 'Cảnh báo Speed-to-Reply — ping khi lead nóng chờ phản hồi quá lâu (mặc định >30 phút, cấu hình reply_sla_minutes)' },
-          { type: 'improve', text: 'Cá nhân hóa sâu hơn — AI remix ở watcher nay dùng tên + chủ đề nhóm nguồn + ngôn ngữ lead; thêm biến {group}/{community} trong template' },
-          { type: 'improve', text: 'Watcher dùng template rotation + auto-translate-native giống campaign' },
-        ]
-      },
-      {
-        version: '2.9.0', date: '2026-09-28',
-        changes: [
-          { type: 'new', text: 'Backtester dữ liệu thật — replay lịch sử outreach, funnel reply/convert/onboard, đo tốc độ phản hồi (median/p90), so sánh variant với khoảng tin cậy Wilson 95% + kiểm định ý nghĩa (thay cho open-rate giả)' },
-          { type: 'new', text: 'Smart Template Rotation cho Keyword Watcher — mỗi tin nhắn DM có ô "Variant"; các tin cùng số tạo thành 1 biến thể để tự động xoay vòng A/B dựa trên hiệu suất' },
-          { type: 'improve', text: 'Ghi nhận variant_index vào watcher_dm_logs để quy kết reply chính xác theo biến thể' },
-          { type: 'fix', text: 'Sửa lỗi ngầm trong campaign: import `re` cục bộ che module-level gây UnboundLocalError khi phát hiện FloodWait' },
-          { type: 'fix', text: 'Sửa định nghĩa hàm trùng lặp find_campaign_log_for_user / find_watcher_log_for_user (hàm sau ghi đè hàm trước)' },
-          { type: 'improve', text: 'Hạ tầng QC/QA: gom toàn bộ test về một runner (pytest + node), thêm ruff/mypy/pytest-cov, CI GitHub Actions, gỡ test trùng lặp' },
-        ]
-      },
-      {
-        version: '2.8.0', date: '2026-08-01',
-        changes: [
-          { type: 'fix', text: 'Sửa lỗi campaign dừng sớm — chỉ gửi 66/1600+ members do accounts exhausted ghi đè status thành "completed"' },
-          { type: 'fix', text: 'PeerFlood accounts giờ sẽ tự phục hồi sau cooldown 2-5 phút thay vì bị loại vĩnh viễn' },
-          { type: 'fix', text: 'Daily limit không còn co rút khi accounts bị flood — dùng tổng sender ban đầu' },
-          { type: 'improve', text: 'Thêm diagnostic logging chi tiết trước mỗi campaign: tổng members, đã gửi, cross-excluded, blacklisted' },
-          { type: 'new', text: 'Thêm trang Changelog để theo dõi lịch sử cập nhật phần mềm' },
-        ]
-      },
-      {
-        version: '2.7.0', date: '2026-07-24',
-        changes: [
-          { type: 'new', text: 'AI Sales Agent — tự động phản hồi DM bằng AI để chốt deal & onboard khách hàng' },
-          { type: 'new', text: 'Hỗ trợ đa nhà cung cấp AI: Gemini, Groq, OpenAI, DeepSeek, OpenAI-Compatible' },
-          { type: 'improve', text: 'Auto-fallback AI provider — tự chuyển sang provider khác nếu provider chính thiếu key' },
-          { type: 'fix', text: 'Sửa lỗi Settings không lưu được khi F5 (save_setting alias)' },
-        ]
-      },
-      {
-        version: '2.6.0', date: '2026-07-22',
-        changes: [
-          { type: 'new', text: 'AI Remix nội dung DM — mỗi tin nhắn được AI viết lại khác nhau chống spam' },
-          { type: 'new', text: 'SpamBot pre-check — tự kiểm tra account bị spam-limited trước khi chạy campaign' },
-          { type: 'improve', text: 'Cross-campaign dedup — loại trừ user đã nhận DM từ campaign/watcher khác' },
-          { type: 'improve', text: 'Auto-join nhóm nếu account chưa join source group khi gửi DM' },
-        ]
-      },
-      {
-        version: '2.5.0', date: '2026-07-17',
-        changes: [
-          { type: 'new', text: 'Smart Template Rotation — xoay vòng variant template thông minh dựa trên hiệu suất' },
-          { type: 'new', text: 'Warmup Module — tự join/chat nhóm để làm nóng account mới' },
-          { type: 'new', text: 'Daily Summary — báo cáo tổng hợp cuối ngày tự động' },
-          { type: 'new', text: 'Auto-Pause khi phát hiện account bị restricted' },
-        ]
-      },
-      {
-        version: '2.4.0', date: '2026-07-15',
-        changes: [
-          { type: 'new', text: 'Batch Scrape — scrape members từ nhiều nhóm cùng lúc' },
-          { type: 'new', text: 'Invite Module — mời members vào nhóm/kênh chỉ định' },
-          { type: 'improve', text: 'Cải thiện round-robin account selection với anti-ban backoff' },
-        ]
-      },
-      {
-        version: '2.3.0', date: '2026-07-12',
-        changes: [
-          { type: 'new', text: 'DM Campaign — gửi DM hàng loạt đến members đã scrape' },
-          { type: 'new', text: 'Blacklist management — quản lý danh sách chặn user' },
-          { type: 'new', text: 'Image randomization — thay đổi hash ảnh chống phát hiện trùng lặp' },
-          { type: 'fix', text: 'Sửa lỗi FloodWait không đợi đúng thời gian Telegram yêu cầu' },
-        ]
-      },
-      {
-        version: '2.2.0', date: '2026-07-09',
-        changes: [
-          { type: 'new', text: 'Analytics Dashboard — thống kê hiệu suất gửi tin, biểu đồ trực quan' },
-          { type: 'new', text: 'Template Library — lưu trữ & quản lý mẫu tin nhắn' },
-          { type: 'new', text: 'Auto-Reply Chatbot — tự động trả lời keyword trong nhóm' },
-        ]
-      },
-      {
-        version: '2.1.0', date: '2026-07-04',
-        changes: [
-          { type: 'new', text: 'Discord Bot integration — quản lý bot Discord, keyword watchers' },
-          { type: 'improve', text: 'Reactions Module — tự động react tin nhắn trong kênh/nhóm' },
-        ]
-      },
-      {
-        version: '2.0.0', date: '2026-06-20',
-        changes: [
-          { type: 'new', text: 'Thiết kế lại toàn bộ UI — Dark theme premium với Glassmorphism' },
-          { type: 'new', text: 'Multi-account management — quản lý nhiều tài khoản Telegram' },
-          { type: 'new', text: 'Scheduled posting — đặt lịch gửi tin theo múi giờ quốc gia' },
-          { type: 'new', text: 'Keyword Watchers — theo dõi keyword & auto-DM members mới' },
-          { type: 'new', text: 'Inbox — xem & quản lý tin nhắn đến từ tất cả accounts' },
-        ]
-      },
-    ];
-
-    const typeIcons = { new: '✨', fix: '🐛', improve: '⚡', security: '🔒', breaking: '💥' };
-    const typeLabels = { new: 'Tính năng mới', fix: 'Sửa lỗi', improve: 'Cải thiện', security: 'Bảo mật', breaking: 'Breaking' };
-    const typeBadgeClass = { new: 'cl-badge-new', fix: 'cl-badge-fix', improve: 'cl-badge-improve', security: 'cl-badge-security', breaking: 'cl-badge-breaking' };
-
-    const entriesHtml = CHANGELOG.map((entry, idx) => {
-      const changesHtml = entry.changes.map(c => `
-        <div class="cl-change">
-          <span class="cl-badge ${typeBadgeClass[c.type] || 'cl-badge-new'}">${typeIcons[c.type] || '📌'} ${typeLabels[c.type] || c.type}</span>
-          <span class="cl-change-text">${c.text}</span>
-        </div>
-      `).join('');
-      const tagHtml = entry.tag === 'latest' ? '<span class="cl-tag-latest">LATEST</span>' : '';
-      return `
-        <div class="cl-entry ${idx === 0 ? 'cl-entry-latest' : ''}">
-          <div class="cl-entry-header">
-            <div class="cl-version-row">
-              <span class="cl-version">v${entry.version}</span>
-              ${tagHtml}
-            </div>
-            <span class="cl-date">${entry.date}</span>
-          </div>
-          <div class="cl-changes">${changesHtml}</div>
-        </div>
-      `;
-    }).join('');
-
-    const clHtml = `<div id="view-changelog">
-      <div class="cl-header">
-        <div>
-          <h2 class="page-title" style="margin:0">📝 Changelog</h2>
-          <p class="cl-subtitle">Lịch sử cập nhật & phiên bản mới nhất</p>
-        </div>
-        <div class="cl-current-version">
-          <span class="cl-cv-label">Phiên bản hiện tại</span>
-          <span class="cl-cv-number">v${CHANGELOG[0].version}</span>
-        </div>
-      </div>
-      <div class="cl-timeline">${entriesHtml}</div>
-    </div>`;
-    const w = document.createElement('div'); w.innerHTML = clHtml;
-    document.querySelector('.main').appendChild(w.firstElementChild);
-  }
-  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
-  (document.getElementById('view-changelog')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
-  return;
-}
 
 document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
 const viewEl=document.getElementById(`view-${page}`);
@@ -1233,9 +1079,9 @@ async showAccountWarnings(accId){
     body.innerHTML=h;
   }catch(e){body.innerHTML=`<div style="color:var(--red)">${esc(e.message)}</div>`}
 },
-async unflagAccount(accId){if(!await customConfirm('Bỏ cảnh báo tài khoản này?'))return;try{await fetch(`/api/auth/accounts/${accId}/unflag`,{method:'POST'});API.clearAccountsCache();this.toast('Đã bỏ cảnh báo','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
+async unflagAccount(accId){if(!await customConfirm('Bỏ cảnh báo tài khoản này?'))return;try{{const _r=await fetch(`/api/auth/accounts/${accId}/unflag`,{method:'POST'});if(!_r.ok)throw new Error('Máy chủ trả lỗi '+_r.status);}API.clearAccountsCache();this.toast('Đã bỏ cảnh báo','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
 
-async unpauseAccount(accId){if(!await customConfirm('Bỏ tạm dừng tài khoản này? Tài khoản sẽ hoạt động lại bình thường.'))return;try{await fetch(`/api/auth/accounts/${accId}/unpause`,{method:'POST'});API.clearAccountsCache();this.toast('Đã bỏ tạm dừng','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
+async unpauseAccount(accId){if(!await customConfirm('Bỏ tạm dừng tài khoản này? Tài khoản sẽ hoạt động lại bình thường.'))return;try{{const _r=await fetch(`/api/auth/accounts/${accId}/unpause`,{method:'POST'});if(!_r.ok)throw new Error('Máy chủ trả lỗi '+_r.status);}API.clearAccountsCache();this.toast('Đã bỏ tạm dừng','success');this.loadAccounts();}catch(e){this.toast(e.message,'error')}},
 
 async _populateLogAccountFilter(){const sel=document.getElementById('log-filter-account');if(!sel)return;const accs=this.accounts||App._accounts||[];if(!sel.options.length||sel.options.length===1){while(sel.options.length>1)sel.remove(1);accs.forEach(a=>{const opt=document.createElement('option');opt.value=a.id;opt.textContent=a.name||a.phone;sel.appendChild(opt);});} },
 
@@ -2058,7 +1904,7 @@ async saveWatcher(){
 
   try{
     const savedId = editId ? parseInt(editId) : null;
-    if(editId) await API.updateWatcher(editId,payload); else { const r = await API.createWatcher(payload); }
+    if(editId) await API.updateWatcherRuntime(editId,payload); else { await API.createWatcherRuntime(payload); }
     this.toast(editId?'Đã cập nhật rule':'Đã tạo rule mới','success');
     this.closeWatcherModal();
     this.loadWatchers();
@@ -2184,7 +2030,7 @@ _esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g
 
 async toggleWatcher(id){try{const r=await API.toggleWatcher(id);this.toast(r.is_active?'Đã bật':'Đã tắt','success');this.loadWatchers()}catch(e){this.toast(e.message,'error')}},
 
-async deleteWatcher(id){if(!await customConfirm('Xóa rule này?'))return;try{await API.deleteWatcher(id);this.toast('Đã xóa','success');this.loadWatchers()}catch(e){this.toast(e.message,'error')}},
+async deleteWatcher(id){if(!await customConfirm('Xóa rule này?'))return;try{await API.deleteWatcherRuntime(id);this.toast('Đã xóa','success');this.loadWatchers()}catch(e){this.toast(e.message,'error')}},
 
 
 
@@ -2591,7 +2437,7 @@ App.loadSettings = async function() {
     // Also load proxy status when settings page loads
     App.loadProxyStatus();
   } catch(e) {
-    App.toast('Loi tai cai dat: ' + e.message, 'error');
+    App.toast('Lỗi tải cài đặt: ' + e.message, 'error');
   }
 };
 
@@ -4140,12 +3986,13 @@ App.openCommandBotLogs = async function() {
 // ══════════════════════════════════════════════════════════
 
 App.loadDailySummary = async function() {
+  if (!document.getElementById('daily-summary-account')) return;  // UI not present
   try {
     // Populate account dropdown
     const sel = document.getElementById('daily-summary-account');
     if (sel) {
       const accs = App._accounts || [];
-      sel.innerHTML = '<option value="">Tu dong (tai khoan dau tien)</option>';
+      sel.innerHTML = '<option value="">Tự động (tài khoản đầu tiên)</option>';
       accs.forEach(a => {
         const name = a.name || a.phone || ('ID ' + a.id);
         sel.innerHTML += `<option value="${a.id}">${name} (ID ${a.id})</option>`;
@@ -4173,7 +4020,7 @@ App.saveDailySummary = async function() {
   const enabled = document.getElementById('daily-summary-enabled')?.checked ? '1' : '0';
   const time = document.getElementById('daily-summary-time')?.value || '21:00';
   const accountId = document.getElementById('daily-summary-account')?.value;
-  statusEl.textContent = 'Dang luu...';
+  statusEl.textContent = 'Đang lưu...';
   try {
     const headers = { ...API.getHeaders(), 'Content-Type': 'application/json' };
     const resp = await fetch('/api/settings/daily-summary', {
@@ -4183,12 +4030,12 @@ App.saveDailySummary = async function() {
     });
     if (!resp.ok) {
       const err = await resp.json();
-      throw new Error(err.detail || 'Loi luu');
+      throw new Error(err.detail || 'Lỗi lưu');
     }
-    App.toast('Da luu cai dat bao cao!', 'success');
+    App.toast('Đã lưu cài đặt báo cáo!', 'success');
     statusEl.textContent = enabled === '1' ? ('Gui luc ' + time + ' moi ngay') : 'Dang tat';
   } catch(e) {
-    App.toast('Loi: ' + e.message, 'error');
+    App.toast('Lỗi: ' + e.message, 'error');
     statusEl.textContent = '';
   }
 };
@@ -4512,6 +4359,7 @@ Object.assign(App, {
     const poll = async () => {
       try{
         const r = await fetch('/api/inbox/unread-count');
+        if (!r.ok) return;
         const d = await r.json();
         const badge = document.getElementById('inbox-badge');
         if(!badge) return;
@@ -4835,6 +4683,7 @@ App._renderProxyTestResults = function(data) {
 };
 
 App.loadProxyStatus = async function() {
+  if (!document.getElementById('proxy-mapping-list')) return;  // proxy pool UI not on this page
   try {
     const resp = await fetch('/api/proxy/status', { headers: API.getHeaders() });
     const data = await resp.json();
@@ -4907,7 +4756,7 @@ App.clearProxyPool = async function() {
     });
     const data = await resp.json();
     if (data.success) {
-      App.toast('Da xoa tat ca proxy', 'success');
+      App.toast('Đã xoá tất cả proxy', 'success');
       App.loadProxyStatus();
       (document.getElementById('proxy-test-results')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
     }
@@ -4969,7 +4818,7 @@ const Warmup = {
               <span style="color:var(--text2);font-size:.85rem;margin-left:8px">${this._esc(g.chat_title || '')} ${g.chat_username ? '@' + g.chat_username : ''}</span>
               <span style="color:var(--text2);font-size:.78rem;margin-left:8px">ID: ${g.chat_id}</span>
             </div>
-            <button onclick="event.stopPropagation();Warmup.deleteGroup(${g.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoa</button>
+            <button onclick="event.stopPropagation();Warmup.deleteGroup(${g.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoá</button>
           </div>
         </div>`;
       }).join('');
@@ -5006,14 +4855,14 @@ const Warmup = {
   },
 
   async deleteGroup(id) {
-    if (!await customConfirm('Xoa nhom nay va tat ca scripts/jobs?')) return;
+    if (!await customConfirm('Xoá nhóm này và tất cả scripts/jobs?')) return;
     try {
       await API.del('/api/warmup/groups/' + id);
       if (this._selectedGroupId === id) {
         this._selectedGroupId = null;
         (document.getElementById('warmup-scripts-section')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).add('hidden');
       }
-      App.toast('Da xoa', 'success');
+      App.toast('Đã xoá', 'success');
       this.loadGroups();
       this.loadJobs();
     } catch(e) { App.toast(e.message, 'error'); }
@@ -5027,7 +4876,7 @@ const Warmup = {
       const scripts = data.scripts || [];
       const el = document.getElementById('warmup-script-list');
       if (!scripts.length) {
-        el.innerHTML = '<div style="color:var(--text2);padding:12px">Chua co script nao. Them script de bat dau warmup.</div>';
+        el.innerHTML = '<div style="color:var(--text2);padding:12px">Chưa có script nào. Thêm script để bắt đầu warmup.</div>';
         return;
       }
       el.innerHTML = scripts.map((s, i) => {
@@ -5038,7 +4887,7 @@ const Warmup = {
               <div style="font-size:.85rem;white-space:pre-wrap">${this._esc(short)}</div>
               <div style="margin-top:4px"><span class="badge ${s.use_ai_remix ? 'badge-green' : 'badge-red'}">${s.use_ai_remix ? 'AI Remix' : 'Nguyen ban'}</span></div>
             </div>
-            <button onclick="Warmup.deleteScript(${s.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem;margin-left:8px">Xoa</button>
+            <button onclick="Warmup.deleteScript(${s.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem;margin-left:8px">Xoá</button>
           </div>
         </div>`;
       }).join('');
@@ -5090,7 +4939,7 @@ const Warmup = {
   },
 
   openAddScript() {
-    if (!this._selectedGroupId) { App.toast('Chon nhom truoc', 'error'); return; }
+    if (!this._selectedGroupId) { App.toast('Chọn nhóm trước', 'error'); return; }
     this._renderScriptPresets();
     (document.getElementById('ws-content') || me_dummy).value = '';
     (document.getElementById('ws-ai-remix') || me_dummy).checked = true;
@@ -5101,23 +4950,23 @@ const Warmup = {
     // One script per non-empty line, so a whole preset pack saves in one click.
     const lines = [...new Set((document.getElementById('ws-content')?.value || "")
       .split('\n').map(x => x.trim()).filter(Boolean))];
-    if (!lines.length) { App.toast('Nhap noi dung', 'error'); return; }
+    if (!lines.length) { App.toast('Nhập nội dung', 'error'); return; }
     const use_ai_remix = document.getElementById('ws-ai-remix')?.checked ? 1 : 0;
     try {
       for (const content of lines) {
         await API.post('/api/warmup/groups/' + this._selectedGroupId + '/scripts', { content, use_ai_remix });
       }
       (document.getElementById('warmup-script-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
-      App.toast(`Da them ${lines.length} script`, 'success');
+      App.toast(`Đã thêm ${lines.length} script`, 'success');
       this.loadScripts();
     } catch(e) { App.toast(e.message, 'error'); }
   },
 
   async deleteScript(id) {
-    if (!await customConfirm('Xoa script nay?')) return;
+    if (!await customConfirm('Xoá script này?')) return;
     try {
       await API.del('/api/warmup/scripts/' + id);
-      App.toast('Da xoa', 'success');
+      App.toast('Đã xoá', 'success');
       this.loadScripts();
     } catch(e) { App.toast(e.message, 'error'); }
   },
@@ -5144,30 +4993,30 @@ const Warmup = {
         const grpName = grp ? grp.name : 'Nhom #' + j.group_id;
         const isRunning = j.is_running || j.status === 'running';
         const statusBadge = isRunning
-          ? '<span class="badge badge-green">Dang chay</span>'
+          ? '<span class="badge badge-green">Đang chạy</span>'
           : j.status === 'error'
-            ? '<span class="badge badge-red">Loi</span>'
-            : '<span class="badge">Dung</span>';
+            ? '<span class="badge badge-red">Lỗi</span>'
+            : '<span class="badge">Dừng</span>';
         const accIds = JSON.parse(j.account_ids || '[]');
-        const lastPost = j.last_post_at ? j.last_post_at.replace('T', ' ').slice(0, 16) : 'Chua co';
+        const lastPost = j.last_post_at ? j.last_post_at.replace('T', ' ').slice(0, 16) : 'Chưa có';
 
         return `<div class="card" style="padding:12px;margin-bottom:8px">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div>
               <strong>${this._esc(grpName)}</strong> ${statusBadge}
               <div style="font-size:.82rem;color:var(--text2);margin-top:4px">
-                ${accIds.length} tai khoan | ${j.interval_min}-${j.interval_max} phut | ${j.schedule_start}-${j.schedule_end} | Limit: ${j.daily_post_limit}/ngay
+                ${accIds.length} tài khoản | ${j.interval_min}-${j.interval_max} phút | ${j.schedule_start}-${j.schedule_end} | Limit: ${j.daily_post_limit}/ngày
               </div>
               <div style="font-size:.8rem;color:var(--text2)">
-                Hom nay: ${j.posts_today}/${j.daily_post_limit} | Lan cuoi: ${lastPost}
+                Hôm nay: ${j.posts_today}/${j.daily_post_limit} | Lần cuối: ${lastPost}
               </div>
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap">
               ${isRunning
-                ? '<button class="btn btn-danger btn-sm" onclick="Warmup.stopJob(' + j.id + ')">Dung</button>'
-                : '<button class="btn btn-primary btn-sm" onclick="Warmup.startJob(' + j.id + ')">Chay</button>'}
+                ? '<button class="btn btn-danger btn-sm" onclick="Warmup.stopJob(' + j.id + ')">Dừng</button>'
+                : '<button class="btn btn-primary btn-sm" onclick="Warmup.startJob(' + j.id + ')">Chạy</button>'}
               <button class="btn btn-sm" style="background:color-mix(in srgb, var(--accent) 15%, transparent);color:var(--accent-text);border:1px solid color-mix(in srgb, var(--accent) 30%, transparent)" onclick="Warmup.viewJobLogs(${j.id})">Logs</button>
-              <button onclick="Warmup.deleteJob(${j.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoa</button>
+              <button onclick="Warmup.deleteJob(${j.id})" style="background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.78rem">Xoá</button>
             </div>
           </div>
         </div>`;
@@ -5251,7 +5100,7 @@ const Warmup = {
         daily_post_limit: parseInt(document.getElementById('wj-daily-limit')?.value) || 10
       });
       (document.getElementById('warmup-job-modal')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('open');
-      App.toast('Da tao job', 'success');
+      App.toast('Đã tạo job', 'success');
       this.loadJobs();
     } catch(e) { App.toast(e.message, 'error'); }
   },
@@ -5273,10 +5122,10 @@ const Warmup = {
   },
 
   async deleteJob(id) {
-    if (!await customConfirm('Xoa job nay?')) return;
+    if (!await customConfirm('Xoá job này?')) return;
     try {
       await API.del('/api/warmup/jobs/' + id);
-      App.toast('Da xoa', 'success');
+      App.toast('Đã xoá', 'success');
       this.loadJobs();
     } catch(e) { App.toast(e.message, 'error'); }
   },
@@ -5287,7 +5136,7 @@ const Warmup = {
       const logs = data.logs || [];
       const tbody = document.getElementById('warmup-job-logs-body');
       if (!logs.length) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text2);padding:16px">Chua co log</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text2);padding:16px">Chưa có log</td></tr>';
       } else {
         tbody.innerHTML = logs.map(l => {
           const time = l.posted_at ? l.posted_at.replace('T', ' ').slice(0, 16) : '';
@@ -5308,21 +5157,15 @@ const Warmup = {
   // ── Recent Logs (main page) ──
   async loadRecentLogs() {
     try {
-      const data = await API.get('/api/warmup/jobs/0/logs?limit=20');
-      // Fallback: load all jobs logs
-      let logs = data.logs || [];
-      if (!logs.length) {
-        // Try loading logs from all jobs
-        for (const j of this._jobs.slice(0, 5)) {
-          const d = await API.get('/api/warmup/jobs/' + j.id + '/logs?limit=10');
-          logs = logs.concat(d.logs || []);
-        }
-        logs.sort((a, b) => (b.posted_at || '').localeCompare(a.posted_at || ''));
-        logs = logs.slice(0, 20);
-      }
+      // Up to 5 jobs, fetched in parallel (the old "job 0" request always came back empty).
+      const parts = await Promise.all((this._jobs || []).slice(0, 5).map(j =>
+        API.get('/api/warmup/jobs/' + j.id + '/logs?limit=10').catch(() => ({ logs: [] }))));
+      let logs = parts.flatMap(d => d.logs || []);
+      logs.sort((a, b) => (b.posted_at || '').localeCompare(a.posted_at || ''));
+      logs = logs.slice(0, 20);
       const tbody = document.getElementById('warmup-log-body');
       if (!logs.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:16px">Chua co log</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:16px">Chưa có log</td></tr>';
         return;
       }
       tbody.innerHTML = logs.map(l => {
@@ -5402,7 +5245,7 @@ const Warmup = {
             ${statusBadge}
           </div>
           <div style="font-size:.82rem;color:var(--text2);margin-bottom:8px">
-            Bat dau: ${started} | ${p.days_in_warmup || 0} ngay${p.flood_count_3d ? ' | <span style="color:var(--orange)">⚠️ ' + p.flood_count_3d + ' flood</span>' : ''}
+            Bắt đầu: ${started} | ${p.days_in_warmup || 0} ngày${p.flood_count_3d ? ' | <span style="color:var(--orange)">⚠️ ' + p.flood_count_3d + ' flood</span>' : ''}
           </div>
           <div style="margin-bottom:4px">
             <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--text2)"><span>💬 Messages</span><span>${p.messages_sent || 0}/10</span></div>
@@ -5434,7 +5277,7 @@ const Warmup = {
       const tbody = document.getElementById('warmup-action-log-body');
       if (!tbody) return;
       if (!logs.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:16px">Chua co action log</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:16px">Chưa có action log</td></tr>';
         return;
       }
       const actionIcons = {read_history:'📖',react_emoji:'😀',view_profile:'👤',post_message:'💬',forward_message:'↗️',join_channel:'📢'};
@@ -5470,7 +5313,9 @@ const Warmup = {
   toggleAutoRefresh() {
     const cb = document.getElementById('warmup-log-autorefresh');
     if (cb && cb.checked) {
+      if (this._refreshTimer) clearInterval(this._refreshTimer);
       this._refreshTimer = setInterval(() => {
+        if (document.hidden) return;
         this.loadActionLogs();
         this.loadProgress();
         this.loadActionLogSummary();

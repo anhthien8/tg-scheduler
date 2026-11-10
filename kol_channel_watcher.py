@@ -115,6 +115,12 @@ async def process_channel_post(event) -> int:
             )
             continue
         personalized = personalize_weex_links(text, vip_code)
+        import flood_state
+        blocked = await flood_state.blocked_reason(kol["account_id"])
+        if blocked:
+            skipped += 1
+            logger.info("[KOL-Channel] Skip uid=%s — account %s: %s", kol["user_id"], kol["account_id"], blocked)
+            continue
         try:
             await tg.send_text_message(
                 kol["account_id"], kol["user_id"], personalized, parse_mode=None
@@ -123,6 +129,9 @@ async def process_channel_post(event) -> int:
             await asyncio.sleep(random.uniform(2.0, 5.0))
         except Exception as exc:
             skipped += 1
+            wait = getattr(exc, "seconds", None)  # FloodWaitError: rest the account everywhere
+            if wait:
+                flood_state.mark(kol["account_id"], wait + 10)
             logger.warning(
                 "[KOL-Channel] Send failed acc=%s uid=%s: %s",
                 kol["account_id"], kol["user_id"], exc,

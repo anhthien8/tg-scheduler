@@ -2,7 +2,10 @@
 Routes for Changelog & Release Notes feature.
 Provides structured system update history for SaaS users.
 """
-from fastapi import APIRouter
+import hashlib
+import json
+
+from fastapi import APIRouter, Request, Response
 
 router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
@@ -2180,12 +2183,21 @@ CHANGELOG_DATA = [
 ]
 
 
+# The list is static for the life of the process: serialise it once and let the
+# browser revalidate with an ETag instead of re-encoding ~150 KB per request.
+_CHANGELOG_BODY = json.dumps({
+    "changelog": CHANGELOG_DATA,
+    "latest_version": CHANGELOG_DATA[0]["version"] if CHANGELOG_DATA else "v1.0.0",
+}, ensure_ascii=False).encode("utf-8")
+_CHANGELOG_ETAG = '"' + hashlib.sha1(_CHANGELOG_BODY).hexdigest() + '"'
+
+
 @router.get("")
-async def get_changelog():
-    return {
-        "changelog": CHANGELOG_DATA,
-        "latest_version": CHANGELOG_DATA[0]["version"] if CHANGELOG_DATA else "v1.0.0"
-    }
+async def get_changelog(request: Request):
+    headers = {"ETag": _CHANGELOG_ETAG, "Cache-Control": "private, max-age=300"}
+    if request.headers.get("if-none-match") == _CHANGELOG_ETAG:
+        return Response(status_code=304, headers=headers)
+    return Response(content=_CHANGELOG_BODY, media_type="application/json", headers=headers)
 
 
 @router.get("/latest")

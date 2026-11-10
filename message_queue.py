@@ -10,6 +10,7 @@ from telethon import errors as tg_errors
 
 import alerts
 import database as db
+import flood_state
 import telegram_client as tg
 
 logger = logging.getLogger("tg-scheduler")
@@ -99,32 +100,8 @@ async def _remix_config(schedule: dict) -> dict | None:
     """Provider, keys and instruction for AI Remix: the schedule's agent first, global settings as fallback."""
     import json
     agent = await db.get_ai_agent(schedule["ai_agent_id"]) if schedule.get("ai_agent_id") else None
-    provider, keys, kwargs = None, [], {}
-    if agent and agent.get("api_keys_json"):
-        provider, keys = agent.get("provider"), agent["api_keys_json"]
-        if agent.get("base_url"):
-            kwargs["base_url"] = agent["base_url"]
-        if agent.get("model"):
-            kwargs["model"] = agent["model"]
-    if not keys:
-        provs = ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]
-        cfg = await db.get_settings_bulk({"ai_provider": None, **{f"ai_keys_{p}": "[]" for p in provs}})
-        order = ([cfg["ai_provider"]] if cfg["ai_provider"] else []) + provs
-        for p in order:
-            try:
-                keys = json.loads(cfg.get(f"ai_keys_{p}") or "[]")
-            except Exception:
-                keys = []
-            if keys:
-                provider = p
-                break
-        if provider in ("openai_compatible", "chatgpt_oauth"):
-            prefix = "oai_compat" if provider == "openai_compatible" else "chatgpt_oauth"
-            env = await db.get_settings_bulk({f"ai_{prefix}_base_url": "", f"ai_{prefix}_model": ""})
-            if (env[f"ai_{prefix}_base_url"] or "").strip():
-                kwargs["base_url"] = env[f"ai_{prefix}_base_url"].strip()
-            if (env[f"ai_{prefix}_model"] or "").strip():
-                kwargs["model"] = env[f"ai_{prefix}_model"].strip()
+    import ai_remix
+    provider, keys, kwargs = await ai_remix.resolve_provider(agent)
     if not keys:
         logger.warning(f"Schedule {schedule['id']}: AI Remix bật nhưng không có API key — gửi nguyên văn")
         return None
@@ -310,6 +287,19 @@ async def queue_worker():
                                       chat_id, chat_title, "skipped", "Tài khoản đang tạm dừng")
                 continue
 
+            # Account resting after a FloodWait (hit here or in any other engine):
+            # put the item back and move on, so one flooded account no longer
+            # stalls every other account's scheduled posts.
+            rest = flood_state.remaining(account_id)
+            if rest > 0:
+                if rest > 3600:
+                    await db.add_send_log(schedule_id, account_id, msg.get("id"), chat_id, chat_title,
+                                          "skipped", f"FloodWait còn {int(rest // 60)} phút — bỏ lượt này")
+                else:
+                    await q.put(item)
+                    await asyncio.sleep(min(rest, 5))
+                continue
+
             try:
                 success = await _send_single_message(account_id, msg, chat_id)
                 if success:
@@ -323,8 +313,9 @@ async def queue_worker():
             except tg_errors.FloodWaitError as e:
                 # MUST actually wait e.seconds — sleeping a fixed 2.5s and
                 # re-queueing escalates FloodWait into PeerFlood/ban.
-                wait_time = min(e.seconds + random.randint(5, 15), 900)
-                logger.warning(f"⏳ FloodWait: sleeping {wait_time}s for account {account_id} before retry.")
+                wait_time = e.seconds + random.randint(5, 15)
+                flood_state.mark(account_id, wait_time)
+                logger.warning(f"⏳ FloodWait: account {account_id} rests {wait_time}s (shared with all engines).")
                 if retry_count < MAX_RETRIES:
                     item["retry_count"] = retry_count + 1
                     await q.put(item)
@@ -332,7 +323,7 @@ async def queue_worker():
                     friendly_error = translate_error(f"FloodWait after {MAX_RETRIES} retries")
                     await db.add_send_log(schedule_id, account_id, msg.get("id"),
                                           chat_id, chat_title, "failed", friendly_error)
-                await asyncio.sleep(wait_time)
+                await asyncio.sleep(1)
 
             except tg_errors.PeerFloodError:
                 logger.warning(f"⚠️ PeerFloodError for account {account_id} -> {chat_title}. Failing immediately.")

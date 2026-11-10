@@ -65,7 +65,10 @@ def is_bot_account(sender, username: str = None) -> bool:
     # 2. Fallback: no sender object, only username available
     #    Use Telegram's official bot naming convention & common bot patterns
     uname = (username or "").strip().lstrip("@").lower()
-    if uname.endswith("bot") or uname.endswith("_bot") or uname.startswith("bot_") or "_bot_" in uname:
+    # Username-only filter for OUTBOUND targets (no entity to ask). Telegram requires
+    # every bot username to end in "bot", so the suffix is the right signal here.
+    # Inbound chats use dm_reply_tracker.is_bot_account (Telegram's bot flag) instead.
+    if uname.endswith("bot") or uname.startswith("bot_") or "_bot_" in uname:
         return True
 
     return False
@@ -469,6 +472,7 @@ async def create_client(
     else:
         client = TelegramClient(session_path, api_id, api_hash)
 
+    client._tg_proxy_url = proxy_url  # lets a later proxy swap roll back to this one
     _clients[account_id] = client
     return client
 
@@ -575,9 +579,17 @@ async def reconnect_with_proxy(account_id: int, proxy_url: str | None) -> bool:
 
     old_client = _clients.get(account_id)
     old_proxy = None
+    old_handlers: list = []
     if old_client:
         # Remember the old proxy so we can roll back on failure.
         old_proxy = getattr(old_client, "_tg_proxy_url", None)
+        # The swap builds a NEW TelegramClient. Every engine's handlers (keyword
+        # watchers, AI reply tracker, engagement, reactions...) are attached to the
+        # old one; carry them over or the account goes deaf until restart.
+        try:
+            old_handlers = list(old_client.list_event_handlers())
+        except Exception:
+            old_handlers = []
         try:
             await old_client.disconnect()
             logger.info(f"Account {account_id}: disconnected for proxy change")
@@ -590,6 +602,21 @@ async def reconnect_with_proxy(account_id: int, proxy_url: str | None) -> bool:
     if not acc:
         logger.error(f"Account {account_id}: not found in DB for reconnect")
         return False
+
+    if old_client is not None and old_proxy is None and acc.get("proxy_url"):
+        old_proxy = acc["proxy_url"]  # never roll back to a direct (no-proxy) connection by accident
+
+    def _reattach():
+        new_client = _clients.get(account_id)
+        if new_client is None or new_client is old_client:
+            return
+        for callback, event in old_handlers:
+            try:
+                new_client.add_event_handler(callback, event)
+            except Exception as he:
+                logger.warning(f"Account {account_id}: could not re-attach handler {callback}: {he}")
+        if old_handlers:
+            logger.info(f"Account {account_id}: re-attached {len(old_handlers)} event handler(s) after proxy change")
 
     async def _build_and_start(purl):
         await create_client(
@@ -613,6 +640,7 @@ async def reconnect_with_proxy(account_id: int, proxy_url: str | None) -> bool:
         if ok:
             proxy_display = proxy_url.split("@")[-1] if proxy_url and "@" in proxy_url else (proxy_url or "direct")
             logger.info(f"Account {account_id}: ✓ reconnected via {proxy_display}")
+            _reattach()
             return True
 
         logger.warning(f"Account {account_id}: reconnected but not authorized")
@@ -623,6 +651,8 @@ async def reconnect_with_proxy(account_id: int, proxy_url: str | None) -> bool:
     # way (the caller must NOT persist the new proxy), but attempt rollback so
     # the account isn't left offline.
     restored = await _rollback_proxy(account_id, old_proxy, acc)
+    if restored:
+        _reattach()
     if not restored:
         logger.error(f"Account {account_id}: account is OFFLINE (rollback failed)")
     return False
@@ -1460,7 +1490,7 @@ async def deep_crawl_similar_channels(
         # All accounts failed — if ALL failures are FloodWait, auto-wait the shortest one then retry
         if flood_waits and len(flood_waits) == len([r for r in resolve_errors if "FloodWait" in r]):
             min_wait = min(s for s, _, _ in flood_waits)
-            wait_time = min(min_wait + 5, 120)  # cap at 2 minutes
+            wait_time = min(min_wait + 5, 900)  # 2 min cap retried too early and re-flooded
             if resolve_attempt < MAX_RESOLVE_RETRIES - 1:
                 logger.warning(f"[DeepCrawl] All accounts FloodWait on resolve. "
                                f"Waiting {wait_time}s then retrying (attempt {resolve_attempt+1}/{MAX_RESOLVE_RETRIES})...")
@@ -1601,7 +1631,7 @@ async def deep_crawl_similar_channels(
                     continue
             if res is None:
                 # All accounts flood-limited — wait on the original and re-queue
-                wait_time = min(e.seconds + 10, 120)  # Cap wait at 2 min
+                wait_time = min(e.seconds + 10, 900)  # 2 min cap retried too early and re-flooded
                 logger.warning(f"[DeepCrawl] All accounts flood-limited for recommendations, waiting {wait_time}s")
                 state["errors"].append(f"FloodWait all accounts: pause {wait_time}s")
                 await _update_progress()
@@ -1839,6 +1869,12 @@ async def check_spam_status(account_id: int, max_age_hours: float = 0) -> dict:
         # PeerFlood auto-pauses the whole account; once SpamBot says it is clean
         # again, turn it back on so DMs and the AI Agent resume by themselves.
         if result.get("status") == "free":
+            # One source of truth: a clean SpamBot verdict also ends the timed
+            # PeerFlood cooldown used by watchers / engagement / warmup.
+            import flood_state
+            if flood_state.peerflood_blocked(account_id):
+                flood_state.clear_peerflood(account_id)
+                await _db.set_account_peerflood_until(account_id, 0)
             acc = await _db.get_account(account_id)
             if acc and acc.get("is_paused") and str(acc.get("pause_reason") or "").startswith("PeerFlood"):
                 await _db.unpause_account(account_id)

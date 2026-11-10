@@ -201,17 +201,23 @@ async def test_test_agent_no_keys_anywhere(client):
 
 async def test_reset_agent_chats_success(client):
     agent_id = await db.create_ai_agent({"name": "Agent"})
-    await db.get_or_create_followup_chat(
-        account_id=1, user_id=101, username="user", name="User"
-    )
-    await db.update_followup_chat_status(1, 101, "needs_human")
-    
+    other_agent = await db.create_ai_agent({"name": "Other"})
+    acc = await db.create_account({"name": "A", "phone": "+1", "api_id": "a", "api_hash": "h", "session_name": "s_a"})
+    acc2 = await db.create_account({"name": "B", "phone": "+2", "api_id": "a", "api_hash": "h", "session_name": "s_b"})
+    await db.set_account_ai_agent(acc, agent_id)
+    await db.set_account_ai_agent(acc2, other_agent)
+    for a, uid, status in ((acc, 101, "needs_human"), (acc, 102, "bot_ignored"), (acc2, 103, "needs_human")):
+        await db.get_or_create_followup_chat(account_id=a, user_id=uid, username="user", name="User")
+        await db.update_followup_chat_status(a, uid, status)
+
     response = client.post(f"/api/ai-agents/{agent_id}/reset-chats")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    
-    chat = await db.get_followup_chat(1, 101)
-    assert chat["status"] == "active"
+
+    assert (await db.get_followup_chat(acc, 101))["status"] == "active"
+    # Bot chats and other agents' chats are not touched.
+    assert (await db.get_followup_chat(acc, 102))["status"] == "bot_ignored"
+    assert (await db.get_followup_chat(acc2, 103))["status"] == "needs_human"
 
 
 # ── 5. Learned Rules & Profiles ──────────────────────────────────────────────

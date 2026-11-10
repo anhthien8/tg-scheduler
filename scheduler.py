@@ -131,9 +131,14 @@ async def _auto_start_campaign(campaign_id: int):
             return
 
         # Import and start the campaign
-        from routes.members import _active_campaigns, _run_campaign
-        await db.update_dm_campaign_status(campaign_id, "running")
-        _active_campaigns[campaign_id] = True
+        from routes.members import _active_campaign_lock, _active_campaigns, _run_campaign
+        # Same check-and-start lock as the UI / bot, so one campaign never runs twice.
+        async with _active_campaign_lock:
+            if _active_campaigns.get(campaign_id):
+                logger.info(f"Campaign {campaign_id} already running, skipping auto-start")
+                return
+            await db.update_dm_campaign_status(campaign_id, "running")
+            _active_campaigns[campaign_id] = True
         logger.info(f"🚀 Campaign {campaign_id} auto-started by scheduler")
         await _run_campaign(campaign_id)
     except Exception as e:
@@ -229,7 +234,9 @@ async def _auto_resume_campaigns():
     import json
 
     import telegram_client as tg
-    from routes.members import _active_campaigns, _run_campaign
+    from routes.members import _active_campaign_lock, _active_campaigns, _run_campaign
+
+    spam_seen: dict[int, str] = {}  # one SpamBot answer per account per run
 
     for cmp in campaigns:
         cid = cmp["id"]
@@ -247,7 +254,11 @@ async def _auto_resume_campaigns():
             if not client or not client.is_connected():
                 continue
             try:
-                spam = await tg.check_spam_status(sid)
+                if sid not in spam_seen:
+                    # Reuse an answer up to 1h old: messaging @SpamBot from a limited
+                    # account every run for every campaign is needless risk.
+                    spam_seen[sid] = (await tg.check_spam_status(sid, max_age_hours=1)).get("status")
+                spam = {"status": spam_seen[sid]}
                 if spam.get("status") == "free":
                     any_available = True
                     break
@@ -259,10 +270,13 @@ async def _auto_resume_campaigns():
 
         if any_available:
             logger.info(f"[AutoResume] 🚀 Resuming campaign {cid} — found available sender account")
-            await db.update_dm_campaign_status(cid, "running")
             import asyncio
-            task = asyncio.create_task(_run_campaign(cid))
-            _active_campaigns[cid] = task
+            async with _active_campaign_lock:
+                if _active_campaigns.get(cid):
+                    continue  # started by the UI / bot while we were checking
+                await db.update_dm_campaign_status(cid, "running")
+                task = asyncio.create_task(_run_campaign(cid))
+                _active_campaigns[cid] = task
             await db.add_dm_campaign_log(cid, None, 0, None, "skipped",
                                          "🔄 Campaign tự động chạy tiếp — tìm thấy account sender đã hết bị giới hạn.")
         else:

@@ -2809,6 +2809,7 @@ const Members = {
   },
 
   async loadInviteCampaigns() {
+    if (!document.getElementById('ms-invite-campaigns-tbody')) return;  // invite UI not on this page
     try {
       const d = await InviteAPI.getCampaigns(this._lastInviteCampaignsUpdate);
       const newCampaigns = d.campaigns || [];

@@ -19,6 +19,7 @@ from telethon.tl.functions.messages import GetMessagesViewsRequest, ImportChatIn
 from telethon.tl.types import ReactionEmoji
 
 import database as db
+import flood_state
 import telegram_client as tg
 
 logger = logging.getLogger("tg-scheduler.reactions")
@@ -287,8 +288,8 @@ async def _react_all_accounts(target: dict, msg_id: int, channel_link: str) -> N
         client = tg.get_client(acc_id)
         if not client or not client.is_connected():
             continue
-        if await db.is_account_paused(acc_id):
-            continue  # "Tạm dừng" means no actions at all
+        if await flood_state.blocked_reason(acc_id):
+            continue  # paused ("Tạm dừng" means no actions at all) or resting after a flood
 
         # Apply delay between accounts (skip wait for first)
         if i > 0:

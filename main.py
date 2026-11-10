@@ -283,10 +283,23 @@ class DashboardLoginRequest(BaseModel):
 _login_fails: dict[str, list[float]] = {}
 
 
+def _is_local_peer(host: str) -> bool:
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(host)
+        return addr.is_loopback or addr.is_private
+    except ValueError:
+        return host in ("localhost", "testclient")
+
+
 @app.post("/api/login")
 async def dashboard_login(payload: DashboardLoginRequest, request: Request):
     # Exposed via Cloudflare Tunnel → chặn dò mật khẩu: 5 lần sai / IP thì khoá 15 phút
-    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
+    peer = request.client.host if request.client else "?"
+    # cf-connecting-ip is client-controlled unless the request really came through
+    # the local tunnel / reverse proxy; trusting it from anyone let an attacker
+    # reset the lockout by forging a new value per attempt.
+    ip = (request.headers.get("cf-connecting-ip") if _is_local_peer(peer) else None) or peer
     now = time.time()
     fails = [t for t in _login_fails.get(ip, []) if now - t < 900]
     if len(fails) >= 5:
@@ -298,6 +311,8 @@ async def dashboard_login(payload: DashboardLoginRequest, request: Request):
         if token:
             _login_fails.pop(ip, None)
             return {"api_key": token, "role": "member", "username": payload.username.strip()}
+        if len(_login_fails) > 5000:  # bound memory under a distributed guess attack
+            _login_fails.clear()
         _login_fails[ip] = fails + [now]
         await asyncio.sleep(1)
         raise HTTPException(status_code=401, detail="Sai username hoặc mật khẩu")
@@ -402,6 +417,14 @@ else:
         (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/schedules{rest:path}", "Schedule mutation routes"),
         (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/members{rest:path}", "Member/campaign routes"),
         (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/ai-followup{rest:path}", "AI follow-up routes"),
+        # These had no route at all in web mode (plain 404) while the UI still calls them.
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/proxy{rest:path}", "Proxy routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/inbox{rest:path}", "Inbox routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/invite-campaigns{rest:path}", "Invite routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/warmup{rest:path}", "Warmup routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/engagement{rest:path}", "Engagement routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/referrals{rest:path}", "Referral routes"),
+        (["GET", "POST", "PUT", "DELETE", "PATCH"], "/api/zalo{rest:path}", "Zalo routes"),
     ):
         app.add_api_route(path, _split_runtime_pending(name), methods=methods, dependencies=_auth_dep)
 

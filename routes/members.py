@@ -1840,7 +1840,7 @@ async def _run_campaign(campaign_id: int):
                     ai_keys, _ = await ai_rmx.get_provider_config(ai_provider)
 
             if not ai_keys:
-                for alt_prov in all_providers:
+                for alt_prov in await ai_rmx.get_fallback_order():  # the order set in Settings
                     alt_keys = _provider_keys(alt_prov)
                     if alt_keys:
                         logger.warning(

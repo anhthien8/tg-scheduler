@@ -43,8 +43,8 @@ exclude = [
 
 [tool.ruff.lint]
 # Conservative, enforceable-from-day-one set: real bugs + import hygiene.
-# UP/B beyond this are deliberately NOT enabled yet — modernizing 13k untyped
-# LOC (Optional[X] -> X|None etc.) is churn that belongs in its own reviewed PR,
+# UP/B beyond this are deliberately NOT enabled yet — modernizing the untyped
+# codebase (Optional[X] -> X|None etc.) is churn that belongs in its own reviewed PR,
 # not in a QC-bootstrap change. Add rule families incrementally later.
 select = [
     "E9",   # syntax/runtime errors (e.g. undefined names)

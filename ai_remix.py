@@ -36,10 +36,19 @@ def _cf_access_headers(url: str) -> dict:
 LOCAL_AI_ROUTER = os.getenv("AI_LOCAL_FALLBACK_URL", "http://127.0.0.1:20128")
 
 
+_PUBLIC_AI_HOSTS = ("openai.com", "chatgpt.com", "groq.com", "googleapis.com", "deepseek.com",
+                    "anthropic.com", "openrouter.ai", "mistral.ai", "together.xyz")
+
+
 def _local_fallback_url(url: str) -> str | None:
     """Same path on the local 9router, or None if url is already local."""
     parts = urlsplit(url)
-    if (parts.hostname or "") in ("127.0.0.1", "localhost", "::1"):
+    host = (parts.hostname or "").lower()
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return None
+    # Public providers are never the local router: rerouting them silently
+    # bypassed the configured provider and handed its API key to the router.
+    if host.endswith(_PUBLIC_AI_HOSTS):
         return None
     base = urlsplit(LOCAL_AI_ROUTER)
     return parts._replace(scheme=base.scheme, netloc=base.netloc).geturl()
@@ -182,7 +191,6 @@ def _mark_key_failed(provider, idx):
 
 # gemini-2.0-flash was retired by Google (404); thinking is disabled so the
 # output budget is spent on the reply itself.
-GEMINI_MODEL = "gemini-2.5-flash"
 # Tried in order; on 404/429/5xx/timeout the next model is used (tested 2026-11-02).
 GEMINI_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite"]
 
@@ -312,10 +320,6 @@ async def _call_chatgpt_web_backend(token: str, prompt: str, model: str = "auto"
 
     # Normalize model identifiers
     target_model = model or "auto"
-    if target_model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
-        target_model = target_model
-    elif target_model in ("gpt-4o", "gpt-4o-mini", "o3-mini", "o4-mini"):
-        target_model = target_model
 
     payload = {
         "action": "next",
@@ -613,21 +617,21 @@ def _build_prompt(original_text, sender_name=None, custom_instruction=None, auto
         "You are an expert Telegram outreach assistant. Rephrase the message below to sound natural, authentic, and human.\n"
         "\n"
         "RULES (follow strictly):\n"
-        "1. Preserve essential information and intent while prioritizing a natural, non-spammy tone.\n"
-        "2. AGGRESSIVELY change wording, sentence order, and structure each time.\n"
+        "1. Keep every fact and selling point of the original (features, product names, numbers, percentages, terms). "
+        "Aim for 80-120% of the original length; never shorten by dropping points.\n"
+        "2. Change the WORDING and sentence construction each time so no two messages read alike. "
+        "Keep the same overall flow (rule 7).\n"
         + lang_rule +
         "4. Do NOT use any emoji or icon characters. Write plain text only. Messages with emoji look like spam/bot.\n"
-        "5. Keep all @usernames, links, and numbers exactly as-is unless instructed to reframe.\n"
+        "5. Keep all @usernames, links, and numbers exactly as-is unless instructed to reframe. "
+        "Keep technical/brand terms in their original Latin form even when translating (e.g. No KYC, API, HFT, MetaTrader 5, USDT).\n"
         "6. Write naturally like a real person texting a colleague or collaborator: casual, friendly, authentic, peer-to-peer. Avoid robotic sales pitches or corporate jargon.\n"
-        "7. STRUCTURE AS A SINGLE COHESIVE MESSAGE (3-Act Flow):\n"
-        "   - Hook / Warm greeting with context\n"
-        "   - Core value: carry over EVERY concrete selling point from the original (features, product names, numbers, percentages, terms).\n"
-        "     If there are 3+ points, list them compactly (a short list or one tight sentence) instead of summarizing them away.\n"
-        "   - End with a low-friction, polite open-ended question to invite genuine dialogue.\n"
-        "10. NEVER shorten by dropping selling points. Aim for roughly the same length as the original (80-120%).\n"
-        "    Keep technical/brand terms in their original Latin form even when translating (e.g. No KYC, API, HFT, MetaTrader 5, USDT).\n"
-        "8. Output ONLY the rephrased message. No intro, no quotes, no explanation, no multiple message splits.\n"
-        "9. FORMAT for visual breathing room: greeting on its own line, then short paragraphs of 1-2 sentences each, separated by a blank line (double newline). The closing question is its own paragraph. Never output a dense wall of text.\n"
+        "7. FLOW of the single message: a warm greeting with context; then the core value "
+        "(if there are 3+ points, list them compactly instead of summarizing them away); "
+        "then one low-friction, polite open question.\n"
+        "8. FORMAT: greeting on its own line, then short paragraphs of 1-2 sentences separated by a blank line; "
+        "the closing question is its own paragraph. Never a dense wall of text.\n"
+        "9. Output ONLY the rephrased message. No intro, no quotes, no explanation, no multiple message splits.\n"
         + _key_points_rule(original_text)
         + instruction_addon
         + name_hint
@@ -680,6 +684,43 @@ async def get_provider_config(provider: str) -> tuple[list[str], dict]:
     return keys, kwargs
 
 
+async def resolve_provider(agent: dict | None = None) -> tuple[str | None, list, dict]:
+    """THE way to pick provider, keys and base_url/model kwargs for an AI call.
+
+    Settings are the single source of truth (per-agent provider/model/keys are
+    legacy fields that used to shadow Settings and break agents):
+    1. the global `ai_provider` from Settings,
+    2. the first provider in the configured fallback order that has keys,
+    3. only when Settings define nothing at all: the agent's own legacy keys
+       (or an agent pinned to a keyless router).
+    Used by live replies, "Test agent", rule learning and scheduled-post remix,
+    so they can no longer disagree.
+    """
+    import database as db
+    primary = await db.get_setting("ai_provider", None)
+    for prov in ([primary] if primary else []) + [p for p in await get_fallback_order() if p != primary]:
+        keys, kwargs = await get_provider_config(prov)
+        if keys:
+            if prov not in ("openai_compatible", "chatgpt_oauth"):
+                kwargs = {}
+            return prov, keys, {k: v for k, v in kwargs.items() if v}
+
+    if agent:
+        agent_keys = agent.get("api_keys_json") or []
+        if isinstance(agent_keys, str):
+            try:
+                agent_keys = json.loads(agent_keys)
+            except Exception:
+                agent_keys = []
+        agent_keys = [k for k in agent_keys if k]
+        legacy_kwargs = {"base_url": agent.get("base_url") or "", "model": agent.get("model") or ""}
+        if agent_keys:
+            return agent.get("provider") or primary or "gemini", agent_keys, legacy_kwargs
+        if agent.get("provider") == "openai_compatible" and agent.get("base_url") and agent.get("model"):
+            return "openai_compatible", [""], legacy_kwargs
+    return primary, [], {}
+
+
 async def check_providers(primary: str | None, timeout: float = 25.0) -> list[dict]:
     """Ping the active provider then every configured fallback with a tiny prompt.
     Used as a preflight before a campaign so a dead 9Router is caught up front."""
@@ -717,13 +758,18 @@ async def _auto_fallback_remix(failed_provider, prompt):
             alt_keys, alt_kwargs = await get_provider_config(alt_prov)
             if alt_keys:
                 logger.info("[AI Remix] 🔄 Auto-fallback from '%s' to '%s' (%d keys available)...", failed_provider, alt_prov, len(alt_keys))
-                for a_key in alt_keys:
+                for a_idx, a_key in enumerate(alt_keys):
+                    # A key that just failed (quota/auth) is skipped until its cooldown ends,
+                    # so one bad message no longer walks every key of every provider.
+                    if time.time() - _key_cooldown.get((alt_prov, a_idx), 0) <= _KEY_FAIL_COOLDOWN:
+                        continue
                     try:
                         res = await _try_call(alt_prov, a_key, prompt, **alt_kwargs)
                         if res and res.strip():
                             logger.info("[AI Remix] ✨ Auto-fallback to '%s' succeeded!", alt_prov)
                             return res.strip()
                     except Exception as fb_err:
+                        _mark_key_failed(alt_prov, a_idx)
                         logger.warning("[AI Remix] Fallback key for '%s' failed: %s", alt_prov, fb_err)
     except Exception as e:
         logger.warning("[AI Remix] Error during auto-fallback: %s", e)
@@ -876,8 +922,14 @@ def humanize_text(text):
     return t
 
 
-async def generate_chat_response(*args, **kwargs):
-    """Chat reply with anti AI-slop style rule + punctuation cleanup."""
+async def generate_chat_response(*args, style: bool = True, **kwargs):
+    """Chat reply with anti AI-slop style rule + punctuation cleanup.
+
+    style=False is for machine-read output (JSON extraction): no style rule,
+    no punctuation rewriting.
+    """
+    if not style:
+        return await _generate_chat_response_raw(*args, **kwargs)
     if len(args) >= 2:
         args = (args[0], (args[1] or "") + _HUMAN_STYLE_RULE) + tuple(args[2:])
     elif "system_prompt" in kwargs:
@@ -1193,7 +1245,8 @@ async def extract_kol_profile(history: list[dict], provider: str, api_keys: list
 
     try:
         # JSON task: skip the chat style rule and punctuation humanizer.
-        raw_res = await _generate_chat_response_raw(
+        raw_res = await generate_chat_response(
+            style=False,
             messages_history=[{"role": "user", "content": f"Conversation:\n{conv_text}"}],
             system_prompt=sys_prompt,
             provider=provider,
@@ -1240,7 +1293,8 @@ async def distill_human_takeover_rule(history: list[dict], human_reply: str, pro
 
     try:
         # JSON task: skip the chat style rule and punctuation humanizer.
-        raw_res = await _generate_chat_response_raw(
+        raw_res = await generate_chat_response(
+            style=False,
             messages_history=[{"role": "user", "content": conv_context}],
             system_prompt=sys_prompt,
             provider=provider,

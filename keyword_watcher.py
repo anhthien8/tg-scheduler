@@ -25,65 +25,9 @@ from personalization import apply_personalization
 
 logger = logging.getLogger("tg-scheduler.watcher")
 
-def clean_id(telegram_id: int) -> int:
-    s = str(abs(telegram_id))
-    if len(s) > 10 and s.startswith("100"):
-        return int(s[3:])
-    return int(s)
+# Shared, platform-agnostic helpers (same code the Discord watcher uses).
+from engines.keyword_engine import clean_id, match_keyword, match_keyword_advanced, normalize_text  # noqa: E402,F401
 
-def normalize_text(t: str) -> str:
-    if not t:
-        return ""
-    # Remove zero-width spaces and formatting marks
-    t = re.sub(r'[\u200b-\u200d\ufeff]', '', t)
-    # Replace any sequence of whitespaces with a single space
-    t = re.sub(r'\s+', ' ', t.lower())
-    return t.strip()
-
-
-def match_keyword_advanced(text: str, rule: str) -> bool:
-    """
-    Match text against a rule string.
-    Rule formats supported:
-    1. Regex: if starting with 're:', compile and check search.
-       e.g., 're:\b(solana|sol)\b'
-    2. Logic expression: parses simple operators (AND, OR, NOT).
-       All checks are case-insensitive.
-       e.g., 'solana AND gem NOT bot'
-    3. Plain substring: fallback, standard check.
-    """
-    text_lower = text.lower()
-    rule_trimmed = rule.strip()
-    
-    # 1. Regex Match
-    if rule_trimmed.lower().startswith("re:"):
-        pattern = rule_trimmed[3:].strip()
-        try:
-            return bool(re.search(pattern, text, re.IGNORECASE))
-        except Exception as e:
-            logger.warning(f"Invalid regex pattern '{pattern}' in watcher: {e}")
-            return False
-            
-    # 2. Logic Operators Match (AND, OR, NOT)
-    # Split by OR
-    or_clauses = re.split(r'\s+or\s+', rule_trimmed, flags=re.IGNORECASE)
-    for clause in or_clauses:
-        # Split by NOT
-        not_parts = re.split(r'\s+not\s+', clause, flags=re.IGNORECASE)
-        positive_clause = not_parts[0]
-        negative_clauses = not_parts[1:]
-        
-        # Check positive part (AND split)
-        and_parts = re.split(r'\s+and\s+', positive_clause, flags=re.IGNORECASE)
-        pos_match = all(part.strip().lower() in text_lower for part in and_parts if part.strip())
-        
-        # Check negative parts
-        neg_match = not any(neg.strip().lower() in text_lower for neg in negative_clauses if neg.strip())
-        
-        if pos_match and neg_match:
-            return True
-            
-    return False
 
 async def _resolve_peer_for_client(client, user_id: int, username: str | None, event=None, input_peer=None):
     """
@@ -139,9 +83,9 @@ _background_tasks: set = set()
 import time as _time
 
 # {account_id: timestamp_when_unblocked}  — PeerFlood blocks for 45 min
-_peerflood_cooldown: dict = {}
+_peerflood_cooldown: dict = flood_state.peerflood_until  # shared: cleared when SpamBot says free
 PEERFLOOD_COOLDOWN_SECS = 45 * 60  # 45 minutes (legacy default)
-_peerflood_count: dict[int, int] = {}  # {acc_id: consecutive_flood_count} for exponential backoff
+_peerflood_count: dict[int, int] = flood_state.peerflood_count  # consecutive floods, for exponential backoff
 
 # {user_id: timestamp_last_dm}  — prevent duplicate DMs to same user
 _user_dm_sent: dict = {}
@@ -254,7 +198,9 @@ def _mark_peerflood(acc_id: int):
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.ensure_future(_persist())
+            _t = asyncio.ensure_future(_persist())
+            _background_tasks.add(_t)
+            _t.add_done_callback(_background_tasks.discard)
     except Exception:
         pass
     cooldown_hrs = cooldown_secs / 3600
@@ -745,7 +691,7 @@ async def _do_send_dm_with_fallback(
             last_error = _translate_dm_error("PeerFlood too many DMs from this account")
             _mark_peerflood(acc_id)
             await alerts.flood_guard(acc_id)  # auto-pause + cảnh báo Telegram
-            logger.warning(f"[Watcher {watcher_id}] Account {acc_id} ✗ PeerFlood, blocked for {PEERFLOOD_COOLDOWN_SECS//60} min. NOT retrying same target.")
+            logger.warning(f"[Watcher {watcher_id}] Account {acc_id} ✗ PeerFlood, cooldown started (4h+, escalating). NOT retrying same target.")
             break  # STOP — don't try other accounts for same target
 
         except ValueError as e:
@@ -1143,7 +1089,7 @@ def _make_handler(watcher: dict):
         if not text:
             return
 
-        matched = next((kw for kw in keywords if kw.lower() in text), None)
+        matched = next((kw for kw in keywords if match_keyword(text, kw)), None)
         logger.debug(f"[DEBUG Watcher {watcher_id}] text={repr(text)}, keywords={keywords}, matched={repr(matched)}, Loop: {id(asyncio.get_running_loop())}, Thread: {threading.current_thread().name}")
         if not matched:
             return

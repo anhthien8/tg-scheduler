@@ -91,3 +91,23 @@ def match_keyword_advanced(text: str, rule: str) -> bool:
             return True
 
     return False
+
+
+_UPPER_OP_RE = re.compile(r"\s(?:AND|OR|NOT)\s")
+
+
+def match_keyword(text: str, rule: str) -> bool:
+    """Single entry point for watcher keyword rules.
+
+    A rule is treated as an expression only when it says so explicitly: a
+    ``re:`` prefix, or an UPPERCASE ``AND`` / ``OR`` / ``NOT`` operator.
+    Anything else is a plain case-insensitive substring, so an ordinary phrase
+    such as "trade and earn" keeps matching as a phrase.
+    """
+    rule = (rule or "").strip()
+    if not rule:
+        return False
+    if rule.lower().startswith("re:") or _UPPER_OP_RE.search(f" {rule} "):
+        return match_keyword_advanced(text, rule)
+    return rule.lower() in (text or "").lower()
+

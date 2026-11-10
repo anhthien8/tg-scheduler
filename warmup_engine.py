@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timezone
 
 import database as db
+import flood_state
 import telegram_client as tg
 from ai_remix import remix_message
 
@@ -41,6 +42,8 @@ def _unsafe_reason(acc: dict | None) -> str | None:
             return "PeerFlood"
     except (TypeError, ValueError):
         pass
+    if acc.get("id") is not None and flood_state.is_resting(acc["id"]):
+        return "FloodWait"
     return None
 
 # ── Behavior Weights by Stage ────────────────────────────────────────
@@ -271,9 +274,15 @@ async def run_warmup_job(job_id: int):
 
         while _active_jobs.get(job_id, False):
             # Check schedule window
-            now = datetime.now()
-            current_time = now.strftime("%H:%M")
-            if current_time < job["schedule_start"] or current_time > job["schedule_end"]:
+            # App timezone (Asia/Ho_Chi_Minh by default), not the server's local clock.
+            import scheduler as _sch
+            current_time = datetime.now(_sch.TZ).strftime("%H:%M")
+            start_t, end_t = job["schedule_start"], job["schedule_end"]
+            if start_t <= end_t:
+                in_window = start_t <= current_time <= end_t
+            else:  # overnight window, e.g. 22:00-06:00
+                in_window = current_time >= start_t or current_time <= end_t
+            if not in_window:
                 await asyncio.sleep(60)
                 continue
 

@@ -23,7 +23,7 @@ class AIFollowUpSettings(BaseModel):
     enabled: bool = True
     system_prompt: str = "Bạn là chuyên gia tư vấn bán hàng & onboard thân thiện. Mục tiêu của bạn là lắng nghe nhu cầu của khách hàng, giải đáp thắc mắc và hướng dẫn họ đăng ký dùng thử / chốt deal."
     knowledge_base: str = "Tên sản phẩm: Telegram Outreach Automation\nGiá: 50$/tháng\nTính năng: Gửi tin nhắn hàng loạt, lọc trùng, tương tác AI tự động chốt đơn.\nLink đăng ký onboard: https://example.com/onboard"
-    max_replies_per_user: int = 5
+    max_replies_per_user: int = 20  # same default the reply engine uses
     handover_keywords: list[str] = ["gặp admin", "tư vấn viên", "gọi điện", "số điện thoại", "lừa đảo"]
     # Drip cadence: hours of silence before each follow-up. Default day 1/3/7.
     drip_cadence_hours: list[int] = [24, 72, 168]
@@ -289,7 +289,7 @@ async def get_settings():
         "ai_followup_enabled": "true",
         "ai_followup_system_prompt": None,
         "ai_followup_knowledge_base": None,
-        "ai_followup_max_replies": "5",
+        "ai_followup_max_replies": "20",
         "ai_followup_handover_keywords": '["gặp admin", "tư vấn viên", "số điện thoại"]',
         "ai_followup_drip_cadence": "",
         "ai_followup_drip_cadence_tier_a": "",
