@@ -661,6 +661,11 @@ def get_safe_offer_fallback_reply(lang: str = "en") -> str:
             "Để mình check lại con số chính xác với team rồi báo bạn ngay nhé, "
             "không muốn nói sai cho bạn 🙏"
         )
+    if (lang or "").lower().startswith("ru"):
+        return (
+            "Уточню точные цифры у команды и сразу вернусь к вам — "
+            "не хочу ошибиться 🙏"
+        )
     return (
         "Let me double-check the exact numbers with the team and get right back to you — "
         "don't want to misquote anything for you 🙏"

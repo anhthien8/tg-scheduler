@@ -266,7 +266,7 @@ async def test_reminder_uses_ai_text_only_when_it_is_safe(mock_send, mock_gen):
     assert mock_send.call_args[0][2] == tracker._step_reminder_template("weex_uid", "en")
 
     await _backdate(U, hours=72)
-    mock_gen.return_value = "Bro ơi, rảnh thì gửi mình UID WEEX nha 👍"
+    mock_gen.return_value = "Hey bro, send me your WEEX UID whenever you get a moment 👍"
     with patch("database.check_account_active_hours", return_value=True):
         assert (await tracker.process_step_reminders())["sent"] == 1
     assert mock_send.call_args[0][2] == mock_gen.return_value

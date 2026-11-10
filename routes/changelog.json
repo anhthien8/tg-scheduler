@@ -1,11 +1,64 @@
 [
     {
+        "version": "3.38.0",
+        "date": "10/11/2026",
+        "title": "🛡️ Không nhắn sai ngôn ngữ, không nhắn lại lead cũ, không chen vào chat admin đã xử lý",
+        "summary": "Sửa ba lỗi ảnh hưởng uy tín: (1) chiến dịch gửi mẫu tiếng Trung cho người không đọc tiếng Trung, (2) AI nhắn tiếng Anh vào đoạn chat toàn tiếng Việt, (3) follow-up tự động (drip) nhắn lại lead đã im cả tuần, kể cả trên nick đã tắt AI và trong chat admin đã tự trả lời. Giờ có chốt chặn bằng code ở từng đường gửi, không còn phụ thuộc vào việc AI “nghe lời”.",
+        "is_latest": true,
+        "badge": "LATEST",
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Mẫu tin sai ngôn ngữ người nhận thì không gửi",
+                "desc": "Chiến dịch DM và Keyword DM giờ kiểm tra ngôn ngữ của mẫu so với người nhận (ngôn ngữ Telegram, đầu số điện thoại, bio, tên, nhóm nguồn) trước khi gửi — kể cả khi tắt AI Remix. Mẫu tiếng Trung / Nga / Việt… gửi cho người đọc ngôn ngữ khác sẽ được AI dịch sang đúng ngôn ngữ; nếu không dịch được thì bỏ qua người đó và ghi lý do “Sai ngôn ngữ người nhận” trong nhật ký chiến dịch. Mẫu tiếng Anh vẫn gửi bình thường."
+            },
+            {
+                "type": "fix",
+                "title": "AI luôn viết đúng ngôn ngữ khách đang dùng",
+                "desc": "Mọi tin AI viết (trả lời, drip, nhắc bước, chăm sóc KOL) được kiểm tra bằng code so với ngôn ngữ khách đã viết trong đoạn chat. Sai ngôn ngữ (ví dụ tiếng Anh vào chat tiếng Việt / tiếng Nga) thì không gửi; nếu khách đang chờ trả lời thì chuyển “Cần người thật” và báo admin. Lời nhắc ngôn ngữ cũng được thêm thẳng vào chỉ dẫn cho AI, và câu trả lời an toàn có thêm bản tiếng Nga."
+            },
+            {
+                "type": "fix",
+                "title": "Drip không còn “đào mộ” lead cũ",
+                "desc": "Một tin follow-up chỉ được gửi trong vòng 72 giờ kể từ lúc đến hạn. Lead đã im lâu hơn thế thì bỏ hẳn, không nhắn lại. (Trước đó, bản sửa kẹt hàng đợi đã xả cả lô lead im 7–11 ngày trong một buổi chiều.)"
+            },
+            {
+                "type": "fix",
+                "title": "Chat admin đã tự trả lời thì AI không follow-up nữa",
+                "desc": "Đoạn chat nào đã có tin của admin (người thật) thì drip tự động bỏ qua vĩnh viễn — người đã nói chuyện với khách là người theo tiếp. AI vẫn có thể trả lời khi khách chủ động nhắn lại sau 12 giờ như trước."
+            },
+            {
+                "type": "fix",
+                "title": "Nick tắt AI thì không tự nhắn gì",
+                "desc": "Trước đây nick để “không dùng AI” vẫn bị drip và chăm sóc KOL dùng AI mặc định để nhắn. Giờ nick tắt AI (và chat không đến từ chiến dịch / Keyword DM có gắn AI Agent) sẽ không gửi bất kỳ tin tự động nào."
+            }
+        ]
+    },
+    {
+        "version": "3.37.1",
+        "date": "10/11/2026",
+        "title": "🛡️ Chặn thẻ nội bộ [HANDOVER_REQUIRED] lọt ra chat với KOL",
+        "summary": "Sửa lỗi nghiêm trọng: tin nhắn follow-up tự động (drip) gửi nguyên chữ “[HANDOVER_REQUIRED]” cho KOL. Đây là thẻ AI dùng để báo cho hệ thống “cần người thật”, không phải nội dung cho khách. Giờ có hai lớp chặn nên thẻ nội bộ không thể tới tay khách ở bất kỳ đường gửi nào.",
+        "is_latest": false,
+        "changes": [
+            {
+                "type": "fix",
+                "title": "Thẻ nội bộ không bao giờ được gửi ra ngoài",
+                "desc": "Trước đây chỉ luồng AI trả lời trực tiếp mới gỡ thẻ; luồng follow-up tự động (drip) thì gửi nguyên văn. Giờ mọi tin do AI viết (trả lời, drip, nhắc bước, chăm sóc KOL, nudge) đều qua một bộ lọc chung gỡ [HANDOVER_REQUIRED], khối METRICS/META, thẻ bước và các thẻ dạng [CHỮ_HOA]. Thêm lớp chặn cuối ở tầng gửi Telegram (cả chú thích ảnh/video, Keyword DM, chiến dịch DM, bình luận cộng đồng): nếu tin chỉ gồm thẻ nội bộ thì không gửi gì cả."
+            },
+            {
+                "type": "fix",
+                "title": "AI xin người thật trong tin drip thì chuyển “Cần người thật”",
+                "desc": "Khi AI gắn [HANDOVER_REQUIRED] vào tin follow-up, hệ thống giờ làm đúng ý nghĩa của thẻ: gửi phần nội dung (nếu có), chuyển lead sang “Cần người thật” và báo cho admin. Nếu AI không viết gì ngoài thẻ thì không gửi gì, chỉ chuyển lead cho người thật và không thử lại."
+            }
+        ]
+    },
+    {
         "version": "3.37.0",
         "date": "10/11/2026",
         "title": "📌 “Việc cần làm”, form sửa hồ sơ lead, menu theo quy trình",
         "summary": "Giao diện dễ dùng hơn: trang Lead KOL có khối “Việc cần làm” cho biết hôm nay phải xử lý ai, sửa hồ sơ lead bằng một form thay cho chuỗi hộp hỏi, menu bên trái xếp theo thứ tự công việc, và Keyword DM báo rõ khi nick gửi đang bị tạm dừng.",
-        "is_latest": true,
-        "badge": "LATEST",
+        "is_latest": false,
         "changes": [
             {
                 "type": "feature",

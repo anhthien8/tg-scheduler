@@ -37,6 +37,7 @@ import telegram_client as tg
 import weex_mirror
 import kol_region_offer
 import owed_answers
+import lang_guard
 
 logger = logging.getLogger("tg-scheduler.inbox")
 
@@ -146,7 +147,7 @@ def _last_assistant_is_fallback(history: list) -> bool:
     if not last:
         return False
     text = _norm_msg(last.get("content"))
-    fallbacks = {_norm_msg(kol_offer.get_safe_offer_fallback_reply(l)) for l in ("en", "vi")}
+    fallbacks = {_norm_msg(kol_offer.get_safe_offer_fallback_reply(l)) for l in ("en", "vi", "ru")}
     return text in fallbacks or any(p in text for p in (
         "double-check the exact numbers", "double-check the latest details",
         "check lại con số chính xác", "check lại thông tin mới nhất"))
@@ -549,8 +550,10 @@ def _detect_reply_lang(history: list[dict] | None) -> str:
     """'vi' if the KOL's latest message contains Vietnamese diacritics, else 'en'."""
     for m in reversed(history or []):
         if m.get("role") == "user":
-            return "vi" if _VN_CHARS_RE.search(m.get("content") or "") else "en"
-    return "en"
+            if _VN_CHARS_RE.search(m.get("content") or ""):
+                return "vi"
+            break
+    return {"cyr": "ru", "vi": "vi"}.get(lang_guard.conversation_script(history), "en")
 
 
 def extract_uid_candidates_from_messages(history: list[dict] | None) -> set[str]:
@@ -871,6 +874,7 @@ async def process_step_reminders() -> dict:
                           f"natural message (1-2 sentences, same language as the KOL's last message) that asks "
                           f"ONLY for: {ask or item}. No pitching, no other questions, no pressure, "
                           f"no numbers, no tags."
+                        + lang_guard.language_rule(history)
                     )
                     try:
                         msg = await ai_rmx.generate_chat_response(history[-6:], combined, ai_provider, ai_keys, **kwargs) or ""
@@ -880,7 +884,8 @@ async def process_step_reminders() -> dict:
             msg = _STEP_TAG_RE.sub("", msg).replace("[HANDOVER_REQUIRED]", "")
             msg = re.sub(r'\[?METRICS\s*:.*$', '', msg, flags=re.DOTALL | re.IGNORECASE).strip()
             msg = sanitize_telegram_html(msg) if msg else ""
-            if not msg or contains_ai_disclosure(msg) or kol_offer.find_off_offer_figures(msg, exchange, agent_config):
+            if (not msg or contains_ai_disclosure(msg) or kol_offer.find_off_offer_figures(msg, exchange, agent_config)
+                    or lang_guard.wrong_language(msg, lang_guard.conversation_scripts(history), strict=True)):
                 msg = _step_reminder_template(item, lang, exchange)
 
             if await _send_ai_message(account_id, user_id, msg):
@@ -1111,7 +1116,31 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
         if drip_stage is not None and chat.get("last_drip_stage", 0) >= drip_stage:
             return False
         import kol_banners
+        import outbound_guard
         text, banner_keys = kol_banners.extract(text)
+        # Internal markers never reach the KOL, whichever engine wrote the text
+        # (reply, drip, reminder, care…). If the AI asked for a human, honour it.
+        text, wants_human = outbound_guard.clean_ai(text)
+        if wants_human:
+            new_status = "needs_human"
+            _spawn_background(_notify_main_account_handover(
+                account_id, user_id, chat.get("username"),
+                reason="AI triggered [HANDOVER_REQUIRED]"))
+        # A message the reader cannot read is never sent: checked from the
+        # characters alone against the languages this person has written in.
+        lang_why = lang_guard.wrong_language(
+            text, lang_guard.conversation_scripts(chat.get("history")), strict=True)
+        if lang_why:
+            logger.error("[AIFollowUp] 🚫 Wrong-language message blocked for user %d (acc %d): %s — %r",
+                         user_id, account_id, lang_why, text[:120])
+            hist = chat.get("history") or []
+            if drip_stage is None and hist and hist[-1].get("role") == "user":
+                # Someone is waiting for an answer: a person takes over.
+                await db.update_followup_chat_status(account_id, user_id, "needs_human")
+                _spawn_background(_notify_main_account_handover(
+                    account_id, user_id, chat.get("username"),
+                    reason="AI reply blocked: " + lang_why))
+            return False
         text = await _mirror_weex_links_for(account_id, user_id, text, chat.get("history"))
         banner = None
         for k in banner_keys[:1]:
@@ -1119,6 +1148,12 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
             if p and not kol_banners.already_sent(chat.get("history"), k):
                 banner = (k, p)
         if not text and not banner:
+            if new_status == "needs_human":
+                # The AI had nothing to say and only asked for a human: send
+                # nothing, hand the chat over so no engine retries it.
+                await db.update_followup_chat_status(account_id, user_id, "needs_human")
+                logger.warning("[AIFollowUp] 🙋 AI asked for a human without a message — "
+                               "nothing sent, chat handed over (user %d, acc %d)", user_id, account_id)
             return False
         lock_gen = _lock_ai_send(account_id, user_id)
         try:
@@ -1483,6 +1518,7 @@ async def generate_and_send_ai_reply_for_chat(
             for r in learned_rules:
                 combined_prompt += f"• When user asks about: {r['question_pattern']} -> Follow this answer/policy: {r['learned_answer']}\n"
 
+    combined_prompt += lang_guard.language_rule(full_history)
     history = full_history[-40:] if len(full_history) > 40 else full_history
     logger.info("[AIFollowUp] 🤖 Generating AI reply using Agent '%s' for user @%s (%d, history_len=%d)...",
                 agent_config.get('name', '?'), sender_username or '?', user_id, len(history))
@@ -2467,12 +2503,51 @@ async def _drip_daily_cap() -> int:
     return cap if cap > 0 else DRIP_DAILY_CAP_DEFAULT
 
 
+# A follow-up that is this many hours overdue is dropped, not sent late: a lead
+# who went quiet weeks ago must not suddenly get a pitch (a stuck queue once
+# released an 11-day-old backlog in one afternoon).
+_DRIP_STALE_HOURS = 72
+
+
+async def _proactive_agent(account_id: int, chat: dict | None) -> dict | None:
+    """The AI agent allowed to write first from this account, or None.
+
+    Same rule as the reply path: the account's own active agent, else the agent
+    of the campaign / Keyword DM rule that started the chat. An account with AI
+    switched off and no such source sends nothing on its own.
+    """
+    account_obj = await db.get_account(account_id)
+    agent_id = account_obj.get("ai_agent_id") if account_obj else None
+    if agent_id:
+        agent = await db.get_ai_agent(agent_id)
+        return agent if agent and agent.get("is_active", 1) else None
+    src_id = await _source_agent_id((chat or {}).get("campaign_id"), (chat or {}).get("watcher_id"))
+    if src_id:
+        agent = await db.get_ai_agent(src_id)
+        if agent and agent.get("is_active", 1):
+            return agent
+    return None
+
+
+def _admin_owns_chat(chat: dict | None) -> bool:
+    """True once a human admin has written in the chat: it is theirs to follow up."""
+    chat = chat or {}
+    if chat.get("human_takeover_at"):
+        return True
+    history = chat.get("history")
+    if history is None:
+        return "[Human Admin]" in (chat.get("history_json") or "")
+    return any(isinstance(m, dict) and m.get("role") == "assistant" and isinstance(m.get("content"), str)
+               and m["content"].lstrip().startswith("[Human Admin]") for m in history)
+
+
 async def _process_drip_queue() -> tuple[int, list[str]]:
     import aiosqlite
     sent, errs = 0, []
     cadences = {t: await _load_drip_cadence_for_tier(t) for t in ("Tier A", "Tier B", "Tier C")}
     other_cadence = await _load_drip_cadence()  # "Cold" / unknown tier → global cadence
     daily_cap = await _drip_daily_cap()
+    longest_wait = max([h for c in (*cadences.values(), other_cadence) for h in c] or [168])
 
     async with db.get_db() as db_conn:
         db_conn.row_factory = aiosqlite.Row
@@ -2517,12 +2592,15 @@ async def _process_drip_queue() -> tuple[int, list[str]]:
                   AND COALESCE(NULLIF(kol_step, ''), 'prospect') = 'prospect'
                   AND last_user_message_at IS NOT NULL
                   AND datetime(COALESCE(last_user_message_at, updated_at)) <= datetime('now', ?)
+                  AND datetime(COALESCE(last_user_message_at, updated_at)) >= datetime('now', ?)
+                  AND human_takeover_at IS NULL
+                  AND COALESCE(history_json, '') NOT LIKE '%[Human Admin]%'
                   AND COALESCE(last_drip_stage, 0) < CASE COALESCE(lead_tier, 'Tier C')
                         WHEN 'Tier A' THEN ? WHEN 'Tier B' THEN ? WHEN 'Tier C' THEN ? ELSE ? END
                   AND (drip_retry_after IS NULL OR datetime(drip_retry_after) <= datetime('now'))
             ) WHERE rn <= ?
             ORDER BY account_id, rn
-        """, (*eligible, f"-{_MIN_FIRST_STAGE_HOURS} hours",
+        """, (*eligible, f"-{_MIN_FIRST_STAGE_HOURS} hours", f"-{int(longest_wait + _DRIP_STALE_HOURS)} hours",
               len(cadences["Tier A"]), len(cadences["Tier B"]), len(cadences["Tier C"]),
               len(other_cadence), _DRIP_CANDIDATES_PER_ACCOUNT))
         rows = [dict(r) for r in await cursor.fetchall()]
@@ -2543,6 +2621,12 @@ async def _process_drip_queue() -> tuple[int, list[str]]:
         silence = _silence_hours(row.get("last_user_message_at") or row.get("updated_at"))
         if silence < cadence[stage - 1]:
             await _drip_defer(row_id, cadence[stage - 1] - silence)  # not due yet
+            continue
+        if silence > cadence[stage - 1] + _DRIP_STALE_HOURS:
+            # Too late: this lead went quiet long ago. Never revive an old chat.
+            await _drip_defer(row_id, 24 * 30)
+            logger.info("[DripEngine] Lead %d (acc %d) silent %.0fh — stage %d is overdue, dropped",
+                        user_id, account_id, silence, stage)
             continue
         if stage > 1 and row.get("last_drip_at"):
             # A long-silent lead must not get every stage back to back.
@@ -2573,9 +2657,17 @@ async def _process_drip_queue() -> tuple[int, list[str]]:
         chat = await db.get_followup_chat(account_id, user_id)
         if not chat or chat.get("status") != "active":
             continue
-        account_obj = await db.get_account(account_id)
-        agent_id = account_obj.get("ai_agent_id") if account_obj else None
-        agent_config = await db.get_ai_agent(agent_id) if agent_id else None
+        if _admin_owns_chat(chat):
+            # A person on our side has talked to this lead: the follow-up is theirs.
+            await _drip_defer(row_id, 24 * 30)
+            logger.info("[DripEngine] Lead %d (acc %d) was handled by a human admin — no AI follow-up",
+                        user_id, account_id)
+            continue
+        agent_config = await _proactive_agent(account_id, chat)
+        if not agent_config:
+            await _drip_defer(row_id, 24 * 7)
+            logger.info("[DripEngine] Account %d has AI off — no follow-up for lead %d", account_id, user_id)
+            continue
 
         drip_instruction = _drip_instruction_for_stage(stage, total_stages, tier)
         sys_p = agent_config.get("system_prompt", "") if agent_config else ""
@@ -2593,7 +2685,7 @@ async def _process_drip_queue() -> tuple[int, list[str]]:
             continue
         combined = (sys_p + "\n\n" + offer_block
                     + f"\n\n[DRIP FOLLOWUP STAGE {stage}/{total_stages} — {tier} INSTRUCTION]: "
-                    + drip_instruction)
+                    + drip_instruction + lang_guard.language_rule(history))
 
         try:
             ai_provider, ai_keys, kwargs = await _resolve_ai_provider(agent_config)
@@ -2617,6 +2709,11 @@ async def _process_drip_queue() -> tuple[int, list[str]]:
                 logger.warning("[DripEngine] 🚫 Blocked off-ladder figures %s in drip for user %d",
                                off_ladder, user_id)
                 await _drip_defer(row_id, 6)
+                continue
+            lang_why = lang_guard.wrong_language(msg, lang_guard.conversation_scripts(history), strict=True)
+            if lang_why:
+                logger.warning("[DripEngine] 🚫 Blocked wrong-language drip for user %d: %s", user_id, lang_why)
+                await _drip_defer(row_id, 24)
                 continue
             if await _send_ai_message(account_id, user_id, msg, drip_stage=stage):
                 sent += 1
@@ -3033,9 +3130,9 @@ async def process_monthly_kol_care() -> dict:
             if user_id in await _blocked_user_ids(account_id, client, blocked_cache):
                 continue
 
-            account_obj = await db.get_account(account_id)
-            agent_id = account_obj.get("ai_agent_id") if account_obj else None
-            agent_config = await db.get_ai_agent(agent_id) if agent_id else None
+            agent_config = await _proactive_agent(account_id, chat)
+            if not agent_config:
+                continue  # AI is off for this account: nothing is sent on its own
             ai_provider, ai_keys, kwargs = await _resolve_ai_provider(agent_config)
             if not ai_keys:
                 continue
@@ -3044,7 +3141,8 @@ async def process_monthly_kol_care() -> dict:
                            if kol_offer.uses_ladder(exchange) else None)
             care_ladder = (kol_region_offer.guard_ladder(await kol_offer.get_ladder()) if care_region else None)
             combined = ((agent_config.get("system_prompt", "") if agent_config else "")
-                        + "\n\n" + _kol_care_instruction(exchange, days, events, care_region))
+                        + "\n\n" + _kol_care_instruction(exchange, days, events, care_region)
+                        + lang_guard.language_rule(history))
             msg = await ai_rmx.generate_chat_response(history[-8:], combined, ai_provider, ai_keys, **kwargs)
             if not msg:
                 continue
@@ -3217,6 +3315,11 @@ async def process_outreach_nudges() -> dict:
                 logger.warning("[NudgeEngine] AI returned empty for user %d, skipping", user_id)
                 continue
 
+            import outbound_guard
+            msg, _ = outbound_guard.clean_ai(msg)
+            if not msg:
+                logger.warning("[NudgeEngine] AI returned only internal markers for user %d, skipping", user_id)
+                continue
             msg = sanitize_telegram_html(msg)
             if contains_ai_disclosure(msg):
                 logger.warning("[NudgeEngine] 🚫 Blocked AI-disclosure nudge for user %d", user_id)

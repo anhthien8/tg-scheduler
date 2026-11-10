@@ -659,6 +659,19 @@ async def _do_send_dm_with_fallback(
                         **ai_remix_kwargs
                     )
 
+                # ── Language gate: never send a template the recipient cannot read.
+                if msg_to_send.get("content"):
+                    msg_to_send["content"], _lang_why = await ai_rmx.fit_recipient_language(
+                        msg_to_send["content"], _member_info, enforce_default=_auto_native,
+                        provider=ai_provider, api_keys=ai_keys,
+                        custom_instruction=ai_custom_prompt, **ai_remix_kwargs)
+                    if _lang_why:
+                        logger.warning(f"[Watcher {watcher_id}] 🚫 Not sent to {username or user_id}: {_lang_why}")
+                        await db.add_watcher_dm_log(
+                            watcher_id, acc_id, user_id, username,
+                            group_id, group_title, matched_keyword, "skipped", _lang_why[:500])
+                        return False, None, _lang_why
+
                 # ── Simulate realistic typing action (human-like behavior) ──
                 try:
                     typing_action = "typing" if msg_to_send.get("msg_type") == "text" else "photo"
@@ -879,6 +892,11 @@ async def _send_one(client, peer, msg: dict):
     msg_type = msg.get("msg_type", "text")
     content = msg.get("content", "") or ""
     media_path = msg.get("media_path")
+    import outbound_guard
+    if msg_type == "text":
+        content = outbound_guard.require(content, "keyword DM")
+    else:
+        content = outbound_guard.guard_outgoing(content, "keyword DM caption") or ""
 
     if msg_type == "text":
         await client.send_message(peer, content, parse_mode="html")
@@ -935,6 +953,8 @@ async def _send_group_reply(
         logger.warning(f"[Watcher {watcher_id}] Group reply skipped — acc={used_dm_acc_id} PeerFlood blocked")
         return
     try:
+        import outbound_guard
+        reply_text = outbound_guard.require(reply_text, "watcher group reply")
         await client.send_message(
             entity=chat_id,
             message=reply_text,

@@ -155,7 +155,7 @@ async def test_daily_cap_per_account(mock_send, mock_gen):
 @patch("telegram_client.send_text_message", new_callable=AsyncMock)
 async def test_long_silent_lead_does_not_get_every_stage_back_to_back(mock_send, mock_gen):
     await _account_and_agent()
-    await _silent_lead(hours=24 * 30)  # silent for a month: every stage is "due"
+    await _silent_lead(hours=60, tier="Tier A")  # stages 1-3 (12h, 24h, 48h) are all "due"
     mock_gen.return_value = "Hey bro, still interested in the affiliate program?"
     assert (await tracker.process_drip_followups())["sent"] == 1
     assert (await tracker.process_drip_followups())["sent"] == 0
@@ -169,7 +169,7 @@ async def test_long_silent_lead_does_not_get_every_stage_back_to_back(mock_send,
 async def test_a_lead_that_is_not_due_is_deferred_not_rescanned(mock_send, mock_gen):
     await _account_and_agent()
     await _silent_lead(hours=20, tier="Tier C")  # Tier C first stage = 48h
-    assert (await tracker.process_drip_followups())["sent"] == 0
+    assert (await tracker._process_drip_queue())[0] == 0
     mock_gen.assert_not_called()
     assert (await _row())["drip_retry_after"]
 

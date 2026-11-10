@@ -4,6 +4,7 @@ Each account gets its own Telethon client instance.
 """
 import asyncio
 import logging
+import outbound_guard
 import os
 import time
 import random
@@ -1106,6 +1107,11 @@ async def send_text_message(account_id: int, chat_id: int, text: str, parse_mode
     client = _clients.get(account_id)
     if not client:
         raise Exception("Account not connected")
+    # Last-line guard: internal AI markers ([HANDOVER_REQUIRED], METRICS…) never
+    # reach a chat. A message made only of markers is not sent at all.
+    text = outbound_guard.guard_outgoing(text, f"acc={account_id} chat={chat_id}")
+    if text is None:
+        return False
     try:
         entity = await _get_entity_safe(client, chat_id)
         await client.send_message(entity, text, parse_mode=parse_mode)
@@ -1121,6 +1127,7 @@ async def send_photo_message(account_id: int, chat_id: int, file_path: str, capt
     client = _clients.get(account_id)
     if not client:
         raise Exception("Account not connected")
+    caption = outbound_guard.guard_outgoing(caption, f"acc={account_id} chat={chat_id} photo caption") or ""
     try:
         entity = await _get_entity_safe(client, chat_id)
         await client.send_file(entity, file_path, caption=caption, parse_mode="html")
@@ -1136,6 +1143,7 @@ async def send_video_message(account_id: int, chat_id: int, file_path: str, capt
     client = _clients.get(account_id)
     if not client:
         raise Exception("Account not connected")
+    caption = outbound_guard.guard_outgoing(caption, f"acc={account_id} chat={chat_id} video caption") or ""
     try:
         entity = await _get_entity_safe(client, chat_id)
         await client.send_file(entity, file_path, caption=caption, parse_mode="html", supports_streaming=True)
@@ -1151,6 +1159,7 @@ async def send_document_message(account_id: int, chat_id: int, file_path: str, c
     client = _clients.get(account_id)
     if not client:
         raise Exception("Account not connected")
+    caption = outbound_guard.guard_outgoing(caption, f"acc={account_id} chat={chat_id} document caption") or ""
     try:
         entity = await _get_entity_safe(client, chat_id)
         await client.send_file(entity, file_path, caption=caption, parse_mode="html", force_document=True)

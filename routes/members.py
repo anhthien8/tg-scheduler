@@ -3098,6 +3098,7 @@ async def _run_campaign(campaign_id: int):
                 merged_msgs = merge_messages(selected_msgs)
 
                 # Send messages (1 consolidated message / media with caption)
+                _lang_why = ""
                 for msg in merged_msgs:
                     content = msg.get("content", "")
                     msg_type = msg.get("msg_type", "text")
@@ -3165,6 +3166,21 @@ async def _run_campaign(campaign_id: int):
                         else:
                             logger.warning(f"[Campaign {campaign_id}] ⚠️ AI Remix BẬT nhưng thiếu API Key (vui lòng kiểm tra Cài Đặt AI Remix)")
 
+                    # ── Language gate: a template the recipient cannot read is never
+                    # sent (also with AI Remix off). Translated when an AI key exists,
+                    # otherwise this recipient is skipped.
+                    if content:
+                        content, _lang_why = await ai_rmx.fit_recipient_language(
+                            content,
+                            {"first_name": member.get("first_name"), "last_name": member.get("last_name"),
+                             "username": username, "lang_code": member.get("lang_code"),
+                             "phone": member.get("phone"), "community_hint": member.get("group_title", "")},
+                            enforce_default=bool(campaign.get("auto_translate_native", 1)),
+                            provider=ai_provider, api_keys=ai_keys, client=client, peer=peer,
+                            custom_instruction=ai_custom_prompt, **ai_remix_kwargs)
+                        if _lang_why:
+                            break
+
                     # ── Simulate realistic typing action (human-like behavior) ──
                     try:
                         typing_action = "typing" if msg_type == "text" else "photo"
@@ -3175,6 +3191,11 @@ async def _run_campaign(campaign_id: int):
                     except Exception:
                         pass
 
+                    import outbound_guard
+                    if msg_type == "text":
+                        content = outbound_guard.require(content, "campaign DM")
+                    else:
+                        content = outbound_guard.guard_outgoing(content, "campaign DM caption") or ""
                     if msg_type == "text":
                         await client.send_message(peer, content)
                     elif msg_type in ("photo", "video", "document"):
@@ -3193,6 +3214,15 @@ async def _run_campaign(campaign_id: int):
                                     img_rand.cleanup_temp_image(rand_path, media_path)
                         elif content:
                             await client.send_message(peer, content)
+
+                if _lang_why:
+                    skipped += 1
+                    logger.warning(f"[Campaign {campaign_id}] 🚫 Không gửi cho {username or user_id}: {_lang_why}")
+                    await db.finish_dm_campaign_reservation(campaign_id, user_id, "sent", _lang_why)
+                    _reservation_done = True
+                    await db.add_dm_campaign_log(campaign_id, acc_id, user_id, username, "skipped",
+                                                "Sai ngôn ngữ người nhận — không gửi. " + _lang_why)
+                    continue
 
                 sent += 1
                 daily_sent += 1

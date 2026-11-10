@@ -289,6 +289,8 @@ async def _send_group_message(
 
             # Send message
             try:
+                import outbound_guard
+                text = outbound_guard.require(text, "engagement")
                 kwargs = {
                     "entity": chat_id,
                     "message": text,

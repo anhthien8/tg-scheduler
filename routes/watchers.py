@@ -150,6 +150,8 @@ async def test_send_group(account_id: int, chat_id: int, text: str):
     if not client:
         raise HTTPException(status_code=400, detail="Client not found")
     try:
+        import outbound_guard
+        text = outbound_guard.require(text, "watcher test send")
         msg = await client.send_message(chat_id, text)
         async def delete_later():
             await asyncio.sleep(60)

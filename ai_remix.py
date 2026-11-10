@@ -667,6 +667,53 @@ async def get_fallback_order() -> list[str]:
     return list(DEFAULT_FALLBACK_ORDER)
 
 
+async def fit_recipient_language(text, member_info, enforce_default=True, provider=None, api_keys=None,
+                                 client=None, peer=None, **kwargs):
+    """Make sure a template can be read by the person it goes to.
+
+    Returns (text, "") when it is fine to send, or (text, reason) when it must
+    NOT be sent. Only a template written in one specific language (Chinese,
+    Russian, Vietnamese...) is judged; an English template always passes. When
+    the recipient reads another language the text is translated if an AI key is
+    available, and the translation is checked again. `enforce_default`: also
+    apply when we know nothing about the recipient (then English is assumed).
+    """
+    import lang_guard
+    script = lang_guard.text_script(text)
+    if not script or script == lang_guard.LATIN:
+        return text, ""
+    info = dict(member_info or {})
+    if client is not None and peer is not None and not info.get("lang_code") and not info.get("phone"):
+        try:
+            info.update(await fetch_profile_hints(client, peer))
+        except Exception:
+            pass
+    code, src = detect_user_language(info, with_source=True)
+    family = lang_guard.lang_family(code)
+    if family == script or (src == "default" and not enforce_default):
+        return text, ""
+    reason = (f"language_mismatch: template is {lang_guard.FAMILY_NAMES.get(script, script)}, "
+              f"recipient reads {LANGUAGE_NAMES.get(code, code)} ({src})")
+    try:
+        if not provider:
+            import database as db
+            provider = await db.get_setting("ai_provider", "")
+        if provider and not api_keys:
+            api_keys, cfg_kw = await get_provider_config(provider)
+            for k, v in cfg_kw.items():
+                if v:
+                    kwargs.setdefault(k, v)
+        if provider and api_keys:
+            translated = await remix_message(text, provider, api_keys, auto_translate_native=True,
+                                             member_info=info, **kwargs)
+            if translated and lang_guard.text_script(translated) in ("", family)                     and lang_guard.text_script(translated) != script:
+                logger.info("[Lang] Template translated for recipient (%s -> %s, %s)", script, code, src)
+                return translated, ""
+    except Exception as e:
+        logger.warning("[Lang] Could not translate template for recipient: %s", e)
+    return text, reason
+
+
 async def get_provider_config(provider: str) -> tuple[list[str], dict]:
     """(keys, kwargs) for a provider. A self-hosted openai_compatible router
     (9Router) with base_url + model counts as configured even without a key."""
