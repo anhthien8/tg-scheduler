@@ -180,6 +180,7 @@ async def start_engines() -> asyncio.Task:
 
     # Daily summary
     from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.interval import IntervalTrigger
 
     from daily_summary import send_daily_summary
     summary_time = await db.get_setting("daily_summary_time", "21:00")
@@ -205,8 +206,17 @@ async def start_engines() -> asyncio.Task:
     )
     logger.info("DB backup scheduled daily at 03:00")
 
+    # Warmup daily counters: without this reset a job that reached its daily
+    # limit once stayed stopped forever.
+    sch.get_scheduler().add_job(
+        db.reset_warmup_daily_counts,
+        trigger=CronTrigger(hour=0, minute=0, timezone=sch.TZ),
+        id="warmup_daily_reset",
+        name="Warmup daily reset",
+        replace_existing=True,
+    )
+
     # Lead SLA check
-    from apscheduler.triggers.interval import IntervalTrigger
     sch.get_scheduler().add_job(
         alerts.check_lead_sla,
         trigger=CronTrigger(hour=9, minute=0, timezone=sch.TZ),
@@ -219,12 +229,14 @@ async def start_engines() -> asyncio.Task:
     # Speed-to-reply SLA: ping when a hot lead has waited too long for OUR reply.
     sch.get_scheduler().add_job(
         alerts.check_reply_sla,
-        trigger=CronTrigger(hour=9, minute=1, timezone=sch.TZ),
+        # A 30-minute SLA needs frequent checks (was once a day at 09:01);
+        # check_reply_sla de-duplicates alerts per lead set.
+        trigger=IntervalTrigger(minutes=10),
         id="reply_sla_check",
         name="Speed-to-Reply SLA Check",
         replace_existing=True,
     )
-    logger.info("Speed-to-reply SLA check scheduled daily at 09:01")
+    logger.info("Speed-to-reply SLA check scheduled every 10 minutes")
 
     # Message queue worker
     mq.start_worker()

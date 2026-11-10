@@ -56,6 +56,7 @@ def test_relevant_picker_prefers_matching_topic(tmp_path, monkeypatch):
     conn.close()
 
     from contextlib import asynccontextmanager
+
     import aiosqlite
 
     @asynccontextmanager

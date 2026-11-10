@@ -122,8 +122,6 @@ const API = {
     return this._runtimeModePromise;
   },
 
-  clearRuntimeModeCache() { this._runtimeModePromise = null; },
-
   _requireId(value, label) {
     const num = typeof value === 'number' ? value : Number(value);
     if (!Number.isInteger(num) || num <= 0) {
@@ -175,16 +173,6 @@ const API = {
     return MembersAPI.stopCampaign(campaignId);
   },
 
-  /** Campaign list. Both modes are DB reads; web uses the IPC snapshot. */
-  async listCampaignsRuntime(updatedSince = null) {
-    if (await this.getRuntimeMode() === 'web') {
-      const res = await this.get('/api/ipc/campaigns');
-      return res.campaigns || [];
-    }
-    const res = await MembersAPI.getCampaigns(updatedSince);
-    return Array.isArray(res) ? res : (res.campaigns || []);
-  },
-
   /** Telegram watcher list (telegram platform only). */
   async listWatchersRuntime() {
     if (await this.getRuntimeMode() === 'web') {
@@ -193,16 +181,6 @@ const API = {
     }
     const res = await this.getWatchers();
     return Array.isArray(res) ? res : (res.watchers || []);
-  },
-
-  /** Ask the worker to reload one watcher's handlers. web → queued command. */
-  async reloadWatcherRuntime(id) {
-    const watcherId = this._requireId(id, 'ID watcher');
-    if (await this.getRuntimeMode() === 'web') {
-      return this.enqueueCommand('watchers.reload', { watcher_id: watcherId });
-    }
-    // combined: create/update already reload in-process; nothing to enqueue.
-    return { status: 'noop', reason: 'combined mode reloads watchers in-process' };
   },
 
   // Watcher CRUD is NOT migrated to the command queue yet. Fail loudly in web
@@ -292,15 +270,10 @@ const API = {
       body: JSON.stringify({ ai_agent_id: aiAgentId ? parseInt(aiAgentId) : null })
     }));
   },
-  getDmStats(id) { return this.get(`/api/auth/accounts/${id}/dm-stats`); },
   sendCode(phone, accountId) { return this.post('/api/auth/send-code', { phone, account_id: accountId }); },
   async verify(phone, code, hash, accountId, password) {
     this.clearAccountsCache();
     return this.post('/api/auth/verify', { phone, code, phone_code_hash: hash, account_id: accountId, password });
-  },
-  async logoutAccount(id) {
-    this.clearAccountsCache();
-    return this.post(`/api/auth/logout/${id}`);
   },
 
   // Chats
@@ -360,18 +333,11 @@ const API = {
   getWatcherStats() { return this.get('/api/watchers/stats'); },
   testWatcherDM(id, target) { return this.post(`/api/watchers/${id}/test-dm`, { target }); },
   checkMembership(account_ids, group_ids) { return this.post('/api/watchers/check-membership', { account_ids, group_ids }); },
-  autoJoinGroups(account_ids, group_ids) { return this.post('/api/watchers/auto-join', { account_ids, group_ids }); },
   joinChannel(account_id, channel_link) { return this.post('/api/members/join-channel', { account_id, channel_link: String(channel_link) }); },
 
   // Settings
   getSetting(key) { return this.get(`/api/settings/${key}`); },
   setSetting(key, value) { return this.post(`/api/settings/${key}`, { value }); },
-
-  // AI Remix test (calls backend directly)
-  async testRemixDirect(provider, keys, text) {
-    // Call backend to do the remix so we use real server-side logic
-    return this.post('/api/settings/test-remix', { provider, keys, text });
-  },
   // DM Campaigns
   cloneCampaign(id, data) { return MembersAPI.cloneCampaign(id, data); }
 };
@@ -441,7 +407,6 @@ const DiscordAPI = {
   // Bots
   getBots:          ()           => apiGet('/api/discord/bots'),
   addBot:           (data)       => apiPost('/api/discord/bots', data),
-  updateBot:        (id, data)   => apiPut(`/api/discord/bots/${id}`, data),
   deleteBot:        (id)         => apiDelete(`/api/discord/bots/${id}`),
   connectBot:       (id)         => apiPost(`/api/discord/bots/${id}/connect`, {}),
   disconnectBot:    (id)         => apiPost(`/api/discord/bots/${id}/disconnect`, {}),
@@ -453,8 +418,6 @@ const DiscordAPI = {
     const q = new URLSearchParams(params).toString();
     return apiGet('/api/discord/watchers/logs' + (q ? '?' + q : ''));
   },
-  // Reactions
-  getReactions:     ()           => apiGet('/api/discord/reactions'),
   // Stats
   getStats:         ()           => apiGet('/api/discord/stats'),
 };
@@ -482,11 +445,7 @@ const MembersAPI = {
   getScrapeMembers:  (jobId, limit = 500, offset = 0) =>
     apiGet(`/api/members/scrape-jobs/${jobId}?limit=${limit}&offset=${offset}`),
   deleteScrapeJob:   (jobId)      => apiDelete(`/api/members/scrape-jobs/${jobId}`),
-
-  // Batch Scraping
-  batchScrape:        (data)    => apiPost('/api/members/batch-scrape', data),
   getBatchProgress:   (jobId)   => apiGet(`/api/members/batch-scrape/${jobId}/progress`),
-  resolveChannels:    (data)    => apiPost('/api/members/batch-scrape/resolve', data),
 
   // DM Campaigns
   createCampaign:    (data)       => apiPost('/api/members/campaigns', data),
@@ -520,7 +479,6 @@ const InviteAPI = {
   stopCampaign:      (id)         => apiPost(`/api/invite-campaigns/${id}/stop`, {}),
   getCampaignLogs:   (id, limit = 200) =>
     apiGet(`/api/invite-campaigns/${id}/logs?limit=${limit}`),
-  resolveGroup:      (identifier) => apiPost('/api/invite-campaigns/resolve-group', { identifier }),
 };
 
 

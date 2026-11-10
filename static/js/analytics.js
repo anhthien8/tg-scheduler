@@ -496,9 +496,9 @@ const AutoReply = {
       const el = document.getElementById('ar-logs-body');
       if (!el) return;
       el.innerHTML = logs.length ? logs.map(l => `<tr>
-        <td>${l.username || l.user_id}</td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${l.trigger_text || ''}</td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${l.reply_text || ''}</td>
+        <td>${esc(l.username || l.user_id)}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(l.trigger_text || '')}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(l.reply_text || '')}</td>
         <td><span class="badge ${l.status === 'success' ? 'badge-green' : 'badge-red'}">${l.status}</span></td>
         <td>${l.sent_at?.slice(0, 16) || ''}</td>
       </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text2)">Ch\u01B0a c\u00F3 log</td></tr>';

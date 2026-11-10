@@ -17,7 +17,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install ruff
-        run: pip install ruff
+        run: pip install ruff==0.16.9  # keep in sync with requirements-dev.txt / pre-commit
       - name: ruff check
         run: ruff check .
 

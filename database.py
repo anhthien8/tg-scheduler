@@ -1048,12 +1048,14 @@ async def init_db():
             ON ai_followup_chats(account_id, user_id)
         """)
 
-        # Auto-pause / ignore any existing Telegram bot chats in ai_followup_chats
+        # Auto-pause / ignore any existing Telegram bot chats in ai_followup_chats.
+        # Same rule as dm_reply_tracker.is_bot_account ('_bot' in username): matching
+        # display names on '%bot%' flagged real people (Abbott, Botha) on every restart.
         try:
             await db.execute("""
                 UPDATE ai_followup_chats 
                 SET status = 'bot_ignored' 
-                WHERE LOWER(username) LIKE '%bot' OR LOWER(name) LIKE '%bot%' OR user_id IN (777000, 178220800, 4244000, 4244001, 1088515515)
+                WHERE LOWER(username) LIKE '%!_bot%' ESCAPE '!' OR user_id IN (777000, 178220800, 4244000, 4244001, 1088515515)
             """)
         except Exception:
             pass
@@ -1274,11 +1276,17 @@ async def init_db():
                 await db.execute(_fts_trigger)
             except Exception:
                 pass  # trigger already exists
-        # One-time FTS rebuild to index pre-existing data
+        # One-time FTS rebuild to index pre-existing data (flagged in settings so it
+        # no longer re-indexes the whole table on every startup).
         try:
-            await db.execute(
-                "INSERT INTO agent_learned_knowledge_fts(agent_learned_knowledge_fts) VALUES('rebuild')"
-            )
+            cur = await db.execute("SELECT 1 FROM settings WHERE key = 'fts_learned_rebuilt_v1'")
+            if not await cur.fetchone():
+                await db.execute(
+                    "INSERT INTO agent_learned_knowledge_fts(agent_learned_knowledge_fts) VALUES('rebuild')"
+                )
+                await db.execute(
+                    "INSERT OR REPLACE INTO settings (key, value, updated_at) "
+                    "VALUES ('fts_learned_rebuilt_v1', '1', datetime('now'))")
         except Exception:
             pass
 
@@ -2420,14 +2428,6 @@ async def _load_watcher_rows_bulk(db, rows: list) -> list:
     return watchers
 
 
-async def get_all_watchers() -> list:
-    async with get_db() as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM keyword_watchers ORDER BY created_at DESC")
-        rows = await cursor.fetchall()
-        return await _load_watcher_rows_bulk(db, rows)
-
-
 async def get_active_watchers() -> list:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
@@ -2943,35 +2943,6 @@ async def unblock_target(schedule_id: int, account_id: int, chat_id: int) -> boo
 
 DM_DAILY_LIMIT_NORMAL = 10
 DM_DAILY_LIMIT_PREMIUM = 60
-
-
-async def get_campaign_dm_limits(campaign_id: int = None) -> tuple[int, int]:
-    """Get DM daily limits. If campaign_id given, read from campaign; else use defaults."""
-    if campaign_id:
-        async with get_db() as db:
-            db.row_factory = aiosqlite.Row
-            row = await (await db.execute(
-                "SELECT daily_limit_premium, daily_limit_normal FROM dm_campaigns WHERE id=?",
-                (campaign_id,)
-            )).fetchone()
-            if row:
-                return (row["daily_limit_premium"] or DM_DAILY_LIMIT_PREMIUM,
-                        row["daily_limit_normal"] or DM_DAILY_LIMIT_NORMAL)
-    return (DM_DAILY_LIMIT_PREMIUM, DM_DAILY_LIMIT_NORMAL)
-
-
-async def get_account_daily_dm_count(account_id: int) -> int:
-    """Count how many DMs this account sent today (UTC date) across watchers and campaigns."""
-    async with get_db() as db:
-        row = await (await db.execute(
-            """SELECT (
-                (SELECT COUNT(*) FROM watcher_dm_logs WHERE account_id=? AND status='success' AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours'))
-                +
-                (SELECT COUNT(*) FROM dm_campaign_logs WHERE account_id=? AND status='success' AND sent_at >= datetime('now', '+7 hours', 'start of day', '-7 hours'))
-            ) as cnt""",
-            (account_id, account_id)
-        )).fetchone()
-        return row[0] if row else 0
 
 
 async def is_account_dm_limit_reached(account_id: int, limit_premium: int = None, limit_normal: int = None) -> tuple[bool, int, int]:
@@ -3517,27 +3488,6 @@ async def add_dm_reply(data: dict) -> int:
         return cursor.lastrowid
 
 
-async def record_dm_reply(
-    watcher_id: int | None = None,
-    account_id: int = 0,
-    sender_user_id: int = 0,
-    sender_username: str | None = None,
-    sender_name: str | None = None,
-    message_text: str = "",
-    platform: str = "telegram",
-) -> int:
-    """Helper alias for add_dm_reply supporting keyword arguments."""
-    return await add_dm_reply({
-        "watcher_id": watcher_id,
-        "account_id": account_id,
-        "sender_user_id": sender_user_id,
-        "sender_username": sender_username,
-        "sender_name": sender_name,
-        "message_text": message_text,
-        "platform": platform,
-    })
-
-
 async def get_dm_replies(
     limit: int = 50,
     offset: int = 0,
@@ -3922,15 +3872,6 @@ async def delete_scrape_job(scrape_job_id: str):
 
 # ── Batch Scrape Channels ──
 
-async def create_batch_channel(batch_job_id: str, channel_username: str):
-    """Add a channel to a batch scrape job."""
-    async with get_db() as db:
-        await db.execute("""
-            INSERT INTO batch_scrape_channels (batch_job_id, channel_username)
-            VALUES (?, ?)
-        """, (batch_job_id, channel_username))
-        await db.commit()
-
 
 async def create_batch_channels_bulk(batch_job_id: str, channel_usernames):
     """Add many channels to a batch scrape job in ONE insert + ONE commit."""
@@ -3968,13 +3909,6 @@ async def get_batch_channels(batch_job_id: str) -> list:
             (batch_job_id,)
         )
         return [dict(row) for row in await cursor.fetchall()]
-
-
-async def delete_batch_channels(batch_job_id: str):
-    """Delete batch channel records for a job."""
-    async with get_db() as db:
-        await db.execute("DELETE FROM batch_scrape_channels WHERE batch_job_id = ?", (batch_job_id,))
-        await db.commit()
 
 
 # ── DM Campaigns ──
@@ -4683,19 +4617,6 @@ async def get_all_templates() -> list:
         return result
 
 
-async def get_template(template_id: int) -> dict | None:
-    async with get_db() as db:
-        db.row_factory = aiosqlite.Row
-        row = await (await db.execute(
-            "SELECT * FROM dm_templates WHERE id=?", (template_id,)
-        )).fetchone()
-        if not row:
-            return None
-        d = dict(row)
-        d["messages"] = json.loads(d.get("messages") or "[]")
-        return d
-
-
 async def create_template(data: dict) -> int:
     async with get_db() as db:
         cursor = await db.execute("""
@@ -4896,7 +4817,6 @@ async def find_running_campaign_log_for_user(sender_user_id: int, username: str 
             ORDER BY l.sent_at DESC LIMIT 1
         """, (sender_user_id, (username or "").lstrip("@"), (username or "").lstrip("@")))).fetchone()
         return dict(row) if row else None
-
 
 
 async def find_watcher_log_for_user(sender_user_id: int, username: str | None = None) -> dict | None:
@@ -5191,7 +5111,6 @@ async def get_invite_campaign_sent_user_ids(campaign_id: int) -> set:
             (campaign_id,)
         )).fetchall()
         return {r[0] for r in rows}
-
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -6012,24 +5931,6 @@ async def get_kol_profile(account_id: int, user_id: int) -> dict:
         return _merge_profile_row(row)
 
 
-async def get_kol_profiles(user_ids: list[int] | None = None) -> list[dict]:
-    """Return KOL profiles (account_id, user_id + merged profile fields)."""
-    async with get_db() as db:
-        db.row_factory = aiosqlite.Row
-        query = "SELECT * FROM kol_profiles"
-        params: list = []
-        if user_ids:
-            query += " WHERE user_id IN (" + ",".join("?" for _ in user_ids) + ")"
-            params = list(user_ids)
-        cursor = await db.execute(query, params)
-        rows = await cursor.fetchall()
-    out = []
-    for row in rows:
-        profile = _merge_profile_row(row)
-        out.append({"account_id": row["account_id"], "user_id": row["user_id"], **profile})
-    return out
-
-
 def _profile_col_value(key: str, value):
     """Serialise a structured profile field for its column."""
     if value is None:
@@ -6451,15 +6352,6 @@ async def upsert_telegram_topic(data: dict) -> int:
         return cursor.lastrowid
 
 
-async def update_telegram_topic_status(group_id: int, topic_id: int, status: str):
-    async with get_db() as db:
-        await db.execute(
-            "UPDATE telegram_topics SET status = ?, updated_at = datetime('now') WHERE group_id = ? AND topic_id = ?",
-            (status, group_id, topic_id),
-        )
-        await db.commit()
-
-
 async def update_telegram_topic_last_message(group_id: int, topic_id: int, message: str):
     async with get_db() as db:
         await db.execute(
@@ -6574,17 +6466,6 @@ async def get_nudge_stats() -> dict:
         )
         rows = await cursor.fetchall()
         return {r[0]: r[1] for r in rows}
-
-
-async def get_nudge_for_user(account_id: int, target_user_id: int) -> dict | None:
-    """Get nudge record for a specific user (for UI badge)."""
-    async with get_db() as db:
-        db.row_factory = aiosqlite.Row
-        row = await (await db.execute(
-            "SELECT * FROM nudges WHERE account_id = ? AND target_user_id = ? LIMIT 1",
-            (account_id, target_user_id),
-        )).fetchone()
-        return dict(row) if row else None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -6938,9 +6819,6 @@ def generate_referral_code() -> str:
     return "REF-" + "".join(_secrets.choice(chars) for _ in range(8))
 
 
-
-
-
 async def create_referral_code(
     account_id: int, referrer_user_id: int, code: str | None = None,
     max_uses: int = 10, expires_at: str | None = None,
@@ -7037,34 +6915,6 @@ async def get_all_referral_attributions() -> list[dict]:
             "SELECT * FROM referral_attributions ORDER BY attributed_at DESC"
         )
         return [dict(r) for r in await cursor.fetchall()]
-
-
-async def update_attribution_status(attribution_id: int, status: str, converted_at: str | None = None):
-    async with get_db() as db:
-        if converted_at:
-            await db.execute(
-                "UPDATE referral_attributions SET status = ?, converted_at = ? WHERE id = ?",
-                (status, converted_at, attribution_id)
-            )
-        else:
-            await db.execute(
-                "UPDATE referral_attributions SET status = ? WHERE id = ?",
-                (status, attribution_id)
-            )
-        await db.commit()
-
-
-async def create_referral_reward(
-    referrer_user_id: int, attribution_id: int,
-    reward_type: str, reward_detail: str | None = None,
-) -> int:
-    async with get_db() as db:
-        cursor = await db.execute("""
-            INSERT INTO referral_rewards (referrer_user_id, attribution_id, reward_type, reward_detail)
-            VALUES (?, ?, ?, ?)
-        """, (referrer_user_id, attribution_id, reward_type, reward_detail))
-        await db.commit()
-        return cursor.lastrowid
 
 
 async def get_referral_stats() -> dict:

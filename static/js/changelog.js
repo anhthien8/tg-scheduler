@@ -4,7 +4,6 @@
  */
 const ChangelogAPI = {
   get: () => apiGet('/api/changelog'),
-  getLatest: () => apiGet('/api/changelog/latest'),
 };
 
 const Changelog = {

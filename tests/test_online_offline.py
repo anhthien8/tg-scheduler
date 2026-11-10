@@ -1,9 +1,10 @@
 """Tests for C3: Online/Offline Cycle per Account."""
-import pytest
-from unittest.mock import patch
 from datetime import datetime
+from unittest.mock import patch
 
-from database import is_account_in_active_hours, check_account_active_hours
+import pytest
+
+from database import check_account_active_hours, is_account_in_active_hours
 
 
 class TestIsAccountInActiveHours:

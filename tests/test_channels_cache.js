@@ -48,6 +48,7 @@ function buildApp(globals) {
   const script = `
     var me_dummy = me_dummy || {};
     function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    function escJs(s){return esc(s);}
     function debounce(fn, d) { return fn; }
 
     var App = {

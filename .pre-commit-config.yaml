@@ -12,14 +12,15 @@ repos:
       - id: check-added-large-files
         args: ["--maxkb=2048"]
       - id: detect-private-key
-      # Project rule (AGENTS.md #2): never corrupt UTF-8 / Vietnamese chars.
+      # Project rule (AGENTS.md): never corrupt UTF-8 / Vietnamese chars.
       - id: mixed-line-ending
         args: ["--fix=lf"]
         exclude: \.(bat|cmd|vbs)$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+    rev: v0.16.9  # same version as CI and requirements-dev.txt
     hooks:
+      # Lint only: the codebase is not ruff-formatted and CI does not check
+      # formatting, so a format hook would rewrite every touched file.
       - id: ruff
         args: ["--fix"]
-      - id: ruff-format

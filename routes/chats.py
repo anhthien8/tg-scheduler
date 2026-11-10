@@ -76,6 +76,7 @@ class JoinGroupPayload(BaseModel):
 async def join_group(payload: JoinGroupPayload):
     """Join a group by @username / t.me link / invite link and return it as a schedule target."""
     from telethon.tl.types import Channel, Chat
+
     from reaction_watcher import _join_or_get_entity
 
     link = payload.link.strip()

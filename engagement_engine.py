@@ -24,6 +24,7 @@ import account_busy
 import alerts
 import claimer
 import database as db
+import flood_state
 import telegram_client as tg
 
 logger = logging.getLogger("tg-scheduler.engagement")
@@ -44,8 +45,11 @@ _last_reply_at: dict[int, float] = {}
 # Muted/kicked nicks per campaign — campaign_id → {account_id: mute_until}
 _muted_nicks: dict[int, dict[int, float]] = {}
 
-# Engagement send lock — serialize sends to prevent collisions
-_engagement_send_lock: asyncio.Lock | None = None
+# Engagement send locks — one per group, so two of our nicks never reply in the
+# same group at once. (A single global lock held across the 20-90s human delay
+# capped the whole process at ~1 reply/minute.)
+_engagement_send_locks: dict[int, asyncio.Lock] = {}
+_bg_tasks: set = set()
 
 # Handler removers — campaign_id → [(client, handler_fn)]
 _engagement_handlers: dict[int, list] = {}
@@ -55,12 +59,12 @@ _self_user_ids: set[int] = set()
 _self_ids_loaded_at: float = 0.0
 
 
-def _get_engagement_send_lock():
-    """Lazily create the engagement send lock."""
-    global _engagement_send_lock
-    if _engagement_send_lock is None:
-        _engagement_send_lock = asyncio.Lock()
-    return _engagement_send_lock
+def _get_engagement_send_lock(group_id: int = 0):
+    """Lazily create the send lock for a group."""
+    lock = _engagement_send_locks.get(group_id)
+    if lock is None:
+        lock = _engagement_send_locks[group_id] = asyncio.Lock()
+    return lock
 
 
 # ── Helper: self user IDs ─────────────────────────────────────────────────────
@@ -109,7 +113,11 @@ async def _get_group_admin_ids(client, group_id: int) -> set:
         for u in result.users:
             admin_ids.add(u.id)
     except Exception as e:
+        # Do not cache a failure: an empty set cached for 24h switched the admin
+        # filter off after any transient error. Retry in 10 minutes instead.
         logger.debug(f"[Engagement] Could not get admins for {group_id}: {e}")
+        _admin_cache[group_id] = (admin_ids, _time.time() - _ADMIN_CACHE_TTL + 600)
+        return admin_ids
     _admin_cache[group_id] = (admin_ids, _time.time())
     return admin_ids
 
@@ -262,7 +270,7 @@ async def _send_group_message(
         _is_peerflood_blocked = lambda a: False
         _mark_peerflood = lambda a: None
 
-    if _is_peerflood_blocked(account_id):
+    if _is_peerflood_blocked(account_id) or flood_state.is_resting(account_id):
         return {"ok": False, "msg_id": None, "error": "peerflood_blocked", "kind": "peerflood"}
 
     client = tg.get_client(account_id)
@@ -274,7 +282,7 @@ async def _send_group_message(
 
     # AC6: Busy registry
     try:
-        async with account_busy.acquire(account_id, "engagement", ttl_secs=90):
+        async with account_busy.acquire(account_id, "engagement", ttl_secs=180):  # 90s delay + typing + send
             # AC2: Delay 20-90s before replying
             delay = random.uniform(20, 90)
             await asyncio.sleep(delay)
@@ -302,9 +310,16 @@ async def _send_group_message(
                 return {"ok": True, "msg_id": msg_id, "error": None, "kind": "reply"}
 
             except tg_errors.FloodWaitError as e:
-                # AC3: FloodWait → mark peerflood
+                # FloodWait is a short, exact wait: rest the account for that long in
+                # every engine. (It used to start the 4-72h PeerFlood cooldown.)
+                flood_state.mark(account_id, e.seconds + 10)
+                return {"ok": False, "msg_id": None, "error": str(e), "kind": "peerflood"}
+            except tg_errors.PeerFloodError as e:
                 _mark_peerflood(account_id)
                 return {"ok": False, "msg_id": None, "error": str(e), "kind": "peerflood"}
+            except tg_errors.SlowModeWaitError as e:
+                # Per-group limit, not an account problem.
+                return {"ok": False, "msg_id": None, "error": f"slow mode {e.seconds}s", "kind": "error"}
             except (tg_errors.ChatWriteForbiddenError,
                     tg_errors.UserBannedInChannelError) as e:
                 # AC4: mute classification
@@ -507,11 +522,8 @@ def _make_engagement_handler(campaign: dict):
                 return  # own account, or identity unknown → fail closed
 
             # 7. Filter bots
-            sender_username = ""
-            if sender:
-                if getattr(sender, "bot", False):
-                    return
-                sender_username = getattr(sender, "username", "") or ""
+            if sender and getattr(sender, "bot", False):
+                return
 
             # 8. Filter admins
             try:
@@ -541,8 +553,8 @@ def _make_engagement_handler(campaign: dict):
                         # Check if the original message was from one of our accounts
                         async with db.get_db() as conn:
                             row = await (await conn.execute(
-                                "SELECT 1 FROM engagement_logs WHERE reply_msg_id=? AND status='success' LIMIT 1",
-                                (reply_msg_id,)
+                                "SELECT 1 FROM engagement_logs WHERE reply_msg_id=? AND group_id=? AND status='success' LIMIT 1",
+                                (reply_msg_id, chat_id)
                             )).fetchone()
                             if row:
                                 return  # Don't self-reply
@@ -553,14 +565,8 @@ def _make_engagement_handler(campaign: dict):
             candidates = []
             now = _time.time()
             for acc_id in reply_account_ids:
-                if account_busy.is_busy(acc_id) or await db.is_account_paused(acc_id):
+                if account_busy.is_busy(acc_id) or await flood_state.blocked_reason(acc_id):
                     continue
-                try:
-                    from keyword_watcher import _is_peerflood_blocked
-                    if _is_peerflood_blocked(acc_id):
-                        continue
-                except ImportError:
-                    pass
                 # Check if nick is muted for this campaign
                 mute_until = _muted_nicks.get(campaign_id, {}).get(acc_id, 0)
                 if mute_until > now:
@@ -648,7 +654,7 @@ def _make_engagement_handler(campaign: dict):
 
             # 15. Send group message (§4.1.3) — claims already reserved
             start_ts = _time.time()
-            async with _get_engagement_send_lock():
+            async with _get_engagement_send_lock(chat_id):
                 result = await _send_group_message(
                     event, reply_text, chosen_acc,
                     reply_to=msg_id,
@@ -721,7 +727,9 @@ def _make_engagement_handler(campaign: dict):
     async def handler(event):
         """Top-level event handler — dispatches to _process_engagement as a background task."""
         try:
-            asyncio.create_task(_process_engagement(event))
+            _t = asyncio.create_task(_process_engagement(event))
+            _bg_tasks.add(_t)  # keep a reference so the task is not garbage-collected
+            _t.add_done_callback(_bg_tasks.discard)
         except Exception as e:
             logger.error(f"[Engagement] Could not create task: {e}")
 

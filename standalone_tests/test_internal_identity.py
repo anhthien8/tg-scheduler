@@ -26,6 +26,8 @@ async def test_internal_user_guard_blocks_internal_and_sends_nothing():
     with patch.dict(tracker.tg._me_cache, {}, clear=True), patch.object(
         tracker.db, 'get_all_internal_telegram_user_ids', AsyncMock(return_value={111, 222})
     ), patch.object(tracker.db, 'update_followup_chat_status', AsyncMock()), patch.object(
+        tracker.db, 'get_followup_chat', AsyncMock(return_value=None)  # no chat row: nothing may be sent
+    ), patch.object(
         tracker.tg, 'send_text_message', AsyncMock()
     ) as send:
         assert await tracker.is_internal_account_user(111)

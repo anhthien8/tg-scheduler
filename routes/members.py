@@ -16,16 +16,17 @@ from pydantic import BaseModel
 from telethon import errors as tg_errors
 
 import ai_remix as ai_rmx
-import flood_state
 import alerts
 import database as db
+import flood_state
 import image_randomizer as img_rand
 import lead_scoring
 import telegram_client as tg
 import template_rotation as tmpl_rot
+from account_busy import AccountBusy
+from account_busy import acquire as acquire_account_busy
 from message_merger import merge_messages
 from personalization import apply_personalization
-from account_busy import AccountBusy, acquire as acquire_account_busy
 
 logger = logging.getLogger("tg-scheduler.members")
 router = APIRouter(prefix="/api/members", tags=["members"])
@@ -1839,7 +1840,7 @@ async def _run_campaign(campaign_id: int):
                     ai_keys, _ = await ai_rmx.get_provider_config(ai_provider)
 
             if not ai_keys:
-                for alt_prov in all_providers:
+                for alt_prov in await ai_rmx.get_fallback_order():  # the order set in Settings
                     alt_keys = _provider_keys(alt_prov)
                     if alt_keys:
                         logger.warning(

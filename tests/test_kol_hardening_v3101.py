@@ -237,6 +237,7 @@ async def test_account_busy_blocks_a_second_holder():
 async def test_campaign_module_uses_the_account_busy_registry():
     """The campaign send path must register the account in the busy registry."""
     import inspect
+
     import routes.members as members
     src = inspect.getsource(members)
     assert "acquire_account_busy" in src
@@ -398,6 +399,7 @@ async def test_root_index_serves_a_non_stale_shell():
     be 'no-cache' either — the app shell is versioned by its asset query string
     and revalidated every time."""
     from fastapi.testclient import TestClient
+
     from main import app
     client = TestClient(app)
     resp = client.get("/")
@@ -410,8 +412,9 @@ async def test_auth_status_is_true_when_an_account_is_logged_in():
     """A registered account that the engine marked as logged in must be
     reported as authenticated (the fast path must not drop the DB flag)."""
     from fastapi.testclient import TestClient
-    from main import app
+
     import telegram_client as tg
+    from main import app
 
     client = TestClient(app)
     client.headers.update({"X-API-Key": "test_secret_key"})

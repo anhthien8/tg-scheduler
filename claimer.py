@@ -103,6 +103,10 @@ async def claim_limit(
             raise
 
 
+# claim_id -> created_at of the gap row before this claim took it over.
+_gap_prev: dict[int, str] = {}
+
+
 async def claim_gap(
     campaign_id: int, group_id: int, account_id: int,
     window_key: str, min_gap: int
@@ -128,11 +132,20 @@ async def claim_gap(
                     await conn.execute("COMMIT")
                     return False, "rate_limit", None
 
-                # Past gap — delete old gap row, insert new one
-                await conn.execute(
-                    "DELETE FROM engagement_claims WHERE account_id=? AND window_key=?",
-                    (account_id, window_key),
-                )
+                # Past gap — take over the existing row instead of delete+insert, and
+                # remember its old timestamp: releasing this claim (AI skipped the
+                # reply) must restore the time of the last REAL reply, otherwise the
+                # next trigger passes min_gap immediately.
+                old = await (await conn.execute(
+                    "SELECT id FROM engagement_claims WHERE account_id=? AND window_key=? "
+                    "ORDER BY created_at DESC LIMIT 1", (account_id, window_key))).fetchone()
+                if old:
+                    await conn.execute(
+                        "UPDATE engagement_claims SET created_at=datetime('now'), campaign_id=?, group_id=? "
+                        "WHERE id=?", (campaign_id, group_id, old[0]))
+                    _gap_prev[old[0]] = row[0]
+                    await conn.execute("COMMIT")
+                    return True, "", old[0]
 
             try:
                 claim_cur = await conn.execute(
@@ -167,9 +180,14 @@ async def release_claims(claimed: list) -> None:
         for claim_id, counter_id, is_gap in claimed:
             if is_gap:
                 if claim_id:
-                    await conn.execute(
-                        "DELETE FROM engagement_claims WHERE id=?", (claim_id,)
-                    )
+                    prev = _gap_prev.pop(claim_id, None)
+                    if prev:
+                        await conn.execute(
+                            "UPDATE engagement_claims SET created_at=? WHERE id=?", (prev, claim_id))
+                    else:
+                        await conn.execute(
+                            "DELETE FROM engagement_claims WHERE id=?", (claim_id,)
+                        )
                 continue
             # Limit type: delete claim record, decrement counter
             if claim_id:

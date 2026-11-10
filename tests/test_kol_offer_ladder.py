@@ -16,7 +16,6 @@ import database as db
 import dm_reply_tracker as tracker
 import kol_offer
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _custom_ladder(**overrides) -> dict:

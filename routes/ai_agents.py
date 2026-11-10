@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 import ai_remix as ai_rmx
 import database as db
+import secret_mask
 
 logger = logging.getLogger("tg-scheduler.ai_agents")
 router = APIRouter(prefix="/api/ai-agents", tags=["AI Agents"])
@@ -52,49 +53,6 @@ class AgentUpdate(BaseModel):
 
 class AgentTestRequest(BaseModel):
     text: str = "Chào bạn, mình đang tìm hiểu về Weex. Cho mình biết thêm thông tin được không?"
-
-
-async def _get_system_ai_config():
-    """Load system-wide global AI provider & keys."""
-    ai_provider = await db.get_setting("ai_provider", None)
-    ai_keys = []
-    if ai_provider:
-        try:
-            raw = await db.get_setting(f"ai_keys_{ai_provider}", "[]")
-            ai_keys = json.loads(raw) if raw else []
-        except Exception:
-            ai_keys = []
-
-    if not ai_keys:
-        # One bulk read for every fallback provider instead of up to 6 sequential
-        # get_setting() calls (one pool acquire + query each).
-        alt_provs = ["chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible"]
-        alt_map = await db.get_settings_bulk({f"ai_keys_{p}": "[]" for p in alt_provs})
-        for alt_prov in alt_provs:
-            try:
-                alt_keys = json.loads(alt_map[f"ai_keys_{alt_prov}"] or "[]")
-                if alt_keys:
-                    ai_provider = alt_prov
-                    ai_keys = alt_keys
-                    break
-            except Exception:
-                pass
-
-    kwargs = {}
-    if ai_provider in ("openai_compatible", "chatgpt_oauth"):
-        env = await db.get_settings_bulk({
-            f"ai_{'oai_compat' if ai_provider == 'openai_compatible' else 'chatgpt_oauth'}_base_url": "",
-            f"ai_{'oai_compat' if ai_provider == 'openai_compatible' else 'chatgpt_oauth'}_model": "",
-        })
-        prefix = "oai_compat" if ai_provider == "openai_compatible" else "chatgpt_oauth"
-        b_url = env[f"ai_{prefix}_base_url"]
-        mod = env[f"ai_{prefix}_model"]
-        if b_url and b_url.strip():
-            kwargs["base_url"] = b_url.strip()
-        if mod and mod.strip():
-            kwargs["model"] = mod.strip()
-
-    return ai_provider, ai_keys, kwargs
 
 
 CRYPTO_BD_DEFAULT_PROMPT = """Bạn là Senior Business Development Manager (BD Manager) của Sàn Giao Dịch Crypto WEEX Exchange.
@@ -147,6 +105,7 @@ async def list_agents():
     counts = await db.count_campaigns_by_agent_bulk([a["id"] for a in agents])
     for agent in agents:
         agent["campaign_count"] = counts.get(agent["id"], 0)
+        agent["api_keys_json"] = secret_mask.mask_list(secret_mask.loads_list(agent.get("api_keys_json")))
     return {"agents": agents}
 
 
@@ -207,12 +166,14 @@ async def get_agent(agent_id: int):
     if not agent:
         raise HTTPException(404, "Agent not found")
     agent["campaign_count"] = await db.count_campaigns_by_agent(agent_id)
+    agent["api_keys_json"] = secret_mask.mask_list(secret_mask.loads_list(agent.get("api_keys_json")))
     return agent
 
 
 @router.post("")
 async def create_agent(req: AgentCreate):
     data = req.model_dump()
+    data["api_keys_json"] = [k for k in (data.get("api_keys_json") or []) if not secret_mask.is_masked(k)]
     agent_id = await db.create_ai_agent(data)
     return {"id": agent_id, "status": "created"}
 
@@ -223,6 +184,9 @@ async def update_agent(agent_id: int, req: AgentUpdate):
     if not agent:
         raise HTTPException(404, "Agent not found")
     data = {k: v for k, v in req.model_dump().items() if v is not None}
+    if "api_keys_json" in data:  # masked keys from the form map back to the stored ones
+        data["api_keys_json"] = secret_mask.resolve(
+            data["api_keys_json"], secret_mask.loads_list(agent.get("api_keys_json")))
     await db.update_ai_agent(agent_id, data)
     return {"status": "updated"}
 
@@ -242,37 +206,20 @@ async def test_agent(agent_id: int, req: AgentTestRequest):
     if not agent:
         raise HTTPException(404, "Agent not found")
 
-    # Single source of truth: provider/model/base_url/keys ALWAYS come from the
-    # global Settings. Per-agent provider/model/keys are legacy fields and are
-    # intentionally ignored (they used to shadow Settings and break agents).
-    provider, api_keys, kwargs = await _get_system_ai_config()
-
-    # Only fall back to the agent's own legacy provider/model/keys when the
-    # global Settings define nothing at all (e.g. fresh install, nobody saved yet).
-    if not api_keys:
-        legacy_keys = agent.get("api_keys_json", [])
-        if isinstance(legacy_keys, str):
-            try:
-                legacy_keys = json.loads(legacy_keys)
-            except Exception:
-                legacy_keys = []
-        if legacy_keys:
-            provider = agent.get("provider") or provider
-            api_keys = legacy_keys
-            kwargs = {"base_url": agent.get("base_url") or "",
-                      "model": agent.get("model") or ""}
+    # Same resolver as live replies, so "Test" exercises exactly what a lead gets.
+    provider, api_keys, kwargs = await ai_rmx.resolve_provider(agent)
 
     if not api_keys:
         raise HTTPException(400, f"AI Agent '{agent['name']}' chưa có API Key và hệ thống chưa cấu hình API Key!")
 
-    # base_url/model already resolved from Settings by _get_system_ai_config().
+    # base_url/model already resolved by ai_remix.resolve_provider().
     # Only apply safe defaults for the OpenAI-OAuth provider, and never let an
     # agent-level value override what Settings say.
     if provider == "chatgpt_oauth":
         if not kwargs.get("base_url"):
             kwargs["base_url"] = "https://api.openai.com/v1"
         if not kwargs.get("model"):
-            kwargs["model"] = "gpt-4o"
+            kwargs["model"] = ai_rmx.DEFAULT_MODELS["chatgpt_oauth"]
 
     sys_prompt = agent.get("system_prompt", "")
     kb = agent.get("knowledge_base", "")
@@ -322,11 +269,22 @@ async def reset_agent_chats(agent_id: int):
         raise HTTPException(404, "Agent not found")
     
     async with db.get_db() as database:
-        await database.execute("UPDATE ai_followup_chats SET status = 'active', reply_count = 0")
+        # Only this agent's chats (via its accounts or campaigns), and only the
+        # states a reset is meant for. Bot chats, onboarded leads and explicit
+        # operator holds (stage paused/signed) are left alone. This used to reset
+        # every chat of every agent.
+        cur = await database.execute("""
+            UPDATE ai_followup_chats SET status = 'active', reply_count = 0
+            WHERE status IN ('needs_human', 'paused_admin')
+              AND COALESCE(stage, 'new') NOT IN ('paused', 'signed')
+              AND (account_id IN (SELECT id FROM accounts WHERE ai_agent_id = ?)
+                   OR campaign_id IN (SELECT id FROM dm_campaigns WHERE ai_agent_id = ?))
+        """, (agent_id, agent_id))
+        n = cur.rowcount
         await database.commit()
-    
-    logger.info("Reset all AI followup chats to 'active' state")
-    return {"status": "ok", "message": "Đã kích hoạt lại toàn bộ hội thoại AI!"}
+
+    logger.info("Reset %s AI followup chats of agent %s to 'active'", n, agent_id)
+    return {"status": "ok", "message": f"Đã kích hoạt lại {n} hội thoại AI của agent này!"}
 
 
 # ── AI Memory & Self-Learning Endpoints ────────────────────────────────────────

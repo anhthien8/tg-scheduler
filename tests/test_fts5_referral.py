@@ -1,27 +1,26 @@
 """Tests for C4: Self-Learning FTS5 and C5: Referral Loop."""
-import pytest
 import aiosqlite
+import pytest
 
 from database import (
     _sanitize_fts_query,
-    get_relevant_learned_knowledge_v2,
     add_learned_knowledge,
-    get_relevant_learned_knowledge,
-    generate_referral_code,
-    create_referral_code,
-    get_referral_code,
-    get_referral_code_by_user,
-    get_all_referral_codes,
-    deactivate_referral_code,
-    increment_referral_uses,
     create_referral_attribution,
+    create_referral_code,
+    deactivate_referral_code,
+    generate_referral_code,
+    get_all_referral_codes,
     get_attribution_by_referred,
     get_attributions_by_referrer,
-    get_referral_stats,
-    init_db,
     get_db,
+    get_referral_code,
+    get_referral_code_by_user,
+    get_referral_stats,
+    get_relevant_learned_knowledge,
+    get_relevant_learned_knowledge_v2,
+    increment_referral_uses,
+    init_db,
 )
-
 
 # ── C4: FTS5 Tests ─────────────────────────────────────────────────────────
 

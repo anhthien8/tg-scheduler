@@ -1,18 +1,18 @@
 """Tests for C1: Tier-Differentiated Drip Cadence."""
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from dm_reply_tracker import (
+    _MIN_FIRST_STAGE_HOURS,
     DEFAULT_DRIP_CADENCE_HOURS,
     DEFAULT_TIER_CADENCE,
-    _MIN_FIRST_STAGE_HOURS,
-    _validate_cadence,
+    _drip_instruction_for_stage,
     _load_drip_cadence,
     _load_drip_cadence_for_tier,
-    _drip_instruction_for_stage,
+    _validate_cadence,
 )
-
 
 # ── _validate_cadence ──
 

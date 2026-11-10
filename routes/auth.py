@@ -3,6 +3,7 @@ Authentication & Account management routes.
 """
 import logging
 import os
+import re
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -72,6 +73,10 @@ async def list_accounts():
 
     for acc in accounts:
         await get_acc_status(acc)
+        # Credentials never go to the browser (routes/ipc.py applies the same rule).
+        acc.pop("api_hash", None)
+        if acc.get("proxy_url"):
+            acc["proxy_url"] = re.sub(r"(://[^:/@]+):[^@]*@", r"\1:***@", acc["proxy_url"])
 
     return {"accounts": accounts}
 

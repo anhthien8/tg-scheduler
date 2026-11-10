@@ -237,7 +237,7 @@ const AIFollowUp = {
     const kbEl = document.getElementById('aifu-kb');
     if (kbEl) kbEl.value = this.settings.knowledge_base || '';
     const maxRepliesEl = document.getElementById('aifu-max-replies');
-    if (maxRepliesEl) maxRepliesEl.value = this.settings.max_replies_per_user || 5;
+    if (maxRepliesEl) maxRepliesEl.value = this.settings.max_replies_per_user || 20;
     const handoverEl = document.getElementById('aifu-handover-kw');
     if (handoverEl) handoverEl.value = (this.settings.handover_keywords || []).join(', ');
     const cadenceEl = document.getElementById('aifu-drip-cadence');
@@ -373,7 +373,7 @@ const AIFollowUp = {
       enabled: document.getElementById('aifu-enabled')?.checked || false,
       system_prompt: (document.getElementById('aifu-sys-prompt')?.value || '').trim(),
       knowledge_base: (document.getElementById('aifu-kb')?.value || '').trim(),
-      max_replies_per_user: parseInt(document.getElementById('aifu-max-replies')?.value || '5', 10),
+      max_replies_per_user: parseInt(document.getElementById('aifu-max-replies')?.value || '20', 10),
       handover_keywords: (document.getElementById('aifu-handover-kw')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
       drip_cadence_hours: this._parseHoursInput('aifu-drip-cadence', [24, 72, 168]),
       drip_cadence_tier_a: this._parseHoursInput('aifu-drip-tier-a', [12, 24, 48, 96]),
@@ -415,7 +415,7 @@ const AIFollowUp = {
         enabled,
         system_prompt: s.system_prompt || '',
         knowledge_base: s.knowledge_base || '',
-        max_replies_per_user: s.max_replies_per_user || 5,
+        max_replies_per_user: s.max_replies_per_user || 20,
         handover_keywords: s.handover_keywords || [],
         drip_cadence_hours: s.drip_cadence_hours || [24, 72, 168],
         drip_cadence_tier_a: s.drip_cadence_tier_a || [12, 24, 48, 96],
@@ -845,7 +845,7 @@ const AIFollowUp = {
     const body = document.getElementById('aifu-kol-body');
     if (!rows.length) { body.innerHTML = '<div style="text-align:center;color:var(--text2);padding:20px">Chưa có KOL nào</div>'; return; }
     const d = v => v ? new Date(String(v).replace(' ', 'T') + (String(v).includes('Z') || String(v).includes('+') ? '' : 'Z')).toLocaleDateString('vi-VN') : '–';
-    const link = (u, t) => u ? `<a href="${esc(u)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(t)}</a>` : '–';
+    const link = (u, t) => (u && /^https?:\/\//i.test(u)) ? `<a href="${esc(u)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(t)}</a>` : '–';
     body.innerHTML = `<table class="table" style="width:100%;font-size:12px"><thead><tr>
         <th>KOL</th><th>Account</th><th>Bước</th><th>UID / VIP</th><th>Kênh</th><th>Ngày chốt</th><th>Chăm sóc gần nhất</th>
       </tr></thead><tbody>${rows.map(k => {

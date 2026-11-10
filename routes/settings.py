@@ -1,6 +1,7 @@
 """
 Settings API Routes - store/retrieve key-value settings like AI API keys.
 """
+import json
 import logging
 from typing import Optional
 
@@ -8,7 +9,9 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+import ai_remix
 import database as db
+import secret_mask
 
 logger = logging.getLogger("tg-scheduler.settings")
 
@@ -35,23 +38,53 @@ class DailySummaryPayload(BaseModel):
 
 
 # NOTE: /test-remix MUST be declared before /{key} wildcard
+_AI_PROVIDERS = ("chatgpt_oauth", "gemini", "groq", "openai", "deepseek", "openai_compatible")
+
+
+async def _unmask_keys(keys, provider: str | None = None) -> list[str]:
+    """Turn masked keys coming back from the browser into the stored ones."""
+    keys = [str(k) for k in (keys or []) if k]
+    if not any(secret_mask.is_masked(k) for k in keys):
+        return keys
+    stored: list = []
+    for prov in ([provider] if provider else []) + [p for p in _AI_PROVIDERS if p != provider]:
+        stored += secret_mask.loads_list(await db.get_setting(f"ai_keys_{prov}", "[]"))
+    return secret_mask.resolve(keys, stored)
+
+
+async def _unmask_one(value: str | None) -> str:
+    resolved = await _unmask_keys([value] if value else [])
+    return resolved[0] if resolved else ""
+
+
+def _safe_ai_base(url: str) -> str:
+    """SSRF guard for user-supplied AI endpoints. Local/private routers (9Router)
+    stay allowed; link-local / cloud-metadata targets are refused."""
+    from routes._url_guard import UrlNotAllowed, validate_outbound_url
+    try:
+        return validate_outbound_url(url, allow_private=True)
+    except UrlNotAllowed as e:
+        raise HTTPException(status_code=400, detail=f"URL bị chặn: {e}")
+
+
 @router.post("/test-remix")
 async def test_remix(payload: TestRemixPayload):
     """Test AI remix with provided keys directly (no DB save needed)."""
     import ai_remix as ai_rmx
     if payload.provider not in ("gemini", "deepseek", "openai", "groq", "openai_compatible", "chatgpt_oauth"):
         raise HTTPException(status_code=400, detail="Invalid provider")
+    payload.keys = await _unmask_keys(payload.keys, payload.provider)
     if not payload.keys:
         raise HTTPException(status_code=400, detail="No API keys provided")
     kwargs = {}
     if payload.provider == "openai_compatible":
         if not payload.base_url or not payload.model:
             raise HTTPException(status_code=400, detail="base_url and model required for openai_compatible")
-        kwargs["base_url"] = payload.base_url
+        kwargs["base_url"] = _safe_ai_base(payload.base_url)
         kwargs["model"] = payload.model
     elif payload.provider == "chatgpt_oauth":
-        kwargs["base_url"] = payload.base_url or "https://api.openai.com/v1"
-        kwargs["model"] = payload.model or "gpt-4o"
+        kwargs["base_url"] = _safe_ai_base(payload.base_url or "https://api.openai.com/v1")
+        kwargs["model"] = payload.model or ai_remix.DEFAULT_MODELS["chatgpt_oauth"]
     try:
         remixed = await ai_rmx.remix_message(
             original_text=payload.text,
@@ -123,8 +156,9 @@ async def fetch_models(payload: FetchModelsPayload):
         ).rstrip("/")
     except UrlNotAllowed as e:
         return {"success": False, "error": f"URL bị chặn: {e}"}
-    except Exception:
-        base_url = payload.base_url.rstrip("/")
+    except Exception as e:
+        # Fail closed: an unparseable URL must not skip the SSRF guard.
+        return {"success": False, "error": f"URL không hợp lệ: {e}"}
     # Ensure we hit /models endpoint
     if base_url.endswith("/v1"):
         models_url = base_url + "/models"
@@ -133,8 +167,9 @@ async def fetch_models(payload: FetchModelsPayload):
 
     from ai_remix import _cf_access_headers, ai_request
     headers = {"Content-Type": "application/json", **_cf_access_headers(models_url)}
-    if payload.api_key:
-        headers["Authorization"] = f"Bearer {payload.api_key}"
+    api_key = await _unmask_one(payload.api_key)
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -173,7 +208,7 @@ class VerifyChatgptOauthPayload(BaseModel):
 @router.post("/verify-chatgpt-oauth")
 async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
     """Verify ChatGPT Session Token or API Key and auto-detect type."""
-    token = payload.access_token.strip()
+    token = (await _unmask_one(payload.access_token.strip()) or payload.access_token.strip())
     if not token:
         return {"success": False, "error": "Access Token không được để trống"}
 
@@ -208,10 +243,10 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
                     logger.info(f"[ChatGPT OAuth] Session token verified for: {email or name}")
                     return {
                         "success": True,
-                        "token": token,
+                        "token": payload.access_token.strip(),  # echo what was sent, never the unmasked key
                         "token_type": "session",
                         "base_url": "https://api.openai.com/v1",
-                        "model": "gpt-4o",
+                        "model": ai_remix.DEFAULT_MODELS["chatgpt_oauth"],
                         "email": email,
                         "name": name,
                         "message": f"Xác thực thành công! Tài khoản: {email or name}"
@@ -222,7 +257,7 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
                 logger.warning(f"[ChatGPT OAuth] backend-api/me check failed: {e}")
 
             # Strategy 2: Try OpenAI API /v1/models (standard API key)
-            base_url = (payload.base_url or "https://api.openai.com/v1").rstrip("/")
+            base_url = _safe_ai_base(payload.base_url or "https://api.openai.com/v1").rstrip("/")
             models_url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
             try:
                 api_resp = await client.get(models_url, headers=api_headers)
@@ -243,7 +278,7 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
 
                     return {
                         "success": True,
-                        "token": token,
+                        "token": payload.access_token.strip(),  # echo what was sent, never the unmasked key
                         "token_type": "api_key",
                         "base_url": base_url,
                         "model": best_model,
@@ -258,10 +293,10 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
                 logger.info("[ChatGPT OAuth] Online verification failed, but token looks like valid JWT - accepting")
                 return {
                     "success": True,
-                    "token": token,
+                    "token": payload.access_token.strip(),  # echo what was sent, never the unmasked key
                     "token_type": "session",
                     "base_url": "https://api.openai.com/v1",
-                    "model": "gpt-4o",
+                    "model": ai_remix.DEFAULT_MODELS["chatgpt_oauth"],
                     "message": "Token đã được chấp nhận (định dạng JWT hợp lệ). Sẽ xác thực khi sử dụng thực tế."
                 }
 
@@ -276,10 +311,10 @@ async def verify_chatgpt_oauth(payload: VerifyChatgptOauthPayload):
         if token.startswith("ey") and len(token) > 100:
             return {
                 "success": True,
-                "token": token,
+                "token": payload.access_token.strip(),  # echo what was sent, never the unmasked key
                 "token_type": "session",
                 "base_url": "https://api.openai.com/v1",
-                "model": "gpt-4o",
+                "model": ai_remix.DEFAULT_MODELS["chatgpt_oauth"],
                 "message": "Token đã được chấp nhận. Sẽ xác thực khi sử dụng thực tế."
             }
         return {"success": False, "error": f"Lỗi kết nối: {str(e)[:200]}"}
@@ -296,7 +331,7 @@ class FetchChatgptModelsPayload(BaseModel):
 @router.post("/chatgpt-oauth/models")
 async def fetch_chatgpt_models(payload: FetchChatgptModelsPayload):
     """Fetch available models from ChatGPT backend or OpenAI API."""
-    token = payload.access_token.strip()
+    token = (await _unmask_one(payload.access_token.strip()) or payload.access_token.strip())
     if not token:
         return {"success": False, "models": [], "error": "Token không được để trống"}
 
@@ -344,7 +379,7 @@ async def fetch_chatgpt_models(payload: FetchChatgptModelsPayload):
                 logger.debug(f"[ChatGPT Models] backend-api/models failed: {e}")
 
             # Try OpenAI API /v1/models (API keys)
-            base_url = (payload.base_url or "https://api.openai.com/v1").rstrip("/")
+            base_url = _safe_ai_base(payload.base_url or "https://api.openai.com/v1").rstrip("/")
             models_url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
             try:
                 resp = await client.get(models_url, headers=api_headers)
@@ -720,8 +755,8 @@ async def list_forum_inbox_topics(limit: int = 200):
 
 # Infrastructure credentials that this generic getter must NEVER return in
 # plaintext — no UI needs their value back (they are write-only from the UI).
-# NOTE: `ai_keys_*` are intentionally NOT blocked — the AI-keys settings UI
-# edits them and needs to read them back for a single local operator.
+# NOTE: `ai_keys_*` are returned MASKED (see secret_mask) so the keys form can
+# still list and edit them without the real values reaching the browser.
 _BLOCKED_SETTING_KEYS = frozenset({
     "webshare_api_key",
     "command_bot_token",
@@ -743,11 +778,26 @@ async def get_setting(key: str):
     # Never exfiltrate infrastructure credentials through this generic getter.
     if _is_secret_setting(key):
         return {"key": key, "value": None, "configured": bool(value)}
+    if key.lower().startswith("ai_keys_"):
+        # AI provider keys reach the browser masked; set_setting maps them back.
+        value = json.dumps(secret_mask.mask_list(secret_mask.loads_list(value)))
     return {"key": key, "value": value}
 
 
 @router.post("/{key}")
 async def set_setting(key: str, payload: SettingPayload):
-    await db.set_setting(key, payload.value)
-    return {"key": key, "value": payload.value, "message": "Saved"}
+    value = payload.value
+    if _is_secret_setting(key):
+        # Credentials have their own endpoints (command bot, proxy); the generic
+        # setter must not overwrite them.
+        raise HTTPException(status_code=403, detail="Khoá này không ghi được qua API cài đặt chung")
+    if key.lower().endswith("_base_url") and (value or "").strip():
+        value = _safe_ai_base(value.strip())  # every later AI call goes to this URL
+    if key.lower().startswith("ai_keys_"):
+        stored = secret_mask.loads_list(await db.get_setting(key, "[]"))
+        keys = secret_mask.resolve(secret_mask.loads_list(value), stored)
+        await db.set_setting(key, json.dumps(keys))
+        return {"key": key, "value": json.dumps(secret_mask.mask_list(keys)), "message": "Saved"}
+    await db.set_setting(key, value)
+    return {"key": key, "value": value, "message": "Saved"}
 

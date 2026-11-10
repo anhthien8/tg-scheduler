@@ -1,20 +1,20 @@
 """Tests for C6: Warmup Engine v2 — stage determination, behavior weights, graduation."""
-import pytest
 import random
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from warmup_engine import (
     BEHAVIOR_WEIGHTS,
-    determine_stage,
-    pick_behavior,
-    should_graduate,
+    GRAD_MIN_CHANNELS,
     GRAD_MIN_DAYS,
     GRAD_MIN_MESSAGES,
     GRAD_MIN_REACTIONS,
-    GRAD_MIN_CHANNELS,
+    determine_stage,
+    pick_behavior,
+    should_graduate,
 )
-
 
 # ── Stage Determination Tests ────────────────────────────────────────
 

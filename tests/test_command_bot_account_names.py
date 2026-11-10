@@ -10,7 +10,6 @@ from telethon import events
 import command_bot as cb
 import database as db
 
-
 # ── Phần A: nhãn account ────────────────────────────────────────────────────
 
 def test_acc_label_uses_name_and_falls_back_to_id():

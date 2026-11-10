@@ -34,6 +34,7 @@ class ReactionSafetyTests(unittest.IsolatedAsyncioTestCase):
         self.rw.db.get_reaction_target = AsyncMock(return_value=self.target)
         self.rw.db.was_msg_reacted = AsyncMock(return_value=False)
         self.rw.db.add_reaction_log = AsyncMock()
+        self.rw.db.is_account_paused = AsyncMock(return_value=False)
 
     async def dispatch(self, chat_id):
         await self.rw._make_reaction_handler(self.target)(

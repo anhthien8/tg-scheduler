@@ -10,6 +10,7 @@ from telethon import errors
 from telethon.tl.types import PeerUser
 
 import database as db
+import flood_state
 import telegram_client as tg
 
 logger = logging.getLogger("tg-scheduler.invite")
@@ -81,14 +82,17 @@ async def run_invite_campaign(campaign_id: int):
         # Restore today's count from DB (survives restart)
         try:
             async with db.get_db() as _db:
-                row = await _db.execute_fetchone(
-                    "SELECT COUNT(*) as cnt FROM invite_campaign_logs "
-                    "WHERE campaign_id = ? AND status = 'success' "
-                    "AND created_at >= date('now')",
+                # Vietnam-day boundary, same as the DM daily limits.
+                cur = await _db.execute(
+                    "SELECT COUNT(*) FROM invite_campaign_logs "
+                    "WHERE campaign_id = ? AND status = 'invited' "
+                    "AND invited_at >= datetime('now', '+7 hours', 'start of day', '-7 hours')",
                     (campaign_id,)
                 )
-                daily_sent = row["cnt"] if row else 0
-        except Exception:
+                row = await cur.fetchone()
+                daily_sent = row[0] if row else 0
+        except Exception as e:
+            logger.warning("[Invite %s] could not restore today's count: %s", campaign_id, e)
             daily_sent = 0
         consecutive_errors = 0
         account_idx = 0
@@ -138,7 +142,16 @@ async def run_invite_campaign(campaign_id: int):
                 continue
 
             # Account rotation
-            available_senders = [sid for sid in sender_ids if sid not in flooded_accounts]
+            # Shared gate: skips paused accounts and ones resting after a FloodWait /
+            # PeerFlood hit in ANY engine. If senders are only resting, wait for them.
+            while True:
+                available_senders = [sid for sid in sender_ids if sid not in flooded_accounts
+                                     and not await flood_state.blocked_reason(sid)]
+                rests = [flood_state.remaining(sid) for sid in sender_ids
+                         if sid not in flooded_accounts and flood_state.is_resting(sid)]
+                if available_senders or not rests or min(rests) > 3600:
+                    break
+                await asyncio.sleep(min(min(rests) + 1, 60))
             if not available_senders:
                 logger.warning(f"[Invite] Campaign {campaign_id}: all accounts flooded, pausing")
                 await db.update_invite_campaign_status(campaign_id, "paused",
@@ -220,15 +233,20 @@ async def run_invite_campaign(campaign_id: int):
             except errors.FloodWaitError as e:
                 wait_time = e.seconds + random.randint(10, 30)
                 logger.warning(f"[Invite] FloodWait {e.seconds}s on account {acc_id}, waiting {wait_time}s")
-                flooded_accounts.add(acc_id)
-                await asyncio.sleep(min(wait_time, 300))
-                flooded_accounts.discard(acc_id)
+                # Rest for the full time Telegram asked (was capped at 5 minutes).
+                flood_state.mark(acc_id, wait_time)
+                await asyncio.sleep(random.uniform(5, 15))
                 continue
 
             except errors.PeerFloodError:
                 logger.warning(f"[Invite] PeerFlood on account {acc_id}, excluding for this run")
                 flooded_accounts.add(acc_id)
                 consecutive_errors += 1
+                try:
+                    import alerts
+                    await alerts.flood_guard(acc_id)  # pause + alert, same as DM campaigns
+                except Exception as fe:
+                    logger.warning(f"[Invite] flood_guard failed for {acc_id}: {fe}")
                 await asyncio.sleep(random.uniform(120, 300))
                 continue
 

@@ -5,7 +5,9 @@ the Test-AI-Agent modal (see image_f46db2.png):
 
 _next_key() walks keys in round-robin order, but its cooldown check is wrong.
 """
-import sys, time
+import sys
+import time
+
 sys.path.insert(0, '.')
 import ai_remix
 

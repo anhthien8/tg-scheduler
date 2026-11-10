@@ -10,8 +10,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 
 import database as db
-from database import get_db
 import warmup_engine
+from database import get_db
 
 logger = logging.getLogger("tg-scheduler.warmup")
 router = APIRouter(prefix="/api/warmup", tags=["warmup"])
@@ -68,8 +68,9 @@ async def quick_add_group(req: GroupQuickAdd):
 
     Resolves it with the first connected account (joining public groups or
     invite links if needed) so the user never has to look up the chat id."""
-    import telegram_client as tg
     from telethon import utils as tl_utils
+
+    import telegram_client as tg
     from reaction_watcher import _join_or_get_entity
 
     link = (req.link or "").strip()

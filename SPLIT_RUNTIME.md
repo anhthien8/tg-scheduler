@@ -27,11 +27,11 @@
 | `main.py` | Hỗ trợ `TG_RUNTIME_MODE=combined|web`. Khởi tạo schema `runtime_commands`. |
 | `static/js/api.js` | Runtime mode detection (`/api/runtime/mode`), enqueue + polling wrappers. |
 | `static/js/members.js` | Tích hợp runtime-aware start/stop campaign. |
-| `test_split_runtime.py` | 16 offline tests cho lifecycle, mode switching, lock acquisition, heartbeat. |
-| `test_runtime_commands.py` | 29 offline tests cho queue semantics, concurrency, leasing, idempotency. |
-| `test_ipc_vertical.py` | 6 offline ASGI integration tests cho IPC endpoints và worker consumer roundtrip. |
-| `test_reaction_watcher_safety.py` | 6 offline tests kiểm chứng an toàn reaction watcher (channel_id guard, deduplication). |
-| `test_api_runtime.mjs` | 13 JavaScript tests cho `api.js` runtime detection, enqueuing, polling. |
+| `standalone_tests/test_split_runtime.py` | 16 offline tests cho lifecycle, mode switching, lock acquisition, heartbeat. |
+| `standalone_tests/test_runtime_commands.py` | 29 offline tests cho queue semantics, concurrency, leasing, idempotency. |
+| `standalone_tests/test_ipc_vertical.py` | 6 offline ASGI integration tests cho IPC endpoints và worker consumer roundtrip. |
+| `standalone_tests/test_reaction_watcher_safety.py` | 6 offline tests kiểm chứng an toàn reaction watcher (channel_id guard, deduplication). |
+| `standalone_tests/test_api_runtime.mjs` | 13 JavaScript tests cho `api.js` runtime detection, enqueuing, polling. |
 
 ## Giới hạn & Lưu ý
 

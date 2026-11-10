@@ -5,7 +5,6 @@ import pytest
 
 import dm_reply_tracker as tracker
 
-
 pytestmark = pytest.mark.asyncio
 
 

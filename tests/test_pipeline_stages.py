@@ -8,7 +8,6 @@ import pytest
 
 import database as db
 
-
 # ── normalisation: operators type Vietnamese, with or without accents ─────────
 
 def test_normalize_stage_accepts_canonical_and_aliases():

@@ -17,7 +17,6 @@ import pytest
 import database as db
 from dm_reply_tracker import _parse_sqlite_utc, _silence_hours
 
-
 # ── timestamp parsing (the silent-failure surface) ────────────────────────────
 
 def test_parses_sqlite_space_format():

@@ -310,8 +310,9 @@ def test_uid_from_pinned_text():
 
 
 async def test_pinned_uid_saves_and_advances():
-    from types import SimpleNamespace
     from datetime import datetime
+    from types import SimpleNamespace
+
     import dm_reply_tracker as drt
     uid = await _lead(U + 300)
 

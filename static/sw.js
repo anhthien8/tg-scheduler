@@ -1,7 +1,7 @@
 // Service worker: makes the dashboard installable as a PWA.
 // API calls always go to the network (live data, auth). Static assets are
 // served network-first with a cache fallback so the shell still opens offline.
-const CACHE = 'tgs-shell-v1';
+const CACHE = 'tgs-shell-v2';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(
@@ -15,8 +15,9 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
   e.respondWith(
     fetch(req).then(res => {
-      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
+      // Key by path only: each ?v= bump used to add a new entry that was never pruned.
+      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(url.pathname, copy)); }
       return res;
-    }).catch(() => caches.match(req).then(r => r || caches.match('/')))
+    }).catch(() => caches.match(url.pathname).then(r => r || caches.match('/')))
   );
 });
