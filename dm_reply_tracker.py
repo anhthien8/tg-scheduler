@@ -1809,7 +1809,13 @@ def _make_handler(account_id: int):
                 forum_result = None
                 try:
                     import command_bot
-                    forum_result = await command_bot.relay_outgoing_to_forum(account_id, dest_id, msg_content)
+                    import proof_relay
+                    if proof_relay.media_kind(event.message):
+                        # A photo / video / file: the topic gets the file itself, not "[Media]".
+                        _spawn_background(command_bot.relay_outgoing_media_to_forum(
+                            account_id, dest_id, event.message, event.raw_text or ""))
+                    else:
+                        forum_result = await command_bot.relay_outgoing_to_forum(account_id, dest_id, msg_content)
                 except Exception:
                     pass
                 if forum_result == "loop_suppressed":

@@ -332,6 +332,28 @@ async def relay_outgoing(db, bot, cfg: ForumConfig, *, account_id: int, user_id:
     return "relayed"
 
 
+_CAPTION_LIMIT = 1000  # Telegram allows 1024 characters under a file
+
+
+async def relay_outgoing_media(db, bot, cfg: ForumConfig, *, account_id: int, user_id: int,
+                               path: str, text: str = "") -> str:
+    """Post a photo / video / file our account sent to the lead into their topic."""
+    if not cfg.enabled:
+        return "disabled"
+    topic = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
+    if not topic:
+        return "no_topic"
+    topic_id = int(topic["topic_id"])
+    head = f"📤 {await _account_label(db, account_id)}:"
+    body = (text or "").strip()
+    fits = len(head) + len(body) + 2 <= _CAPTION_LIMIT
+    await bot.send_topic_file(cfg.group_id, topic_id, path,
+                              caption=f"{head}\n\n{body}" if body and fits else head)
+    if body and not fits:
+        await bot.send_topic_message(cfg.group_id, topic_id, f"{head}\n\n{body}")
+    return "relayed"
+
+
 async def prepare_reply(db, cfg: ForumConfig, admin_id: int, group_id: int, topic_id: int, text: str) -> ReplyPreview | None:
     if not cfg.enabled or group_id != cfg.group_id or topic_id == (cfg.general_topic_id or 1):
         return None

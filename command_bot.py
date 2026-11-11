@@ -1300,6 +1300,46 @@ async def relay_outgoing_to_forum(account_id: int, user_id: int, text: str) -> s
         return "error"
 
 
+async def relay_outgoing_media_to_forum(account_id: int, user_id: int, message, text: str = "") -> str:
+    """A photo / video / file our account sent to a lead: show the file itself in
+    the lead's topic. Falls back to the plain "[Media]" line when the file cannot
+    be shown, so the transcript never loses the message. Never raises."""
+    import os
+    import proof_relay
+    path = None
+    result = "error"
+    try:
+        bot = _forum_bot()
+        cfg = await _load_forum_config() if bot else None
+        if not bot:
+            return "bot_offline"
+        if not cfg.enabled:
+            return "disabled"
+        if not await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id):
+            return "no_topic"
+        if proof_relay._file_size(message) > proof_relay.MAX_BYTES:
+            result = "too_large"
+        else:
+            os.makedirs(proof_relay.MEDIA_DIR, exist_ok=True)
+            base = os.path.join(proof_relay.MEDIA_DIR, f"out_{account_id}_{user_id}_{int(message.id)}")
+            path = await message.download_media(file=base)
+            result = (await fx.relay_outgoing_media(db, bot, cfg, account_id=account_id, user_id=user_id,
+                                                    path=path, text=text)) if path else "download_failed"
+    except Exception as e:
+        logger.warning("[ForumInbox] outgoing media relay failed (acc=%s user=%s): %s: %s",
+                       account_id, user_id, type(e).__name__, e)
+    finally:
+        if path:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    if result != "relayed":
+        logger.info("[ForumInbox] outgoing media shown as text (acc=%s user=%s): %s", account_id, user_id, result)
+        await relay_outgoing_to_forum(account_id, user_id, ((text or "").strip() + "\n\n[Media]").strip())
+    return result
+
+
 async def send_forum_general_alert(text: str) -> bool:
     """HANDOVER / KOL alerts into the General topic. Fallbacks must not depend on this."""
     try:
