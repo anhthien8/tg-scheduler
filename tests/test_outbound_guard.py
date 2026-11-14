@@ -134,3 +134,12 @@ def test_every_module_that_sends_to_chats_uses_the_guard():
         if raw_sends and "outbound_guard" not in src:
             offenders.append(path.name)
     assert offenders == [], f"raw Telegram sends without outbound_guard: {offenders}"
+
+
+def test_one_question_per_message():
+    import outbound_guard as g
+    msg = ("Thanks, noted. How has your volume looked over the last 3 months? A screenshot is enough. "
+           "Also, where are you based?")
+    assert g.one_question(msg) == "Thanks, noted. How has your volume looked over the last 3 months? A screenshot is enough."
+    assert g.one_question("Where are you based?") == "Where are you based?"
+    assert g.one_question("No question here.") == "No question here."

@@ -501,6 +501,13 @@ async def trigger_ai_reply(account_id: int, user_id: int):
     return {"success": bool(sent)}
 
 
+@router.post("/chats/{account_id}/{user_id}/fetch-media")
+async def fetch_old_proof_media(account_id: int, user_id: int):
+    """Load photos of proof messages stored before media capture existed."""
+    import proof_relay
+    return {"added": await proof_relay.backfill_chat(account_id, user_id)}
+
+
 @router.get("/proof-media/{name}")
 async def get_proof_media(name: str):
     """Proof image a lead sent in DM (stored by proof_relay)."""

@@ -90,3 +90,21 @@ def require(text, where: str = ""):
     if clean is None:
         raise BlockedOutbound(f"message blocked ({where}): it contained only internal markers")
     return clean
+
+
+_SENTENCE = re.compile(r"[^.!?？。\n]*(?:[.!?？。]+|\n+|$)")
+
+
+def one_question(text):
+    """Keep only the first question in an AI message: KOLs find a block of
+    questions pushy. Later question sentences are dropped; statements stay."""
+    if not isinstance(text, str) or sum(text.count(q) for q in "?？") < 2:
+        return text
+    out, asked = [], False
+    for part in _SENTENCE.findall(text):
+        is_q = "?" in part or "？" in part
+        if is_q and asked:
+            continue
+        asked = asked or is_q
+        out.append(part)
+    return _tidy("".join(out)) or text

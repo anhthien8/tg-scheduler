@@ -417,8 +417,8 @@ def render_prompt(region: str, ladder: dict, volume_claimed=None, offer: dict | 
 ORIGIN_QUESTION_RULE = (
     "--- ORIGIN QUESTION (the offer depends on it) ---\n"
     "You do not know yet where this KOL is based or where their community members are from. Ask it directly, ONCE, "
-    "in one short natural line (e.g. \"By the way, where are you based, and where are most of your community members "
-    "from?\"), early in the chat — at the latest together with your first pitch question, before quoting any commission %. "
+    "as its OWN short message (e.g. \"By the way, where are you based?\"), early in the chat, before quoting any commission %. "
+    "NEVER put it in the same message as another question: ask it in the next message after they answer the previous one. "
     "Do not ask again if they already answered or ignored it. Their OWN country decides the offer first; the "
     "community's country counts only when they do not say where they are based."
 )

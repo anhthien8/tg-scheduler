@@ -1333,6 +1333,24 @@ def _make_join_handler(watcher: dict):
             except Exception:
                 group_title = str(event.chat_id)
 
+            # Join events often carry a "min" user without the username. The
+            # sender account cannot reach a no-username peer whose access_hash
+            # belongs to the observer, so look the username up first: the
+            # sender then resolves the lead by @username.
+            if not uname_lower:
+                try:
+                    _full = await event.client.get_entity(user_id)
+                    _un = getattr(_full, "username", None)
+                    if _un:
+                        username, uname_lower = _un, _un.lower()
+                        user = _full
+                        logger.info(f"[Watcher {watcher_id}] Join-DM username found for {user_id}: @{_un}")
+                        if uname_lower in excluded or await db.is_user_blacklisted(user_id=user_id, username=uname_lower):
+                            logger.info(f"[Watcher {watcher_id}] @{uname_lower} excluded/blacklisted, skip join-DM")
+                            return
+                except Exception as _e:
+                    logger.debug(f"[Watcher {watcher_id}] Username lookup failed for {user_id}: {_e}")
+
             # Build input peer — ChatAction user objects usually carry a real access_hash
             from telethon.tl.types import InputPeerUser as _IPU
             input_peer = None

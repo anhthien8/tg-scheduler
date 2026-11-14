@@ -714,12 +714,13 @@ const AIFollowUp = {
         : (tier === 'Tier B' ? '<span class="badge badge-blue">🔷 B</span>' : '<span class="badge badge-gray">⚪ C</span>');
       const updated = c.updated_at ? new Date(c.updated_at).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : '—';
       const toggleBtn = c.status === 'active'
-        ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'paused_admin')" title="Tắt AI, tự chat tay" aria-label="Tắt AI cho ${esc(uName)}">⏸ Chat tay</button>`
-        : `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')" title="Bật AI chat tiếp" aria-label="Bật AI cho ${esc(uName)}">▶️ Bật AI</button>`;
-      const blacklistBtn = `<button class="btn btn-danger btn-sm" data-acc="${c.account_id}" data-uid="${c.user_id}" data-username="${esc(c.username||'')}" onclick="AIFollowUp.addToBlacklistDirect(Number(this.dataset.acc),Number(this.dataset.uid),this.dataset.username)" title="Đưa vào Blacklist (Cấm AI 100%)">🚫 Blacklist</button>`;
+        ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'paused_admin')" style="padding:4px 7px;min-width:0" title="Chat tay (tắt AI)" aria-label="Tắt AI cho ${esc(uName)}">⏸</button>`
+        : `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')" style="padding:4px 7px;min-width:0" title="Bật AI chat tiếp" aria-label="Bật AI cho ${esc(uName)}">▶️</button>`;
+      const blacklistBtn = `<button class="btn btn-danger btn-sm" data-acc="${c.account_id}" data-uid="${c.user_id}" data-username="${esc(c.username||'')}" onclick="AIFollowUp.addToBlacklistDirect(Number(this.dataset.acc),Number(this.dataset.uid),this.dataset.username)" style="padding:4px 7px;min-width:0" title="Blacklist (cấm AI 100%)" aria-label="Blacklist">🚫</button>`;
+      const ignoreBtn = c.status === 'bot_ignored' ? '' : `<button class="btn btn-ghost btn-sm" style="padding:4px 7px;min-width:0" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'bot_ignored')" title="Ignore (bỏ qua lead, AI không chat)" aria-label="Ignore ${esc(uName)}">🙈</button>`;
       const accLabel = c.account_name || `Acc #${c.account_id}`;
       const owedBtn = this.isOwed(c)
-        ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.resolveOwed(${c.account_id},${c.user_id})" title="Đã trả lời KOL về việc đã hứa — bỏ khỏi danh sách Nợ trả lời" aria-label="Đã trả lời ${esc(uName)}">✅ Đã trả lời</button>`
+        ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.resolveOwed(${c.account_id},${c.user_id})" title="Đã trả lời KOL về việc đã hứa — bỏ khỏi danh sách Nợ trả lời" style="padding:4px 7px;min-width:0" aria-label="Đã trả lời ${esc(uName)}">✅</button>`
         : '';
       const step = this.stepOf(c);
       const sm = this.STEP_META[step] || { label: step, emoji: '', color: 'var(--text2)' };
@@ -735,7 +736,7 @@ const AIFollowUp = {
         <td>${stepCell}</td>
         <td><span class="${meta.badge}">${meta.label}</span>${this.owedBadge(c)}</td>
         <td style="font-size:12px;color:var(--text2);white-space:nowrap">${updated}</td>
-        <td><div style="display:flex;gap:4px">${owedBtn}${toggleBtn}${blacklistBtn}<button class="btn btn-primary btn-sm" onclick="AIFollowUp.openChat(${c.account_id},${c.user_id})">💬 Chat</button></div></td>
+        <td><div style="display:flex;gap:4px;justify-content:flex-end;white-space:nowrap">${owedBtn}${toggleBtn}${ignoreBtn}${blacklistBtn}<button class="btn btn-primary btn-sm" onclick="AIFollowUp.openChat(${c.account_id},${c.user_id})">💬 Chat</button></div></td>
       </tr>`;
     }).join('');
   },
@@ -1382,6 +1383,13 @@ const AIFollowUp = {
   async sendMessage() {
     const c = this._modalChat;
     const input = document.getElementById('aifu-chat-input');
+        if (!this._mediaTried) this._mediaTried = new Set();
+        const mk = accountId + ':' + userId;
+        if (!this._mediaTried.has(mk) && history.some(m => m.role === 'user' && !m.media && /^\s*\[Attached/.test(m.content || ''))) {
+          this._mediaTried.add(mk);  // old proofs: fetch the photos from Telegram once, then redraw
+          fetch(`/api/ai-followup/chats/${accountId}/${userId}/fetch-media`, {method: 'POST'})
+            .then(r => r.json()).then(d => { if (d.added) this.openChat(accountId, userId); }).catch(() => {});
+        }
     const btn = document.getElementById('aifu-chat-send-btn');
     if (!c || !input) return;
     const text = input.value.trim();
@@ -1427,3 +1435,4 @@ const AIFollowUp = {
 if (typeof window !== 'undefined') {
   window.AIFollowUp = AIFollowUp;
 }
+    input.style.height = 'auto';

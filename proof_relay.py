@@ -107,3 +107,57 @@ async def capture(account_id: int, user_id: int, username: str | None, name: str
         except Exception as e:
             logger.warning("[ProofRelay] could not tag history (acc=%s user=%s): %s", account_id, user_id, e)
         logger.info("[ProofRelay] %s from user %s (acc=%s): %s", kind, user_id, account_id, media)
+        try:
+            import kol_contacts  # v3.40: save the lead as "<name>_KOL" on this nick
+            kol_contacts.schedule(account_id, user_id, username, media)
+        except Exception as e:
+            logger.warning("[ProofRelay] KOL contact schedule failed (acc=%s user=%s): %s", account_id, user_id, e)
+
+
+_BACKFILL_DONE: set[tuple[int, int]] = set()
+
+
+async def backfill_chat(account_id: int, user_id: int) -> int:
+    """Old proof entries ("[Attached … Proof]" stored before media capture existed):
+    find the photo in the Telegram dialog by time and store it so the dashboard shows it.
+    Runs once per chat per process; nothing is posted to the forum group."""
+    from datetime import datetime, timezone, timedelta
+    import telegram_client as tg
+    if (account_id, user_id) in _BACKFILL_DONE:
+        return 0
+    chat = await db.get_followup_chat(account_id, user_id)
+    todo = [m for m in (chat or {}).get("history") or []
+            if m.get("role") == "user" and not m.get("media") and m.get("timestamp")
+            and str(m.get("content") or "").lstrip().startswith("[Attached")]
+    client = tg.get_client(account_id)
+    if not todo or client is None:
+        _BACKFILL_DONE.add((account_id, user_id))
+        return 0
+    try:
+        msgs = [m for m in await client.get_messages(user_id, limit=300)
+                if not m.out and media_kind(m) == "photo"]
+    except Exception as e:
+        logger.info("[ProofRelay] backfill fetch failed (acc=%s user=%s): %s", account_id, user_id, e)
+        return 0
+    _BACKFILL_DONE.add((account_id, user_id))
+    used, n = set(), 0
+    os.makedirs(MEDIA_DIR, exist_ok=True)
+    for entry in todo:
+        ts = datetime.fromisoformat(entry["timestamp"])
+        when = ts.astimezone(timezone.utc) if ts.tzinfo is None else ts  # stored as server-local time
+        best = min((m for m in msgs if m.id not in used), default=None,
+                   key=lambda m: abs((m.date - when).total_seconds()))
+        if best is None or abs((best.date - when).total_seconds()) > 180:
+            continue
+        used.add(best.id)
+        try:
+            path = await best.download_media(file=os.path.join(MEDIA_DIR, f"{account_id}_{user_id}_{int(best.id)}"))
+        except Exception:
+            path = None
+        ext = os.path.splitext(path or "")[1].lower().lstrip(".")
+        if not path or ext not in ("jpg", "jpeg", "png", "webp", "gif"):
+            continue
+        await db.set_followup_message_media(account_id, user_id, entry["timestamp"], {
+            "type": "photo", "image_url": f"/api/ai-followup/proof-media/{os.path.basename(path)}"})
+        n += 1
+    return n

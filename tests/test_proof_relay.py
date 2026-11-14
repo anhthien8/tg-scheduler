@@ -83,3 +83,23 @@ async def test_video_deleted_after_upload_and_reason_kept(monkeypatch):
     media = await proof_relay.capture(1, 502, "lead", "Lead", _Msg(78, "mp4"), ts, "video")
     assert media == {"type": "video", "forward": "no_outreach_proof"}
     assert not os.path.exists(seen["path"])
+
+
+@pytest.mark.asyncio
+async def test_old_proof_photo_is_backfilled_from_the_dialog(monkeypatch):
+    from datetime import datetime, timezone
+    import telegram_client as tg
+    await db.get_or_create_followup_chat(account_id=1, user_id=503, username="lead", name="Lead")
+    chat = await db.append_followup_chat_message(1, 503, "user", "[Attached Screenshot/Photo Proof]")
+    ts = chat["history"][-1]["timestamp"]
+    m = _Msg(91, "jpg"); m.out = False; m.sticker = m.gif = m.dice = None
+    m.date = datetime.fromisoformat(ts).astimezone(timezone.utc)
+
+    class C:
+        async def get_messages(self, uid, limit):
+            return [m]
+    monkeypatch.setattr(tg, "get_client", lambda a: C())
+    assert await proof_relay.backfill_chat(1, 503) == 1
+    h = (await db.get_followup_chat(1, 503))["history"]
+    assert h[-1]["media"]["image_url"].endswith("1_503_91.jpg")
+    assert await proof_relay.backfill_chat(1, 503) == 0   # once per chat
