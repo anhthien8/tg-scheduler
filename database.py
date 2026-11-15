@@ -4247,6 +4247,13 @@ async def get_scrape_jobs() -> list:
                    COUNT(*) as member_count,
                    MIN(scraped_at) as scraped_at
             FROM scraped_members
+import re as _re  # noqa: E402
+_OTHER_EXCHANGE = _re.compile(
+    r"(?<![a-z])(binance|okx|bybit|bitget|gate\.?io|kucoin|mexc|htx|huobi|bingx|bitmart|coinex|lbank|"
+    r"phemex|bitunix|blofin|toobit|xt\.com|coinbase|kraken|bitfinex|deepcoin|ourbit|zoomex|pionex|"
+    r"bitmex|crypto\.com|hyperliquid|backpack|coinw|btcc|bitrue|ascendex|poloniex|bitstamp|bitvavo|probit|tapbit|websea|bitdu|biconomy)(?![a-z])", _re.I)
+
+
             GROUP BY scrape_job_id
             ORDER BY scraped_at DESC
         """)
@@ -4258,6 +4265,12 @@ async def get_scraped_members(scrape_job_id: str, limit: int = 500, offset: int 
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
         if last_id is not None:
+    # Never store our own nicks (the scraping account and every other internal account)
+    internal = await get_all_internal_telegram_user_ids()
+    members = [m for m in members if int(m.get("user_id") or 0) not in internal]
+    # Names carrying another exchange's brand are almost always that exchange's BD
+    members = [m for m in members if not _OTHER_EXCHANGE.search(
+        " ".join(str(m.get(k) or "") for k in ("first_name", "last_name", "username")))]
             cursor = await db.execute("""
                 SELECT * FROM scraped_members
                 WHERE scrape_job_id = ? AND id > ?
