@@ -303,15 +303,42 @@
   .acc-ib { width: 36px; }
   .acc-input { font-size: 16px; }
 }
+.acc-ico { display: none; }
+.acc-name { flex-wrap: nowrap; }
+.acc-name > :not(b) { flex: none; }
 @media (max-width: 768px) {
-  .acc-head { align-items: stretch; }
-  .acc-head-actions { width: 100%; }
-  .acc-head-actions > * { flex: 1; }
-  .acc-head-actions .acc-menu > .btn { width: 100%; }
+  /* Header: title + actions on one line, labels collapse to icons */
+  .acc-head { flex-direction: row; align-items: center; flex-wrap: nowrap; gap: 8px; margin-bottom: 4px; }
+  .acc-head-title { min-width: 0; flex: 1; }
+  .acc-head-title .page-title { font-size: 18px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acc-head-sub { font-size: 12px; }
+  .acc-head-actions { width: auto; flex: none; gap: 6px; flex-wrap: nowrap; }
+  .acc-head-actions .btn { height: 34px; padding: 0 10px; white-space: nowrap; }
+  .acc-lbl { display: none; }
+  .acc-ico { display: inline; }
   .acc-filters { flex-direction: column; align-items: stretch; gap: 0; }
-  .acc-search { width: 100%; }
-  .acc-row { grid-template-areas: "cb who status" "ai ai ai" "hours hours hours" "act act act"; }
-  .acc-actions { justify-self: stretch; justify-content: flex-end; }
+  .acc-tabs { gap: 16px; }
+  .acc-tab { padding: 8px 0; font-size: 13px; }
+  .acc-search { width: 100%; height: 34px; }
+  /* Row: identity line + one control line (AI · hours · actions) */
+  .acc-row {
+    grid-template-columns: 22px minmax(0, 1fr) auto auto;
+    grid-template-areas: "cb who who status" "ai ai hours act";
+    gap: 6px 8px; padding: 10px 2px;
+  }
+  .acc-ava { width: 28px; height: 28px; font-size: 12px; }
+  .acc-who { gap: 8px; }
+  .acc-input, .acc-ib, .acc-actions .btn { height: 32px; }
+  .acc-ib { width: 32px; }
+  .acc-input { font-size: 13px; padding: 0 6px; }
+  .acc-hours { gap: 3px; }
+  .acc-hours .acc-input { flex: none; width: auto; min-width: 54px; padding: 0 4px; text-align: center; }
+  .acc-hours input[type="time"]::-webkit-calendar-picker-indicator { display: none; }
+  .acc-actions { gap: 4px; }
+  .acc-actions .btn { padding: 0 8px; }
+  .is-active .acc-status { font-size: 0; gap: 0; padding: 0 4px; }
+  .is-active .acc-status i { width: 8px; height: 8px; }
+}
 }
 
 .sidebar-nav .nav-item { width: -webkit-fill-available; width: -moz-available; width: stretch; }
@@ -436,3 +463,39 @@
 .acc-name b { flex: 0 1 auto; max-width: 100%; }
 .spam-badge-slot { display: inline-flex; flex: none; }
 .spam-badge-slot > *, .acc-tag, .acc-flag { white-space: nowrap; }
+
+/* ── Mobile pass (phones): denser tables, no squeezed columns ── */
+@media (max-width: 768px) {
+  /* Headers stay on one line; the wrapper scrolls sideways instead of crushing columns */
+  th { white-space: nowrap; padding: 8px 10px; letter-spacing: .3px; }
+  td { padding: 8px 10px; }
+  .table-wrap, .card:has(> table), .card-body:has(> table) { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Toasts sit at the bottom so they never cover the page title and buttons */
+  .toast-container { top: auto; bottom: 12px; left: 12px; right: 12px; align-items: stretch; }
+  .toast { max-width: none; min-width: 0; padding: 10px 12px; font-size: 13px; }
+  .card { padding: 14px; }
+  /* Popups: bottom sheet that never grows past the visible screen (Android URL bar), tighter padding */
+  .modal { max-height: 92vh !important; max-height: 92dvh !important; }
+  .modal-header { padding: 10px 14px !important; }
+  .modal-body { padding: 14px !important; }
+  .modal-footer { padding: 10px 14px !important; }
+  /* Lead chat: messages take the free space, the reply box always stays on screen */
+  #aifu-history-modal .modal { display: flex; flex-direction: column; overflow: hidden; }
+  #aifu-history-modal .modal > * { flex: none; }
+  #aifu-modal-step-panel { max-height: 28vh; overflow-y: auto; }
+  #aifu-chat-input::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #aifu-history-modal #aifu-modal-chat-box { flex: 1 1 auto; min-height: 120px; max-height: none !important; padding: 10px 12px !important; }
+  .stat-card { padding: 12px 14px; }
+  /* Warmup tabs: one scrollable line */
+  .wu-tab { white-space: nowrap; flex: none; }
+  :has(> .wu-tab) { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  /* Help: less padding, long code wraps instead of pushing the page wide */
+  .help-body { padding: 14px; font-size: 13.5px; }
+  .help-body code { overflow-wrap: anywhere; word-break: break-word; }
+  .help-body pre code { overflow-wrap: normal; word-break: normal; }
+  /* Changelog: slimmer timeline gutter and cards */
+  .changelog-timeline { padding-left: 14px !important; }
+  .changelog-item { margin-bottom: 16px !important; }
+  .changelog-item > .card { padding: 12px !important; }
+  .changelog-item > div:first-child { left: -22px !important; }
+}

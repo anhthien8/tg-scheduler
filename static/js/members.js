@@ -4220,7 +4220,7 @@ const Members = {
     } catch (e) {
       App.toast(e.message || 'Lỗi kiểm tra spam', 'error');
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '🛡️ Kiểm tra Spam'; }
+      if (btn) { btn.disabled = false; btn.innerHTML = '🛡️<span class="acc-lbl"> Kiểm tra Spam</span>'; }
     }
   },
 };

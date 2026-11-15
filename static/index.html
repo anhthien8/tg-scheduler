@@ -13,8 +13,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TG Scheduler">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/css/style.css?v=494">
-  <link rel="stylesheet" href="/static/css/themes.css?v=494">
+  <link rel="stylesheet" href="/static/css/style.css?v=495">
+  <link rel="stylesheet" href="/static/css/themes.css?v=502">
   <script src="/static/js/theme.js?v=492"></script>
   <!-- Boot splash: paints instantly (CSS-only, no JS) so the user never sees a
        blank white screen while the app bundle parses/executes. Hidden as soon
@@ -313,7 +313,7 @@
           </div>
           <div class="acc-head-actions">
             <div class="acc-menu">
-              <button class="btn btn-ghost btn-sm" onclick="App.toggleAccMenu(event)" aria-haspopup="true">Thao tác hàng loạt ▾</button>
+              <button class="btn btn-ghost btn-sm" onclick="App.toggleAccMenu(event)" aria-haspopup="true" title="Thao tác hàng loạt" aria-label="Thao tác hàng loạt"><span class="acc-lbl">Thao tác hàng loạt ▾</span><span class="acc-ico">⋯</span></button>
               <div class="acc-menu-list" id="acc-menu-list" role="menu">
                 <button role="menuitem" onclick="App.openBulkRelogin()">Đăng nhập lại tài khoản mất session</button>
                 <button role="menuitem" onclick="App.openBulkActiveHours()">Đặt giờ chạy cho tất cả</button>
@@ -321,8 +321,8 @@
                 <button role="menuitem" class="is-danger" onclick="App.bulkToggleAccounts(false)">Tắt tất cả</button>
               </div>
             </div>
-            <button class="btn btn-ghost btn-sm" id="btn-spam-check" onclick="Members.checkAllAccountsSpam()" title="Hỏi @SpamBot cho từng tài khoản đang kết nối (khoảng 5 giây/tài khoản). Kết quả được lưu và hiện cạnh tên. Chiến dịch DM cũng tự kiểm tra trước khi gửi.">🛡️ Kiểm tra Spam</button>
-            <button class="btn btn-primary btn-sm" onclick="App.openAddAccountModal()">+ Thêm tài khoản</button>
+            <button class="btn btn-ghost btn-sm" id="btn-spam-check" onclick="Members.checkAllAccountsSpam()" title="Hỏi @SpamBot cho từng tài khoản đang kết nối (khoảng 5 giây/tài khoản). Kết quả được lưu và hiện cạnh tên. Chiến dịch DM cũng tự kiểm tra trước khi gửi.">🛡️<span class="acc-lbl"> Kiểm tra Spam</span></button>
+            <button class="btn btn-primary btn-sm" onclick="App.openAddAccountModal()">+ Thêm<span class="acc-lbl"> tài khoản</span></button>
           </div>
         </div>
         <div class="acc-filters">
@@ -2211,11 +2211,11 @@
   <script defer src="/static/js/api.js?v=492"></script>
   <script defer src="/static/js/discord.js?v=492"></script>
   <script defer src="/static/js/zalo.js?v=495"></script>
-  <script defer src="/static/js/members.js?v=509"></script>
+  <script defer src="/static/js/members.js?v=511"></script>
   <script defer src="/static/js/analytics.js?v=492"></script>
   <script defer src="/static/js/ai_agents.js?v=492"></script>
-  <script defer src="/static/js/ai_followup.js?v=502"></script>
-  <script defer src="/static/js/changelog.js?v=492"></script>
+  <script defer src="/static/js/ai_followup.js?v=505"></script>
+  <script defer src="/static/js/changelog.js?v=493"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=506"></script>
   <script defer src="/static/js/app.js?v=517"></script>

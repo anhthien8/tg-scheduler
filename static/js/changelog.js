@@ -29,6 +29,7 @@ const Changelog = {
 
   setFilter(filter) {
     this._activeFilter = filter;
+    this._limit = 8;
     this.render();
   },
 
@@ -53,6 +54,8 @@ const Changelog = {
       <div class="changelog-timeline" style="position:relative;padding-left:24px;border-left:2px solid var(--border)">
     `;
 
+    const limit = this._limit || 8;
+    let shown = 0, more = 0;
     for (const release of this._data) {
       // Filter changes
       const filteredChanges = this._activeFilter === 'all'
@@ -60,6 +63,9 @@ const Changelog = {
         : release.changes.filter(c => c.type === this._activeFilter);
 
       if (filteredChanges.length === 0 && this._activeFilter !== 'all') continue;
+      // Render only the newest releases; older ones load on demand (page was 100+ cards tall).
+      if (shown >= limit) { more++; continue; }
+      shown++;
 
       const isLatest = release.is_latest;
       const badgeStyle = isLatest
@@ -119,6 +125,7 @@ const Changelog = {
     }
 
     html += '</div>';
+    if (more) html += `<button class="btn btn-outline" style="width:100%;margin-bottom:24px" onclick="window.Changelog._limit=${limit + 20};window.Changelog.render()">Xem thêm ${Math.min(more, 20)} bản cũ hơn (còn ${more})</button>`;
     container.innerHTML = html;
   },
 
