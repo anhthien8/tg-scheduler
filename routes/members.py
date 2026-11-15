@@ -23,7 +23,7 @@ import lead_scoring
 import telegram_client as tg
 import template_rotation as tmpl_rot
 from message_merger import merge_messages
-from personalization import apply_personalization
+from personalization import apply_personalization, my_name as _my_name
 from account_busy import AccountBusy, acquire as acquire_account_busy
 
 logger = logging.getLogger("tg-scheduler.members")
@@ -251,6 +251,14 @@ def _build_member_dict(user, last_seen):
 
 # ── Member Scraping ─────────────────────────────────────────────────────────
 
+
+
+def _ranked_ids(result) -> set:
+    """Members carrying a custom title/role tag in the group are staff, not leads."""
+    return {getattr(p, "user_id", None) for p in getattr(result, "participants", []) or []
+            if (getattr(p, "rank", None) or "").strip()}
+
+
 @router.post("/scrape")
 async def scrape_members(req: ScrapeRequest, background_tasks: BackgroundTasks):
     """Start scraping members from a Telegram group."""
@@ -442,6 +450,7 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
                             limit=batch_size,
                             hash=0,
                         ))
+                        admin_ids |= _ranked_ids(result)
                     except Exception as e:
                         logger.warning(f"[Scrape {scrape_job_id}] Error at offset {offset}: {e}")
                         # Try alphabetical search as fallback
@@ -535,6 +544,7 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
                             limit=200,
                             hash=0,
                         ))
+                        admin_ids |= _ranked_ids(result)
                         for user in result.users:
                             if user.id in seen_ids:
                                 continue
@@ -864,6 +874,7 @@ async def _do_batch_scrape(batch_job_id: str, account_id: int, channels: list[st
                             filter=ChannelParticipantsSearch(""),
                             offset=offset, limit=batch_size, hash=0,
                         ))
+                        admin_ids |= _ranked_ids(result)
                     except Exception:
                         break
 
@@ -900,6 +911,7 @@ async def _do_batch_scrape(batch_job_id: str, account_id: int, channels: list[st
                                 filter=ChannelParticipantsSearch(letter),
                                 offset=0, limit=200, hash=0,
                             ))
+                            admin_ids |= _ranked_ids(result)
                             for user in result.users:
                                 if user.id in global_seen_ids:
                                     continue
@@ -3110,6 +3122,7 @@ async def _run_campaign(campaign_id: int):
                             "last_name": member.get("last_name"),
                             "username": username,
                             "group_title": member.get("group_title"),
+                            "my_name": await _my_name(acc_id, c),
                         })
 
                     # AI remix if enabled

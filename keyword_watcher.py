@@ -20,7 +20,7 @@ import image_randomizer as img_rand
 import telegram_client as tg
 import template_rotation as tmpl_rot
 from message_merger import merge_messages
-from personalization import apply_personalization
+from personalization import apply_personalization, my_name as _my_name
 
 logger = logging.getLogger("tg-scheduler.watcher")
 
@@ -616,6 +616,7 @@ async def _do_send_dm_with_fallback(
                             "last_name": _peer_last,
                             "username": username,
                             "group_title": group_title,
+                            "my_name": await _my_name(acc_id, client),
                         },
                     )
 

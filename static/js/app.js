@@ -5918,3 +5918,12 @@ App.renderChatgptTokenExpiry = function (keys) {
   el.innerHTML = rows.length ? rows.join('') +
     ' <span class="info-i" tabindex="0" data-tip="Token ChatGPT hết hạn sau khoảng 10 ngày. Còn ≤ 3 ngày hệ thống sẽ nhắc qua Telegram lúc 9:02 mỗi sáng. Lấy token mới tại chatgpt.com/api/auth/session.">i</span>' : '';
 };
+
+// One click = copied: any .copy-chip copies its own text.
+document.addEventListener('click', e => {
+  const chip = e.target.closest && e.target.closest('.copy-chip');
+  if (!chip) return;
+  navigator.clipboard.writeText(chip.textContent.trim())
+    .then(() => App.toast(`Đã copy ${chip.textContent.trim()}`, 'success'))
+    .catch(() => App.toast('Không copy được', 'error'));
+});

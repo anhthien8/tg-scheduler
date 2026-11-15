@@ -1676,11 +1676,14 @@
             <span>💬 Nội dung tin nhắn</span>
           </label>
           <div style="font-size:11px;color:var(--text2);margin-bottom:6px;line-height:1.5;">
-            🏷️ Biến cá nhân hóa: <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{name}</code>
-            <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{first_name}</code>
-            <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{last_name}</code>
-            <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{full_name}</code>
-            <code style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{username}</code>
+            🏷️ Biến cá nhân hóa: <code class="copy-chip" title="Bấm để copy" style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{name}</code>
+            <code class="copy-chip" title="Bấm để copy" style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{first_name}</code>
+            <code class="copy-chip" title="Bấm để copy" style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{last_name}</code>
+            <code class="copy-chip" title="Bấm để copy" style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{full_name}</code>
+            <code class="copy-chip" title="Bấm để copy" style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{username}</code>
+            <code class="copy-chip" title="Bấm để copy" style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{my_name}</code>
+            <code class="copy-chip" title="Bấm để copy" style="background:color-mix(in srgb, var(--violet) 15%, transparent);color:var(--violet);padding:1px 5px;border-radius:3px;font-size:11px">{bạn|bro|người anh em}</code>
+            <span class="info-i" tabindex="0" data-tip="{my_name} = tên Telegram của nick đang gửi tin (vd. mình là {my_name}). Chọn ngẫu nhiên: viết các lựa chọn trong ngoặc nhọn, cách nhau bằng dấu |, ví dụ Chào {bạn|bro|người anh em}. Mỗi người nhận sẽ thấy 1 lựa chọn ngẫu nhiên.">i</span>
           </div>
           <div id="cmp-suggest-note" style="display:none;font-size:12px;background:color-mix(in srgb, var(--violet) 8%, transparent);border:1px solid color-mix(in srgb, var(--violet) 25%, transparent);border-radius:8px;padding:8px 10px;margin-bottom:6px"></div>
           <div id="cmp-messages-list" style="display:flex;flex-direction:column;gap:12px;margin-top:6px;"></div>
@@ -2218,7 +2221,7 @@
   <script defer src="/static/js/changelog.js?v=493"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=506"></script>
-  <script defer src="/static/js/app.js?v=517"></script>
+  <script defer src="/static/js/app.js?v=523"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

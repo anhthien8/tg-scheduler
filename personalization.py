@@ -79,6 +79,8 @@ def apply_personalization(text: str, member_info: dict) -> str:
         "username": username,
         "group": group,
         "community": group,
+        # Our own sending nick's Telegram first name ("mình là {my_name}")
+        "my_name": (member_info.get("my_name") or "").strip(),
         # No-underscore aliases: [fullname], [firstname], [lastname]
         "fullname": full_name,
         "firstname": first_name or _cap(username) or _DEFAULT_NAME_FALLBACK,
@@ -98,6 +100,20 @@ def apply_personalization(text: str, member_info: dict) -> str:
     result = re.sub(r"\{(\w+)\}", _replace_match, text)
     result = re.sub(r"\[(\w+)\]", _replace_match, result)
     return apply_spintax(result)
+
+
+_MY_NAME: dict[int, str] = {}
+
+
+async def my_name(account_id: int, client) -> str:
+    """First name of our sending nick on Telegram, cached per account."""
+    if account_id not in _MY_NAME:
+        try:
+            me = await client.get_me()
+            _MY_NAME[account_id] = (getattr(me, "first_name", "") or "").strip()
+        except Exception:
+            return ""
+    return _MY_NAME[account_id]
 
 
 _SPIN_RE = re.compile(r"\{([^{}]*\|[^{}]*)\}")

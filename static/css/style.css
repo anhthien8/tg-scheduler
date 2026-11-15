@@ -2134,3 +2134,6 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .kol-chip:hover { border-color: var(--chip); }
 .kol-chip.active { background: color-mix(in srgb, var(--chip) 18%, transparent); border-color: var(--chip); color: var(--text); }
 .kol-chip.active b { color: var(--text); }
+
+.copy-chip{cursor:pointer;transition:filter .15s}
+.copy-chip:hover{filter:brightness(1.35);outline:1px solid currentColor}
