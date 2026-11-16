@@ -339,7 +339,6 @@
   .is-active .acc-status { font-size: 0; gap: 0; padding: 0 4px; }
   .is-active .acc-status i { width: 8px; height: 8px; }
 }
-}
 
 .sidebar-nav .nav-item { width: -webkit-fill-available; width: -moz-available; width: stretch; }
 .acc-row.account-card { background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; box-shadow: none; transform: none; margin: 0; }

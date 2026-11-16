@@ -177,6 +177,8 @@ async def relay_history(db, bot, cfg: ForumConfig, *, account_id: int, user_id: 
 
     async with _topic_lock(cfg.group_id, account_id, user_id):
         topic = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
+        if is_hidden(topic):
+            return {"status": "hidden", "posted": 0, "total": len(entries)}
         if not topic:
             topic_id = await bot.create_forum_topic(
                 cfg.group_id, _topic_title(account_id, user_id, username, name))
@@ -235,6 +237,8 @@ async def ensure_topic(db, bot, cfg: ForumConfig, *, account_id: int, user_id: i
     """The lead's topic, created on first need. None when we never reached out to them."""
     async with _topic_lock(cfg.group_id, account_id, user_id):
         topic = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
+        if is_hidden(topic):
+            return None
         if topic:
             if last_text is not None:
                 await db.update_telegram_topic_last_message(cfg.group_id, int(topic["topic_id"]), last_text)
@@ -250,6 +254,11 @@ async def ensure_topic(db, bot, cfg: ForumConfig, *, account_id: int, user_id: i
         return topic
 
 
+def is_hidden(topic: dict | None) -> bool:
+    """Operator ran /hide in this lead's topic: nothing about them reaches the group."""
+    return bool(topic) and topic.get("status") == "hidden"
+
+
 def topic_message_link(group_id: int, topic_id: int, message_id: int) -> str:
     """t.me link that opens a message inside a forum topic (members of the group only)."""
     internal = str(abs(int(group_id)))
@@ -263,6 +272,8 @@ async def relay_inbound(db, bot, cfg: ForumConfig, *, account_id: int, user_id: 
                         has_media: bool = False) -> str:
     if not cfg.enabled:
         return "disabled"
+    if is_hidden(await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)):
+        return "hidden"
     topic = await ensure_topic(db, bot, cfg, account_id=account_id, user_id=user_id,
                                username=username, name=name, last_text=text)
     if not topic:
@@ -326,7 +337,7 @@ async def relay_outgoing(db, bot, cfg: ForumConfig, *, account_id: int, user_id:
     if _consume_forum_origin(account_id, user_id, text):
         return "loop_suppressed"
     topic = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
-    if not topic:
+    if not topic or is_hidden(topic):
         return "no_topic"
     await bot.send_topic_message(cfg.group_id, int(topic["topic_id"]), f"📤 {await _account_label(db, account_id)}:\n\n{text}")
     return "relayed"
@@ -341,7 +352,7 @@ async def relay_outgoing_media(db, bot, cfg: ForumConfig, *, account_id: int, us
     if not cfg.enabled:
         return "disabled"
     topic = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
-    if not topic:
+    if not topic or is_hidden(topic):
         return "no_topic"
     topic_id = int(topic["topic_id"])
     head = f"📤 {await _account_label(db, account_id)}:"

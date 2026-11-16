@@ -229,6 +229,32 @@ async def test_off_ladder_reply_is_replaced_and_escalated(mock_send, mock_chat):
 
 @patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
 @patch("telegram_client.send_text_message", new_callable=AsyncMock)
+async def test_off_ladder_reply_is_rewritten_once_with_ladder_figures(mock_send, mock_chat):
+    """An echoed off-ladder figure (old opener's 85%) gets one AI rewrite; a clean
+    rewrite is sent as the real answer and the chat stays with the AI."""
+    await _make_bd_account_with_lead()
+    good = "You start at 55% revshare bro, and from 10M total monthly volume you move to 60%."
+
+    async def _reply(history, prompt, *a, **k):
+        return good if "[OFFER GUARD]" in prompt else "Sure, as promised you get 85% revshare!"
+    mock_chat.side_effect = _reply
+    mock_send.return_value = True
+
+    with patch("dm_reply_tracker._notify_main_account_handover", new_callable=AsyncMock) as mock_notify:
+        res = await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
+        assert not any("off-ladder" in c.kwargs.get("reason", "") for c in mock_notify.call_args_list)
+
+    assert res is True
+    prompts = [str(c.args[1]) if len(c.args) > 1 else str(c.kwargs) for c in mock_chat.call_args_list]
+    guard = [p for p in prompts if "[OFFER GUARD]" in p]
+    assert len(guard) == 1 and "85%" in guard[0]
+    assert mock_send.call_args[0][2] == good
+    chat = await db.get_followup_chat(1, 202)
+    assert chat["status"] != "needs_human"
+
+
+@patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
+@patch("telegram_client.send_text_message", new_callable=AsyncMock)
 async def test_on_ladder_reply_goes_through(mock_send, mock_chat):
     await _make_bd_account_with_lead()
     reply = "You start at 55% revshare bro, and from 10M total monthly volume you move to 60% — plus $100 per 1M taker volume."

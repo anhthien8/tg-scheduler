@@ -282,17 +282,11 @@ if(page==='ai-followup'){
       <!-- ══ TAB: SETTINGS ══ -->
       <div id="aifu-tab-settings" class="hidden">
         <div class="card" style="padding:20px">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-            <div>
-              <label class="form-label" for="aifu-sys-prompt" style="font-weight:600">🎯 Kịch bản tư vấn (Sales Persona)</label>
-              <textarea id="aifu-sys-prompt" class="form-input" rows="6" placeholder="Nhập vai AI chuyên gia tư vấn..."></textarea>
-              <div style="font-size:11px;color:var(--text2);margin-top:4px">Tính cách, xưng hô và cách khéo léo chốt deal / gửi link onboard.</div>
+          <div>
+            <div class="form-label" style="font-weight:600">🤖 Kịch bản & kiến thức theo từng AI Agent
+              <span class="info-i" tabindex="0" data-tip="Mỗi nick dùng agent gắn ở trang Tài khoản (hoặc agent của campaign / Keyword DM). Các cài đặt bên dưới áp cho mọi agent; tên miền WEEX và thang commission chỉ áp cho WEEX.">i</span>
             </div>
-            <div>
-              <label class="form-label" for="aifu-kb" style="font-weight:600">📚 Knowledge Base (Sản phẩm & Giá)</label>
-              <textarea id="aifu-kb" class="form-input" rows="6" placeholder="Thông tin sản phẩm, bảng giá, FAQ, link onboard..."></textarea>
-              <div style="font-size:11px;color:var(--text2);margin-top:4px">AI dùng thông tin này để trả lời thắc mắc của khách.</div>
-            </div>
+            <div id="aifu-agents-list" style="display:flex;flex-wrap:wrap;gap:8px"><span style="font-size:12px;color:var(--text2)">Đang tải…</span></div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 2fr;gap:16px;margin-top:16px">
             <div>

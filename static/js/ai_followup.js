@@ -236,14 +236,30 @@ const AIFollowUp = {
     }
   },
 
+  async _renderAgentsList() {
+    const box = document.getElementById('aifu-agents-list');
+    if (!box) return;
+    let agents = [];
+    try { agents = (await AIAgentsAPI.getAll()).agents || []; } catch (e) { /* keep loader text */ }
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const active = agents.filter(a => a.is_active);
+    box.innerHTML = active.length
+      ? active.map(a => `<button type="button" class="btn btn-ghost btn-sm" title="Sửa kịch bản & Knowledge Base của ${esc(a.name)}" onclick="AIFollowUp.editAgent(${Number(a.id)})">${esc(a.avatar_emoji || '🤖')} ${esc(a.name)} ✏️</button>`).join('')
+        + `<button type="button" class="btn btn-ghost btn-sm" onclick="App.navigate('ai-agents')">Tất cả agent →</button>`
+      : `<button type="button" class="btn btn-primary btn-sm" onclick="App.navigate('ai-agents')">➕ Tạo AI Agent</button>`;
+  },
+
+  async editAgent(id) {
+    App.navigate('ai-agents');
+    await AIAgents.load();
+    AIAgents.openForm(id);
+  },
+
   renderSettings() {
     if (!this.settings) return;
     const enabledEl = document.getElementById('aifu-enabled');
     if (enabledEl) enabledEl.checked = !!this.settings.enabled;
-    const promptEl = document.getElementById('aifu-sys-prompt');
-    if (promptEl) promptEl.value = this.settings.system_prompt || '';
-    const kbEl = document.getElementById('aifu-kb');
-    if (kbEl) kbEl.value = this.settings.knowledge_base || '';
+    this._renderAgentsList();
     const maxRepliesEl = document.getElementById('aifu-max-replies');
     if (maxRepliesEl) maxRepliesEl.value = this.settings.max_replies_per_user || 5;
     const handoverEl = document.getElementById('aifu-handover-kw');
@@ -381,8 +397,9 @@ const AIFollowUp = {
   _collectSettingsForm() {
     return {
       enabled: document.getElementById('aifu-enabled')?.checked || false,
-      system_prompt: (document.getElementById('aifu-sys-prompt')?.value || '').trim(),
-      knowledge_base: (document.getElementById('aifu-kb')?.value || '').trim(),
+      // Global persona/KB are only a last-resort fallback now; keep stored values untouched.
+      system_prompt: this.settings?.system_prompt || '',
+      knowledge_base: this.settings?.knowledge_base || '',
       max_replies_per_user: parseInt(document.getElementById('aifu-max-replies')?.value || '5', 10),
       handover_keywords: (document.getElementById('aifu-handover-kw')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
       drip_cadence_hours: this._parseHoursInput('aifu-drip-cadence', [24, 72, 168]),

@@ -758,6 +758,27 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
     return "\n".join(lines)
 
 
+async def _rewrite_off_ladder(history: list, prompt: str, ai_provider, ai_keys, kwargs: dict, bad: list[str],
+                              exchange, agent_config, ladder) -> str:
+    """Ask the AI once more for the same reply using only official offer figures.
+    Returns the clean rewrite, or '' when it fails or still quotes off-offer figures."""
+    note = (f"\n\n[OFFER GUARD]: Your draft reply quoted figures that are NOT in the official offer: "
+            f"{', '.join(bad)}. Rewrite the reply. Use ONLY figures from the official offer above and present "
+            "that offer as it is. If an earlier message in this chat mentioned a different figure, do not repeat "
+            "or confirm it: just present the official tiers. No tags, no METRICS.")
+    try:
+        msg = await ai_rmx.generate_chat_response(history, prompt + note, ai_provider, ai_keys, **kwargs)
+    except Exception as e:
+        logger.warning("[AIFollowUp] Off-ladder rewrite failed: %s", e)
+        return ""
+    msg = _STEP_TAG_RE.sub("", msg or "").replace("[HANDOVER_REQUIRED]", "")
+    msg = re.sub(r'\[?METRICS\s*:.*$', '', msg, flags=re.DOTALL | re.IGNORECASE).strip()
+    msg = sanitize_telegram_html(msg) if msg else ""
+    if not msg or contains_ai_disclosure(msg) or kol_offer.find_off_offer_figures(msg, exchange, agent_config, ladder):
+        return ""
+    return msg
+
+
 async def apply_kol_step_tags(account_id: int, user_id: int, text: str) -> tuple[str, dict]:
     """Strip funnel tags from an AI reply and apply the (max +1) transition."""
     result: dict = {"declined": False, "advanced": None, "tags": []}
@@ -1611,6 +1632,15 @@ async def generate_and_send_ai_reply_for_chat(
             # Off-ladder guard (spec A2): any % / $ figure not in the official
             # ladder is replaced by a safe fallback and escalated to a human.
             off_ladder = kol_offer.find_off_offer_figures(ai_reply, exchange, agent_config, offer_ladder)
+            if off_ladder and not step_result.get("declined"):
+                # One retry before giving up: most slips are an echoed figure (e.g. an
+                # old opener's 85%), and the KOL deserves the real offer, not a stall.
+                rewritten = await _rewrite_off_ladder(history, combined_prompt, ai_provider, ai_keys, kwargs,
+                                                      off_ladder, exchange, agent_config, offer_ladder)
+                if rewritten:
+                    logger.info("[AIFollowUp] ✏️ Off-ladder figures %s for user %d — AI rewrote with ladder figures only",
+                                off_ladder, user_id)
+                    ai_reply, off_ladder = rewritten, []
             if off_ladder:
                 logger.warning("[AIFollowUp] 🚫 Blocked off-ladder figures %s for user %d — using safe fallback",
                                off_ladder, user_id)

@@ -605,6 +605,13 @@ async def _do_scrape(scrape_job_id: str, account_id: int, group_id: int,
                         logger.debug(f"[Scrape {scrape_job_id}] Letter '{letter}': {e}")
                         continue
 
+        # Member list hidden (non-admins only see admins) → nothing left after the
+        # admin filter. Fall back to chat history so the click still yields leads.
+        if scrape_method == "members" and not all_members:
+            logger.info(f"[Scrape {scrape_job_id}] 0 members (list likely hidden) → retrying via chat history")
+            return await _do_scrape(scrape_job_id, account_id, group_id, group_title,
+                                    filter_active_days, exclude_bots, "history", max_messages)
+
         # Save to DB
         await db.save_scraped_members(scrape_job_id, account_id, group_id, group_title, all_members)
         logger.info(f"[Scrape {scrape_job_id}] Done! Scraped {len(all_members)} members from {group_title}")

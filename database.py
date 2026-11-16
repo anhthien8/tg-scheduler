@@ -3974,11 +3974,9 @@ async def get_dm_reply_threads(
 ) -> list[dict]:
     """Inbox grouped per (account, sender): newest thread first, with the last
     `per_thread` messages and the unread count. Same visibility rules as
-    get_dm_replies (no bots, only people we DM'd first)."""
+    get_dm_replies minus the DM'd-first rule: strangers show too, bots never."""
     conds = [
-        "(r.sender_username IS NULL OR r.sender_username NOT LIKE '%bot')",
-        """(EXISTS (SELECT 1 FROM watcher_dm_logs wdl WHERE wdl.target_user_id = r.sender_user_id AND wdl.status = 'success')
-            OR EXISTS (SELECT 1 FROM dm_campaign_logs dcl WHERE dcl.target_user_id = r.sender_user_id AND dcl.status = 'success'))""",
+        "(r.sender_username IS NULL OR LOWER(r.sender_username) NOT LIKE '%bot')",
     ]
     params: list = []
     if account_id is not None:
@@ -4207,6 +4205,12 @@ async def save_scraped_members(scrape_job_id: str, account_id: int, group_id: in
     ]
     if not members:
         return
+    # Never store our own nicks (the scraping account and every other internal account)
+    internal = await get_all_internal_telegram_user_ids()
+    members = [m for m in members if int(m.get("user_id") or 0) not in internal]
+    # Names carrying another exchange's brand are almost always that exchange's BD
+    members = [m for m in members if not _OTHER_EXCHANGE.search(
+        " ".join(str(m.get(k) or "") for k in ("first_name", "last_name", "username")))]
 
     data = [
         (
@@ -4265,12 +4269,6 @@ async def get_scraped_members(scrape_job_id: str, limit: int = 500, offset: int 
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
         if last_id is not None:
-    # Never store our own nicks (the scraping account and every other internal account)
-    internal = await get_all_internal_telegram_user_ids()
-    members = [m for m in members if int(m.get("user_id") or 0) not in internal]
-    # Names carrying another exchange's brand are almost always that exchange's BD
-    members = [m for m in members if not _OTHER_EXCHANGE.search(
-        " ".join(str(m.get(k) or "") for k in ("first_name", "last_name", "username")))]
             cursor = await db.execute("""
                 SELECT * FROM scraped_members
                 WHERE scrape_job_id = ? AND id > ?

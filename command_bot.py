@@ -384,6 +384,13 @@ def _register_handlers(client: TelegramClient):
             return
         await _handle_stage(event)
 
+    # ── /hide, /unhide — drop an off-topic lead from the forum group ───────
+    @client.on(events.NewMessage(pattern=r"/(un)?hide(@\w+)?$"))
+    async def cmd_hide(event):
+        if not _check_admin(event):
+            return
+        await _handle_hide(event, hidden=not event.raw_text.startswith("/unhide"))
+
     # ── Forum topic admin messages ──────────────────────────────────────────
     # Slash messages are excluded EXCEPT the /ai* control commands, which are
     # handled per-topic by _handle_forum_admin_message.
@@ -1315,7 +1322,8 @@ async def relay_outgoing_media_to_forum(account_id: int, user_id: int, message, 
             return "bot_offline"
         if not cfg.enabled:
             return "disabled"
-        if not await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id):
+        _t = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
+        if not _t or fx.is_hidden(_t):
             return "no_topic"
         if proof_relay._file_size(message) > proof_relay.MAX_BYTES:
             result = "too_large"
@@ -1494,6 +1502,43 @@ async def _handle_pipeline(event) -> None:
     lines.append("Đổi bước: mở lead trên web → modal → nút bước tiếp theo")
     lines.append("Đổi giai đoạn AI cũ: vào topic rồi gõ /stage <giai đoạn>")
     await event.respond("\n".join(lines))
+
+
+async def _handle_hide(event, hidden: bool) -> None:
+    """Hide (or bring back) the lead of THIS topic: no more relays, topic closed."""
+    topic_id = _extract_topic_id(event.message)
+    cfg = await _load_forum_config()
+    topic = await db.get_telegram_topic_by_thread(cfg.group_id, topic_id) if topic_id else None
+    if not topic:
+        await event.respond("Gõ /hide ngay trong topic của lead muốn ẩn.")
+        return
+    await db.update_telegram_topic_status(cfg.group_id, topic_id, "hidden" if hidden else "active")
+    # Hiding a lead also silences the AI for them (same gate as the "Tắt AI" button);
+    # /unhide turns it back on.
+    acc_id, uid = int(topic["account_id"]), int(topic["user_id"])
+    chat = await db.get_followup_chat(acc_id, uid)
+    if chat:
+        if hidden:
+            await db.set_followup_stage(acc_id, uid, "paused")
+        else:
+            await db.resume_ai_for_user(acc_id, uid)
+            if (chat.get("stage") or "") == "paused":
+                await db.set_followup_stage(acc_id, uid, "nurture")
+    try:
+        from telethon.tl.functions.messages import EditForumTopicRequest
+        await event.client(EditForumTopicRequest(peer=await event.get_input_chat(),
+                                                 topic_id=topic_id, closed=hidden))
+    except Exception as e:
+        logger.info("[ForumInbox] close/reopen topic %s failed: %s", topic_id, e)
+    who = _lead_label_short(topic)
+    if hidden:
+        await event.respond(f"🙈 Đã ẩn {who} và tắt AI: tin của họ không vào nhóm nữa, AI không trả lời họ nữa. Gõ /unhide để hiện lại và bật AI.")
+    else:
+        await event.respond(f"👀 Đã hiện lại {who} và bật AI: tin mới sẽ vào topic này.")
+
+
+def _lead_label_short(topic: dict) -> str:
+    return "@" + topic["username"] if topic.get("username") else (topic.get("name") or str(topic.get("user_id")))
 
 
 async def _handle_attention(event) -> None:
