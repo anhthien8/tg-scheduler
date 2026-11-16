@@ -1015,14 +1015,14 @@ async def _handle_resume(event, cid: int):
     try:
         # Chống gửi trùng: lock serialize check-and-start; 2 lệnh /resume đồng thời
         # không thể cùng vượt qua check rồi tạo 2 task
-        from routes.members import _active_campaign_lock, _active_campaigns, _run_campaign
+        from routes.members import _active_campaign_lock, _active_campaigns, launch_campaign
         async with _active_campaign_lock:
             existing = _active_campaigns.get(cid)
             if existing is True or (isinstance(existing, asyncio.Task) and not existing.done()):
                 text = f"⚠️ Campaign #{cid} đang chạy rồi — không tạo thêm."
+            elif await launch_campaign(cid) == "waiting":
+                text = f"⏳ Campaign #{cid} đã xếp hàng chờ — tự chạy khi campaign dùng chung nick gửi xong"
             else:
-                await db.update_dm_campaign_status(cid, "running")
-                _active_campaigns[cid] = asyncio.create_task(_run_campaign(cid))
                 text = f"▶️ Đã resume campaign #{cid}"
                 logger.info(f"Command bot: resumed campaign #{cid}")
     except Exception as e:
@@ -1216,7 +1216,7 @@ async def relay_proof_to_forum(account_id: int, user_id: int, username: str | No
         label = {"photo": "🖼️ Ảnh proof", "video": "🎬 Video proof"}.get(kind, "📎 File proof")
         lead = f"@{username}" if username else (name or str(user_id))
         msg = await bot.send_topic_file(cfg.group_id, int(topic["topic_id"]), path,
-                                        caption=f"{label} từ {lead} (ID {user_id})")
+                                        caption=f"{label} từ {lead} (ID {user_id}) #KOLproof")
         return {"link": fx.topic_message_link(cfg.group_id, int(topic["topic_id"]), int(msg.id))}
     except Exception as e:
         logger.warning("[ForumInbox] proof relay failed (acc=%s user=%s): %s: %s",

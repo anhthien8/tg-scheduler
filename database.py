@@ -1841,6 +1841,59 @@ async def init_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_reaction_logs_status_sent ON reaction_logs(status, sent_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_wal_status_created ON warmup_action_log(status, created_at DESC)")
 
+        # ── v3.39 Story scheduler: bulk story posts + internal nicks viewing each other ──
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS story_jobs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL DEFAULT '',
+                account_ids     TEXT NOT NULL DEFAULT '[]',
+                media_file      TEXT NOT NULL,
+                media_type      TEXT NOT NULL DEFAULT 'photo',
+                caption         TEXT DEFAULT '',
+                scheduled_at    REAL NOT NULL,
+                stagger_min     INTEGER DEFAULT 5,
+                privacy         TEXT DEFAULT 'all',
+                cross_view      INTEGER DEFAULT 1,
+                viewer_scope    TEXT DEFAULT 'job',
+                view_delay_min  INTEGER DEFAULT 3,
+                view_delay_max  INTEGER DEFAULT 45,
+                status          TEXT DEFAULT 'scheduled',
+                created_at      TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS story_posts (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id          INTEGER NOT NULL,
+                account_id      INTEGER NOT NULL,
+                post_at         REAL NOT NULL,
+                status          TEXT DEFAULT 'pending',
+                story_id        INTEGER,
+                error           TEXT,
+                posted_at       REAL,
+                FOREIGN KEY (job_id) REFERENCES story_jobs(id) ON DELETE CASCADE
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS story_views (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id             INTEGER NOT NULL,
+                job_id              INTEGER NOT NULL,
+                viewer_account_id   INTEGER NOT NULL,
+                view_at             REAL NOT NULL,
+                status              TEXT DEFAULT 'pending',
+                error               TEXT,
+                done_at             REAL,
+                UNIQUE(post_id, viewer_account_id),
+                FOREIGN KEY (post_id) REFERENCES story_posts(id) ON DELETE CASCADE
+            )
+        """)
+        await _add_column(db, "story_posts", "caption", "TEXT")  # v3.40 per-nick AI caption
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_story_posts_due ON story_posts(status, post_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_story_posts_job ON story_posts(job_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_story_views_due ON story_views(status, view_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_story_views_job ON story_views(job_id)")
+
         await db.commit()
 
     # Seed default templates after init
@@ -4192,6 +4245,13 @@ async def get_dm_logs_by_platform(platform: str = "telegram",
 
 # ── Member Scraping ──
 
+import re as _re  # noqa: E402
+_OTHER_EXCHANGE = _re.compile(
+    r"(?<![a-z])(binance|okx|bybit|bitget|gate\.?io|kucoin|mexc|htx|huobi|bingx|bitmart|coinex|lbank|"
+    r"phemex|bitunix|blofin|toobit|xt\.com|coinbase|kraken|bitfinex|deepcoin|ourbit|zoomex|pionex|"
+    r"bitmex|crypto\.com|hyperliquid|backpack|coinw|btcc|bitrue|ascendex|poloniex|bitstamp|bitvavo|probit|tapbit|websea|bitdu|biconomy)(?![a-z])", _re.I)
+
+
 async def save_scraped_members(scrape_job_id: str, account_id: int, group_id: int,
                                 group_title: str, members: list[dict]):
     """Save scraped members to DB in bulk (INSERT OR IGNORE for dedup)."""
@@ -4203,14 +4263,14 @@ async def save_scraped_members(scrape_job_id: str, account_id: int, group_id: in
         m for m in members
         if not (m.get("is_bot") or (m.get("username") and m["username"].strip().lower().endswith("bot")))
     ]
-    if not members:
-        return
     # Never store our own nicks (the scraping account and every other internal account)
     internal = await get_all_internal_telegram_user_ids()
     members = [m for m in members if int(m.get("user_id") or 0) not in internal]
     # Names carrying another exchange's brand are almost always that exchange's BD
     members = [m for m in members if not _OTHER_EXCHANGE.search(
         " ".join(str(m.get(k) or "") for k in ("first_name", "last_name", "username")))]
+    if not members:
+        return
 
     data = [
         (
@@ -4251,13 +4311,6 @@ async def get_scrape_jobs() -> list:
                    COUNT(*) as member_count,
                    MIN(scraped_at) as scraped_at
             FROM scraped_members
-import re as _re  # noqa: E402
-_OTHER_EXCHANGE = _re.compile(
-    r"(?<![a-z])(binance|okx|bybit|bitget|gate\.?io|kucoin|mexc|htx|huobi|bingx|bitmart|coinex|lbank|"
-    r"phemex|bitunix|blofin|toobit|xt\.com|coinbase|kraken|bitfinex|deepcoin|ourbit|zoomex|pionex|"
-    r"bitmex|crypto\.com|hyperliquid|backpack|coinw|btcc|bitrue|ascendex|poloniex|bitstamp|bitvavo|probit|tapbit|websea|bitdu|biconomy)(?![a-z])", _re.I)
-
-
             GROUP BY scrape_job_id
             ORDER BY scraped_at DESC
         """)
@@ -4300,6 +4353,16 @@ async def delete_scrape_job(scrape_job_id: str):
     async with get_db() as db:
         await db.execute("DELETE FROM scraped_members WHERE scrape_job_id = ?", (scrape_job_id,))
         await db.commit()
+
+
+async def delete_scraped_member(scrape_job_id: str, user_id: int) -> int:
+    """Remove one contact from a scraped list. Returns rows deleted."""
+    async with get_db() as db:
+        cur = await db.execute(
+            "DELETE FROM scraped_members WHERE scrape_job_id = ? AND user_id = ?",
+            (scrape_job_id, user_id))
+        await db.commit()
+        return cur.rowcount
 
 
 # ── Batch Scrape Channels ──
@@ -6243,6 +6306,15 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
                    COALESCE(c.kol_step, 'prospect') AS kol_step, c.kol_step_updated_at,
                    COALESCE(c.step_reminders_sent, 0) AS step_reminders_sent,
                    c.owed_since, c.owed_note, c.last_user_message_at,
+                   -- Who spoke last + a short preview, so the reply queue can be
+                   -- built without shipping every history to the browser.
+                   CASE WHEN json_valid(c.history_json)
+                        THEN json_extract(c.history_json, '$[#-1].role') END AS last_role,
+                   CASE WHEN json_valid(c.history_json)
+                        THEN substr(json_extract(c.history_json, '$[#-1].content'), 1, 140) END AS last_text,
+                   -- The "lead" is one of our own accounts (never a real KOL).
+                   (c.user_id IN (SELECT telegram_user_id FROM accounts
+                                  WHERE telegram_user_id IS NOT NULL)) AS is_own,
                    p.weex_uid, p.vip_code, p.volume_claimed, p.missing_items,
                    a.name AS account_name,
                    CASE WHEN n.status = 'sent' THEN 1 ELSE 0 END AS nudged,
@@ -6260,6 +6332,7 @@ async def get_all_followup_chats(status_filter: str | None = None, limit: int = 
         for r in rows:
             r["nudged"] = bool(r.get("nudged", 0))
             r["nudge_count"] = r.get("nudge_count", 0)
+            r["is_own"] = bool(r.get("is_own", 0))
             try:
                 r["missing_items"] = json.loads(r.get("missing_items") or "[]")
             except Exception:
@@ -6799,28 +6872,19 @@ async def get_telegram_outreach_proof(account_id: int, user_id: int) -> dict | N
         if row2:
             return dict(row2)
 
-        # The lead is in the AI follow-up pipeline → we definitely contacted them.
+        # Inbound chat (we never DM'd them): only KOL-relevant once the lead
+        # moved past "prospect" in the funnel. Strangers asking random things
+        # (KYC, support, chit-chat) stay out of the forum group.
         f_cur = await db.execute(
             """SELECT 'followup' AS source, name, updated_at AS sent_at
                FROM ai_followup_chats
                WHERE account_id = ? AND user_id = ?
+                 AND COALESCE(NULLIF(kol_step, ''), 'prospect') != 'prospect'
                ORDER BY updated_at DESC LIMIT 1""",
             (account_id, user_id),
         )
         row3 = await f_cur.fetchone()
-        if row3:
-            return dict(row3)
-
-        # Any inbound reply recorded for this (nick, lead) pair.
-        r_cur = await db.execute(
-            """SELECT 'reply' AS source, sender_name AS name, received_at AS sent_at
-               FROM dm_replies
-               WHERE account_id = ? AND sender_user_id = ?
-               ORDER BY received_at DESC LIMIT 1""",
-            (account_id, user_id),
-        )
-        row4 = await r_cur.fetchone()
-        return dict(row4) if row4 else None
+        return dict(row3) if row3 else None
 
 
 async def get_forum_backfill_candidates(days: int = 90, limit: int = 500) -> list:
@@ -6843,6 +6907,15 @@ async def get_forum_backfill_candidates(days: int = 90, limit: int = 500) -> lis
                WHERE c.reply_count > 0
                  AND COALESCE(c.status, '') != 'bot_ignored'
                  AND COALESCE(c.last_user_message_at, c.updated_at) >= datetime('now', ?)
+                 AND (
+                     COALESCE(NULLIF(c.kol_step, ''), 'prospect') != 'prospect'
+                     OR EXISTS (SELECT 1 FROM dm_campaign_logs l
+                                WHERE l.account_id = c.account_id AND l.target_user_id = c.user_id
+                                  AND l.status = 'success')
+                     OR EXISTS (SELECT 1 FROM watcher_dm_logs w
+                                WHERE w.account_id = c.account_id AND w.target_user_id = c.user_id
+                                  AND w.status = 'success')
+                 )
                  AND NOT EXISTS (
                      SELECT 1 FROM telegram_topics t
                      WHERE t.account_id = c.account_id AND t.user_id = c.user_id
@@ -7736,7 +7809,7 @@ async def get_offer_ladder_history(limit: int = 20) -> list[dict]:
 # (PIPELINE_STAGES) is kept only as the AI on/off switch for /aion /aioff.
 
 KOL_STEPS = ("prospect", "deal_agreed", "uid_received", "link_confirmed", "first_post", "active")
-KOL_STEP_TERMINAL = ("declined", "dormant")
+KOL_STEP_TERMINAL = ("declined", "dormant", "media")
 KOL_STEP_ALL = KOL_STEPS + KOL_STEP_TERMINAL
 
 KOL_STEP_LABELS = {
@@ -7748,10 +7821,11 @@ KOL_STEP_LABELS = {
     "active": "Hoạt động",
     "declined": "Từ chối",
     "dormant": "Ngủ đông",
+    "media": "Media (bán gói quảng cáo)",
 }
 KOL_STEP_EMOJI = {
     "prospect": "⚪", "deal_agreed": "🤝", "uid_received": "🆔", "link_confirmed": "🔗",
-    "first_post": "📝", "active": "🟢", "declined": "⛔", "dormant": "💤",
+    "first_post": "📝", "active": "🟢", "declined": "⛔", "dormant": "💤", "media": "📣",
 }
 
 # What is still needed at each step, and who has to supply it.

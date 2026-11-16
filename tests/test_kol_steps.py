@@ -33,7 +33,7 @@ async def _set_null_step(user_id: int):
 
 def test_step_tables_are_closed_and_ordered():
     assert db.KOL_STEPS == ("prospect", "deal_agreed", "uid_received", "link_confirmed", "first_post", "active")
-    assert db.KOL_STEP_TERMINAL == ("declined", "dormant")
+    assert db.KOL_STEP_TERMINAL == ("declined", "dormant", "media")
     assert [db.kol_step_rank(s) for s in db.KOL_STEPS] == [0, 1, 2, 3, 4, 5]
     assert db.kol_step_rank("declined") == -1
     assert db.normalize_kol_step(" Deal_Agreed ") == "deal_agreed"

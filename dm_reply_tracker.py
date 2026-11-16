@@ -426,7 +426,7 @@ _UID_NEAR_RE = re.compile(
     r"\b(?:uid|user\s*id|weex\s*id)\b[^0-9]{0,25}(\d{5,12})\b|\b(\d{5,12})\b[^0-9]{0,15}\b(?:uid|user\s*id)\b",
     re.IGNORECASE)
 _UID_BARE_RE = re.compile(r"\d{6,12}")
-_STEP_TAG_RE = re.compile(r"\[\s*(DEAL_AGREED|FIRST_POST|STOP|DECLINED|ONBOARDED)\s*\]", re.IGNORECASE)
+_STEP_TAG_RE = re.compile(r"\[\s*(DEAL_AGREED|FIRST_POST|STOP|DECLINED|ONBOARDED|MEDIA)\s*\]", re.IGNORECASE)
 
 _STEP_PROMPT_LABELS = {
     "prospect": "Prospect — deal NOT agreed yet",
@@ -437,6 +437,7 @@ _STEP_PROMPT_LABELS = {
     "active": "Active KOL (valid volume recorded)",
     "declined": "Declined",
     "dormant": "Dormant",
+    "media": "Media seller (sells ads/AMA packages, not a trading KOL)",
 }
 
 _STEP_GUIDANCE = {
@@ -467,6 +468,11 @@ _STEP_GUIDANCE = {
         "they can message here anytime. NEVER say you will stop writing / won't message again."
     ),
     "dormant": "The KOL went quiet after agreeing. Be light and friendly; one soft check-in at most, no pressure.",
+    "media": (
+        "This contact sells media / promotion packages and already got our polite decline. Do NOT negotiate prices "
+        "or re-explain. If they share real past campaign results (sign-ups, deposits, trading volume), thank them and say "
+        "the team will review. Otherwise reply in 1 short warm sentence that we will reach out if anything changes."
+    ),
 }
 
 _STEP_REMINDER_TEMPLATES = {
@@ -618,7 +624,7 @@ async def process_pinned_uids(force: bool = False) -> dict:
     async with db.get_db() as conn:
         cur = await conn.execute("""
             SELECT account_id, user_id FROM ai_followup_chats
-            WHERE status != 'bot_ignored' AND COALESCE(NULLIF(kol_step, ''), 'prospect') != 'declined'
+            WHERE status != 'bot_ignored' AND COALESCE(NULLIF(kol_step, ''), 'prospect') NOT IN ('declined', 'media')
         """)
         rows = await cur.fetchall()
     found = 0
@@ -731,7 +737,7 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
     if ops_missing:
         lines.append("WAITING ON OUR TEAM (do NOT ask the KOL for these; if they ask, say the team is on it): "
                      + ", ".join(ops_missing))
-    if not missing and step in ("active", "declined", "dormant"):
+    if not missing and step in ("active", "declined", "dormant", "media"):
         lines.append("NOTHING MISSING.")
     lines.append("GUIDANCE: " + _exch(_STEP_GUIDANCE.get(step, "")))
     try:  # the ladder is WEEX's: never predict a WEEX tier for a BloFin / Bitget KOL
@@ -755,7 +761,19 @@ async def render_kol_step_prompt(account_id: int, user_id: int, profile: dict | 
                  "IF THEY EXPLICITLY ASK YOU TO STOP: no benefit, just thank them and say they can message here anytime they need support. "
                  "In both cases append [STOP] on its own line (halts automatic follow-ups); never say you will stop writing. "
                  "All [TAGS] are invisible to the KOL.")
+    if step == "prospect":
+        lines.append(MEDIA_SELLER_RULE)
     return "\n".join(lines)
+
+
+MEDIA_SELLER_RULE = (
+    "IF THE CONTACT IS A MEDIA / MARKETING SELLER rather than a trader-KOL (they pitch paid posts, AMAs, X Spaces, "
+    "Binance Live, \"partnership\" packages, a KOL network, or send a price list): do NOT negotiate and do NOT pitch the offer. "
+    "Reply politely in their language (2-3 sentences): right now we only partner with KOLs who trade futures, CFD, stocks "
+    "and gold, and we pay on trading performance (volume, active traders), not per post or AMA; so we can't take media "
+    "packages without performance data. Invite them to share past exchange campaign results (sign-ups, deposits, volume) "
+    "if they have them. Append [MEDIA] on its own line."
+)
 
 
 async def _rewrite_off_ladder(history: list, prompt: str, ai_provider, ai_keys, kwargs: dict, bad: list[str],
@@ -787,6 +805,11 @@ async def apply_kol_step_tags(account_id: int, user_id: int, text: str) -> tuple
     if not tags:
         return clean, result
     result["tags"] = sorted(tags)
+    if "MEDIA" in tags:
+        res = await db.set_kol_step(account_id, user_id, "media", actor="ai", reason="AI tag [MEDIA]: media/ads seller")
+        result["declined"] = True
+        result["advanced"] = "media" if res.get("changed") else None
+        return clean, result
     if "STOP" in tags or "DECLINED" in tags:
         res = await db.set_kol_step(account_id, user_id, "declined", actor="ai", reason="AI tag [STOP]/[DECLINED]")
         result["declined"] = True
@@ -1203,6 +1226,33 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
             _spawn_background(_remove_ai_send_after_delay(account_id, user_id, lock_gen))
 
 
+def _human_wrote(chat: dict | None) -> bool:
+    """A real person typed in this chat ("[Human Admin..." entry): never hand it back to the AI."""
+    chat = chat or {}
+    hist = chat.get("history")
+    if hist is None:
+        return "[Human Admin" in (chat.get("history_json") or "")
+    return any(isinstance(m, dict) and m.get("role") == "assistant"
+               and str(m.get("content") or "").lstrip().startswith("[Human Admin") for m in hist)
+
+
+async def _ai_can_answer(account_id, campaign_id, watcher_id) -> bool:
+    """An AI Agent is set on the account, or on the campaign/rule that sent the first DM."""
+    acc = await db.get_account(account_id)
+    if acc and acc.get("ai_agent_id"):
+        return True
+    return bool(await _source_agent_id(campaign_id, watcher_id))
+
+
+async def _retry_after_lock(kwargs: dict, delay: float = 35.0):
+    """The KOL wrote while our previous send held the 30s lock: answer once it is free."""
+    await asyncio.sleep(delay)
+    chat = await db.get_followup_chat(kwargs["account_id"], kwargs["user_id"])
+    hist = (chat or {}).get("history") or []
+    if chat and chat.get("status") == "active" and hist and hist[-1].get("role") == "user":
+        await generate_and_send_ai_reply_for_chat(**kwargs, _lock_retry=False)
+
+
 async def _source_agent_id(campaign_id, watcher_id):
     """AI Agent of the campaign, else the Keyword DM rule, that sent the first DM."""
     try:
@@ -1292,6 +1342,7 @@ async def generate_and_send_ai_reply_for_chat(
     target_campaign_id: int | None = None,
     watcher_id: int | None = None,
     event: Any | None = None,
+    _lock_retry: bool = True,
 ) -> bool:
     """Generate and send AI response for a chat session. Returns True if reply was sent."""
     # 0. HARD GUARD: never let AI chat with another managed internal account.
@@ -1338,6 +1389,10 @@ async def generate_and_send_ai_reply_for_chat(
     if (account_id, user_id) in _pending_ai_sends:
         logger.info("[AIFollowUp] ⚡ Skipping duplicate — AI reply already in progress for user @%s (id=%d, acc=%d)",
                     sender_username or "?", user_id, account_id)
+        if _lock_retry:
+            _spawn_background(_retry_after_lock(dict(
+                account_id=account_id, user_id=user_id, sender_username=sender_username,
+                sender_name=sender_name, target_campaign_id=target_campaign_id, watcher_id=watcher_id)))
         return False
     _lock_ai_send(account_id, user_id)  # Lock immediately to prevent race condition
     # Let the user finish typing (multi-message bursts) before answering once.
@@ -1572,7 +1627,10 @@ async def generate_and_send_ai_reply_for_chat(
 
         # 5-step funnel tags (spec B1): AI may advance exactly one step.
         ai_reply, step_result = await apply_kol_step_tags(account_id, user_id, ai_reply)
-        if step_result.get("declined"):
+        if "MEDIA" in step_result.get("tags", []):
+            new_status = "needs_human"  # AI goes silent; a media seller needs no admin ping
+            logger.info("[AIFollowUp] 📣 User %d classified as media seller — polite decline sent", user_id)
+        elif step_result.get("declined"):
             new_status = "needs_human"
             _spawn_background(_notify_main_account_handover(
                 account_id, user_id, sender_username,
@@ -2097,6 +2155,11 @@ def _make_handler(account_id: int):
                         except Exception:
                             # Unparseable timestamp must not lock the chat forever.
                             should_resume = True
+                    if should_resume and (_human_wrote(chat) or not await _ai_can_answer(
+                            account_id, chat.get("campaign_id"), chat.get("watcher_id"))):
+                        # A person ran this chat, or no AI can answer on it: it stays with
+                        # the human and shows in the reply queue.
+                        should_resume = False
                     if should_resume:
                         logger.info("[AIFollowUp] ⏰ 12h elapsed since human takeover for user %d — auto-resuming!", sender_id)
                         await db.update_followup_chat_status(account_id, sender_id, "active")
@@ -2631,6 +2694,7 @@ async def _process_drip_queue() -> tuple[int, list[str]]:
                   AND datetime(COALESCE(last_user_message_at, updated_at)) <= datetime('now', ?)
                   AND datetime(COALESCE(last_user_message_at, updated_at)) >= datetime('now', ?)
                   AND human_takeover_at IS NULL
+                  AND owed_since IS NULL
                   AND COALESCE(history_json, '') NOT LIKE '%[Human Admin]%'
                   AND COALESCE(last_drip_stage, 0) < CASE COALESCE(lead_tier, 'Tier C')
                         WHEN 'Tier A' THEN ? WHEN 'Tier B' THEN ? WHEN 'Tier C' THEN ? ELSE ? END
@@ -2801,12 +2865,16 @@ async def process_drip_followups() -> dict:
                   AND COALESCE(NULLIF(kol_step, ''), 'prospect') = 'prospect'
                   AND (human_takeover_at IS NULL OR datetime(human_takeover_at) <= datetime('now', '-12 hours'))
                   AND datetime(updated_at) <= datetime('now', '-12 hours')
+                  AND datetime(updated_at) >= datetime('now', '-7 days')  -- never revive an old lead
                 LIMIT 20
             """)
             to_chats = [dict(r) for r in await cur_to.fetchall()]
 
         for t in to_chats:
             hist = json.loads(t.get("history_json", "[]"))
+            if "[Human Admin" in (t.get("history_json") or "") or not await _ai_can_answer(
+                    t["account_id"], t.get("campaign_id"), t.get("watcher_id")):
+                continue  # admin-owned or no AI on it: leave it with the human
             if _last_assistant_is_fallback(hist):
                 # We promised the KOL a human check; the AI resuming would only
                 # repeat the blocked answer. Keep it with the owner (already alerted).
@@ -2826,8 +2894,9 @@ async def process_drip_followups() -> dict:
                         watcher_id=t.get("watcher_id"),
                     ))
                     sent_count += 1
-            elif hist and hist[-1].get("role") == "assistant":
-                # Admin or assistant was the last to speak -> simply flip back to active
+            elif hist and hist[-1].get("role") == "assistant" and not t.get("owed_since"):
+                # Admin or assistant was the last to speak -> simply flip back to active.
+                # Not while we owe the KOL an answer: the drip would only repeat our last ask.
                 await db.update_followup_chat_status(t["account_id"], t["user_id"], "active")
     except Exception as e_to:
         logger.error("[AIFollowUp] Error processing 24h auto-resume: %s", e_to)
@@ -2842,12 +2911,17 @@ async def process_drip_followups() -> dict:
                   AND datetime(updated_at) <= datetime('now', '-2 minutes')
                   AND datetime(updated_at) >= datetime('now', '-48 hours')
                   AND (human_takeover_at IS NULL OR datetime(human_takeover_at) <= datetime('now', '-60 minutes'))
-                LIMIT 20
+                  AND json_valid(history_json)
+                  AND json_extract(history_json, '$[#-1].role') = 'user'
+                ORDER BY datetime(updated_at) ASC
+                LIMIT 60
             """)
             stuck_chats = [dict(r) for r in await cur_stuck.fetchall()]
 
         for sc in stuck_chats:
             hist = json.loads(sc.get("history_json", "[]"))
+            if not await _ai_can_answer(sc["account_id"], sc.get("campaign_id"), sc.get("watcher_id")):
+                continue  # no AI Agent: retrying every 5 min can never succeed
             if hist and hist[-1].get("role") == "user" and (hist[-1].get("content") or "").strip():
                 if (sc["account_id"], sc["user_id"]) not in _pending_ai_sends:
                     client = tg.get_client(sc["account_id"])
@@ -2906,7 +2980,7 @@ async def backfill_owed_answers(force: bool = False) -> int:
         cur = await conn.execute(
             "SELECT account_id, user_id, history_json FROM ai_followup_chats "
             "WHERE owed_since IS NULL AND status != 'bot_ignored' "
-            "AND COALESCE(NULLIF(kol_step, ''), 'prospect') != 'declined'")
+            "AND COALESCE(NULLIF(kol_step, ''), 'prospect') NOT IN ('declined', 'media')")
         rows = [dict(r) for r in await cur.fetchall()]
     found = 0
     for r in rows:
@@ -2949,7 +3023,7 @@ async def process_owed_answer_reminders(force: bool = False) -> dict:
             WHERE c.owed_since IS NOT NULL
               AND datetime(c.owed_since) <= datetime('now', ?)
               AND c.status != 'bot_ignored'
-              AND COALESCE(NULLIF(c.kol_step, ''), 'prospect') != 'declined'
+              AND COALESCE(NULLIF(c.kol_step, ''), 'prospect') NOT IN ('declined', 'media')
               AND COALESCE(c.owed_reminders_sent, 0) < ?
               AND (c.owed_last_reminder_at IS NULL OR datetime(c.owed_last_reminder_at) <= datetime('now', '-1 day'))
             ORDER BY {_TIER_RANK_SQL.replace('lead_tier', 'c.lead_tier')}, c.owed_since ASC
@@ -3123,7 +3197,7 @@ async def process_monthly_kol_care() -> dict:
         cur = await db_conn.execute("""
             SELECT * FROM ai_followup_chats
             WHERE status NOT IN ('bot_ignored', 'paused_admin')
-              AND COALESCE(NULLIF(kol_step, ''), 'prospect') != 'declined'
+              AND COALESCE(NULLIF(kol_step, ''), 'prospect') NOT IN ('declined', 'media')
               AND COALESCE(NULLIF(stage, ''), 'new') != 'paused'
               AND (
                     COALESCE(NULLIF(stage, ''), 'new') = 'signed'

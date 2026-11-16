@@ -459,6 +459,7 @@ const Members = {
         return;
       }
     }
+    this._membersDetailJobId = jobId;
     this._membersDetailCurrent = members;   // giữ full list để lọc
     this._renderMembersDetail();
   },
@@ -502,17 +503,35 @@ const Members = {
     const offset = st.start;
     tbody.innerHTML = st.slice.map((m, i) => {
       const name = [m.first_name, m.last_name].filter(Boolean).join(' ') || '—';
-      const ls = m.last_seen || '—';
+      // ISO timestamp → chỉ ngày (YYYY-MM-DD); 'recently'/'last_month' giữ nguyên
+      const raw = m.last_seen || '—';
+      const ls = /^\d{4}-\d{2}-\d{2}T/.test(raw) ? raw.slice(0, 10) : raw;
       return `<tr>
         <td>${offset + i + 1}</td>
-        <td style="font-size:12px">${m.user_id}</td>
         <td>${m.username ? '@' + esc(m.username) : '<span style="color:var(--text2)">—</span>'}</td>
         <td>${esc(name)}</td>
         <td>${m.is_premium ? '<span class="badge badge-green">⭐</span>' : '—'}</td>
         <td style="font-size:12px;color:var(--text2)">${esc(ls)}</td>
+        <td><button class="btn btn-ghost btn-sm" title="Xóa contact khỏi list (vd. nghi là admin nhóm)" onclick="Members.deleteDetailMember(${Number(m.user_id)})">🗑</button></td>
       </tr>`;
     }).join('');
     renderPager(pager, st, (p) => { this._membersDetailPage = p; this._renderMembersDetail(); });
+  },
+
+  async deleteDetailMember(userId) {
+    const jobId = this._membersDetailJobId;
+    const m = (this._membersDetailCurrent || []).find(x => Number(x.user_id) === userId);
+    const label = m?.username ? '@' + m.username : ([m?.first_name, m?.last_name].filter(Boolean).join(' ') || userId);
+    if (!jobId || !confirm(`Xóa ${label} khỏi list này?`)) return;
+    try {
+      await MembersAPI.deleteScrapeMember(jobId, userId);
+    } catch (e) {
+      alert(e.message);
+      return;
+    }
+    this._membersDetailCurrent = this._membersDetailCurrent.filter(x => Number(x.user_id) !== userId);
+    this._membersDetailCache[jobId] = this._membersDetailCurrent;
+    this._renderMembersDetail();
   },
 
   closeDetailModal() {
@@ -836,6 +855,9 @@ const Members = {
       if (c.status === 'running') {
         actions += `<button class="btn btn-danger btn-sm" onclick="Members.stopCampaign(${c.id})" title="Dừng campaign">⏸</button>`;
       }
+      if (c.status === 'waiting') {
+        actions += `<button class="btn btn-danger btn-sm" onclick="Members.stopCampaign(${c.id})" title="Bỏ khỏi hàng chờ">⏸</button>`;
+      }
       if (c.status === 'scheduled') {
         actions += `<button class="btn btn-primary btn-sm" onclick="Members.startCampaign(${c.id})" title="Chạy ngay (bỏ lịch hẹn)">▶</button>`;
         actions += `<button class="btn btn-ghost btn-sm" onclick="Members.editCampaignMessages(${c.id})" title="Sửa campaign / đổi giờ chạy">✏️</button>`;
@@ -934,6 +956,7 @@ const Members = {
     const map = {
       draft: `<span class="badge" style="background:var(--text2);${st}">📝 Nháp</span>`,
       running: `<span class="badge badge-blue" style="${st}">🔄 Đang chạy</span>`,
+      waiting: `<span class="badge" style="background:var(--text2);${st}" title="Đang xếp hàng — tự chạy khi campaign dùng chung nick gửi chạy xong">⏳ Đang chờ</span>`,
       paused: `<span class="badge" style="background:var(--orange);${st}" title="Tạm dừng thủ công">⏸ Tạm dừng</span>`,
       paused_auto: `<span class="badge" style="background:var(--purple);${st}" title="Dừng do SpamBot/limit — sẽ tự chạy tiếp khi account sẵn sàng">🔒 Chờ mở khóa</span>`,
       completed: `<span class="badge badge-green" style="${st}">✅ Hoàn tất</span>`,

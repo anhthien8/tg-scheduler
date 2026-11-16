@@ -636,6 +636,15 @@ async def get_scrape_job_members(scrape_job_id: str,
     return {"members": members, "count": len(members)}
 
 
+@router.delete("/scrape-jobs/{scrape_job_id}/members/{user_id}")
+async def delete_scrape_member(scrape_job_id: str, user_id: int):
+    """Remove one contact (e.g. a suspected group admin) from a scraped list."""
+    n = await db.delete_scraped_member(scrape_job_id, user_id)
+    if not n:
+        raise HTTPException(status_code=404, detail="Không tìm thấy contact")
+    return {"status": "deleted"}
+
+
 @router.delete("/scrape-jobs/{scrape_job_id}")
 async def delete_scrape_job(scrape_job_id: str):
     """Delete a scrape job and its members."""
@@ -2197,13 +2206,58 @@ async def start_campaign(campaign_id: int, background_tasks: BackgroundTasks):
                 raise HTTPException(status_code=400, detail="Campaign đang chạy")
             logger.info(f"[Campaign {campaign_id}] Campaign marked running in DB but no active background task found. Re-starting task...")
 
-        # Mark as running and register task atomically with the guard
-        await db.update_dm_campaign_status(campaign_id, "running")
-        task = asyncio.create_task(_run_campaign(campaign_id))
-        _active_campaigns[campaign_id] = task
+        # Start (or queue behind a campaign sharing a sender) atomically with the guard
+        state = await launch_campaign(campaign_id)
 
-
+    if state == "waiting":
+        return {"status": "waiting",
+                "message": "⏳ Đã xếp hàng chờ — sẽ tự chạy khi campaign dùng chung nick gửi chạy xong"}
     return {"status": "started", "message": "Campaign đã bắt đầu chạy"}
+
+
+def _campaign_live(task) -> bool:
+    return task is True or (isinstance(task, asyncio.Task) and not task.done())
+
+
+async def launch_campaign(campaign_id: int) -> str:
+    """Start a campaign now, or park it as 'waiting' when a live campaign shares
+    one of its sender accounts (per-account pacing is per campaign, so two
+    campaigns on one nick would halve that nick's gap between DMs).
+    Caller must hold _active_campaign_lock. Returns 'running' or 'waiting'."""
+    campaign = await db.get_dm_campaign(campaign_id)
+    senders = set(campaign["sender_account_ids"]) if campaign else set()
+    for cid, task in list(_active_campaigns.items()):
+        if cid == campaign_id or not _campaign_live(task):
+            continue
+        other = await db.get_dm_campaign(cid)
+        if other and senders & set(other["sender_account_ids"]):
+            await db.update_dm_campaign_status(campaign_id, "waiting")
+            logger.info("[Campaign %d] queued behind campaign %d (shared sender)", campaign_id, cid)
+            return "waiting"
+    await db.update_dm_campaign_status(campaign_id, "running")
+    _active_campaigns[campaign_id] = asyncio.create_task(_run_campaign(campaign_id))
+    return "running"
+
+
+async def start_waiting_campaigns():
+    """Start queued campaigns whose senders are now free, oldest queued first."""
+    async with _active_campaign_lock:
+        waiting = [c for c in await db.get_all_dm_campaigns() if c.get("status") == "waiting"]
+        for c in sorted(waiting, key=lambda c: c.get("updated_at") or ""):
+            await launch_campaign(c["id"])
+
+
+_queue_kick_tasks: set = set()
+
+
+def _kick_campaign_queue(_task=None):
+    """Done-callback of every campaign task: a sender may have been freed."""
+    try:
+        t = asyncio.get_running_loop().create_task(start_waiting_campaigns())
+    except RuntimeError:
+        return  # loop shutting down
+    _queue_kick_tasks.add(t)
+    t.add_done_callback(_queue_kick_tasks.discard)
 
 
 @router.post("/campaigns/{campaign_id}/stop")
@@ -2514,6 +2568,7 @@ async def _run_campaign(campaign_id: int):
     current_task = asyncio.current_task()
     if current_task:
         _active_campaigns[campaign_id] = current_task
+        current_task.add_done_callback(_kick_campaign_queue)  # finished/stopped → start queued ones
     else:
         _active_campaigns[campaign_id] = True
     try:

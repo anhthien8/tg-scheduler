@@ -196,29 +196,34 @@ if(page==='ai-followup'){
     const aiHtml = `<div id="view-ai-followup">
       <div class="toolbar">
         <div>
-          <h2 class="page-title" style="margin-bottom:2px">💬 AI Agent</h2>
-          <p style="margin:0;font-size:.85rem;color:var(--text2)">AI tự chat, giải đáp và chốt deal khi khách trả lời DM</p>
+          <h2 class="page-title" style="margin-bottom:2px">💬 Hàng chờ trả lời</h2>
+          <p style="margin:0;font-size:.85rem;color:var(--text2)">KOL đang chờ người thật — trả lời từ trên xuống, AI lo phần còn lại</p>
         </div>
         <div class="toolbar-left">
-          <label class="toggle" title="Bật/tắt AI Follow-Up (lưu ngay)">
+          <label class="toggle" title="Bật/tắt AI cho TẤT CẢ lead (lưu ngay)">
             <input type="checkbox" id="aifu-enabled" onchange="AIFollowUp.quickToggle()">
             <span class="toggle-slider"></span>
           </label>
+          <span class="info-i" tabindex="0" data-tip="Công tắc AI tổng: tắt thì AI ngừng tự trả lời MỌI lead trên mọi tài khoản. Muốn tắt AI cho riêng một lead, dùng nút 🤖 AI trong cửa sổ chat của lead đó.">i</span>
           <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.loadChats()" title="Tải lại danh sách lead">🔄 Làm mới</button>
         </div>
       </div>
 
       <!-- Tab bar -->
       <div style="display:flex;gap:var(--sp-2);margin-bottom:var(--sp-4)">
-        <button class="btn btn-primary btn-sm" id="aifu-tab-leads-btn" onclick="AIFollowUp.switchTab('leads')">👥 Leads</button>
-        <button class="btn btn-ghost btn-sm" id="aifu-tab-settings-btn" onclick="AIFollowUp.switchTab('settings')">⚙️ Cấu hình AI</button>
+        <button class="btn btn-primary btn-sm" id="aifu-tab-leads-btn" onclick="AIFollowUp.switchTab('leads')">📥 Hàng chờ &amp; Lead</button>
+        <button class="btn btn-ghost btn-sm" id="aifu-tab-settings-btn" onclick="AIFollowUp.switchTab('settings')">⚙️ Cài đặt AI chung</button>
+        <span class="info-i" tabindex="0" style="align-self:center" data-tip="Cài đặt AI chung: lời nhắc và kiến thức dùng cho mọi lead, nhịp nhắc lại, thang commission, kênh nhận proof. Ít khi phải đổi. Kịch bản riêng của từng AI Agent nằm ở mục “AI Agents (kịch bản AI)” trên thanh bên.">i</span>
       </div>
 
       <!-- ══ TAB: LEADS ══ -->
       <div id="aifu-tab-leads">
-        <!-- "Việc cần làm": what needs a human today, built from the already-loaded lead list -->
-        <div id="aifu-todo"></div>
-        <div class="stats-grid" style="margin-bottom:var(--sp-4)">
+        <!-- The old "Việc cần làm" card is replaced by the 📥 Hàng chờ chip (one work list).
+             #aifu-todo is left out on purpose; renderTodo() returns early without it. -->
+        <!-- Numbers and the 5-step funnel: reference only, folded away by default. -->
+        <details id="aifu-funnel" style="margin-bottom:var(--sp-3)">
+        <summary style="cursor:pointer;font-size:13px;color:var(--text2);padding:4px 0;user-select:none">📊 Phễu deal &amp; số liệu <span style="font-size:12px">(bấm để mở — bấm một ô để lọc bảng)</span></summary>
+        <div class="stats-grid" style="margin:var(--sp-3) 0 var(--sp-4)">
           <div class="stat-card" style="cursor:pointer" onclick="AIFollowUp.filterByStatus('needs_human')" title="Bấm để lọc">
             <div class="stat-label">⚠️ Cần người thật</div>
             <div class="stat-value red" id="aifu-stat-human">–</div>
@@ -242,8 +247,15 @@ if(page==='ai-followup'){
         </div>
         <!-- 5-step KOL funnel cards (kol_step) — click to filter -->
         <div id="aifu-step-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:var(--sp-4)"></div>
+        </details>
 
-        <div id="aifu-status-chips" style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-3)"></div>
+        <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;align-items:flex-start;justify-content:space-between;margin-bottom:var(--sp-3)">
+          <div id="aifu-status-chips" style="display:flex;gap:var(--sp-2);flex-wrap:wrap;align-items:center;flex:1 1 420px"></div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="search" id="aifu-search" class="form-input" placeholder="🔍 @username, tên hoặc ID" aria-label="Tìm lead" style="width:240px;padding:6px 10px" oninput="AIFollowUp.onSearch(this.value)">
+            <span class="info-i" tabindex="0" data-tip="Tìm trong toàn bộ lead đã tải theo @username, tên, Telegram ID hoặc tên nick đang chat. Kết hợp được với các bộ lọc trạng thái và bước KOL.">i</span>
+          </div>
+        </div>
         <div id="aifu-selection-bar" class="card hidden" style="padding:10px 12px;margin-bottom:var(--sp-3);border:1px solid var(--accent);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <strong id="aifu-selected-count" style="margin-right:auto">Đã chọn 0 lead</strong>
           <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.assignSelected()">📍 Phân công</button>
@@ -260,7 +272,7 @@ if(page==='ai-followup'){
               <tr>
                 <th style="width:34px;text-align:center"><input type="checkbox" aria-label="Chọn tất cả lead trên trang" onchange="AIFollowUp.togglePageSelection(this.checked)"></th>
                 <th>Lead</th>
-                <th>Tier / Intent</th>
+                <th>Tier / Intent <span class="info-i" tabindex="0" data-tip="Tier do AI chấm theo cuộc chat: A = rất tiềm năng, B = khá, C = thấp, Cold = nguội. Số % là mức quan tâm (intent) AI ước lượng, không phải commission. Hàng chờ xếp Tier A lên trước.">i</span></th>
                 <th>Số câu</th>
                 <th>Bước KOL</th>
                 <th>Trạng thái AI</th>
@@ -383,6 +395,20 @@ if(page==='ai-followup'){
           </div>
           <pre id="aifu-ladder-preview" class="hidden" style="margin-top:12px;max-height:260px;overflow:auto;font-size:11px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px;white-space:pre-wrap"></pre>
           <div id="aifu-ladder-history" class="hidden" style="margin-top:12px;font-size:12px;color:var(--text2)"></div>
+        </div>
+        <div class="card" style="padding:20px;margin-top:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <h3 style="margin:0;font-size:14px">📇 Contact KOL đã gửi proof <span class="info-i" tabindex="0" data-tip="Lead gửi ảnh/video/file proof trong DM thì nick đã DM họ tự lưu họ vào danh bạ Telegram với tên '<tên>_KOL' (lead không nhận được thông báo nào). File proof được bot đăng vào topic của lead trong group Forum Inbox, kèm #KOLproof để tìm lại. Bỏ qua nick nội bộ và bot.">i</span></h3>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span id="kolc-stats" style="font-size:12px;color:var(--text2)"></span>
+              <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.loadKolContacts()">🔄</button>
+              <button class="btn btn-primary btn-sm" onclick="AIFollowUp.backfillKolContacts()">📥 Lưu cho lead cũ <span class="info-i" tabindex="0" data-tip="Tìm lead đã gửi proof trước khi có tính năng này (tối đa 100 người mỗi lần) và lưu contact _KOL, cách nhau vài giây mỗi người. Không gửi tin nhắn nào.">i</span></button>
+            </div>
+          </div>
+          <div style="max-height:260px;overflow:auto;margin-top:10px">
+            <table class="table" style="font-size:12px;width:100%"><thead><tr><th>Contact</th><th>Nick</th><th>Proof</th><th>Trạng thái</th><th>Lưu lúc</th></tr></thead>
+            <tbody id="kolc-body"><tr><td colspan="5" style="color:var(--text2)">—</td></tr></tbody></table>
+          </div>
         </div>
         <div class="card" style="padding:20px;margin-top:16px">
           <h3 style="margin:0 0 4px;font-size:14px">📡 Auto-forward bài channel cho KOL</h3>
@@ -911,6 +937,76 @@ if(page==='warmup'){
   (document.getElementById('view-warmup')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   Warmup.cleanup();
   Warmup.init();
+  return;
+}
+
+// ── Story hàng loạt (v3.39) ──
+if(page==='stories'){
+  if(!document.getElementById('view-stories')){
+    const html = `<div id="view-stories">
+      <style>
+        #view-stories .st-cols{display:grid;grid-template-columns:minmax(320px,420px) 1fr;gap:16px;align-items:start}
+        #view-stories .st-card{border:1px solid var(--border);border-radius:10px;padding:14px}
+        #view-stories .st-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        #view-stories .st-accs{display:flex;flex-wrap:wrap;gap:6px;max-height:180px;overflow:auto;padding:4px 0}
+        #view-stories .st-acc{display:flex;align-items:center;gap:4px;font-size:.8rem;border:1px solid var(--border);border-radius:14px;padding:2px 8px;cursor:pointer}
+        #view-stories .st-acc.off{opacity:.45;cursor:not-allowed}
+        #view-stories .st-prev{max-width:100%;max-height:160px;border-radius:8px;margin-top:6px;display:block}
+        #view-stories .st-job{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+        #view-stories .st-job-h{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+        #view-stories .st-muted{color:var(--text3);font-size:.78rem}
+        @media(max-width:900px){#view-stories .st-cols{grid-template-columns:1fr}}
+      </style>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <h2 class="page-title" style="margin:0">📸 Story hàng loạt</h2>
+        <span class="info-i" tabindex="0" data-tip="Hẹn giờ cho nhiều nick cùng đăng 1 story (ảnh hoặc video kèm caption), mỗi nick cách nhau vài phút. Sau khi đăng, các nick nội bộ khác lần lượt vào xem story của nhau để tăng lượt xem. Chỉ xem, không gửi tin nhắn nào.">i</span>
+        <button class="btn btn-sm" style="margin-left:auto" onclick="Stories.loadJobs(true)">🔄 Làm mới</button>
+      </div>
+      <div class="st-cols">
+        <div class="st-card">
+          <h3 style="margin:0 0 10px;font-size:1rem">Tạo lịch đăng</h3>
+          <div class="form-group"><label class="form-label">Tên lịch</label><input id="st-name" class="form-input" placeholder="VD: Story sự kiện tháng 11"></div>
+          <div class="form-group"><label class="form-label">Ảnh / video <span class="info-i" tabindex="0" data-tip="Ảnh jpg/png/webp hoặc video mp4/mov/webm, tối đa 50 MB. Story dọc 9:16 hiển thị đẹp nhất; video nên dưới 60 giây.">i</span></label>
+            <input type="file" id="st-file" class="form-input" accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,.mkv" onchange="Stories.upload(this)">
+            <div id="st-file-info" class="st-muted"></div></div>
+          <div class="form-group"><label class="form-label">Caption <span class="info-i" tabindex="0" data-tip="Chữ hiện dưới story. Nick thường chỉ được 200 ký tự, nick Premium được tới 2048.">i</span> <span id="st-cap-n" class="st-muted"></span></label>
+            <textarea id="st-caption" class="form-textarea" rows="3" placeholder="Gõ ý tưởng (hoặc để trống) rồi bấm ✨ AI viết caption" oninput="Stories.capCount()"></textarea>
+            <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
+              <button type="button" id="st-ai-btn" class="btn btn-sm" onclick="Stories.aiCaption()">✨ AI viết caption</button>
+              <select id="st-cap-lang" class="form-select" style="width:auto;padding:2px 6px;font-size:.8rem"><option value="vi">Tiếng Việt</option><option value="en">English</option><option value="id">Indonesia</option><option value="ru">Русский</option><option value="zh">中文</option><option value="es">Español</option><option value="pt">Português</option></select>
+              <span class="info-i" tabindex="0" data-tip="Bấm 1 lần: AI viết 1 caption ngắn (tối đa 200 ký tự) và điền vào ô trên, bạn sửa thoải mái. Nếu ô đang có chữ, AI coi đó là ý tưởng và viết lại cho hay hơn, giữ nguyên link và @username. Dùng AI đang cài ở phần Cài đặt AI.">i</span>
+            </div>
+            <label style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:.82rem"><input type="checkbox" id="st-vary"> Mỗi nick 1 caption khác (AI viết lại) <span class="info-i" tabindex="0" data-tip="Khi hẹn giờ, nick đầu tiên dùng đúng caption ở trên, các nick còn lại được AI viết lại mỗi nick 1 câu khác nhau (cùng ý, cùng ngôn ngữ đã chọn) để story không bị trùng y hệt. Ô trống thì nick nào cũng nhận caption AI. Xem caption từng nick trong nút Chi tiết.">i</span></label></div>
+          <div class="form-group"><label class="form-label">Nick đăng <span class="info-i" tabindex="0" data-tip="Nick mờ là nick đang tạm dừng, bị flag, PeerFlood hoặc chưa đăng nhập: không chọn được. Nick nào gặp FloodWait khi chạy sẽ tự tạm dừng và không tự chạy lại.">i</span> <span id="st-acc-n" class="st-muted"></span>
+            <a href="#" style="margin-left:6px;font-size:.78rem" onclick="Stories.pickAll(true);return false">Chọn hết</a> · <a href="#" style="font-size:.78rem" onclick="Stories.pickAll(false);return false">Bỏ hết</a></label>
+            <div id="st-accs" class="st-accs"><span class="st-muted">Đang tải...</span></div></div>
+          <div class="st-row">
+            <div class="form-group"><label class="form-label">Giờ đăng <span class="info-i" tabindex="0" data-tip="Giờ nick đầu tiên đăng (giờ Việt Nam). Để trống = đăng ngay trong 1 phút tới.">i</span></label><input type="datetime-local" id="st-at" class="form-input"></div>
+            <div class="form-group"><label class="form-label">Giãn giờ (phút) <span class="info-i" tabindex="0" data-tip="Mỗi nick đăng sau nick trước khoảng này (cộng thêm vài phút ngẫu nhiên) để không bị coi là đăng hàng loạt. 0 = đăng gần như cùng lúc.">i</span></label><input type="number" id="st-stagger" class="form-input" min="0" max="720" value="5"></div>
+          </div>
+          <div class="form-group"><label class="form-label">Ai được xem <span class="info-i" tabindex="0" data-tip="Mọi người: ai mở profile cũng thấy story. Chỉ danh bạ: chỉ người có trong danh bạ của nick.">i</span></label>
+            <select id="st-privacy" class="form-select"><option value="all">Mọi người</option><option value="contacts">Chỉ danh bạ</option></select></div>
+          <div class="form-group"><label style="display:flex;gap:6px;align-items:center;font-weight:600"><input type="checkbox" id="st-cross" checked> 👀 Nick nội bộ xem story của nhau <span class="info-i" tabindex="0" data-tip="Sau khi 1 nick đăng, các nick nội bộ khác lần lượt mở xem story đó vào các phút ngẫu nhiên. Mỗi phút tối đa vài lượt xem, mỗi nick tối đa 60 story/ngày. Chỉ xem, không nhắn tin.">i</span></label></div>
+          <div class="st-row">
+            <div class="form-group"><label class="form-label">Nick xem <span class="info-i" tabindex="0" data-tip="Nick trong lịch: chỉ các nick đã chọn ở trên xem của nhau. Tất cả nick khỏe: mọi nick đang đăng nhập và không bị tạm dừng đều vào xem.">i</span></label>
+              <select id="st-scope" class="form-select"><option value="job">Nick trong lịch</option><option value="all">Tất cả nick khỏe</option></select></div>
+            <div class="form-group"><label class="form-label">Xem sau (phút) <span class="info-i" tabindex="0" data-tip="Mỗi nick xem vào 1 thời điểm ngẫu nhiên trong khoảng này, tính từ lúc story được đăng.">i</span></label>
+              <div style="display:flex;gap:6px;align-items:center"><input type="number" id="st-vmin" class="form-input" min="1" max="600" value="3"> – <input type="number" id="st-vmax" class="form-input" min="1" max="600" value="45"></div></div>
+          </div>
+          <button class="btn btn-primary" style="width:100%" onclick="Stories.create()">📅 Hẹn giờ đăng</button>
+        </div>
+        <div>
+          <h3 style="margin:0 0 10px;font-size:1rem">Lịch đã tạo</h3>
+          <div id="st-jobs"><span class="st-muted">Đang tải...</span></div>
+        </div>
+      </div>
+    </div>`;
+    const w = document.createElement('div'); w.innerHTML = html;
+    document.querySelector('.main').appendChild(w.firstElementChild);
+  }
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  (document.getElementById('view-stories')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
+  Stories.init();
   return;
 }
 
@@ -4664,21 +4760,18 @@ Object.assign(App, {
   // ── Badge polling ──────────────────────────────────────────────
   startInboxBadgePolling(){
     if(Polling.isActive('inbox:badge')) return;
+    // The sidebar badge = number of KOLs waiting for a human (the reply queue),
+    // counted from the lead list AIFollowUp already holds. The list is re-read
+    // at most once per 5-minute tick, quietly — no 10-second polling any more.
     const poll = async () => {
       try{
-        const r = await fetch('/api/inbox/unread-count');
-        const d = await r.json();
-        const badge = document.getElementById('inbox-badge');
-        if(!badge) return;
-        if(d.count > 0){
-          badge.textContent = d.count > 99 ? '99+' : d.count;
-          badge.classList.remove('hidden');
-        } else {
-          badge.classList.add('hidden');
-        }
+        if(typeof AIFollowUp === 'undefined') return;
+        const last = Math.max(AIFollowUp._chatsLoadedAt || 0, AIFollowUp._chatsTriedAt || 0);
+        if(Date.now() - last > 4 * 60 * 1000) await AIFollowUp.loadChats({silent: true});
+        else AIFollowUp._updateBadge();
       } catch{}
     };
-    Polling.start('inbox:badge', poll, 10000);
+    Polling.start('inbox:badge', poll, 300000);
     Polling.run('inbox:badge');
   },
 
@@ -4848,8 +4941,7 @@ Object.assign(App, {
     await fetch('/api/inbox/read-all', {method:'POST'});
     App.toast('Đã đánh dấu tất cả đã đọc', 'success');
     this.inboxLoad(true);
-    const badge = document.getElementById('inbox-badge');
-    if(badge) badge.classList.add('hidden');
+    // The sidebar badge now counts the reply queue, not unread inbox rows — leave it.
   },
 
   // ── Load more (pagination) ────────────────────────────────────
@@ -5709,6 +5801,136 @@ const Warmup = {
   _esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 };
 window.Warmup = Warmup;
+
+// ── Story hàng loạt (v3.39) — no auto-polling: refresh on open, after actions, or by button ──
+const Stories = {
+  _file: null,
+  _accounts: [],
+  _ST: {pending:['Chờ','badge-blue'],posted:['Đã đăng','badge-green'],failed:['Lỗi','badge-red'],skipped:['Bỏ qua','badge-red'],cancelled:['Đã huỷ','badge-red'],
+        scheduled:['Đã hẹn','badge-blue'],running:['Đang chạy','badge-blue'],done:['Xong','badge-green']},
+
+  async init() {
+    this.capCount();
+    await Promise.all([this.loadAccounts(), this.loadJobs()]);
+  },
+
+  _badge(s) { const b = this._ST[s] || [s, 'badge-blue']; return `<span class="badge ${b[1]}">${esc(b[0])}</span>`; },
+
+  capCount() {
+    const n = (document.getElementById('st-caption')?.value || '').length;
+    const el = document.getElementById('st-cap-n');
+    if (el) el.textContent = n ? `${n} ký tự${n > 200 ? ' (nick thường chỉ 200)' : ''}` : '';
+  },
+
+  async loadAccounts() {
+    const box = document.getElementById('st-accs');
+    try {
+      const r = await API.get('/api/stories/accounts');
+      this._accounts = r.accounts || [];
+      box.innerHTML = this._accounts.map(a => `<label class="st-acc${a.ok ? '' : ' off'}" title="${esc(a.ok ? (a.is_premium ? 'Premium' : 'Nick thường') : a.why)}"><input type="checkbox" value="${a.id}" ${a.ok ? '' : 'disabled'} onchange="Stories.countPicked()">${esc(a.name)}${a.is_premium ? ' ⭐' : ''}</label>`).join('') || '<span class="st-muted">Chưa có nick nào</span>';
+      this.countPicked();
+    } catch (e) { box.innerHTML = `<span class="st-muted">${esc(e.message)}</span>`; }
+  },
+
+  picked() { return [...document.querySelectorAll('#st-accs input:checked')].map(i => parseInt(i.value)); },
+  countPicked() { const el = document.getElementById('st-acc-n'); if (el) el.textContent = `(${this.picked().length} đã chọn)`; },
+  pickAll(on) { document.querySelectorAll('#st-accs input:not(:disabled)').forEach(i => { i.checked = on; }); this.countPicked(); },
+
+  async upload(input) {
+    const f = input.files && input.files[0];
+    const info = document.getElementById('st-file-info');
+    this._file = null;
+    if (!f) { info.innerHTML = ''; return; }
+    info.textContent = 'Đang tải lên...';
+    const fd = new FormData(); fd.append('file', f);
+    try {
+      const r = await API.post('/api/stories/upload', fd);
+      this._file = r.filename;
+      const url = URL.createObjectURL(f);
+      const prev = r.media_type === 'video' ? `<video class="st-prev" src="${url}" muted controls></video>` : `<img class="st-prev" src="${url}" alt="">`;
+      info.innerHTML = `✅ ${esc(f.name)} (${(r.size / 1048576).toFixed(1)} MB)${prev}`;
+    } catch (e) { info.textContent = '❌ ' + e.message; input.value = ''; }
+  },
+
+  async aiCaption() {
+    const ta = document.getElementById('st-caption');
+    const btn = document.getElementById('st-ai-btn');
+    if (!ta || !btn || btn.disabled) return;
+    btn.disabled = true; const old = btn.textContent; btn.textContent = '✨ Đang viết...';
+    try {
+      const r = await API.post('/api/stories/caption', { idea: ta.value || '', lang: document.getElementById('st-cap-lang')?.value || 'vi', n: 1 });
+      ta.value = (r.captions || [])[0] || ta.value;
+      this.capCount(); ta.focus();
+    } catch (e) { App.toast(e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = old; }
+  },
+
+  async create() {
+    const ids = this.picked();
+    if (!this._file) return App.toast('Chưa tải ảnh/video lên', 'error');
+    if (!ids.length) return App.toast('Chọn ít nhất 1 nick', 'error');
+    const v = id => document.getElementById(id)?.value || '';
+    const body = {
+      name: v('st-name').trim(), account_ids: ids, media_file: this._file, caption: v('st-caption'),
+      scheduled_at: v('st-at') || null, stagger_min: parseInt(v('st-stagger')) || 0,
+      privacy: v('st-privacy'), cross_view: !!document.getElementById('st-cross')?.checked,
+      viewer_scope: v('st-scope'), view_delay_min: parseInt(v('st-vmin')) || 3, view_delay_max: parseInt(v('st-vmax')) || 45,
+      vary_caption: !!document.getElementById('st-vary')?.checked, caption_lang: v('st-cap-lang') || 'vi',
+    };
+    try {
+      const r = await API.post('/api/stories/jobs', body);
+      App.toast(`Đã hẹn ${ids.length} nick đăng story từ ${r.scheduled_at_text}${r.ai_captions ? ` · AI viết ${r.ai_captions} caption riêng` : ''}`, 'success');
+      this.loadJobs();
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  async loadJobs(toast) {
+    const box = document.getElementById('st-jobs');
+    try {
+      const r = await API.get('/api/stories/jobs');
+      const jobs = r.jobs || [];
+      const cnt = o => Object.values(o || {}).reduce((a, b) => a + b, 0);
+      box.innerHTML = jobs.length ? jobs.map(j => {
+        const p = j.posts || {}, vw = j.views || {};
+        const live = j.status === 'scheduled' || j.status === 'running';
+        return `<div class="st-job"><div class="st-job-h"><strong>${esc(j.name || ('Lịch #' + j.id))}</strong>${this._badge(j.status)}
+          <span class="st-muted">${j.media_type === 'video' ? '🎬' : '🖼️'} ${esc(j.scheduled_at_text)} · ${j.account_ids.length} nick · cách ${j.stagger_min}′</span>
+          <span style="margin-left:auto;display:flex;gap:4px">
+            <button class="btn btn-sm" onclick="Stories.detail(${j.id})">Chi tiết</button>
+            ${live ? `<button class="btn btn-sm" onclick="Stories.cancel(${j.id})">Huỷ</button>` : `<button class="btn btn-sm" onclick="Stories.remove(${j.id})">Xoá</button>`}
+          </span></div>
+          <div class="st-muted" style="margin-top:4px">Đăng: ${p.posted || 0}/${cnt(p)}${p.failed ? ` · lỗi ${p.failed}` : ''}${p.skipped ? ` · bỏ qua ${p.skipped}` : ''}${j.cross_view ? ` · 👀 xem: ${vw.done || 0}/${cnt(vw)}${vw.pending ? ` (chờ ${vw.pending})` : ''}` : ''}</div>
+          <div id="st-detail-${j.id}"></div></div>`;
+      }).join('') : '<div class="empty-state st-muted">Chưa có lịch story nào</div>';
+      if (toast) App.toast('Đã làm mới', 'info');
+    } catch (e) { box.innerHTML = `<span class="st-muted">${esc(e.message)}</span>`; }
+  },
+
+  async detail(id) {
+    const el = document.getElementById(`st-detail-${id}`);
+    if (!el) return;
+    if (el.innerHTML) { el.innerHTML = ''; return; }
+    try {
+      const j = await API.get(`/api/stories/jobs/${id}`);
+      el.innerHTML = `<div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Nick</th><th>Giờ hẹn</th><th>Trạng thái</th><th>Lượt xem nội bộ</th><th>Caption</th><th>Ghi chú</th></tr></thead><tbody>${
+        j.post_rows.map(p => `<tr><td>${esc(p.account_name || '#' + p.account_id)}</td><td>${esc(p.posted_at_text || p.post_at_text)}</td><td>${this._badge(p.status)}</td><td>${p.views_done}${p.views_pending ? ` (+${p.views_pending} chờ)` : ''}</td><td class="st-muted" style="max-width:260px;white-space:pre-wrap">${esc(p.caption || j.caption || '')}</td><td class="st-muted">${esc(p.error || '')}</td></tr>`).join('')
+      }</tbody></table></div>`;
+    } catch (e) { el.textContent = e.message; }
+  },
+
+  async cancel(id) {
+    if (!confirm('Huỷ các lượt đăng/xem chưa chạy của lịch này? Story đã đăng vẫn giữ nguyên.')) return;
+    try { await API.post(`/api/stories/jobs/${id}/cancel`, {}); App.toast('Đã huỷ', 'success'); this.loadJobs(); }
+    catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  async remove(id) {
+    if (!confirm('Xoá lịch này khỏi danh sách? Story đã đăng trên Telegram không bị xoá.')) return;
+    try { await API.del(`/api/stories/jobs/${id}`); this.loadJobs(); }
+    catch (e) { App.toast(e.message, 'error'); }
+  },
+};
+window.Stories = Stories;
 window.Reactions = Reactions;
 window.App = App;
 

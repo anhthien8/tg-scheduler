@@ -451,11 +451,8 @@ def render_value_estimate(est: dict) -> str:
         "2) Marketing campaign support: ONE exclusive campaign for their channel (best fit; rotates every ~2 weeks, never stacked).",
         "3) Marketing accounts provided so they can build consistent WEEX content.",
         "4) Bonus: offline events in the future, and trial-fund bonuses for their community.",
-        f"5) Marketing fee bonus: up to {fmt(MARKETING_FEE_MAX)}/month. By default mention ONLY the money. Only if the KOL asks "
-        "for details: it requires 10 posts/month about WEEX campaigns across their social channels (web3 airdrops, trading "
-        "campaigns, holding WXT, etc.), unlocked after the first 30 days hit their tier's volume KPI, and continues monthly "
-        "while they keep it. It is an extra on top of the commission, not an answer to an upfront request "
-        "(upfront follows the UPFRONT rule).",
+        "Do NOT mention the marketing fee bonus in this package: it is a RETENTION CARD, used only when the KOL "
+        "refuses / objects or asks for upfront (see the UPFRONT rule and the knowledge base).",
         "Then ask ONE question to move forward (e.g. which campaign they prefer or their WEEX UID).",
     ])
 
@@ -700,8 +697,10 @@ UPFRONT_PROOF_RULE = (
     "they currently partner with (rate, any upfront/fixed fee they receive). They may hide UID, balance and email. "
     "Do not promise anything in return for the video. "
     "After the video is received, rank the KOL with it and offer the monthly MARKETING FEE BONUS instead of upfront "
-    "(amount and conditions as in the offer block; continuing monthly while they keep the KPI and posting). Only if they still insist on upfront/fixed fees (or refuse / cannot "
-    "provide the video), reply following your system prompt's upfront rule and append [HANDOVER_REQUIRED] so the team reviews it."
+    "(amount, 30-day pilot KPI and conditions as in the knowledge base). Only if they still refuse after that (or refuse / cannot "
+    "provide the video): if the knowledge base defines a LAST-RESORT UPFRONT offer, offer exactly that once, and when the KOL "
+    "accepts its terms append [HANDOVER_REQUIRED]; otherwise reply following your system prompt's upfront rule and append "
+    "[HANDOVER_REQUIRED] so the team reviews it."
 )
 
 

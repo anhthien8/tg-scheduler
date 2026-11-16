@@ -155,6 +155,17 @@ async def test_stop_tag_declines_lead():
     assert tracker._step_holds_ai(None) is False
 
 
+async def test_media_tag_classifies_media_seller():
+    await _agent_and_account()
+    await _lead(step="prospect")
+    clean, res = await tracker.apply_kol_step_tags(
+        A, U, "We only work with trading KOLs on performance for now.\n[MEDIA]")
+    assert "[MEDIA]" not in clean and res["declined"] is True and res["advanced"] == "media"
+    assert await db.get_kol_step(A, U) == "media"
+    assert tracker._step_holds_ai("media") is True
+    assert "[MEDIA]" in tracker.MEDIA_SELLER_RULE and "performance" in tracker.MEDIA_SELLER_RULE
+
+
 async def test_step_prompt_lists_have_and_missing():
     await _agent_and_account()
     await _lead(step="link_confirmed")

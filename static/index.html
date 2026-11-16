@@ -165,6 +165,9 @@
         <button type="button" class="nav-item" data-page="warmup" onclick="App.navigate('warmup')">
           🔥 Warmup Nhóm
         </button>
+        <button type="button" class="nav-item" data-page="stories" onclick="App.navigate('stories')">
+          📸 Story hàng loạt
+        </button>
 
         <div class="nav-section" title="Tìm người phù hợp và gửi tin nhắn đầu tiên">2 · Tìm &amp; tiếp cận KOL</div>
         <button type="button" class="nav-item" data-page="members" onclick="App.navigate('members')">
@@ -182,16 +185,17 @@
 
         <div class="nav-section" title="Khi KOL trả lời: AI chat, người thật tiếp quản, theo dõi từng bước tới lúc chốt">3 · Trò chuyện &amp; chốt deal</div>
         <button type="button" class="nav-item" data-page="ai-followup" onclick="App.navigate('ai-followup')">
-          💬 Lead KOL (AI Agent)
+          💬 Hàng chờ trả lời <span id="inbox-badge" class="inbox-badge hidden" title="Số KOL đang chờ người thật trả lời">0</span>
         </button>
-        <button type="button" class="nav-item" data-page="inbox" onclick="App.navigate('inbox')" id="nav-inbox">
-          📬 Inbox <span id="inbox-badge" class="inbox-badge hidden">0</span>
+        <button type="button" class="nav-item" data-page="inbox" onclick="App.navigate('inbox')" id="nav-inbox" title="Tin nhắn đến không thuộc lead KOL: nhóm, người lạ, thông báo">
+          📬 Tin đến khác
         </button>
-        <button type="button" class="nav-item" data-page="autoreply" onclick="App.navigate('autoreply')">
+        <div style="padding:6px 16px 2px;font-size:11px;color:var(--text3,var(--text2));opacity:.8" title="Thiết lập một lần, ít khi phải mở lại">Cấu hình (ít dùng)</div>
+        <button type="button" class="nav-item" data-page="ai-agents" onclick="App.navigate('ai-agents')" title="Kịch bản, kiến thức và giọng nói của từng AI Agent">
+          🤖 AI Agents (kịch bản AI)
+        </button>
+        <button type="button" class="nav-item" data-page="autoreply" onclick="App.navigate('autoreply')" title="Luật trả lời theo từ khoá, không dùng AI">
           ↩️ Trả lời tự động
-        </button>
-        <button type="button" class="nav-item" data-page="ai-agents" onclick="App.navigate('ai-agents')">
-          🤖 Cấu hình AI Agents
         </button>
 
         <div class="nav-section" title="Đăng bài theo lịch và nuôi kênh / nhóm của mình">4 · Kênh &amp; cộng đồng</div>
@@ -263,7 +267,7 @@
             <div class="stat-value accent" id="dash-kpi-sent">0</div>
             <div class="kpi-sub" id="dash-kpi-sent-sub">—</div>
           </div>
-          <div class="stat-card kpi-card" role="button" tabindex="0" onclick="App.navigate('inbox')" onkeydown="if(event.key==='Enter')App.navigate('inbox')">
+          <div class="stat-card kpi-card" role="button" tabindex="0" onclick="App.navigate('ai-followup')" onkeydown="if(event.key==='Enter')App.navigate('ai-followup')">
             <div class="stat-label">💬 Trả lời hôm nay</div>
             <div class="stat-value green" id="dash-kpi-replies">0</div>
             <div class="kpi-sub" id="dash-kpi-replies-sub">—</div>
@@ -1637,11 +1641,11 @@
             <thead>
               <tr>
                 <th>#</th>
-                <th>User ID</th>
                 <th>Username</th>
                 <th>Tên</th>
                 <th>Premium</th>
                 <th>Last Seen</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="members-detail-tbody"></tbody>

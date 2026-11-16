@@ -482,6 +482,7 @@ const MembersAPI = {
   getScrapeMembers:  (jobId, limit = 500, offset = 0) =>
     apiGet(`/api/members/scrape-jobs/${jobId}?limit=${limit}&offset=${offset}`),
   deleteScrapeJob:   (jobId)      => apiDelete(`/api/members/scrape-jobs/${jobId}`),
+  deleteScrapeMember: (jobId, userId) => apiDelete(`/api/members/scrape-jobs/${jobId}/members/${userId}`),
 
   // Batch Scraping
   batchScrape:        (data)    => apiPost('/api/members/batch-scrape', data),

@@ -66,6 +66,7 @@ from routes import changelog as changelog_routes
 from routes import discord as discord_routes
 from routes import help as help_routes
 from routes import ipc as ipc_routes
+from routes import stories as story_routes
 
 if TG_RUNTIME_MODE == "combined":
     import dm_reply_tracker as drt
@@ -376,6 +377,7 @@ app.include_router(ai_agents_routes.router, dependencies=_auth_dep)
 app.include_router(changelog_routes.router, dependencies=_auth_dep)
 app.include_router(help_routes.router, dependencies=_auth_dep)
 app.include_router(ipc_routes.router, dependencies=_auth_dep)
+app.include_router(story_routes.router, dependencies=_auth_dep)
 
 if TG_RUNTIME_MODE == "combined":
     app.include_router(auth.router, dependencies=_auth_dep)
@@ -390,6 +392,8 @@ if TG_RUNTIME_MODE == "combined":
     app.include_router(invite.router, dependencies=_auth_dep)
     app.include_router(warmup_routes.router, dependencies=_auth_dep)
     app.include_router(ai_followup.router, dependencies=_auth_dep)
+    from routes import kol_contacts as kol_contacts_routes
+    app.include_router(kol_contacts_routes.router, dependencies=_auth_dep)
     app.include_router(engagement_routes.router, dependencies=_auth_dep)
     app.include_router(referral_routes.router, dependencies=_auth_dep)
     from routes import zalo as zalo_routes

@@ -1,11 +1,126 @@
 [
     {
+        "version": "3.42.0",
+        "date": "15/11/2026",
+        "title": "📥 Hàng chờ trả lời: một danh sách việc, cửa sổ chat không tự đóng",
+        "summary": "Mục 3 “Trò chuyện & chốt deal” gọn lại: mở ra là thấy ngay Hàng chờ — những KOL đang chờ người thật, ai chờ lâu nhất và Tier cao nhất nằm trên cùng. Trả lời xong cửa sổ chat vẫn mở, bấm Tiếp ▶ để sang lead kế. Số trên thanh bên giờ là số KOL đang chờ.",
+        "is_latest": true,
+        "badge": "LATEST",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Chip 📥 Hàng chờ (mặc định)",
+                "desc": "Gồm lead có lời hứa chưa trả và lead “cần người thật” mà KOL là người nhắn sau cùng. Quá hạn 24h xếp trước, rồi tới Tier A, rồi ai chờ lâu hơn. Nick nhà và lead đã Ignored không vào hàng chờ. Các bộ lọc ít dùng nằm trong “Thêm ▾”."
+            },
+            {
+                "type": "feature",
+                "title": "Cửa sổ chat ở lại, có ◀ Trước / Tiếp ▶",
+                "desc": "Gửi tin, bật/tắt AI, bấm “Đã trả lời” không còn tải lại cả trang hay đóng cửa sổ. Bỏ qua hoặc Blacklist xong thì tự nhảy sang lead kế."
+            },
+            {
+                "type": "improvement",
+                "title": "Biết ai nhắn câu nào",
+                "desc": "Bong bóng tin ghi rõ ✍️ Người thật, 🤖 AI, hoặc 📨 Bên mình (tin tự động / không rõ). Bảng lead có thêm dòng xem trước tin cuối và nhãn 🏠 Nick nhà."
+            },
+            {
+                "type": "improvement",
+                "title": "Thanh bên dễ hiểu hơn",
+                "desc": "“Lead KOL (AI Agent)” đổi thành “Hàng chờ trả lời” kèm số KOL đang chờ; “Inbox” đổi thành “Tin đến khác”; AI Agents và Trả lời tự động gom dưới nhãn “Cấu hình (ít dùng)”. Phễu deal và số liệu gập lại trong “📊 Phễu deal & số liệu”."
+            },
+            {
+                "type": "improvement",
+                "title": "Nhẹ hơn",
+                "desc": "Bỏ việc hỏi máy chủ số tin chưa đọc mỗi 10 giây; số trên thanh bên tính từ danh sách lead đã tải, làm mới 5 phút một lần. Tab Cài đặt AI chỉ tải khi mở."
+            },
+            {
+                "type": "fix",
+                "title": "Công tắc AI tổng không ghi đè cấu hình",
+                "desc": "Nếu cấu hình chưa tải xong, bấm công tắc sẽ không lưu (tránh ghi cấu hình trống)."
+            }
+        ]
+    },
+    {
+        "version": "3.41.0",
+        "date": "12/11/2026",
+        "title": "✨ Story hàng loạt: AI viết caption 1 click, mỗi nick 1 caption khác",
+        "summary": "Trong trang Story hàng loạt có thêm nút “✨ AI viết caption”: bấm 1 lần là AI viết sẵn caption ngắn và điền vào ô, bạn sửa thoải mái rồi hẹn giờ đăng. Tuỳ chọn “Mỗi nick 1 caption khác” để AI viết lại caption cho từng nick, story không bị trùng y hệt.",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Nút ✨ AI viết caption",
+                "desc": "Ô trống thì AI viết 1 caption đời thường hợp với mọi ảnh/video. Ô đang có chữ thì AI coi đó là ý tưởng và viết lại cho hay hơn, giữ nguyên link và @username. Chọn được ngôn ngữ: Việt, Anh, Indonesia, Nga, Trung, Tây Ban Nha, Bồ Đào Nha. Dùng AI đang cài trong phần Cài đặt AI (tự chuyển sang AI dự phòng nếu AI chính chưa có key)."
+            },
+            {
+                "type": "feature",
+                "title": "Mỗi nick 1 caption khác",
+                "desc": "Tick ô này khi hẹn giờ: nick đầu tiên dùng đúng caption bạn gõ, các nick còn lại được AI viết lại mỗi nick 1 câu khác nhau (cùng ý). Xem caption của từng nick trong nút Chi tiết. Nếu AI lỗi thì lịch không được tạo và có thông báo, không đăng caption trống."
+            },
+            {
+                "type": "improvement",
+                "title": "Caption luôn an toàn",
+                "desc": "Caption AI tối đa 200 ký tự (đủ cho cả nick thường), tự bỏ thẻ nội bộ kiểu [HANDOVER_REQUIRED], dấu ngoặc kép bao quanh và số thứ tự."
+            }
+        ]
+    },
+    {
+        "version": "3.40.0",
+        "date": "12/11/2026",
+        "title": "📇 Lead gửi proof được tự lưu vào danh bạ với tên đuôi _KOL",
+        "summary": "Khi lead gửi ảnh, video hoặc file proof trong DM, nick đã DM họ tự lưu họ vào danh bạ Telegram với tên “<tên>_KOL”. Lead không nhận được thông báo nào. File proof vẫn được bot đăng vào topic của lead trong group Forum Inbox để lưu trữ, giờ kèm thêm #KOLproof.",
+        "is_latest": false,
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Tự lưu contact _KOL",
+                "desc": "Lead gửi proof thì nick đang chat với họ lưu họ vào danh bạ, tên lấy từ tên Telegram của lead và thêm “_KOL” ở cuối (ví dụ “Lewis K_KOL”). Mỗi lead chỉ lưu 1 lần trên mỗi nick. Bỏ qua nick nội bộ và bot. Gặp FloodWait thì nick đó ngừng lưu contact cho tới hết thời gian chờ, không tự thử lại."
+            },
+            {
+                "type": "feature",
+                "title": "Thẻ “Contact KOL đã gửi proof”",
+                "desc": "AI Follow-up → Cài đặt có bảng các lead đã gửi proof: tên contact, nick, số proof (bấm để mở proof mới nhất trong group), trạng thái và giờ lưu. Nút “Lưu cho lead cũ” lưu contact cho tối đa 100 lead đã gửi proof trước khi có tính năng này, mỗi người cách nhau vài giây, không gửi tin nhắn nào."
+            },
+            {
+                "type": "improvement",
+                "title": "Proof trong group có #KOLproof",
+                "desc": "Ảnh, video và file proof bot đăng vào topic của lead giờ có #KOLproof trong caption, nên tìm lại toàn bộ proof trong group bằng tìm kiếm hashtag."
+            }
+        ]
+    },
+    {
+        "version": "3.39.0",
+        "date": "12/11/2026",
+        "title": "📸 Story hàng loạt: hẹn giờ nhiều nick cùng đăng story, nick nội bộ xem story của nhau",
+        "summary": "Trang mới “Story hàng loạt”: chọn nhiều nick, tải 1 ảnh hoặc video kèm caption, hẹn giờ đăng và giãn vài phút giữa các nick. Sau khi đăng, các nick nội bộ khác lần lượt vào xem story của nhau vào các phút ngẫu nhiên. Chỉ xem, không gửi tin nhắn nào.",
+        "is_latest": false,
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Hẹn giờ đăng story cho nhiều nick",
+                "desc": "Chọn nick, tải ảnh (jpg/png/webp) hoặc video (mp4/mov/webm, tối đa 50 MB), viết caption, chọn giờ đăng (giờ Việt Nam) và số phút giãn giữa các nick. Nick đầu đăng đúng giờ, các nick sau đăng cách nhau khoảng đó cộng thêm vài phút ngẫu nhiên. Chọn được ai xem: mọi người hoặc chỉ danh bạ."
+            },
+            {
+                "type": "feature",
+                "title": "Nick nội bộ tự xem story của nhau",
+                "desc": "Bật “Nick nội bộ xem story của nhau” thì sau khi 1 nick đăng, các nick khác (trong lịch hoặc tất cả nick khỏe) mở xem story đó vào thời điểm ngẫu nhiên trong khoảng phút bạn chọn (mặc định 3–45 phút). Chỉ xem, không nhắn tin, không thả cảm xúc."
+            },
+            {
+                "type": "improvement",
+                "title": "Giới hạn an toàn chống FloodWait / PeerFlood",
+                "desc": "Mỗi phút tối đa 3 lượt đăng và 6 lượt xem, mỗi nick cách ít nhất 45 giây giữa 2 lần xem. Nick thường tối đa 3 story/ngày, Premium 20, mỗi nick xem tối đa 60 story/ngày. Nick tạm dừng, bị flag, PeerFlood hoặc chưa đăng nhập sẽ bị bỏ qua. Nick gặp FloodWait sẽ tự tạm dừng, các lượt còn lại của nick đó bị bỏ qua, có cảnh báo, và không tự chạy lại."
+            },
+            {
+                "type": "improvement",
+                "title": "Nhẹ máy",
+                "desc": "Bộ lập lịch chỉ kiểm tra 1 lần/phút bằng 2 truy vấn có index; trang không tự làm mới liên tục, bấm 🔄 khi cần xem tiến độ. Lượt đăng trễ quá 2 giờ (ví dụ máy tắt) sẽ bị bỏ qua thay vì đăng muộn."
+            }
+        ]
+    },
+    {
         "version": "3.38.0",
         "date": "10/11/2026",
         "title": "🛡️ Không nhắn sai ngôn ngữ, không nhắn lại lead cũ, không chen vào chat admin đã xử lý",
         "summary": "Sửa ba lỗi ảnh hưởng uy tín: (1) chiến dịch gửi mẫu tiếng Trung cho người không đọc tiếng Trung, (2) AI nhắn tiếng Anh vào đoạn chat toàn tiếng Việt, (3) follow-up tự động (drip) nhắn lại lead đã im cả tuần, kể cả trên nick đã tắt AI và trong chat admin đã tự trả lời. Giờ có chốt chặn bằng code ở từng đường gửi, không còn phụ thuộc vào việc AI “nghe lời”.",
-        "is_latest": true,
-        "badge": "LATEST",
+        "is_latest": false,
         "changes": [
             {
                 "type": "fix",

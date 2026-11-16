@@ -39,29 +39,31 @@ async def test_proof_ignores_group_id_targets():
 
 
 @pytest.mark.asyncio
-async def test_proof_accepts_followup_chat_interaction():
-    """An AI follow-up chat proves contact even without a campaign log."""
+async def test_proof_requires_funnel_progress_for_inbound_chat():
+    """Inbound chat still at prospect is not KOL work; past prospect it is."""
     await db.get_or_create_followup_chat(account_id=21, user_id=31, username="lead21")
+    assert await db.get_telegram_outreach_proof(21, 31) is None
+    await db.set_kol_step(21, 31, "deal_agreed", actor="test")
     proof = await db.get_telegram_outreach_proof(21, 31)
     assert proof is not None and proof["source"] == "followup"
 
 
 @pytest.mark.asyncio
-async def test_proof_accepts_inbound_reply():
-    """A recorded inbound reply proves contact even without any follow-up chat."""
+async def test_inbound_reply_alone_is_not_proof():
+    """A stranger messaging us first must not open a topic."""
     await db.add_dm_reply({
         "watcher_id": None, "account_id": 41, "sender_user_id": 51,
         "sender_username": "lead41", "sender_name": "Lead 41",
         "message_text": "hello", "platform": "telegram",
     })
-    proof = await db.get_telegram_outreach_proof(41, 51)
-    assert proof is not None and proof["source"] == "reply"
+    assert await db.get_telegram_outreach_proof(41, 51) is None
 
 
 @pytest.mark.asyncio
 async def test_inbound_creates_topic_for_replied_lead_without_campaign_proof():
     """End-to-end: a lead who replied now gets a topic (the reported bug)."""
     await db.get_or_create_followup_chat(account_id=61, user_id=71, username="lead61")
+    await db.set_kol_step(61, 71, "deal_agreed", actor="test")
 
     class FakeBot:
         def __init__(self):
@@ -119,6 +121,10 @@ async def test_backfill_is_bounded_by_days_and_skips_existing_topics():
 async def test_backfill_creates_one_topic_per_replied_conversation():
     await db.get_or_create_followup_chat(account_id=101, user_id=111, username="bf1")
     await db.append_followup_chat_message(101, 111, "user", "hello", inc_reply_count=True)
+    await db.set_kol_step(101, 111, "deal_agreed", actor="test")
+    # Stranger still at prospect: must be skipped.
+    await db.get_or_create_followup_chat(account_id=102, user_id=112, username="stranger")
+    await db.append_followup_chat_message(102, 112, "user", "kyc?", inc_reply_count=True)
 
     class FakeBot:
         def __init__(self):
@@ -139,6 +145,7 @@ async def test_backfill_creates_one_topic_per_replied_conversation():
     assert report["failed"] == 0
     topic = await db.find_telegram_topic_for_user(-1005, 101, 111)
     assert topic is not None
+    assert await db.find_telegram_topic_for_user(-1005, 102, 112) is None
     # History must NOT be replayed into the group — only a header per new topic.
     assert len(bot.sent) == report["created"]
     assert "backfill" in bot.sent[0][2].lower()

@@ -10,7 +10,7 @@ def test_estimate_tiers_and_math():
     e = k.value_estimate(None, "15M")
     assert e["sabc"] == "B" and e["fees"] == 9000
     assert e["steady"]["tier"] == 2 and e["steady"]["total"] == 6150
-    assert "$200" in k.render_value_estimate(e) and "6,150" in k.render_value_estimate(e)
+    assert "RETENTION CARD" in k.render_value_estimate(e) and "$200" not in k.render_value_estimate(e) and "6,150" in k.render_value_estimate(e)
     assert k.value_estimate(None, None) is None
     assert k.sabc_tier(99) is None and k.sabc_tier(100_000) == "S"
 

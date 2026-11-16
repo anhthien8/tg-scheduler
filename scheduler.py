@@ -147,15 +147,14 @@ async def _auto_start_campaign(campaign_id: int):
 
         # Same guarded start as the manual Start button (lock + background task),
         # so Stop can cancel it and a double start is impossible.
-        from routes.members import _active_campaigns, _active_campaign_lock, _run_campaign
+        from routes.members import _active_campaigns, _active_campaign_lock, launch_campaign
         async with _active_campaign_lock:
             existing = _active_campaigns.get(campaign_id)
             if existing is True or (isinstance(existing, asyncio.Task) and not existing.done()):
                 logger.info(f"Campaign {campaign_id} already running, skipping auto-start")
                 return
-            await db.update_dm_campaign_status(campaign_id, "running")
-            _active_campaigns[campaign_id] = asyncio.create_task(_run_campaign(campaign_id))
-        logger.info(f"🚀 Campaign {campaign_id} auto-started by scheduler")
+            state = await launch_campaign(campaign_id)
+        logger.info(f"🚀 Campaign {campaign_id} auto-started by scheduler ({state})")
     except Exception as e:
         logger.error(f"Error auto-starting campaign {campaign_id}: {e}", exc_info=True)
 
@@ -254,7 +253,7 @@ async def _auto_resume_campaigns():
     import json
 
     import telegram_client as tg
-    from routes.members import _active_campaigns, _run_campaign
+    from routes.members import _active_campaigns, _active_campaign_lock, launch_campaign
 
     for cmp in campaigns:
         cid = cmp["id"]
@@ -284,10 +283,8 @@ async def _auto_resume_campaigns():
 
         if any_available:
             logger.info(f"[AutoResume] 🚀 Resuming campaign {cid} — found available sender account")
-            await db.update_dm_campaign_status(cid, "running")
-            import asyncio
-            task = asyncio.create_task(_run_campaign(cid))
-            _active_campaigns[cid] = task
+            async with _active_campaign_lock:
+                await launch_campaign(cid)  # queues itself if a live campaign shares a sender
             await db.add_dm_campaign_log(cid, None, 0, None, "skipped",
                                          "🔄 Campaign tự động chạy tiếp — tìm thấy account sender đã hết bị giới hạn.")
         else:

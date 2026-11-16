@@ -161,6 +161,13 @@ async def start_engines() -> asyncio.Task:
     except Exception as e:
         logger.warning("Command bot startup error: %s", e)
 
+    # v3.39: bulk story posts + internal nicks viewing each other (one light 60s tick)
+    try:
+        import story_engine
+        story_engine.register_job(sch.get_scheduler())
+    except Exception as e:
+        logger.warning("Story scheduler startup error: %s", e)
+
     await sch.load_all_jobs()
 
     # Reload scheduled DM campaigns
@@ -186,6 +193,9 @@ async def start_engines() -> asyncio.Task:
                     running_cnt += 1
         if running_cnt:
             logger.info("Auto-resumed %d active running DM campaigns", running_cnt)
+        # Campaigns left queued at shutdown: start any whose senders are free now.
+        from routes.members import start_waiting_campaigns
+        await start_waiting_campaigns()
     except Exception as e:
         logger.warning("Error auto-resuming DM campaigns: %s", e)
 

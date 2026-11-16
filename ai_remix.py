@@ -554,8 +554,11 @@ def detect_user_language(member_info: dict | None, with_source: bool = False):
             if phone.startswith(pre):
                 return done(code, "phone")
     name = f"{mi.get('first_name') or ''} {mi.get('last_name') or ''}".strip()
+    # Our own list labels ("(lọc)", "(đã lọc)") are Vietnamese; they say nothing about the member.
+    import re as _re
+    group = _re.sub(r"\((?:đã\s*)?lọc\)", "", str(mi.get("community_hint") or ""), flags=_re.I)
     for field, val in (("location", mi.get("location")), ("bio", mi.get("bio")), ("name", name),
-                       ("channel", mi.get("channel_title")), ("group", mi.get("community_hint"))):
+                       ("channel", mi.get("channel_title")), ("group", group)):
         code = _text_lang(val or "")
         if code:
             return done(code, field)

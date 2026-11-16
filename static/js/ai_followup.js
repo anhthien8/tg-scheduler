@@ -36,7 +36,8 @@ const AIFollowUp = {
     first_post:     { label: 'Bài đầu tiên',  emoji: '📝', color: 'var(--green)' },
     active:         { label: 'Hoạt động',     emoji: '🟢', color: 'var(--green)' },
     declined:       { label: 'Từ chối',       emoji: '⛔', color: 'var(--red)' },
-    dormant:        { label: 'Ngủ đông',      emoji: '💤', color: 'var(--text3)' }
+    dormant:        { label: 'Ngủ đông',      emoji: '💤', color: 'var(--text3)' },
+    media:          { label: 'Media',         emoji: '📣', color: 'var(--text3)', tip: 'Bên bán gói quảng cáo (AMA, Space, post). AI đã từ chối lịch sự: chỉ làm với KOL trade futures/CFD/stocks/vàng, trả theo hiệu suất.' }
   },
   MISSING_LABELS: {
     deal_agreement: 'KOL đồng ý thang', weex_uid: 'WEEX UID', vip_code: 'vipCode (ops)',
@@ -62,10 +63,17 @@ const AIFollowUp = {
   },
 
   async init(force = false) {
+    // The page template is rebuilt on every visit, so the settings tab is empty again.
+    this._settingsTabLoaded = false;
     this.switchTab('leads');
+    // First visit in a session opens on the reply queue (the work list), not "all leads".
+    if (!this._defaulted) { this._defaulted = true; this._statusFilter = this.QUEUE_FILTER; }
     // Cache: chỉ fetch lại 86KB chats nếu quá 30s hoặc bị yêu cầu (nút 🔄 / force).
     const fresh = this._chatsLoadedAt && (Date.now() - this._chatsLoadedAt) < 30000 && this._chats.length;
-    const tasks = [this.loadSettings(), this.loadKolChannelSettings(), this.loadReferrals(), this.loadLadder()];
+    // Only the settings read needed for the global on/off switch. The rest of the
+    // settings tab (channel settings, referrals, ladder, KOL contacts) loads when
+    // that tab is first opened — see switchTab().
+    const tasks = [this.loadSettings()];
     if (force || !fresh) {
       tasks.push(this.loadChats());
     } else {
@@ -222,6 +230,10 @@ const AIFollowUp = {
     const sb = document.getElementById('aifu-tab-settings-btn');
     if (lb) lb.className = leads ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
     if (sb) sb.className = leads ? 'btn btn-ghost btn-sm' : 'btn btn-primary btn-sm';
+    if (!leads && !this._settingsTabLoaded) {
+      this._settingsTabLoaded = true;
+      this.loadKolChannelSettings(); this.loadReferrals(); this.loadLadder(); this.loadKolContacts();
+    }
   },
 
   // ── Settings ──────────────────────────────────────────────────────
@@ -280,6 +292,46 @@ const AIFollowUp = {
     if (careCap) careCap.value = this.settings.kol_care_daily_cap ?? 5;
     const mirrorEl = document.getElementById('aifu-weex-mirrors');
     if (mirrorEl) mirrorEl.value = (this.settings.weex_mirror_domains || []).join(', ');
+  },
+
+  // ── v3.40 Contact KOL (lead đã gửi proof → lưu "<tên>_KOL") ─────────
+  async loadKolContacts() {
+    const body = document.getElementById('kolc-body');
+    if (!body) return;
+    try {
+      const res = await fetch('/api/kol-contacts');
+      if (!res.ok) throw new Error('Không tải được danh sách contact KOL');
+      const d = await res.json();
+      const rows = d.contacts || [];
+      const saved = rows.filter(r => r.status === 'saved').length;
+      const bf = d.backfill || {};
+      const st = document.getElementById('kolc-stats');
+      if (st) st.textContent = `${saved} đã lưu / ${rows.length}` + (bf.running ? ` · đang lưu lead cũ ${bf.saved + bf.skipped + bf.failed}/${bf.total}` : '');
+      const label = { saved: '✅ Đã lưu', pending: '⏳ Chờ', failed: '⚠️ Lỗi', skipped: '⏭ Bỏ qua' };
+      body.innerHTML = rows.length ? rows.slice(0, 200).map(r => {
+        const who = r.contact_name || (r.username ? '@' + r.username : String(r.user_id));
+        const proof = r.last_proof_link ? `<a href="${esc(r.last_proof_link)}" target="_blank" rel="noopener">${r.proof_count || 1} ↗</a>` : String(r.proof_count || 0);
+        return `<tr><td>${esc(who)}${r.username ? ` <span style="color:var(--text2)">@${esc(r.username)}</span>` : ''}</td>
+          <td>#${r.account_id} ${esc(r.account_name || '')}</td><td>${proof}</td>
+          <td title="${esc(r.reason || '')}">${label[r.status] || esc(r.status)}</td><td>${esc(r.saved_at || '')}</td></tr>`;
+      }).join('') : '<tr><td colspan="5" style="color:var(--text2)">Chưa có lead nào gửi proof.</td></tr>';
+    } catch (e) {
+      body.innerHTML = `<tr><td colspan="5" style="color:var(--red)">${esc(e.message)}</td></tr>`;
+    }
+  },
+
+  async backfillKolContacts() {
+    try {
+      const p = await (await fetch('/api/kol-contacts/backfill/preview')).json();
+      if (!p.count) { App.toast('Không còn lead cũ nào cần lưu contact', 'info'); return; }
+      if (!window.confirm(`Lưu contact _KOL cho ${p.count} lead đã gửi proof? Mỗi người cách nhau vài giây, không gửi tin nhắn.`)) return;
+      const res = await fetch('/api/kol-contacts/backfill', { method: 'POST' });
+      if (!res.ok) throw new Error('Không bắt đầu được');
+      App.toast(`Đang lưu ${p.count} contact trong nền`, 'success');
+      setTimeout(() => this.loadKolContacts(), 5000);
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
   },
 
   // ── KOL Channel Auto-Forward Settings ──────────────────────────────
@@ -436,8 +488,17 @@ const AIFollowUp = {
 
   // Quick toggle từ toolbar — lưu ngay, không cần bấm Lưu
   async quickToggle() {
-    const enabled = document.getElementById('aifu-enabled')?.checked || false;
-    const s = this.settings || {};
+    const box = document.getElementById('aifu-enabled');
+    const enabled = box?.checked || false;
+    // Settings not loaded yet: saving now would overwrite the prompt and knowledge
+    // base with blanks. Refuse, put the switch back, and load them.
+    if (!this.settings || !Object.keys(this.settings).length) {
+      if (box) box.checked = !enabled;
+      App.toast('Cài đặt AI chưa tải xong — thử lại sau vài giây', 'error');
+      this.loadSettings();
+      return;
+    }
+    const s = this.settings;
     try {
       await this._postSettings({
         enabled,
@@ -459,18 +520,28 @@ const AIFollowUp = {
   },
 
   // ── Leads: load + stats + chips + pagination ─────────────────────
-  async loadChats() {
+  async loadChats(opts = {}) {
+    this._chatsTriedAt = Date.now();
     try {
       const res = await fetch('/api/ai-followup/chats?limit=2000&include_history=false');
       if (!res.ok) throw new Error('Lỗi tải danh sách lead');
       const data = await res.json();
       this._chats = data.chats || [];
       this._chatsLoadedAt = Date.now();
-      this._page = 1;
+      // Page is kept (renderPage clamps it); only a filter or search change resets it.
+      const open = this._modalChat;
+      if (open) {
+        const again = this._chats.find(x => x.account_id === open.account_id && x.user_id === open.user_id);
+        if (again) this._modalChat = again;
+        else this._chats.push(open); // e.g. a supported KOL opened from the KOL list
+      }
       this.renderStats();
       this.renderChips();
       this.renderPage();
+      this._updateBadge();
+      if (this._modalChat) { this._renderModalActions(); this._paintNav(); }
     } catch (e) {
+      if (opts.silent) return; // sidebar badge refresh: fail quietly
       App.toast(e.message, 'error');
       const tb = document.getElementById('aifu-chats-table-body');
       if (tb) tb.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--red)">${esc(e.message)}</td></tr>`;
@@ -487,7 +558,8 @@ const AIFollowUp = {
     set('aifu-stat-nudged', this._chats.filter(c => c.nudged).length);
     this.renderTodo();
     this.renderStepCards();
-    this.loadSupportedCount();
+    // Only when the page is on screen — the sidebar badge refresh also runs loadChats().
+    if (document.getElementById('aifu-stat-supported')) this.loadSupportedCount();
   },
 
   renderStepCards() {
@@ -495,7 +567,7 @@ const AIFollowUp = {
     if (!el) return;
     const counts = {};
     this._chats.forEach(c => { if (!this.inFunnel(c)) return; const s = this.stepOf(c); counts[s] = (counts[s] || 0) + 1; });
-    const keys = [...this.STEPS, 'declined', 'dormant'].filter(k => this.STEPS.includes(k) || counts[k]);
+    const keys = [...this.STEPS, 'declined', 'dormant', 'media'].filter(k => this.STEPS.includes(k) || counts[k]);
     el.innerHTML = keys.map((k, i) => {
       const m = this.STEP_META[k];
       const active = this._stepFilter === k;
@@ -510,35 +582,124 @@ const AIFollowUp = {
   renderChips() {
     const el = document.getElementById('aifu-status-chips');
     if (!el) return;
-    const chips = [
-      ['', 'Tất cả'],
-      ['needs_human', '⚠️ Cần người thật'],
-      ['active', '🤖 AI đang chat'],
-      ['paused_admin', '⏸ Chat tay'],
-      ['bot_ignored', '🚫 Ignored']
-    ];
-    const noFilter = !this._statusFilter && !this._stepFilter;
-    let html = chips.map(([v, l]) => v === ''
-      ? `<button class="btn btn-sm ${noFilter ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.clearFilters()" title="Bỏ mọi bộ lọc">${l}</button>`
-      : `<button class="btn btn-sm ${this._statusFilter === v ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.filterByStatus('${v}')">${l}</button>`
-    ).join('');
-    const todo = this.TODO.find(t => t.key === this._statusFilter && t.key.startsWith('__'));
-    if (todo) html += `<button class="btn btn-sm btn-primary" onclick="AIFollowUp.filterByStatus('')" title="Bỏ lọc này">${todo.icon} ${todo.label} ✕</button>`;
+    const f = this._statusFilter;
+    const tip = t => `<span class="info-i" tabindex="0" data-tip="${esc(t)}">i</span>`;
+    const chip = (key, label, extra = '') =>
+      `<button class="btn btn-sm ${f === key ? 'btn-primary' : 'btn-ghost'}" aria-pressed="${f === key}" onclick="AIFollowUp.filterByStatus('${key}')"${extra}>${label}</button>`;
+    const queue = this._queueRows();
+    const late = queue.filter(c => this._queueGroup(c) === 1).length;
+    const proof = this._todoRows(this.TODO.find(t => t.key === '__proof')).length;
+    const answered = this._chats.filter(c => this._isAnswered(c)).length;
+    const cleanup = this._chats.filter(c => this._isCleanup(c)).length;
+    const count = st => this._chats.filter(c => c.status === st).length;
+    const noFilter = !f && !this._stepFilter;
+
+    let html = chip(this.QUEUE_FILTER, `📥 Hàng chờ (${queue.length}${late ? ` · ${late} quá hạn` : ''})`,
+        late && f !== this.QUEUE_FILTER ? ' style="color:var(--red);font-weight:700"' : '')
+      + tip('Những KOL đang chờ NGƯỜI THẬT trả lời. Gồm: (1) lời hứa “team sẽ báo lại” đã quá 24 giờ, (2) lời hứa chưa quá 24 giờ, (3) lead “cần người thật” hoặc “chat tay” mà KOL là người nhắn sau cùng, (4) lead AI vừa chuyển cho người thật và chưa ai trả lời. Xếp theo mức gấp, rồi Tier A → B → C → Cold, rồi chờ lâu nhất. Không tính lead đã Bỏ qua, Từ chối, Ngủ đông và tài khoản của chính mình. Lead tự rời hàng chờ khi bạn nhắn cho KOL.')
+      + chip('__proof', `🧾 Proof (${proof})`)
+      + `<button class="btn btn-sm ${noFilter ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.clearFilters()" title="Bỏ mọi bộ lọc, xem toàn bộ lead">Tất cả (${this._chats.length})</button>`;
+
+    const moreKeys = ['active', this.ANSWERED_FILTER, 'needs_human', 'paused_admin', this.OWED_FILTER, 'bot_ignored', this.CLEANUP_FILTER];
+    const todo = this.TODO.find(t => t.key === f && t.key.startsWith('__') && t.key !== '__proof');
+    const open = this._moreOpen || moreKeys.includes(f) || !!todo;
+    html += `<button class="btn btn-sm btn-ghost" aria-expanded="${open}" onclick="AIFollowUp.toggleMoreChips()" title="Các bộ lọc ít dùng hơn">Thêm ${open ? '▴' : '▾'}</button>`;
+    if (open) {
+      html += '<span style="flex-basis:100%;height:0"></span>'
+        + chip('active', `🤖 AI đang chat (${count('active')})`)
+        + chip(this.ANSWERED_FILTER, `↩️ Đã trả lời, chờ KOL (${answered})`)
+        + chip('needs_human', `⚠️ Cần người thật — tất cả (${count('needs_human')})`)
+        + chip('paused_admin', `⏸ Chat tay (${count('paused_admin')})`)
+        + chip(this.OWED_FILTER, `⏳ Lời hứa (${this._chats.filter(c => this.isOwed(c)).length})`)
+        + chip('bot_ignored', `🚫 Ignored (${count('bot_ignored')})`)
+        + chip(this.CLEANUP_FILTER, `🧹 Dọn rác (${cleanup})`)
+        + tip('Những dòng còn mang cờ “cần người thật” hoặc lời hứa nhưng KHÔNG cần trả lời nữa: lead đã Từ chối / Ngủ đông, hoặc là tài khoản của chính mình. Chúng đã được ẩn khỏi Hàng chờ; vào đây để bấm ✅ hoặc 🙈 cho sạch dữ liệu. Không có gì bị xoá tự động.');
+      if (todo) html += `<button class="btn btn-sm btn-primary" onclick="AIFollowUp.filterByStatus('')" title="Bỏ lọc này">${todo.icon} ${todo.label} ✕</button>`;
+    }
     if (this._stepFilter) {
       const lbl = this._stepFilter === 'link_confirmed+' ? '🔗 Đã gắn link trở lên' : this.stepLabel(this._stepFilter);
       html += `<button class="btn btn-sm btn-primary" onclick="AIFollowUp.filterByStep('')" title="Bỏ lọc bước">Bước: ${lbl} ✕</button>`;
     }
-    const owed = this._chats.filter(c => this.isOwed(c));
-    const late = owed.filter(c => this.owedHours(c) >= this.OWED_DEADLINE_HOURS).length;
-    const owedOn = this._statusFilter === this.OWED_FILTER;
-    html += `<button class="btn btn-sm ${owedOn ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.filterByStatus('${this.OWED_FILTER}')"${late && !owedOn ? ' style="color:var(--red);font-weight:700"' : ''}>⏳ Nợ trả lời (${owed.length}${late ? ` · ${late} quá hạn` : ''})</button>`
-      + `<span class="info-i" tabindex="0" data-tip="Các KOL mà bên mình (AI hoặc admin) đã hứa “team sẽ xem và báo lại” nhưng chưa có người thật trả lời. Hạn trả lời là 24 giờ; quá hạn sẽ tô đỏ và bot nhắc admin (tối đa 3 lần cho mỗi lời hứa). Lead tự ra khỏi danh sách khi admin nhắn cho KOL, hoặc khi bạn bấm “✅ Đã trả lời”.">i</span>`;
-    if (this._statusFilter && this._stepFilter) html += `<span style="font-size:12px;color:var(--text2);align-self:center">Đang lọc kết hợp trạng thái + bước</span>`;
+    if (f && this._stepFilter) html += `<span style="font-size:12px;color:var(--text2);align-self:center">Đang lọc kết hợp trạng thái + bước</span>`;
     el.innerHTML = html;
   },
 
-  // ── "Việc cần làm": the lists a human has to work through, most urgent first ──
+  toggleMoreChips() { this._moreOpen = !this._moreOpen; this.renderChips(); },
+
+  // ── Reply queue: the one list a human works through ──────────────────
   // Built from this._chats (already loaded) — no extra request, no polling.
+  QUEUE_FILTER: '__queue',
+  CLEANUP_FILTER: '__cleanup',
+  ANSWERED_FILTER: '__answered',
+
+  _deadStep(c) { const s = this.stepOf(c); return s === 'declined' || s === 'dormant' || s === 'media'; },
+
+  // A real lead that can still be worked: not ignored, not closed, not one of our own accounts.
+  _isLive(c) { return !!c && c.status !== 'bot_ignored' && !this._deadStep(c) && !c.is_own; },
+
+  // "[Human Admin]: ..." / "[Human Admin via Forum]: ..." = typed by a real person.
+  HUMAN_PREFIX: /^\s*\[Human Admin[^\]]*\]:\s*/,
+  _humanLast(c) { return c.last_role === 'assistant' && this.HUMAN_PREFIX.test(c.last_text || ''); },
+
+  // 0 = not waiting on us · 1 = promise past 24h · 2 = promise under 24h, or the
+  // KOL spoke last on a human-owned lead (needs_human / chat tay) · 3 = the AI
+  // handed the lead over and its own message is still the last one.
+  _queueGroup(c) {
+    if (!this._isLive(c)) return 0;
+    if (this.isOwed(c)) return this.owedHours(c) >= this.OWED_DEADLINE_HOURS ? 1 : 2;
+    const humanOwned = c.status === 'needs_human' || c.status === 'paused_admin';
+    if (humanOwned && c.last_role === 'user') return 2;
+    return (c.status === 'needs_human' && c.last_role === 'assistant' && !this._humanLast(c)) ? 3 : 0;
+  },
+
+  _queueWait(c) { return Math.max(this.isOwed(c) ? this.owedHours(c) : 0, this.silentHours(c)); },
+
+  _queueRows() {
+    return this._chats.filter(c => this._queueGroup(c) > 0).sort((a, b) =>
+      (this._queueGroup(a) - this._queueGroup(b)) || (this._tierRank(a) - this._tierRank(b))
+      || (this._queueWait(b) - this._queueWait(a)));
+  },
+
+  // We (a human) answered last and the ball is with the KOL.
+  _isAnswered(c) {
+    if (!this._isLive(c) || this.isOwed(c) || c.last_role !== 'assistant') return false;
+    // Chat tay: any message from our side counts. needs_human: only a real person's.
+    return c.status === 'paused_admin' || (c.status === 'needs_human' && this._humanLast(c));
+  },
+
+  // Still flagged for a human, but nobody needs to answer (closed lead / our own account).
+  _isCleanup(c) {
+    return c.status !== 'bot_ignored' && (this._deadStep(c) || c.is_own)
+      && (c.status === 'needs_human' || !!c.owed_since);
+  },
+
+  _updateBadge() {
+    const el = document.getElementById('inbox-badge');
+    if (!el || !this._chatsLoadedAt) return;
+    const n = this._queueRows().length;
+    el.textContent = n > 99 ? '99+' : String(n);
+    el.classList.toggle('hidden', n === 0);
+    el.title = `${n} KOL đang chờ người thật trả lời`;
+  },
+
+  // Change one lead in place and redraw — no reload, the chat window stays open.
+  _patchChat(accountId, userId, fields) {
+    const c = this._chats.find(x => x.account_id === accountId && x.user_id === userId);
+    if (!c) return null;
+    Object.assign(c, fields);
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('aifu-stat-human', this._chats.filter(x => x.status === 'needs_human').length);
+    set('aifu-stat-active', this._chats.filter(x => x.status === 'active').length);
+    this.renderTodo();
+    this.renderStepCards();
+    this.renderChips();
+    this.renderPage();
+    this._updateBadge();
+    if (this._sameLead(c)) { this._modalChat = c; this._renderModalActions(); this._paintNav(); }
+    return c;
+  },
+
+  // ── Extra work lists (proof, ops, silent Tier A) used as filters ──
   HOT_SILENT_HOURS: 48,
   TODO: [
     { key: 'needs_human', icon: '⚠️', label: 'Cần người thật trả lời', urgent: true,
@@ -569,7 +730,8 @@ const AIFollowUp = {
 
   silentHours(c) { return this._utcHoursAgo(c.last_user_message_at || c.updated_at); },
 
-  _tierRank(c) { return c.lead_tier === 'Tier A' ? 0 : (c.lead_tier === 'Tier B' ? 1 : 2); },
+  // Tier A, B, C (also "no tier yet"), then Cold at the bottom.
+  _tierRank(c) { return ({ 'Tier A': 0, 'Tier B': 1, 'Cold': 3 })[c.lead_tier] ?? 2; },
 
   _todoRows(t) {
     const rows = this._chats.filter(c => t.test(c, this));
@@ -644,11 +806,8 @@ const AIFollowUp = {
     try {
       const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/owed?owed=false`, { method: 'POST' });
       if (!res.ok) throw new Error('Không cập nhật được');
-      const c = this._chats.find(x => x.account_id === accountId && x.user_id === userId);
-      if (c) { c.owed_since = null; c.owed_note = null; }
+      this._patchChat(accountId, userId, { owed_since: null, owed_note: null });
       App.toast('Đã đánh dấu là đã trả lời', 'success');
-      this.renderChips();
-      this.renderPage();
     } catch (e) {
       App.toast(e.message, 'error');
     }
@@ -677,6 +836,9 @@ const AIFollowUp = {
     const s = this._statusFilter;
     const todo = s ? this.TODO.find(t => t.key === s) : null;
     let rows = !s ? this._chats
+      : s === this.QUEUE_FILTER ? this._queueRows()
+      : s === this.CLEANUP_FILTER ? this._chats.filter(c => this._isCleanup(c))
+      : s === this.ANSWERED_FILTER ? this._chats.filter(c => this._isAnswered(c))
       : (todo ? this._todoRows(todo)
         : (s === this.OWED_FILTER
           ? this._chats.filter(c => this.isOwed(c)).sort((a, b) => this.owedHours(b) - this.owedHours(a))
@@ -685,7 +847,21 @@ const AIFollowUp = {
     if (st) rows = rows.filter(c => this.inFunnel(c));
     if (st === 'link_confirmed+') rows = rows.filter(c => this.stepRank(this.stepOf(c)) >= 3);
     else if (st) rows = rows.filter(c => this.stepOf(c) === st);
+    const q = this._search;
+    if (q) rows = rows.filter(c => [c.username ? '@' + c.username : '', c.name, c.user_id, c.account_name]
+      .some(v => v != null && String(v).toLowerCase().includes(q)));
     return rows;
+  },
+
+  _search: '',
+  _searchTimer: null,
+  onSearch(v) {
+    clearTimeout(this._searchTimer);
+    this._searchTimer = setTimeout(() => {
+      this._search = String(v || '').trim().toLowerCase();
+      this._page = 1;
+      this.renderPage();
+    }, 150);
   },
 
   renderPage() {
@@ -695,7 +871,7 @@ const AIFollowUp = {
     this.renderChats(filtered.slice((this._page - 1) * this.PAGE_SIZE, this._page * this.PAGE_SIZE), filtered.length === 0);
     this.renderSelectionBar();
     const cnt = document.getElementById('aifu-count');
-    if (cnt) cnt.textContent = (this._statusFilter || this._stepFilter)
+    if (cnt) cnt.textContent = (this._statusFilter || this._stepFilter || this._search)
       ? `Hiển thị: ${filtered.length}/${this._chats.length}`
       : (this._chats.length ? `Tổng: ${this._chats.length} lead` : '');
     const pager = document.getElementById('aifu-pager');
@@ -712,7 +888,11 @@ const AIFollowUp = {
   renderChats(rows, isEmpty) {
     const tb = document.getElementById('aifu-chats-table-body');
     if (!tb) return;
-    if (isEmpty && this._chats.length && (this._statusFilter || this._stepFilter)) {
+    if (isEmpty && this._chats.length && this._statusFilter === this.QUEUE_FILTER && !this._stepFilter && !this._search) {
+      tb.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:32px"><div style="font-size:2rem;margin-bottom:8px">🎉</div><div style="color:var(--text);font-weight:600;margin-bottom:6px">Hàng chờ trống — không KOL nào đang chờ bạn</div><button class="btn btn-ghost btn-sm" onclick="AIFollowUp.clearFilters()">Xem tất cả lead</button></td></tr>`;
+      return;
+    }
+    if (isEmpty && this._chats.length && (this._statusFilter || this._stepFilter || this._search)) {
       tb.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:28px"><div style="color:var(--text);font-weight:600;margin-bottom:6px">Không có lead nào khớp bộ lọc đang chọn</div><button class="btn btn-ghost btn-sm" onclick="AIFollowUp.clearFilters()">Bỏ mọi bộ lọc</button></td></tr>`;
       return;
     }
@@ -728,7 +908,13 @@ const AIFollowUp = {
       const score = c.intent_score || 0;
       const tierBadge = tier === 'Tier A'
         ? '<span class="badge" style="background:var(--orange-dim);color:var(--orange);font-weight:700">⭐ A</span>'
-        : (tier === 'Tier B' ? '<span class="badge badge-blue">🔷 B</span>' : '<span class="badge badge-gray">⚪ C</span>');
+        : (tier === 'Tier B' ? '<span class="badge badge-blue">🔷 B</span>'
+          : (tier === 'Cold' ? '<span class="badge badge-gray" title="Cold: lead nguội, ít khả năng chốt">🧊 Cold</span>' : '<span class="badge badge-gray">⚪ C</span>'));
+      const lastTxt = String(c.last_text || '').replace(this.HUMAN_PREFIX, '').replace(/\s+/g, ' ').trim();
+      const lastLine = lastTxt
+        ? `<div style="font-size:11px;color:${c.last_role === 'user' ? 'var(--text)' : 'var(--text2)'};max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(lastTxt).replace(/"/g, '&quot;')}">${c.last_role === 'user' ? '👤' : '↩️'} ${esc(lastTxt)}</div>`
+        : '';
+      const ownBadge = c.is_own ? ' <span class="badge badge-gray" style="font-size:10px;vertical-align:middle" title="Đây là một tài khoản của chính mình, không phải KOL. AI không trả lời và dòng này không nằm trong Hàng chờ.">🏠 Nick nhà</span>' : '';
       const updated = c.updated_at ? new Date(c.updated_at).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : '—';
       const toggleBtn = c.status === 'active'
         ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'paused_admin')" style="padding:4px 7px;min-width:0" title="Chat tay (tắt AI)" aria-label="Tắt AI cho ${esc(uName)}">⏸</button>`
@@ -747,7 +933,7 @@ const AIFollowUp = {
       const stepCell = `<div style="font-size:12px;font-weight:600;color:${sm.color};white-space:nowrap" title="${esc(missingTxt)}">${sm.emoji} ${esc(sm.label)}</div><div style="font-size:10px;color:var(--text2);font-family:monospace">${this.stepBar(step)}${remTxt}</div>`;
       return `<tr>
         <td style="width:34px;text-align:center"><input type="checkbox" aria-label="Chọn ${esc(uName)}" ${this._selected.has(`${c.account_id}:${c.user_id}`) ? 'checked' : ''} onchange="AIFollowUp.toggleSelection('${c.account_id}:${c.user_id}',this.checked)"></td>
-        <td><div style="font-weight:600">${esc(uName)}${nudgeBadge}</div><div style="font-size:11px;color:var(--text2);font-family:monospace">ID ${c.user_id} • 👤 ${esc(accLabel)}</div></td>
+        <td><div style="font-weight:600">${esc(uName)}${nudgeBadge}${ownBadge}</div><div style="font-size:11px;color:var(--text2);font-family:monospace">ID ${c.user_id} • 👤 ${esc(accLabel)}</div>${lastLine}</td>
         <td><div style="display:flex;align-items:center;gap:6px">${tierBadge}<span style="font-size:11px;color:var(--text2)">${score}%</span></div><div style="width:70px;height:4px;background:color-mix(in srgb, var(--text) 8%, transparent);border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:${Math.min(100, Math.max(0, score))}%;height:100%;background:${score >= 80 ? 'var(--orange)' : score >= 50 ? 'var(--accent)' : 'var(--text3)'}"></div></div></td>
         <td>${c.reply_count || 0}</td>
         <td>${stepCell}</td>
@@ -759,7 +945,7 @@ const AIFollowUp = {
   },
 
   async addToBlacklistDirect(accountId, userId, username) {
-    if (!window.confirm(`Đưa lead ${username ? '@' + username : 'ID ' + userId} vào Blacklist để CẤM AI CHAT 100%?`)) return;
+    if (!window.confirm(`Đưa lead ${username ? '@' + username : 'ID ' + userId} vào Blacklist để CẤM AI CHAT 100%?`)) return false;
     try {
       const res = await fetch('/api/blacklist', {
         method: 'POST',
@@ -768,8 +954,20 @@ const AIFollowUp = {
       });
       if (!res.ok) throw new Error('Cập nhật Blacklist thất bại');
       App.toast(`Đã đưa ${username ? '@' + username : userId} vào Blacklist (Chat tay 100%)`, 'success');
-      this.loadChats();
-    } catch (e) { App.toast(e.message, 'error'); }
+      await this.loadChats();
+      return true;
+    } catch (e) { App.toast(e.message, 'error'); return false; }
+  },
+
+  // Blacklist from the chat window: only after it really went through, move on to
+  // the next lead in the list (or close when there is none).
+  async blacklistFromModal() {
+    const c = this._modalChat;
+    if (!c) return;
+    const next = this._neighbor(1);
+    if (!(await this.addToBlacklistDirect(c.account_id, c.user_id, c.username || ''))) return;
+    if (!this._isOpen(c.account_id, c.user_id)) return; // user moved on meanwhile
+    if (next) this.openChat(next.account_id, next.user_id); else this.closeHistoryModal();
   },
 
   async bulkBlacklistSelected() {
@@ -1029,6 +1227,7 @@ const AIFollowUp = {
       const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/step`);
       if (!res.ok) throw new Error('Không tải được trạng thái bước');
       const st = await res.json();
+      if (!this._isOpen(accountId, userId)) return; // another lead was opened meanwhile
       this._modalStep = st;
       if (this._modalChat) { this._modalChat.kol_step = st.step; this._modalChat.missing_items = st.missing_items; }
       this.renderStepPanel(st);
@@ -1152,8 +1351,16 @@ const AIFollowUp = {
       if (!res.ok) throw new Error('Cập nhật trạng thái thất bại');
       const data = await res.json();
       App.toast(data.message || 'Đã cập nhật trạng thái', 'success');
-      this.closeHistoryModal();
-      this.loadChats();
+      if (this._isOpen(accountId, userId)) {
+        // Chat window is open on this lead: change the row in place, keep the window.
+        const next = status === 'bot_ignored' ? this._neighbor(1) : null;
+        this._patchChat(accountId, userId, { status });
+        if (status === 'bot_ignored') {
+          if (next) this.openChat(next.account_id, next.user_id); else this.closeHistoryModal();
+        }
+      } else {
+        this.loadChats();
+      }
     } catch (e) {
       App.toast(e.message, 'error');
     }
@@ -1228,14 +1435,99 @@ const AIFollowUp = {
   },
 
   _ensureTranslateBtn() {
-    if (document.getElementById('aifu-tr-btn')) return this._paintTranslateBtn();
+    if (document.getElementById('aifu-tr-btn')) { this._paintAIBtn(); this._paintNav(); return this._paintTranslateBtn(); }
     const close = document.querySelector('#aifu-history-modal .modal-header .modal-close');
     if (!close) return;
-    close.insertAdjacentHTML('beforebegin', `<span style="margin-left:auto;margin-right:8px;display:inline-flex;align-items:center;gap:4px">
+    close.insertAdjacentHTML('beforebegin', `<span style="margin-left:auto;margin-right:8px;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:flex-end">
+      <span id="aifu-nav" style="display:inline-flex;align-items:center;gap:4px;margin-right:8px"></span>
+      <button id="aifu-ai-btn" class="btn btn-sm" onclick="AIFollowUp.toggleModalAI()"></button>
+      <span class="info-i" tabindex="0" data-tip="Công tắc AI cho riêng lead này. Bật: AI tự trả lời; nếu KOL là người nhắn sau cùng thì AI sẽ trả lời NGAY. Tắt: chỉ người thật chat. Khi bạn tự gửi một tin, AI tự tắt cho lead này. Lưu ý: lead còn ở bước 0 (chưa chốt) mà bị tắt AI sẽ được tự bật lại sau 12 giờ im lặng.">i</span>
       <button id="aifu-tr-btn" class="btn btn-sm" onclick="AIFollowUp.toggleTranslate()"></button>
       <span class="info-i" tabindex="0" data-tip="Tự dịch tin nhắn sang tiếng Anh, hiện ngay dưới mỗi tin. Chỉ để bạn đọc — không gửi gì cho lead. Tin vốn là tiếng Anh/tiếng Việt thì không dịch. Bản dịch được lưu đệm nên mở lại rất nhanh.">i</span>
     </span>`);
+    this._paintAIBtn();
+    this._paintNav();
     this._paintTranslateBtn();
+  },
+
+  // ── Prev / Next inside the chat window ─────────────────────────────
+  // Walks the list currently shown in the table (same filter, search and order).
+  // Same lead as the one in the chat window (the row object is replaced on reload).
+  _sameLead(c) {
+    const m = this._modalChat;
+    return !!m && !!c && m.account_id === c.account_id && m.user_id === c.user_id;
+  },
+
+  _isOpen(accountId, userId) {
+    const c = this._modalChat;
+    return !!c && c.account_id === accountId && c.user_id === userId
+      && !!document.getElementById('aifu-history-modal')?.classList.contains('open');
+  },
+
+  _navState() {
+    const list = this._filtered();
+    const c = this._modalChat;
+    const i = c ? list.findIndex(x => x.account_id === c.account_id && x.user_id === c.user_id) : -1;
+    if (i >= 0) this._modalIdx = i;
+    return { list, i };
+  },
+
+  // The lead `delta` steps away. When the open lead has just left the list (it was
+  // answered, ignored…), "next" is whoever moved into its place.
+  _neighbor(delta) {
+    const { list, i } = this._navState();
+    if (i >= 0) return list[i + delta] || null;
+    const at = Math.min(this._modalIdx ?? 0, list.length);
+    return (delta > 0 ? list[at] : list[at - 1]) || null;
+  },
+
+  openNeighbor(delta) {
+    const n = this._neighbor(delta);
+    if (n) this.openChat(n.account_id, n.user_id);
+  },
+
+  _paintNav() {
+    const el = document.getElementById('aifu-nav');
+    if (!el) return;
+    if (!this._modalChat) { el.innerHTML = ''; return; }
+    const { list, i } = this._navState();
+    const prev = this._neighbor(-1), next = this._neighbor(1);
+    const pos = i >= 0 ? `${i + 1} / ${list.length}` : `– / ${list.length}`;
+    const tip = i >= 0 ? 'Vị trí của lead này trong danh sách đang lọc' : 'Lead này đã rời danh sách đang lọc (ví dụ vừa được trả lời). Bấm Tiếp để sang lead kế tiếp.';
+    el.innerHTML = `<button class="btn btn-ghost btn-sm" ${prev ? '' : 'disabled'} onclick="AIFollowUp.openNeighbor(-1)" title="Lead trước trong danh sách đang lọc">◀ Trước</button>`
+      + `<span style="font-size:12px;color:var(--text2);white-space:nowrap" title="${tip}">${pos}</span>`
+      + `<button class="btn btn-ghost btn-sm" ${next ? '' : 'disabled'} onclick="AIFollowUp.openNeighbor(1)" title="Lead kế tiếp trong danh sách đang lọc">Tiếp ▶</button>`;
+  },
+
+  _paintAIBtn(busy) {
+    const btn = document.getElementById('aifu-ai-btn');
+    const c = this._modalChat;
+    if (!btn) return;
+    btn.hidden = !c;
+    if (!c) return;
+    const on = c.status === 'active';
+    btn.className = `btn btn-sm ${on ? 'btn-green' : 'btn-ghost'}`;
+    btn.textContent = busy ? '🤖 …' : `🤖 AI ${on ? 'bật' : 'tắt'}`;
+    btn.title = on ? 'AI đang tự trả lời lead này — bấm để chuyển sang chat tay' : 'Đang chat tay — bấm để AI tự trả lời tiếp';
+  },
+
+  async toggleModalAI() {
+    const c = this._modalChat;
+    if (!c) return;
+    const status = c.status === 'active' ? 'paused_admin' : 'active';
+    this._paintAIBtn(true);
+    try {
+      const res = await fetch(`/api/ai-followup/chats/${c.account_id}/${c.user_id}/status`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status })
+      });
+      if (!res.ok) throw new Error('Cập nhật trạng thái thất bại');
+      const data = await res.json().catch(() => ({}));
+      this._patchChat(c.account_id, c.user_id, { status });
+      App.toast(status === 'active' ? (data.message || 'Đã bật AI') : 'Đã tắt AI — chat tay', 'success');
+    } catch (e) {
+      App.toast(e.message, 'error');
+    }
+    this._paintAIBtn();
   },
 
   _paintTranslateBtn(busy) {
@@ -1276,10 +1568,10 @@ const AIFollowUp = {
           if (tr !== undefined && lang) this._trCache.set(t, { tr, lang }); // lang '' = failed, retry next open
         }
       } catch (e) { break; }
-      if (this._modalChat !== c) return;
+      if (!this._sameLead(c)) return;
     }
     this._paintTranslateBtn();
-    if (this._modalChat !== c || !this.translateOn()) return;
+    if (!this._sameLead(c) || !this.translateOn()) return;
     const norm = x => (x || '').toLowerCase().replace(/\s+/g, ' ').trim();
     const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
     slots.forEach(el => {
@@ -1296,9 +1588,13 @@ const AIFollowUp = {
   async openChat(accountId, userId) {
     const c = this._chats.find(x => x.account_id === accountId && x.user_id === userId);
     if (!c) return;
-    this._modalChat = c;
     const modal = document.getElementById('aifu-history-modal');
     if (!modal) return;
+    // A draft typed for another lead must never be sent to this one.
+    const switching = !this._modalChat || this._modalChat.account_id !== accountId || this._modalChat.user_id !== userId;
+    this._modalChat = c;
+    const draft = document.getElementById('aifu-chat-input');
+    if (draft && switching) { draft.value = ''; draft.style.height = 'auto'; }
 
     const uName = c.name || (c.username ? `@${c.username}` : `User #${c.user_id}`);
     const title = document.getElementById('aifu-modal-title');
@@ -1322,16 +1618,30 @@ const AIFollowUp = {
     if (stepPanel) stepPanel.innerHTML = '<div style="font-size:12px;color:var(--text2)">⏳ Đang tải trạng thái bước...</div>';
     this._modalStep = null;
     this._modalTexts = [];
+    this._modalLeadTexts = [];
     this._ensureTranslateBtn();
     this.loadStepPanel(accountId, userId);
     try {
       const histRes = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/history`);
       const histData = await histRes.json();
+      if (!this._sameLead(c)) return; // another lead was opened meanwhile
       const history = [...(histData.history || [])].sort((a,b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
       if (!history.length) {
         box.innerHTML = summaryBanner + '<div style="text-align:center;color:var(--text2);padding:20px">Chưa có tin nhắn nào</div>';
       } else {
-        this._modalTexts = history.map(msg => (msg.content || '').trim());
+        if (!this._sameLead(c)) return; // user already moved to another lead
+        // Our side: a real person ("[Human Admin]:" prefix), the AI (has a model), or unknown.
+        const HUMAN = this.HUMAN_PREFIX;
+        history.forEach(m => {
+          m._human = m.role !== 'user' && HUMAN.test(m.content || '');
+          m._shown = m._human ? (m.content || '').replace(HUMAN, '') : (m.content || '');
+        });
+        const who = m => m.role === 'user' ? '👤 ' + esc(uName)
+          : (m._human ? '✍️ Người thật · ' + esc(accountLabel)
+            : (m.model ? '🤖 AI · ' + esc(accountLabel)
+              : '📨 Bên mình (tin tự động / không rõ) · ' + esc(accountLabel)));
+        this._modalTexts = history.map(msg => (msg._shown || '').trim());
+        this._modalLeadTexts = history.filter(m => m.role === 'user').map(m => (m.content || '').trim()).filter(Boolean);
         box.innerHTML = summaryBanner + history.map((msg, i) => {
           const isUser = msg.role === 'user';
           const timeText = msg.timestamp ? new Date(msg.timestamp).toLocaleString('vi-VN', {
@@ -1340,29 +1650,40 @@ const AIFollowUp = {
           }) : 'Không rõ thời gian';
           return `
             <div style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-start' : 'flex-end'};margin-bottom:12px">
-              <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${isUser ? '👤 ' + esc(uName) : '🤖 ' + esc(accountLabel) + ' · AI'} • ${timeText}</div>
-              <div style="background:${isUser ? 'var(--accent-dim)' : 'var(--purple-dim)'};border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${this._mediaHtml(msg.media)}${esc(msg.content || '')}<div class="aifu-tr" data-tr-idx="${i}" hidden style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border-hover);font-size:12px;font-style:italic;color:var(--text2)"></div></div>
+              <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${who(msg)} • ${timeText}</div>
+              <div style="background:${isUser ? 'var(--accent-dim)' : (msg._human ? 'var(--green-dim, var(--purple-dim))' : 'var(--purple-dim)')};border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${this._mediaHtml(msg.media)}${esc(msg._shown)}<div class="aifu-tr" data-tr-idx="${i}" hidden style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border-hover);font-size:12px;font-style:italic;color:var(--text2)"></div></div>
             </div>`;
         }).join('');
         box.scrollTop = box.scrollHeight;
         this._applyTranslations(c); // async, does not block opening the modal
+        if (!this._mediaTried) this._mediaTried = new Set();
+        const mk = accountId + ':' + userId;
+        if (!this._mediaTried.has(mk) && history.some(m => m.role === 'user' && !m.media && /^\s*\[Attached/.test(m.content || ''))) {
+          this._mediaTried.add(mk);  // old proofs: fetch the photos from Telegram once, then redraw
+          fetch(`/api/ai-followup/chats/${accountId}/${userId}/fetch-media`, {method: 'POST'})
+            .then(r => r.json()).then(d => { if (d.added && this._isOpen(accountId, userId)) this.openChat(accountId, userId); }).catch(() => {});
+        }
       }
     } catch (e) {
+      if (!this._sameLead(c)) return;
       box.innerHTML = summaryBanner + '<div style="text-align:center;color:var(--red);padding:20px">Lỗi tải lịch sử chat</div>';
     }
 
+    if (!this._sameLead(c)) return;
     this._renderModalActions();
     modal.classList.add('open');
   },
 
   _renderModalActions() {
     const c = this._modalChat;
+    this._paintAIBtn();
     const el = document.getElementById('aifu-modal-actions');
     if (!el || !c) return;
-    const toggle = c.status === 'active'
-      ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'paused_admin')">⏸ Chat tay</button>`
-      : `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'active')">▶️ Bật AI</button>`;
-    const blkBtn = `<button class="btn btn-danger btn-sm" data-acc="${c.account_id}" data-uid="${c.user_id}" data-username="${esc(c.username||'')}" onclick="AIFollowUp.addToBlacklistDirect(Number(this.dataset.acc),Number(this.dataset.uid),this.dataset.username);AIFollowUp.closeHistoryModal()" title="Cấm AI chat 100% với lead này">🚫 Blacklist</button>`;
+    // The AI on/off switch lives in the header only (toggleModalAI).
+    const toggle = (c.status === 'bot_ignored' ? '' : `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.updateStatus(${c.account_id},${c.user_id},'bot_ignored')" title="Bỏ qua lead này rồi sang lead kế tiếp">🙈 Bỏ qua</button>`)
+      + (this.isOwed(c) ? `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.resolveOwed(${c.account_id},${c.user_id})" title="Đã trả lời KOL về việc đã hứa (qua kênh khác) — xoá lời hứa">✅ Đã trả lời</button>` : '');
+    const blkBtn = `<button class="btn btn-danger btn-sm" onclick="AIFollowUp.blacklistFromModal()" title="Cấm AI chat 100% với người này">🚫 Blacklist</button>`
+      + `<span class="info-i" tabindex="0" data-tip="Bỏ qua: chỉ ẩn cuộc chat này khỏi Hàng chờ và tắt AI cho nó; đổi lại được bất cứ lúc nào ở bộ lọc 🚫 Ignored. Blacklist: cấm AI nhắn người này vĩnh viễn trên MỌI tài khoản và mọi chiến dịch. Cả hai nút đều chuyển sang lead kế tiếp.">i</span>`;
     const vs = c.verification_status || 'none';
     const vsLabel = {none:'🔍 Chưa verify', requested:'📤 Đã yêu cầu', submitted:'📎 Đã nộp', verified:'✅ Verified', rejected:'❌ Từ chối'}[vs] || vs;
     const vsBtn = `<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.cycleVerification(${c.account_id},${c.user_id})" title="Click để đổi trạng thái verify">${vsLabel}</button>`;
@@ -1372,7 +1693,7 @@ const AIFollowUp = {
     const nextBtn = next
       ? `<button class="btn btn-green btn-sm" onclick="AIFollowUp.setStep(${c.account_id},${c.user_id},'${next}')" title="Chuyển sang bước tiếp theo (ghi vào kol_step_events)">➡️ ${this.stepLabel(next)}</button>`
       : '';
-    const opts = [...this.STEPS, 'declined', 'dormant'].map((s, i) =>
+    const opts = [...this.STEPS, 'declined', 'dormant', 'media'].map((s, i) =>
       `<option value="${s}" ${s === cur ? 'disabled' : ''}>${i < this.STEPS.length ? i + '. ' : ''}${this.stepLabel(s)}${s === cur ? ' (hiện tại)' : ''}</option>`).join('');
     const stepSel = `<select class="form-input" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:12px" title="Admin đặt bước bất kỳ (tiến/lùi)" onchange="AIFollowUp.stepSelectChanged(this,${c.account_id},${c.user_id})"><option value="">Đặt bước…</option>${opts}</select>`;
     el.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center';
@@ -1397,22 +1718,65 @@ const AIFollowUp = {
     } catch (e) { App.toast(e.message, 'error'); }
   },
 
+  // Returns {lang, text} when the lead writes in a language other than en/vi and the text needs translating; else null.
+  async _translateOutgoing(text) {
+    const tr = async (texts, target) => {
+      const res = await fetch('/api/members/translate-descriptions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texts, target_lang: target })
+      });
+      if (!res.ok) throw new Error('translate failed');
+      return res.json();
+    };
+    const recent = (this._modalLeadTexts || []).filter(t => t.length >= 2).slice(-5);
+    if (!recent.length) return null;
+    const missing = recent.filter(t => !this._trCache.has(t));
+    if (missing.length) {
+      const d = await tr(missing, 'en');
+      for (const t of missing) {
+        const lang = d.langs?.[t] || '';
+        if (lang) this._trCache.set(t, { tr: d.translations?.[t] ?? t, lang });
+      }
+    }
+    const counts = {};
+    for (const t of recent) {
+      const l = (this._trCache.get(t)?.lang || '').split('-')[0];
+      if (l && l !== 'und') counts[l] = (counts[l] || 0) + 1;
+    }
+    const lang = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+    if (!lang || ['en', 'vi'].includes(lang)) return null;
+    // Paragraph by paragraph: keeps line breaks and stays under the backend's 1200-char cap.
+    const paras = text.split(/\n/);
+    const d = await tr(paras.filter(p => p.trim()), lang);
+    const out = paras.map(p => p.trim() ? (d.translations?.[p.trim()] ?? p) : p).join('\n');
+    return out.trim() === text.trim() ? null : { lang, text: out };
+  },
+
   async sendMessage() {
     const c = this._modalChat;
     const input = document.getElementById('aifu-chat-input');
-        if (!this._mediaTried) this._mediaTried = new Set();
-        const mk = accountId + ':' + userId;
-        if (!this._mediaTried.has(mk) && history.some(m => m.role === 'user' && !m.media && /^\s*\[Attached/.test(m.content || ''))) {
-          this._mediaTried.add(mk);  // old proofs: fetch the photos from Telegram once, then redraw
-          fetch(`/api/ai-followup/chats/${accountId}/${userId}/fetch-media`, {method: 'POST'})
-            .then(r => r.json()).then(d => { if (d.added) this.openChat(accountId, userId); }).catch(() => {});
-        }
     const btn = document.getElementById('aifu-chat-send-btn');
-    if (!c || !input) return;
-    const text = input.value.trim();
+    if (!c || !input || this._sending) return;
+    let text = input.value.trim();
     if (!text) return;
-    input.value = '';
+    this._sending = true;
+    try { await this._sendMessage(c, input, btn, text); } finally { this._sending = false; }
+  },
+
+  async _sendMessage(c, input, btn, text) {
     if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+    // Translate into the lead's language (detected from their recent messages) and let the admin confirm.
+    try {
+      const tr = await this._translateOutgoing(text);
+      if (tr) {
+        if (!confirm(`Lead nói ${tr.lang.toUpperCase()} — gửi bản dịch này?\n\n${tr.text}\n\n(Cancel = không gửi, sửa lại tin)`)) {
+          if (btn) { btn.disabled = false; btn.textContent = 'Gửi ➤'; }
+          return;
+        }
+        text = tr.text;
+      }
+    } catch (e) { /* translation unavailable: fall through and send original */ }
+    if (this._sameLead(c)) { input.value = ''; input.style.height = 'auto'; }
     try {
       const res = await fetch(`/api/ai-followup/chats/${c.account_id}/${c.user_id}/send`, {
         method: 'POST', headers: {'Content-Type':'application/json'},
@@ -1421,21 +1785,26 @@ const AIFollowUp = {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Gửi thất bại');
       // Append bubble vào chat box
-      const box = document.getElementById('aifu-modal-chat-box');
+      const box = this._sameLead(c) ? document.getElementById('aifu-modal-chat-box') : null;
       if (box) {
         const accLabel = c.account_name || `Account #${c.account_id}`;
         const timeText = new Date().toLocaleString('vi-VN', { timeZone:'Asia/Ho_Chi_Minh', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
         box.insertAdjacentHTML('beforeend', `
           <div style="display:flex;flex-direction:column;align-items:flex-end;margin-bottom:12px">
-            <div style="font-size:11px;color:var(--text2);margin-bottom:3px">🧑‍💼 ${esc(accLabel)} · chat tay • ${timeText}</div>
-            <div style="background:var(--purple-dim);border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(text)}</div>
+            <div style="font-size:11px;color:var(--text2);margin-bottom:3px">✍️ Người thật · ${esc(accLabel)} • ${timeText}</div>
+            <div style="background:var(--green-dim, var(--purple-dim));border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(text)}</div>
           </div>`);
         box.scrollTop = box.scrollHeight;
       }
-      // Interceptor tự pause AI + ghi history — báo nhẹ
+      // Server: a hand-sent message turns the AI off for this lead and closes the
+      // promise. Mirror that here so the lead leaves the queue without a reload.
+      this._patchChat(c.account_id, c.user_id, {
+        status: 'needs_human',
+        owed_since: null, owed_note: null, last_role: 'assistant', last_text: ('[Human Admin]: ' + text).slice(0, 140)
+      });
       App.toast('✅ Đã gửi — AI tạm dừng để bạn chat tay', 'success');
     } catch (e) {
-      input.value = text; // giữ lại text nếu lỗi
+      if (this._sameLead(c)) input.value = text; // giữ lại text nếu lỗi (và vẫn đang mở lead đó)
       App.toast('❌ ' + e.message, 'error');
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = 'Gửi ➤'; }
@@ -1452,4 +1821,3 @@ const AIFollowUp = {
 if (typeof window !== 'undefined') {
   window.AIFollowUp = AIFollowUp;
 }
-    input.style.height = 'auto';
