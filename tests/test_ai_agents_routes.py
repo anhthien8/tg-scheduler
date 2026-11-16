@@ -284,3 +284,41 @@ async def test_get_chat_summary_success(client):
     assert response.json()["lead_tier"] == "Tier A"
     assert response.json()["intent_score"] == 80
     assert response.json()["summary"] == "Wants to test CEX"
+
+
+# ── Keyword DM: first message drafted in the agent's voice ──────────────────
+
+@patch("ai_remix.generate_response", new_callable=AsyncMock)
+async def test_draft_opener_uses_agent_script_keywords_and_groups(mock_gen, client):
+    agent_id = await db.create_ai_agent({
+        "name": "BloFin Negotiator", "system_prompt": "You are BloFin BD.",
+        "knowledge_base": "BloFin pays rev share to KOLs.",
+    })
+    await db.set_setting("ai_provider", "gemini")
+    await db.set_setting("ai_keys_gemini", '["k"]')
+    mock_gen.return_value = '"{Hey|Hi} {name}, saw you in {group} — are you trading futures?"'
+
+    r = client.post(f"/api/ai-agents/{agent_id}/draft-opener",
+                    json={"keywords": ["copy trade", "rebate"], "groups": ["WEEX English Official"]})
+    assert r.status_code == 200
+    content = r.json()["content"]
+    assert content.startswith("{Hey|Hi} {name}") and "—" not in content and not content.endswith('"')
+    prompt = mock_gen.call_args.args[0]
+    for part in ("You are BloFin BD.", "BloFin pays rev share", "copy trade, rebate",
+                 "WEEX English Official", "{name}", "{group}"):
+        assert part in prompt
+
+
+@patch("ai_remix.generate_response", new_callable=AsyncMock)
+async def test_draft_opener_join_rule_and_empty_ai(mock_gen, client):
+    agent_id = await db.create_ai_agent({"name": "A"})
+    await db.set_setting("ai_provider", "gemini")
+    await db.set_setting("ai_keys_gemini", '["k"]')
+    mock_gen.return_value = ""
+    r = client.post(f"/api/ai-agents/{agent_id}/draft-opener", json={"watch_type": "join"})
+    assert r.status_code == 502
+    assert "just joined" in mock_gen.call_args.args[0]
+
+
+async def test_draft_opener_unknown_agent(client):
+    assert client.post("/api/ai-agents/9999/draft-opener", json={}).status_code == 404

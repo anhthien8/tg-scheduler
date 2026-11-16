@@ -2189,7 +2189,7 @@
           <div id="w-ai-agent-row" style="display:flex;gap:8px;align-items:center;margin-top:10px">
             <span style="font-size:12px;color:var(--text2);white-space:nowrap">AI Agent</span>
             <span class="info-i" tabindex="0" data-tip="Chọn Agent để AI dùng API key, hướng dẫn viết và kiến thức sản phẩm riêng của Agent đó. Để Mặc định thì dùng cấu hình AI chung trong Cài đặt.">i</span>
-            <select class="form-select" id="w-ai-agent" style="flex:1"><option value="">— Mặc định (cấu hình AI chung) —</option></select>
+            <select class="form-select" id="w-ai-agent" style="flex:1" onchange="App.draftWatcherDM(true)"><option value="">— Mặc định (cấu hình AI chung) —</option></select>
           </div>
         </div>
 
@@ -2197,11 +2197,13 @@
         <div class="form-group">
           <label class="form-label">Kịch bản DM</label>
           <div id="w-messages-list"></div>
-          <div style="display:flex;gap:6px;margin-top:8px">
+          <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">
             <button class="btn btn-ghost btn-sm" onclick="App.addWatcherMessage('text')">+ Text</button>
             <button class="btn btn-ghost btn-sm" onclick="App.addWatcherMessage('photo')">+ Ảnh</button>
             <button class="btn btn-ghost btn-sm" onclick="App.addWatcherMessage('video')">+ Video</button>
             <button class="btn btn-ghost btn-sm" onclick="App.addWatcherMessage('document')">+ File</button>
+            <button class="btn btn-ghost btn-sm" id="w-ai-draft-btn" onclick="App.draftWatcherDM(false)">✨ AI viết theo Agent</button>
+            <span class="info-i" tabindex="0" data-tip="AI viết tin mở đầu theo kịch bản và Knowledge Base của AI Agent đang chọn, dựa trên từ khóa và nhóm của rule. Khi chọn Agent mà chưa có nội dung, AI tự viết luôn. Bấm lại để viết bản khác (thay tin Text đầu tiên).">i</span>
           </div>
         </div>
       </div>
@@ -2254,11 +2256,11 @@
   <script defer src="/static/js/members.js?v=511"></script>
   <script defer src="/static/js/analytics.js?v=492"></script>
   <script defer src="/static/js/ai_agents.js?v=492"></script>
-  <script defer src="/static/js/ai_followup.js?v=506"></script>
+  <script defer src="/static/js/ai_followup.js?v=507"></script>
   <script defer src="/static/js/changelog.js?v=493"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=506"></script>
-  <script defer src="/static/js/app.js?v=524"></script>
+  <script defer src="/static/js/app.js?v=525"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

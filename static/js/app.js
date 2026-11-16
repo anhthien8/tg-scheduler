@@ -2133,6 +2133,29 @@ addWatcherMessage(type,data=null){
 
   div.innerHTML=inner;list.appendChild(div);this._updateVariantHint()},
 
+// AI writes the first DM in the selected agent's voice (its script + knowledge base),
+// from the rule's keywords and groups. auto=true (agent just picked) never overwrites
+// text the user already typed; the button rewrites the first Text message.
+async draftWatcherDM(auto){
+  const agentId=parseInt(document.getElementById('w-ai-agent')?.value)||0;
+  if(!agentId){if(!auto)this.toast('Chọn AI Agent trước','error');return}
+  const texts=()=>[...document.querySelectorAll('#w-messages-list .msg-item[data-type="text"] textarea.msg-content')];
+  if(auto&&texts().some(t=>t.value.trim()))return;
+  if(this._wDrafting)return;this._wDrafting=true;
+  const btn=document.getElementById('w-ai-draft-btn');const label=btn?.textContent;
+  if(btn){btn.disabled=true;btn.textContent='⏳ AI đang viết…'}
+  try{
+    const groups=[...document.querySelectorAll('#w-chat-list input[type="checkbox"]:checked')].map(c=>c.dataset.title).filter(Boolean);
+    const r=await API.post(`/api/ai-agents/${agentId}/draft-opener`,{keywords:this._watcherKeywords||[],groups,watch_type:this._watcherType||'keyword'});
+    if(!texts().length)this.addWatcherMessage('text');
+    const ta=texts()[0];
+    if(auto&&ta.value.trim())return; // user typed while the AI was writing
+    ta.value=r.content||'';
+    this.toast('AI đã viết tin mở đầu, xem lại rồi Lưu Rule','success');
+  }catch(e){this.toast(e.message||'AI chưa viết được, thử lại','error')}
+  finally{this._wDrafting=false;if(btn){btn.disabled=false;btn.textContent=label}}
+},
+
 // Personalization tags (replaced per recipient by personalization.py) + spintax.
 _msgTagBar(){
   const tags=[['{name}','Tên (first name, không có thì username)'],['{full_name}','Họ và tên (cũng nhận [fullname])'],['{last_name}','Họ (cũng nhận [lastname])'],['{username}','Username không có @'],['{group}','Tên nhóm nơi gặp người này'],['{Hey|Hi|Hello}','Spintax: chọn ngẫu nhiên 1 lựa chọn cho mỗi người, chống trùng lặp/spam']];

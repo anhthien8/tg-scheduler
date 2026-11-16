@@ -241,38 +241,7 @@ async def test_agent(agent_id: int, req: AgentTestRequest):
     agent = await db.get_ai_agent(agent_id)
     if not agent:
         raise HTTPException(404, "Agent not found")
-
-    # Single source of truth: provider/model/base_url/keys ALWAYS come from the
-    # global Settings. Per-agent provider/model/keys are legacy fields and are
-    # intentionally ignored (they used to shadow Settings and break agents).
-    provider, api_keys, kwargs = await _get_system_ai_config()
-
-    # Only fall back to the agent's own legacy provider/model/keys when the
-    # global Settings define nothing at all (e.g. fresh install, nobody saved yet).
-    if not api_keys:
-        legacy_keys = agent.get("api_keys_json", [])
-        if isinstance(legacy_keys, str):
-            try:
-                legacy_keys = json.loads(legacy_keys)
-            except Exception:
-                legacy_keys = []
-        if legacy_keys:
-            provider = agent.get("provider") or provider
-            api_keys = legacy_keys
-            kwargs = {"base_url": agent.get("base_url") or "",
-                      "model": agent.get("model") or ""}
-
-    if not api_keys:
-        raise HTTPException(400, f"AI Agent '{agent['name']}' chưa có API Key và hệ thống chưa cấu hình API Key!")
-
-    # base_url/model already resolved from Settings by _get_system_ai_config().
-    # Only apply safe defaults for the OpenAI-OAuth provider, and never let an
-    # agent-level value override what Settings say.
-    if provider == "chatgpt_oauth":
-        if not kwargs.get("base_url"):
-            kwargs["base_url"] = "https://api.openai.com/v1"
-        if not kwargs.get("model"):
-            kwargs["model"] = "gpt-4o"
+    provider, api_keys, kwargs = await _resolve_agent_ai(agent)
 
     sys_prompt = agent.get("system_prompt", "")
     kb = agent.get("knowledge_base", "")
@@ -304,6 +273,89 @@ async def test_agent(agent_id: int, req: AgentTestRequest):
     except Exception as e:
         logger.error("AI Agent test error: %s", e)
         raise HTTPException(500, f"Lỗi gọi AI: {str(e)}")
+
+
+class OpenerRequest(BaseModel):
+    keywords: list[str] = []
+    groups: list[str] = []
+    watch_type: str = "keyword"  # "keyword" | "join"
+
+
+def _opener_prompt(agent: dict, req: OpenerRequest) -> str:
+    """Instruction for the first DM of a Keyword DM / Join DM rule, in this agent's voice."""
+    if req.watch_type == "join":
+        trigger = "has just joined one of these Telegram groups"
+    else:
+        kws = ", ".join(k.strip() for k in req.keywords if k.strip())[:300] or "a topic we care about"
+        trigger = f"has just written a message in one of these Telegram groups that mentions: {kws}"
+    groups = ", ".join(g.strip() for g in req.groups if g.strip())[:300] or "a crypto trading group"
+    kb = (agent.get("knowledge_base") or "").strip()
+    return (
+        (agent.get("system_prompt") or "").strip()
+        + (f"\n\n--- KNOWLEDGE BASE ---\n{kb[:6000]}" if kb else "")
+        + "\n\n--- TASK ---\n"
+        f"Write the FIRST private Telegram message we send to a stranger who {trigger}. Groups: {groups}.\n"
+        "Rules: 2 to 4 short sentences, friendly and human, written in English (the system translates it to "
+        "the recipient's language when needed). Open naturally by referring to the group, then one clear reason "
+        "to talk based on the knowledge base, then one easy question. No links, no prices or percentages, no "
+        "hashtags, no bracket tags, no signature. Use the placeholders {name} for the person's first name and "
+        "{group} for the group name exactly as written (with curly braces). You may start with the spintax "
+        "{Hey|Hi|Hello}. Output ONLY the message text."
+    )
+
+
+@router.post("/{agent_id}/draft-opener")
+async def draft_opener(agent_id: int, req: OpenerRequest):
+    """First-DM script for a Keyword DM rule, written in the selected agent's voice."""
+    agent = await db.get_ai_agent(agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    provider, api_keys, kwargs = await _resolve_agent_ai(agent)
+    try:
+        text = await ai_rmx.generate_response(_opener_prompt(agent, req), provider, api_keys, **kwargs)
+    except Exception as e:
+        logger.warning("draft-opener agent %s failed: %s", agent_id, e)
+        text = None
+    text = (text or "").strip().strip('"').strip()
+    if not text:
+        raise HTTPException(502, "AI không trả về nội dung, thử lại sau")
+    return {"content": ai_rmx.ensure_paragraphs(ai_rmx.humanize_text(text))}
+
+
+async def _resolve_agent_ai(agent: dict):
+    """Provider, keys and call kwargs for this agent (global Settings first)."""
+    # Single source of truth: provider/model/base_url/keys ALWAYS come from the
+    # global Settings. Per-agent provider/model/keys are legacy fields and are
+    # intentionally ignored (they used to shadow Settings and break agents).
+    provider, api_keys, kwargs = await _get_system_ai_config()
+
+    # Only fall back to the agent's own legacy provider/model/keys when the
+    # global Settings define nothing at all (e.g. fresh install, nobody saved yet).
+    if not api_keys:
+        legacy_keys = agent.get("api_keys_json", [])
+        if isinstance(legacy_keys, str):
+            try:
+                legacy_keys = json.loads(legacy_keys)
+            except Exception:
+                legacy_keys = []
+        if legacy_keys:
+            provider = agent.get("provider") or provider
+            api_keys = legacy_keys
+            kwargs = {"base_url": agent.get("base_url") or "",
+                      "model": agent.get("model") or ""}
+
+    if not api_keys:
+        raise HTTPException(400, f"AI Agent '{agent['name']}' chưa có API Key và hệ thống chưa cấu hình API Key!")
+
+    # base_url/model already resolved from Settings by _get_system_ai_config().
+    # Only apply safe defaults for the OpenAI-OAuth provider, and never let an
+    # agent-level value override what Settings say.
+    if provider == "chatgpt_oauth":
+        if not kwargs.get("base_url"):
+            kwargs["base_url"] = "https://api.openai.com/v1"
+        if not kwargs.get("model"):
+            kwargs["model"] = "gpt-4o"
+    return provider, api_keys, kwargs
 
 
 @router.post("/{agent_id}/duplicate")
