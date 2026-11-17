@@ -8,9 +8,12 @@ def _ladder_with(est):
 
 def test_estimate_tiers_and_math():
     e = k.value_estimate(None, "15M")
-    assert e["sabc"] == "B" and e["fees"] == 9000
-    assert e["steady"]["tier"] == 2 and e["steady"]["total"] == 6150
-    assert "RETENTION CARD" in k.render_value_estimate(e) and "$200" not in k.render_value_estimate(e) and "6,150" in k.render_value_estimate(e)
+    # 15M at 0.05% blended fees (0.02% maker / 0.08% taker, half each) = 7,500; SABC tier keeps its own table rate.
+    assert e["sabc"] == "B" and e["fees"] == 7500
+    # Tier 2: 60% of 7,500 = 4,500 commission + $100 per 1M on ALL 15M futures volume = 1,500 bonus.
+    assert e["steady"]["tier"] == 2 and e["steady"]["commission"] == 4500 and e["steady"]["bonus"] == 1500
+    assert e["steady"]["total"] == 6000
+    assert "RETENTION CARD" in k.render_value_estimate(e) and "$200" not in k.render_value_estimate(e) and "6,000" in k.render_value_estimate(e)
     assert k.value_estimate(None, None) is None
     assert k.sabc_tier(99) is None and k.sabc_tier(100_000) == "S"
 

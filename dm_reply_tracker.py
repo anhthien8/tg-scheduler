@@ -114,7 +114,11 @@ _SOURCE_LEAK_RE = re.compile(
     r"owner[- ]supplied|operator'?s? (?:files?|notes?|sources?)|"
     r"my (?:training|instructions|records|data)|"
     r"tài liệu (?:được cung cấp|nội bộ|tham khảo)|dữ liệu được cung cấp|"
-    r"cơ sở dữ liệu kiến thức)\b",
+    r"cơ sở dữ liệu kiến thức|"
+    # "hand over to a human BD" tells the lead the current sender is not human.
+    r"human (?:bd|team|agents?|managers?|colleagues?|reps?|representatives?|advis[eo]rs?|staff|partners?hip)|"
+    r"(?:a |an )?(?:real|actual) (?:person|human)|"
+    r"người thật|nhân viên thật)\b",
     re.IGNORECASE,
 )
 
@@ -494,14 +498,62 @@ _STEP_REMINDER_TEMPLATES = {
 _RU_CHARS_RE = re.compile(r"[а-яё]", re.IGNORECASE)
 
 
-def get_decline_closing_reply(history: list[dict] | None) -> str:
-    """Polite thank-you + open-door CTA sent when the KOL declines and the AI
-    produced only tags (e.g. a bare [STOP]) — one message, then the AI stops."""
+# "Thanks! I no need" / "no thanks" / "not interested" / "không cần": a short polite no.
+_POLITE_NO_RE = re.compile(
+    r"\b(?:no+\s*need|not\s+interest(?:ed)?|no\s*,?\s*thanks?|no\s+thank\s+you|not\s+now|i'?m\s+good|i\s+am\s+good|"
+    r"i'?ll\s+pass|not\s+for\s+me|no\s+interest)\b"
+    r"|kh[oô]ng\s+c[aầ]n|\bko\s+c[aầ]n|\bk\s+c[aầ]n|kh[oô]ng\s+quan\s+t[aâ]m|\bko\s+quan\s+t[aâ]m"
+    r"|не\s+(?:надо|нужно|интересно)",
+    re.IGNORECASE)
+
+
+def latest_user_turn(history: list[dict] | None) -> str:
+    """Everything the lead sent since our last message, joined."""
+    parts = []
+    for m in reversed(history or []):
+        if m.get("role") != "user":
+            break
+        parts.append((m.get("content") or "").strip())
+    return " ".join(reversed(parts)).strip()
+
+
+def is_polite_decline(text: str) -> bool:
+    """A short 'thanks, no need' — not a question, not a long message with real content."""
+    t = re.sub(r"\s+", " ", text or "").strip()
+    return bool(t) and len(t) <= 80 and "?" not in t and bool(_POLITE_NO_RE.search(t))
+
+
+def get_decline_closing_reply(history: list[dict] | None, exchange: str | None = None) -> str:
+    """Polite thank-you + open-door CTA sent when the KOL declines — one message, then the AI stops.
+    WEEX leads get the all-in-one / no-KYC / top-6 TradFi pitch."""
     latest = ""
     for m in reversed(history or []):
         if m.get("role") == "user":
             latest = m.get("content") or ""
             break
+    if (exchange or db.DEFAULT_EXCHANGE).upper() == db.DEFAULT_EXCHANGE.upper():
+        if _VN_CHARS_RE.search(latest):
+            return (
+                "Cảm ơn bạn đã phản hồi nhé, mình hiểu rồi 🙏\n\n"
+                "Trước khi đi mình gửi bạn một thông tin nhỏ: nếu có lúc nào bạn muốn trade tất cả trong 1, "
+                "crypto lẫn TradFi trên cùng 1 sàn, không cần KYC, không hạn chế rút tiền, top 6 TradFi trên "
+                "CoinGecko như WEEX, thì cứ nhắn mình ở đây nhé. Dạo này anh em trader chuyển qua đông lắm, "
+                "mình setup cho bạn liền 🚀"
+            )
+        if _RU_CHARS_RE.search(latest):
+            return (
+                "Спасибо, что ответили, всё понял 🙏\n\n"
+                "Напоследок: если захотите торговать всем в одном месте — крипта и TradFi на одной бирже, "
+                "без KYC, без ограничений на вывод, топ-6 по TradFi на CoinGecko, как WEEX — просто напишите мне "
+                "сюда. Трейдеры сейчас активно переходят, помогу всё настроить сразу 🚀"
+            )
+        return (
+            "Thanks a lot for getting back to me, totally understood 🙏\n\n"
+            "One last thing before I go: if you ever want to trade everything in one place, crypto and TradFi "
+            "on a single exchange with no KYC, no withdrawal limits, and ranked top 6 for TradFi on CoinGecko "
+            "like WEEX, just message me here. Lots of traders are moving over right now, and I'll get you set "
+            "up straight away 🚀"
+        )
     if _VN_CHARS_RE.search(latest):
         return (
             "Cảm ơn bạn đã dành thời gian phản hồi nhé, mình hoàn toàn tôn trọng quyết định của bạn 🙏 "
@@ -662,6 +714,8 @@ async def maybe_advance_uid_received(account_id: int, user_id: int, uid: str, ac
                                 reason=f"UID {uid} confirmed by regex + LLM")
     if res.get("changed"):
         logger.info("[KOL Step] user %d (acc=%d) → uid_received (UID %s)", user_id, account_id, uid)
+        import weex_affiliate  # big KOL → CSS line, small KOL → team card; no-op unless enabled
+        asyncio.create_task(weex_affiliate.onboard_uid(account_id, user_id, uid))
     return bool(res.get("changed"))
 
 
@@ -1507,6 +1561,7 @@ async def generate_and_send_ai_reply_for_chat(
         "     * Acknowledge briefly (e.g. 'Got the screenshot bro! Let me check the stats 👍'). Answer any accompanying question.\n"
         "     * NEVER ask for proof/video again once a screenshot has been received!\n"
         "     * Only acknowledge a file/screenshot/video if the LATEST user messages carry an [Attached ...] tag. Stickers, GIFs, memes and emoji are casual reactions: react like a human (laugh, empathise), never say 'received the file' or 'team will review'. If an image looks like a meme/joke rather than stats, treat it as banter.\n"
+        "   - HANDOVER WORDING: you ARE the BD. Never say 'human', 'human BD', 'real person' or 'hand over / pass your case to someone'. Say you will check with your manager / the partnership lead and come back to them.\n"
         "   - DEMANDING / DIFFICULT CASES ESCALATION: When the KOL's demands exceed normal scope (complex sponsorship; or an upfront request AFTER the 3-month performance video was received or refused — see the UPFRONT rule), politely escalate to the exchange's committee for special approval. Reply IN THE USER'S LANGUAGE:\n"
         "     * English example: 'This is a special case that goes beyond my usual authority. Let me forward your detailed proposal to the WEEX Partnership Committee for a dedicated review!'\n"
         "     * Vietnamese example: 'Case này đặc biệt và vượt thẩm quyền thông thường của mình rồi, để mình chuyển tiếp proposal chi tiết của bạn lên Ban Giám Đốc / Partnership Committee của sàn WEEX để duyệt riêng nhé!'\n"
@@ -1600,13 +1655,25 @@ async def generate_and_send_ai_reply_for_chat(
     logger.info("[AIFollowUp] 🤖 Generating AI reply using Agent '%s' for user @%s (%d, history_len=%d)...",
                 agent_config.get('name', '?'), sender_username or '?', user_id, len(history))
 
+    # A prospect who just says "thanks, no need": thank them once with the open-door
+    # CTA and close the lead (no AI call, no drips, no persuasion).
+    polite_no = (is_polite_decline(latest_user_turn(full_history))
+                 and db.kol_step_rank(await db.get_kol_step(account_id, user_id)) <= 0)
+
     # _pending_ai_sends already locked at guard check (line 291)
     try:
-        _imgs = await _event_images(event)
-        if _imgs:
-            logger.info("[AIFollowUp] 🖼 Passing %d image(s) to %s for user %d", len(_imgs), ai_provider, user_id)
-        ai_reply = await ai_rmx.generate_chat_response(
-            history, combined_prompt, ai_provider, ai_keys, **({**kwargs, "images": _imgs} if _imgs else kwargs))
+        if polite_no:
+            ai_reply = get_decline_closing_reply(full_history, exchange)
+            await db.set_kol_step(account_id, user_id, "declined", actor="system",
+                                  reason="Polite decline (thanks / no need) — closing CTA sent")
+            logger.info("[AIFollowUp] 🙏 User @%s (%d) politely declined — closing CTA, lead closed",
+                        sender_username or "?", user_id)
+        else:
+            _imgs = await _event_images(event)
+            if _imgs:
+                logger.info("[AIFollowUp] 🖼 Passing %d image(s) to %s for user %d", len(_imgs), ai_provider, user_id)
+            ai_reply = await ai_rmx.generate_chat_response(
+                history, combined_prompt, ai_provider, ai_keys, **({**kwargs, "images": _imgs} if _imgs else kwargs))
 
         if not ai_reply:
             logger.warning("[AIFollowUp] ⚠️ AI provider '%s' returned an empty reply for user @%s (%d) — nothing sent",
@@ -1616,7 +1683,8 @@ async def generate_and_send_ai_reply_for_chat(
 
         new_status = "active"
         # Extract profile trước alert để UID/campaign/community có mặt trong notification.
-        _spawn_background(_async_update_kol_profile(account_id, user_id, full_history, ai_provider, ai_keys, kwargs))
+        if not polite_no:
+            _spawn_background(_async_update_kol_profile(account_id, user_id, full_history, ai_provider, ai_keys, kwargs))
         if "[HANDOVER_REQUIRED]" in ai_reply:
             new_status = "needs_human"
             ai_reply = ai_reply.replace("[HANDOVER_REQUIRED]", "").strip()
@@ -1636,6 +1704,9 @@ async def generate_and_send_ai_reply_for_chat(
                 account_id, user_id, sender_username,
                 reason="KOL declined / asked to stop — step reminders halted"
             ))
+        if polite_no:
+            new_status = "needs_human"  # AI goes silent after the closing; nobody needs a ping for a "no thanks"
+            step_result["declined"] = True
 
         intent_score = 30
         lead_tier = "Tier C"
@@ -1670,7 +1741,7 @@ async def generate_and_send_ai_reply_for_chat(
         ai_reply = sanitize_telegram_html(ai_reply)
         if not ai_reply:
             if step_result.get("declined"):
-                ai_reply = get_decline_closing_reply(full_history)
+                ai_reply = get_decline_closing_reply(full_history, exchange)
                 logger.info("[AIFollowUp] 🙏 KOL @%s (%d) declined and AI reply was tags-only — sending polite closing",
                             sender_username or "?", user_id)
             else:
@@ -1704,7 +1775,7 @@ async def generate_and_send_ai_reply_for_chat(
                                off_ladder, user_id)
                 # A decline gets the polite closing, not a "let me check the numbers"
                 # promise the KOL never asked for.
-                ai_reply = (get_decline_closing_reply(full_history) if step_result.get("declined")
+                ai_reply = (get_decline_closing_reply(full_history, exchange) if step_result.get("declined")
                             else kol_offer.get_safe_offer_fallback_reply(_detect_reply_lang(full_history)))
                 new_status = "needs_human"
                 _spawn_background(_notify_main_account_handover(

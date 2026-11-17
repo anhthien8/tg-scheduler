@@ -181,7 +181,7 @@ def test_guard_flags_off_ladder_figures():
 
 def test_guard_passes_ladder_figures():
     ok = ("You start at 55% revshare, 60% once you hit 10M total monthly volume, "
-          "65% at 20M, 70% at 50M and 80% at 100M. Plus $100 per 1M taker volume "
+          "65% at 20M, 70% at 50M and 80% at 100M. Plus $100 per 1M futures volume "
           "(drops to $50 then $10 at the top tiers). That's 5% above a standard affiliate "
           "and 100% transparent.")
     assert kol_offer.find_off_ladder_figures(ok) == []
@@ -257,7 +257,7 @@ async def test_off_ladder_reply_is_rewritten_once_with_ladder_figures(mock_send,
 @patch("telegram_client.send_text_message", new_callable=AsyncMock)
 async def test_on_ladder_reply_goes_through(mock_send, mock_chat):
     await _make_bd_account_with_lead()
-    reply = "You start at 55% revshare bro, and from 10M total monthly volume you move to 60% — plus $100 per 1M taker volume."
+    reply = "You start at 55% revshare bro, and from 10M total monthly volume you move to 60% — plus $100 per 1M futures volume."
     mock_chat.return_value = reply
     mock_send.return_value = True
 
@@ -283,3 +283,19 @@ async def test_prompt_sent_to_model_contains_ladder_block(mock_send, mock_chat):
     assert "OFFICIAL WEEX KOL COMMISSION LADDER" in system_prompt
     assert "KOL ONBOARDING STATE" in system_prompt
     assert "| 1 |" in system_prompt and "| 5 |" in system_prompt
+
+
+def test_volume_bonus_counts_all_futures_volume():
+    """Owner, 2026-11-18: the per-1M bonus is paid on all futures volume, no longer taker only."""
+    text = kol_offer.render_offer_ladder_prompt(kol_offer.DEFAULT_LADDER, volume_stated="15M")
+    assert "Bonus per 1M FUTURES volume" in text and "per 1M futures volume" in text
+    assert "TOTAL futures volume" in text
+    assert "taker volume" not in text.lower().replace("(maker + taker)", "")
+    # A ladder saved before the change still carries the old default sentence: it is migrated, not kept.
+    saved = {**kol_offer.DEFAULT_LADDER,
+             "rules": {**kol_offer.DEFAULT_LADDER["rules"],
+                       "bonus_basis": "The per-1M bonus is computed on TAKER volume only."}}
+    assert "TAKER volume only" not in kol_offer.render_offer_ladder_prompt(saved)
+    # An admin-written basis is kept as is.
+    custom = {**saved, "rules": {**saved["rules"], "bonus_basis": "Bonus on perpetual volume only."}}
+    assert "Bonus on perpetual volume only." in kol_offer.render_offer_ladder_prompt(custom)

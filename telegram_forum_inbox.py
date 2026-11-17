@@ -6,9 +6,11 @@ ponytail: in-memory confirm tokens are lost on process restart; persist only if 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import json
 import logging
+import re
 import secrets
 import time
 from dataclasses import dataclass
@@ -146,7 +148,7 @@ def _format_history_message(role: str, content: str, ts: str) -> str:
 
 async def relay_history(db, bot, cfg: ForumConfig, *, account_id: int, user_id: int,
                         username: str | None = None, name: str | None = None,
-                        days: int = 30) -> dict:
+                        days: int = 30, history_account_id: int | None = None) -> dict:
     """Replay a conversation's stored transcript into its topic.
 
     The topic is created if missing, then entries are posted in chronological
@@ -155,12 +157,16 @@ async def relay_history(db, bot, cfg: ForumConfig, *, account_id: int, user_id: 
     topic readable ("what did we say this month") without dumping years of
     messages into the group.
 
+    `history_account_id`: read the transcript of another nick's chat with this lead
+    (a lead handed over to `account_id`) and post it into `account_id`'s topic.
+
     Returns {"status", "posted", "total", "topic_id"}.
     """
     if not cfg.enabled:
         return {"status": "disabled", "posted": 0, "total": 0}
 
-    chat = await db.get_followup_chat(account_id, user_id)
+    src_account_id = history_account_id or account_id
+    chat = await db.get_followup_chat(src_account_id, user_id)
     raw = (chat or {}).get("history_json")
     if not raw:
         return {"status": "no_history", "posted": 0, "total": 0}
@@ -199,7 +205,7 @@ async def relay_history(db, bot, cfg: ForumConfig, *, account_id: int, user_id: 
         logger.debug("[ForumInbox] step line skipped: %s", e)
     header = (f"🗂️ **Hội thoại {days} ngày qua**\n"
               f"Lead: {_lead_label(username, name, user_id)}\n"
-              f"{await _account_label(db, account_id)}\n"
+              f"{await _account_label(db, src_account_id)}\n"
               + (f"{step_line}\n" if step_line else "")
               + f"Tổng {len(entries)} tin nhắn (cũ → mới)\n"
               f"{'─' * 28}")
@@ -223,6 +229,53 @@ async def relay_history(db, bot, cfg: ForumConfig, *, account_id: int, user_id: 
 
     return {"status": "replayed", "posted": posted,
             "total": len(entries), "topic_id": topic_id}
+
+
+async def relay_transfer(db, bot, cfg: ForumConfig, *, from_account_id: int, to_account_id: int,
+                         user_id: int, username: str | None = None, name: str | None = None,
+                         created: bool = True) -> dict:
+    """An admin handed a lead over to another nick: say so in the old topic, then open the
+    new nick's topic with the old nick's transcript so whoever picks it up can read it.
+
+    `created` False = the new nick already had its own chat with this lead."""
+    if not cfg.enabled:
+        return {"status": "disabled"}
+    old_label = await _account_label(db, from_account_id)
+    new_label = await _account_label(db, to_account_id)
+    old = await db.find_telegram_topic_for_user(cfg.group_id, from_account_id, user_id)
+    if old and not is_hidden(old):
+        try:  # a closed/deleted old topic must not stop the new one from opening
+            await bot.send_topic_message(
+                cfg.group_id, int(old["topic_id"]),
+                f"🔀 Lead đã chuyển sang nick **{new_label}**. Topic này ngừng dùng — trả lời ở topic của nick mới.")
+        except Exception as e:
+            logger.warning("[ForumInbox] transfer notice to old topic failed (acc=%s user=%s): %s: %s",
+                           from_account_id, user_id, type(e).__name__, e)
+    async with _topic_lock(cfg.group_id, to_account_id, user_id):
+        topic = await db.find_telegram_topic_for_user(cfg.group_id, to_account_id, user_id)
+        if is_hidden(topic):
+            return {"status": "hidden"}
+        if not topic:
+            topic_id = await bot.create_forum_topic(
+                cfg.group_id, _topic_title(to_account_id, user_id, username, name))
+            topic = {"group_id": cfg.group_id, "topic_id": int(topic_id), "account_id": to_account_id,
+                     "user_id": user_id, "username": username, "name": name, "campaign_name": None,
+                     "status": "active", "last_lead_message": None}
+            await db.upsert_telegram_topic(topic)
+    topic_id = int(topic["topic_id"])
+    state = ("Nick mới CHƯA nhắn KOL lần nào." if created
+             else "Nick mới đã có hội thoại riêng với KOL này.")
+    await bot.send_topic_message(
+        cfg.group_id, topic_id,
+        f"🔀 Lead {_lead_label(username, name, user_id)} chuyển từ nick **{old_label}** sang **{new_label}**.\n"
+        f"{state} AI đang tắt — gõ tin ở đây để gửi từ nick mới.")
+    hist = await relay_history(db, bot, cfg, account_id=to_account_id, user_id=user_id, username=username,
+                               name=name, days=365, history_account_id=from_account_id)
+    if hist.get("status") != "replayed":
+        await bot.send_topic_message(
+            cfg.group_id, topic_id,
+            f"(Không có tin nhắn nào với nick {old_label} trong 365 ngày qua để chép sang.)")
+    return {"status": "relayed", "topic_id": topic_id}
 
 
 async def relay_general_alert(bot, cfg: ForumConfig, text: str) -> bool:
@@ -254,6 +307,98 @@ async def ensure_topic(db, bot, cfg: ForumConfig, *, account_id: int, user_id: i
         return topic
 
 
+# ── Pinned deal card ─────────────────────────────────────────────────
+# One message per topic, pinned, rewritten in place whenever what it says changes:
+# who the KOL is, their channel, where the deal stands and what is still missing.
+
+_CARD_DEAL_FIELDS = (
+    ("monthly_volume", "Volume/tháng"), ("volume_claimed", "Volume KOL báo"),
+    ("volume_verified", "Volume đã verify"), ("current_cex", "Đang ở sàn"),
+    ("current_deal", "Deal hiện tại ở sàn đó"), ("revshare_request", "KOL đòi"),
+    ("key_demands", "Yêu cầu"), ("selected_campaign", "Campaign"),
+    ("offer_version", "Phiên bản offer"), ("weex_uid", "UID"), ("vip_code", "VIP code"),
+    ("affiliate_link", "Link affiliate"), ("first_post_link", "Bài đầu tiên"),
+)
+
+
+def _card_val(v) -> str:
+    if isinstance(v, (list, tuple)):
+        v = ", ".join(str(x) for x in v if x not in (None, ""))
+    return re.sub(r"\s+", " ", str(v or "")).strip()[:300]
+
+
+async def build_deal_card(db, account_id: int, user_id: int,
+                          username: str | None, name: str | None) -> str:
+    """Card body (no timestamp, so an unchanged deal hashes the same)."""
+    profile = await db.get_kol_profile(account_id, user_id) or {}
+    chat = await db.get_followup_chat(account_id, user_id) or {}
+    lines = [f"📌 **THẺ DEAL** · {_lead_label(username, name, user_id)}",
+             f"Nick: {await _account_label(db, account_id)}"]
+    platform = _card_val(profile.get("platform"))
+    links = [_card_val(profile.get(k)) for k in ("channel_link", "community_link")]
+    links = list(dict.fromkeys(x for x in links if x))
+    followers = _card_val(profile.get("followers"))
+    lines.append("📺 Kênh: " + (" · ".join(x for x in (platform, followers and f"{followers} followers") if x)
+                                 or "chưa rõ"))
+    lines += [f"   {x}" for x in links]
+    try:
+        import dm_reply_tracker as _drt
+        step = await _drt.render_kol_step_line(account_id, user_id)
+        if step:
+            lines.append(step)
+    except Exception as e:
+        logger.debug("[ForumInbox] card step line skipped: %s", e)
+    deal = [f"• {label}: {_card_val(profile.get(k))}" for k, label in _CARD_DEAL_FIELDS
+            if _card_val(profile.get(k))]
+    lines.append("💼 Deal:" if deal else "💼 Deal: chưa có thông tin")
+    lines += deal
+    summary = _card_val(chat.get("summary"))
+    if summary:
+        lines.append(f"📝 Tóm tắt: {summary}")
+    if chat.get("owed_note"):
+        lines.append(f"⏳ Mình đang nợ KOL: {_card_val(chat.get('owed_note'))}")
+    return "\n".join(lines)
+
+
+_card_locks: dict = {}
+
+
+async def refresh_deal_card(db, bot, cfg: ForumConfig, topic: dict) -> str:
+    """Post + pin the topic's deal card, or edit it when the deal changed. Never raises."""
+    try:
+        if not cfg.enabled or not topic or is_hidden(topic) or not hasattr(bot, "pin_topic_message"):
+            return "skipped"
+        gid, tid = cfg.group_id, int(topic["topic_id"])
+        lock = _card_locks.setdefault((gid, tid), asyncio.Lock())
+        async with lock:
+            fresh = await db.find_telegram_topic_for_user(gid, int(topic["account_id"]), int(topic["user_id"])) or topic
+            body = await build_deal_card(db, int(fresh["account_id"]), int(fresh["user_id"]),
+                                         fresh.get("username"), fresh.get("name"))
+            h = hashlib.sha1(body.encode("utf-8")).hexdigest()[:16]
+            if fresh.get("card_message_id") and fresh.get("card_hash") == h:
+                return "unchanged"
+            text = f"{body}\n🕒 Cập nhật {datetime.now().strftime('%d/%m %H:%M')}"
+            if fresh.get("card_message_id"):
+                try:
+                    await bot.edit_topic_message(gid, int(fresh["card_message_id"]), text)
+                    await db.set_telegram_topic_card(gid, tid, int(fresh["card_message_id"]), h)
+                    return "edited"
+                except Exception as e:  # deleted by an admin → post a new one below
+                    logger.info("[ForumInbox] deal card edit failed (topic %s), reposting: %s", tid, e)
+            msg = await bot.send_topic_message(gid, tid, text)
+            mid = int(getattr(msg, "id", 0) or 0)
+            if mid:
+                try:
+                    await bot.pin_topic_message(gid, mid)
+                except Exception as e:
+                    logger.warning("[ForumInbox] deal card pin failed (topic %s): %s", tid, e)
+            await db.set_telegram_topic_card(gid, tid, mid or None, h)
+            return "posted"
+    except Exception as e:
+        logger.warning("[ForumInbox] deal card refresh failed: %s: %s", type(e).__name__, e)
+        return "error"
+
+
 def is_hidden(topic: dict | None) -> bool:
     """Operator ran /hide in this lead's topic: nothing about them reaches the group."""
     return bool(topic) and topic.get("status") == "hidden"
@@ -272,8 +417,14 @@ async def relay_inbound(db, bot, cfg: ForumConfig, *, account_id: int, user_id: 
                         has_media: bool = False) -> str:
     if not cfg.enabled:
         return "disabled"
-    if is_hidden(await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)):
+    existing = await db.find_telegram_topic_for_user(cfg.group_id, account_id, user_id)
+    if is_hidden(existing):
         return "hidden"
+    if not existing and not has_media:
+        # A first reply that is only "thanks, no need" is not a lead: no topic for it.
+        import dm_reply_tracker as _drt
+        if _drt.is_polite_decline(text):
+            return "polite_decline"
     topic = await ensure_topic(db, bot, cfg, account_id=account_id, user_id=user_id,
                                username=username, name=name, last_text=text)
     if not topic:
@@ -281,6 +432,7 @@ async def relay_inbound(db, bot, cfg: ForumConfig, *, account_id: int, user_id: 
 
     _label = await _account_label(db, account_id)
     await bot.send_topic_message(cfg.group_id, int(topic["topic_id"]), _format_inbound(_label, user_id, username, name, text, has_media))
+    await refresh_deal_card(db, bot, cfg, topic)
     return "relayed"
 
 
@@ -340,6 +492,7 @@ async def relay_outgoing(db, bot, cfg: ForumConfig, *, account_id: int, user_id:
     if not topic or is_hidden(topic):
         return "no_topic"
     await bot.send_topic_message(cfg.group_id, int(topic["topic_id"]), f"📤 {await _account_label(db, account_id)}:\n\n{text}")
+    await refresh_deal_card(db, bot, cfg, topic)
     return "relayed"
 
 

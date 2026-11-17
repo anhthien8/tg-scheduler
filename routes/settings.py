@@ -792,6 +792,7 @@ _BLOCKED_SETTING_KEYS = frozenset({
     "webshare_api_key",
     "command_bot_token",
     "dashboard_secret_key",
+    "weex_aff_token",
 })
 
 

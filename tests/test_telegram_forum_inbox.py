@@ -152,3 +152,17 @@ async def test_send_failure_audited_without_history(raises):
 
 def test_parse_int_set_accepts_negative_group_ids_and_ignores_junk():
     assert inbox.parse_int_set(" -1001, 42 ,abc,\n7 ") == {-1001, 42, 7}
+
+
+@pytest.mark.asyncio
+async def test_polite_decline_opens_no_topic_but_existing_topic_still_gets_it():
+    cfg = inbox.ForumConfig(True, -1001, 1, {9})
+    bot = FakeBot(); db = FakeDB(proof={"source": "campaign", "name": "Launch"})
+    result = await inbox.relay_inbound(db, bot, cfg, account_id=3, user_id=4, username="lead",
+                                       name="Lead", text="Thanks!\nI no need", has_media=False)
+    assert result == "polite_decline" and bot.created == [] and bot.sent == []
+
+    db.topic = {"group_id": -1001, "topic_id": 77, "account_id": 3, "user_id": 4, "status": "active"}
+    result = await inbox.relay_inbound(db, bot, cfg, account_id=3, user_id=4, username="lead",
+                                       name="Lead", text="no thanks", has_media=False)
+    assert result == "relayed" and "no thanks" in bot.sent[-1][2]

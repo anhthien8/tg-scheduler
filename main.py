@@ -370,6 +370,8 @@ async def team_users_delete(username: str):
 _auth_dep = [Depends(verify_api_key)]
 app.include_router(logs.router, dependencies=_auth_dep)
 app.include_router(settings.router, dependencies=_auth_dep)
+from routes import weex_connect as weex_connect_routes  # noqa: E402
+app.include_router(weex_connect_routes.router, dependencies=_auth_dep)
 app.include_router(blacklist.router, dependencies=_auth_dep)
 app.include_router(discord_routes.router, dependencies=_auth_dep)
 app.include_router(analytics.router, dependencies=_auth_dep)

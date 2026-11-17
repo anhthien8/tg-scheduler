@@ -8,6 +8,21 @@
         "badge": "LATEST",
         "changes": [
             {
+                "type": "improvement",
+                "title": "Thưởng volume WEEX tính trên toàn bộ volume futures",
+                "desc": "Thưởng $/1M giờ tính trên toàn bộ volume futures (maker + taker), không còn chỉ taker. Ước tính thu nhập của KOL dùng phí trung bình 0,05% (maker 0,02% / taker 0,08%). Khi KOL đòi upfront, AI nói upfront chưa kích hoạt cho lần đầu hợp tác, team xem lại sau tháng đầu theo kết quả cộng đồng, rồi đi tiếp theo thang marketing fee và trial fund trong knowledge base."
+            },
+            {
+                "type": "feature",
+                "title": "🔀 Chuyển lead sang nick khác",
+                "desc": "KOL chặn nick đang chat? Trong cửa sổ chat bấm “Chuyển nick”, chọn nick nhận. Hồ sơ, tóm tắt và bước đi theo sang nick mới, AI tắt, chat cũ được ẩn, forum mở topic mới kèm lịch sử cũ. Không tin nào tự gửi cho KOL — bạn gõ tin đầu tiên."
+            },
+            {
+                "type": "feature",
+                "title": "Chat tay tự dịch sang ngôn ngữ của lead",
+                "desc": "Lead nói tiếng Nga, Trung…? Bấm Gửi, app dịch tin của bạn sang ngôn ngữ đó và cho xem bản dịch trước khi gửi. Lead nói tiếng Anh hoặc tiếng Việt thì gửi nguyên văn."
+            },
+            {
                 "type": "feature",
                 "title": "Chip 📥 Hàng chờ (mặc định)",
                 "desc": "Gồm lead có lời hứa chưa trả và lead “cần người thật” mà KOL là người nhắn sau cùng. Quá hạn 24h xếp trước, rồi tới Tier A, rồi ai chờ lâu hơn. Nick nhà và lead đã Ignored không vào hàng chờ. Các bộ lọc ít dùng nằm trong “Thêm ▾”."

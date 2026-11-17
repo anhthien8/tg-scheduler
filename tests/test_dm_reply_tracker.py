@@ -472,3 +472,40 @@ def test_fallback_not_repeated_helpers():
     assert not t._last_assistant_is_fallback(hist[:2])
     vi = [{"role": "assistant", "content": kol_offer.get_safe_offer_fallback_reply("vi")}]
     assert t._last_assistant_is_fallback(vi)
+
+
+def test_human_bd_handover_wording_is_blocked():
+    import dm_reply_tracker as t
+    assert t.contains_ai_disclosure("I've handed over your case to a human BD. They will review your data.")
+    assert t.contains_ai_disclosure("Let me connect you with a real person")
+    assert not t.contains_ai_disclosure("Let me check with my manager and come back to you.")
+
+
+# ── Polite "thanks, no need": closing CTA once, lead closed, no AI call ──────
+
+@pytest.mark.parametrize("text,expected", [
+    ("Thanks!\nI no need", True), ("no thanks", True), ("Not interested bro", True),
+    ("không cần đâu", True), ("не надо", True),
+    ("no need KYC?", False), ("ok thanks", False), ("thanks", False),
+    ("I need more info, no need to rush but tell me the commission and how I withdraw my funds each month", False),
+])
+def test_is_polite_decline(text, expected):
+    assert tracker.is_polite_decline(text) is expected
+
+
+@patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
+@patch("telegram_client.send_text_message", new_callable=AsyncMock)
+async def test_polite_decline_gets_closing_cta_without_ai_and_closes_lead(mock_send, mock_chat):
+    await _setup_agent_chat("Thanks!\nI no need")
+    with patch("dm_reply_tracker._notify_main_account_handover", new_callable=AsyncMock) as mock_notify:
+        res = await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
+    assert res is True
+    mock_chat.assert_not_called()
+    mock_notify.assert_not_called()
+    sent = mock_send.call_args[0][2]
+    for part in ("Thanks", "no KYC", "no withdrawal limits", "top 6", "CoinGecko", "WEEX", "message me here"):
+        assert part in sent
+    assert "%" not in sent and "$" not in sent
+    chat = await db.get_followup_chat(1, 202)
+    assert chat["status"] == "needs_human"
+    assert await db.get_kol_step(1, 202) == "declined"

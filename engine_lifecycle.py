@@ -265,6 +265,16 @@ async def start_engines() -> asyncio.Task:
         replace_existing=True,
     )
 
+    # WEEX sub-affiliate tier-up: day 1 each month, queued for admin approval (off unless weex_tier_auto_enabled=1).
+    import weex_affiliate
+    sch.get_scheduler().add_job(
+        weex_affiliate.run_monthly_review,
+        trigger=CronTrigger(day=1, hour=9, minute=5, timezone=sch.TZ),
+        id="weex_tier_review",
+        name="WEEX Tier Review",
+        replace_existing=True,
+    )
+
     # Message queue worker
     mq.start_worker()
 

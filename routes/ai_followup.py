@@ -465,6 +465,10 @@ async def update_chat_status(account_id: int, user_id: int, req: UpdateChatStatu
         # Turning AI back on must also clear the human-takeover stamp, otherwise
         # the 12h "admin is chatting" guard keeps the AI silent.
         ok = await db.resume_ai_for_user(account_id, user_id)
+        held = await db.get_followup_chat(account_id, user_id)
+        if held and (held.get("stage") or "") in ("paused", "signed"):
+            # Same as /aion in the forum: lift the operator hold, or the AI stays silent.
+            await db.set_followup_stage(account_id, user_id, "nurture")
     else:
         ok = await db.update_followup_chat_status(account_id, user_id, req.status)
     if not ok:
@@ -637,6 +641,58 @@ async def message_op(account_id: int, user_id: int, req: MessageOpRequest):
         new_content = (ops.HUMAN_PREFIX + " " + new_text) if entry["content"].startswith(ops.HUMAN_PREFIX) else new_text
     await db.edit_followup_history_entry(account_id, user_id, req.timestamp, req.content, new_content)
     return {"ok": True, "telegram_messages": len(found), "content": new_content}
+
+
+class TransferChatRequest(BaseModel):
+    to_account_id: int
+
+
+@router.post("/chats/{account_id}/{user_id}/transfer")
+async def transfer_chat(account_id: int, user_id: int, req: TransferChatRequest):
+    """Hand a lead over to another of our nicks (e.g. the KOL blocked this one).
+
+    Carries the profile, summary and funnel step to the new nick's chat with the AI off,
+    hides the old chat and opens the new forum topic with the old transcript. Sends NOTHING
+    to the lead — the admin writes the first message from the new nick by hand.
+    """
+    to_id = req.to_account_id
+    if to_id == account_id:
+        raise HTTPException(status_code=400, detail="Lead đang ở nick này rồi")
+    chat = await db.get_followup_chat(account_id, user_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    if not await db.get_account(to_id):
+        raise HTTPException(status_code=404, detail="Không tìm thấy nick nhận")
+    client = tg.get_client(to_id)
+    if not client:
+        raise HTTPException(status_code=400, detail="Nick nhận chưa kết nối Telegram")
+    # The new nick has never seen this lead: Telegram only lets it write to them once it has
+    # resolved them — by @username, or by id when it already knows them (shared group).
+    uname = (chat.get("username") or "").lstrip("@").strip()
+    try:
+        entity = await client.get_entity(uname or user_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=("Nick nhận không tìm thấy KOL này trên Telegram"
+                    + ("" if uname else " (KOL không có @username nên nick mới không thể tự tìm)")
+                    + f": {type(e).__name__}"))
+    if getattr(entity, "id", None) != user_id:
+        raise HTTPException(status_code=400,
+                            detail=f"@{uname} hiện thuộc về một người khác — không chuyển để tránh nhắn nhầm")
+    res = await db.transfer_followup_chat(account_id, to_id, user_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    forum = "unavailable"
+    try:
+        import command_bot
+        # Background: replaying a long transcript into the topic takes a while.
+        asyncio.create_task(command_bot.relay_transfer_to_forum(
+            account_id, to_id, user_id, chat.get("username"), chat.get("name"), res["created"]))
+        forum = "relaying"
+    except Exception:
+        pass
+    return {"ok": True, "account_id": to_id, "user_id": user_id, "forum": forum, **res}
 
 
 @router.get("/chats/{account_id}/{user_id}/history")

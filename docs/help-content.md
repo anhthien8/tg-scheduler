@@ -318,7 +318,7 @@ Terminal: `declined` (KOL từ chối / AI trả `[STOP]`), `dormant`.
 
 #### Thang offer chính thức (kol_offer.py)
 
-- Mặc định v1 (hiệu lực 21/10/2026): 55% ngay → ≥10M 60% → ≥20M 65% → ≥50M 70% → ≥100M 80% (tổng volume/tháng dương lịch); bonus $100/1M taker (bậc 4 $50, bậc 5 $10). Lên bậc theo tháng, review hạ bậc theo quý; commission hàng ngày, bonus mùng 10; loại tự trade/wash, sub-affiliate được tính.
+- Mặc định v1 (hiệu lực 21/10/2026): 55% ngay → ≥10M 60% → ≥20M 65% → ≥50M 70% → ≥100M 80% (tổng volume/tháng dương lịch); bonus $100/1M volume futures, tính trên toàn bộ volume futures từ 18/11/2026 (bậc 4 $50, bậc 5 $10). Lên bậc theo tháng, review hạ bậc theo quý; commission hàng ngày, bonus mùng 10; loại tự trade/wash, sub-affiliate được tính.
 - Chỉnh trong Tab AI Agent → **Thang offer** (preview đúng khối prompt). Lưu = version mới + ghi `kol_offer_ladder_history`.
 - **Guard số lạ**: reply AI có % / $ / USDT ngoài thang hoặc cụm cấm (B-book) → thay bằng câu an toàn, chat chuyển needs_human, thông báo nick chính + Forum Inbox. Kiểm tra tay: `POST /api/ai-followup/offer-ladder/check {"text": ...}`.
 - AI chỉ dự đoán bậc khi KOL đã nói volume (`volume_claimed`).

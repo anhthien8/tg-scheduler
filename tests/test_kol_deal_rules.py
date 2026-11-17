@@ -75,8 +75,13 @@ def test_weex_ladder_prompt_carries_current_deal_and_upfront_review():
 def test_upfront_review_rule_never_refuses_and_hands_over_on_the_second_step():
     rule = kol_offer.UPFRONT_REVIEW_RULE
     assert "do NOT refuse" in rule and "do NOT hand over yet" in rule
-    assert "milestones" in rule and "paid in stages" in rule
-    assert "Never state an upfront amount" in rule
+    assert "not yet activated" in rule and "first-time partnership" in rule
+    assert "after the first month" in rule and "community's performance" in rule
+    assert "trial-fund" in rule and "paid in stages" not in rule
+    assert "Never state an upfront amount" in rule and "CASH upfront" in rule
+    # The kept knowledge-base ladder (marketing fee bonus, then trial fund) stays reachable and quotable.
+    assert "MARKETING FEE & UPFRONT LADDER" in rule and "step 1 before step 2" in rule
+    assert "MARKETING FEE & UPFRONT LADDER" in kol_offer.render_offer_ladder_prompt(kol_offer.DEFAULT_LADDER).splitlines()[-2]
     assert rule.rstrip(".").endswith("[HANDOVER_REQUIRED]")
     deal = kol_offer.CURRENT_DEAL_RULE
     assert "ONCE" in deal and "Never name an exchange" in deal and "never promise" in deal
@@ -97,8 +102,8 @@ async def test_non_weex_agents_keep_the_upfront_proof_rule():
 
 
 def test_guard_passes_milestone_upfront_wording():
-    reply = ("Totally get it bro. Our team will review your current deal — after a good first month together, "
-             "an upfront tied to milestones (volume / active traders) and paid in stages is possible. "
+    reply = ("Totally get it bro. Upfront isn't activated yet for a first-time partnership — after the first month "
+             "together our team will review your request again based on your community's performance. "
              "Could you share your current revshare %, any volume bonus or fixed fee, and a screenshot of "
              "your commission page?")
     assert kol_offer.find_off_ladder_figures(reply) == []

@@ -1215,6 +1215,25 @@ async def init_db():
         """)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_kol_step_events_lead ON kol_step_events(account_id, user_id, id)")
 
+        # Monthly WEEX sub-affiliate tier upgrades, one row per (month, agent): pending → applied/rejected/failed.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS weex_tier_upgrades (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                month       TEXT NOT NULL,
+                agent_uid   TEXT NOT NULL,
+                agent_name  TEXT DEFAULT '',
+                volume_usd  REAL DEFAULT 0,
+                old_rate    REAL NOT NULL,
+                new_rate    REAL NOT NULL,
+                tier        INTEGER NOT NULL,
+                status      TEXT DEFAULT 'pending',
+                error       TEXT DEFAULT '',
+                created_at  TEXT DEFAULT (datetime('now')),
+                decided_at  TEXT,
+                UNIQUE(month, agent_uid)
+            )
+        """)
+
         # Version history of the pre-approved commission ladder (spec §A1).
         await db.execute("""
             CREATE TABLE IF NOT EXISTS kol_offer_ladder_history (
@@ -1476,6 +1495,8 @@ async def init_db():
                 UNIQUE(group_id, account_id, user_id)
             )
         """)
+        await _add_column(db, "telegram_topics", "card_message_id", "INTEGER")  # pinned deal card
+        await _add_column(db, "telegram_topics", "card_hash", "TEXT")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_telegram_topics_lookup ON telegram_topics(group_id, account_id, user_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_telegram_topics_thread ON telegram_topics(group_id, topic_id)")
 
@@ -6183,6 +6204,85 @@ async def get_pipeline_counts() -> dict:
     return {s: counts.get(s, 0) for s in PIPELINE_STAGES}
 
 
+async def transfer_followup_chat(from_account_id: int, to_account_id: int, user_id: int,
+                                 actor: str = "admin:web") -> dict | None:
+    """Hand a lead over to another of our accounts (e.g. the KOL blocked the old nick).
+
+    The (to_account, user) chat receives the lead metrics, summary, funnel step (with its
+    event history), any open owed answer and the KOL profile. It starts with an EMPTY
+    transcript — a chat's history is only what that nick really exchanged, so the AI can
+    never answer a message that was written to another nick — and on an operator hold
+    (stage 'paused'). A chat the new nick already has keeps its own transcript and step.
+    Channel distribution is not carried: an admin turns it on again after the first
+    manual message. The old chat is hidden and held (bot_ignored + 'paused').
+    Nothing is sent to the lead.
+
+    Returns {"created": bool, "kol_step": str}, or None when the source chat is missing.
+    """
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT kol_step FROM ai_followup_chats WHERE account_id = ? AND user_id = ?",
+            (from_account_id, user_id))
+        src = await cursor.fetchone()
+        if not src:
+            return None
+        step = normalize_kol_step(src["kol_step"]) or "prospect"
+        cursor = await db.execute("""
+            INSERT OR IGNORE INTO ai_followup_chats
+                (account_id, user_id, username, name, intent_score, lead_tier, summary,
+                 verification_status, owed_since, owed_note, kol_step, kol_step_updated_at,
+                 status, stage, human_takeover_at)
+            SELECT ?, user_id, username, name, intent_score, lead_tier,
+                   '[Chuyển từ nick ' || COALESCE((SELECT name FROM accounts WHERE id = ?), '#' || ?)
+                       || ' — lịch sử cũ: xem chat cũ ở bộ lọc Ignored hoặc topic forum] ' || COALESCE(summary, ''),
+                   verification_status, owed_since, owed_note, ?, datetime('now'),
+                   'needs_human', 'paused', datetime('now')
+            FROM ai_followup_chats WHERE account_id = ? AND user_id = ?
+        """, (to_account_id, from_account_id, from_account_id, step, from_account_id, user_id))
+        created = cursor.rowcount > 0
+        if created:
+            # Keep the funnel history (e.g. the day the deal was agreed) with the lead.
+            await db.execute(
+                "INSERT INTO kol_step_events (account_id, user_id, from_step, to_step, actor, reason, created_at) "
+                "SELECT ?, user_id, from_step, to_step, actor, reason, created_at FROM kol_step_events "
+                "WHERE account_id = ? AND user_id = ? ORDER BY id",
+                (to_account_id, from_account_id, user_id))
+            await db.execute(
+                "INSERT INTO kol_step_events (account_id, user_id, from_step, to_step, actor, reason) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (to_account_id, user_id, step, step, actor, f"Chuyển lead từ nick #{from_account_id}"))
+        else:
+            await db.execute("""
+                UPDATE ai_followup_chats
+                SET stage = 'paused', status = 'needs_human', updated_at = datetime('now'),
+                    human_takeover_at = COALESCE(human_takeover_at, datetime('now'))
+                WHERE account_id = ? AND user_id = ?
+            """, (to_account_id, user_id))
+        # 'paused' as well: a manual send from the old nick flips bot_ignored back to
+        # needs_human, and only the stage keeps the 12h auto-resume away from it.
+        await db.execute(
+            "UPDATE ai_followup_chats SET status = 'bot_ignored', stage = 'paused', updated_at = datetime('now') "
+            "WHERE account_id = ? AND user_id = ?", (from_account_id, user_id))
+        await db.commit()
+
+    try:  # the chat rows are committed: a profile hiccup must not fail a finished transfer
+        src_profile = await get_kol_profile(from_account_id, user_id)
+        dst_profile = await get_kol_profile(to_account_id, user_id)
+        skip = ("missing_items", "last_kol_reply_at", "last_our_reply_at", "distribution_enabled")
+        carry = {k: v for k, v in src_profile.items() if k not in dst_profile and k not in skip}
+        if carry:
+            await upsert_kol_profile(to_account_id, user_id, carry)
+        if src_profile.get("distribution_enabled"):
+            # The old nick can no longer reach the KOL: do not send channel posts from it.
+            await upsert_kol_profile(from_account_id, user_id, {"distribution_enabled": False})
+        await refresh_missing_items(to_account_id, user_id)
+    except Exception as exc:
+        logger.warning(f"[Transfer] profile carry-over failed for {user_id}: {exc}")
+    logger.info(f"[Transfer] lead {user_id}: account {from_account_id} → {to_account_id} by {actor} (created={created})")
+    return {"created": created, "kol_step": step if created else await get_kol_step(to_account_id, user_id)}
+
+
 async def find_followup_chat_by_username(username: str, account_id: int | None = None) -> dict | None:
     """Look up a chat by @username, optionally scoped to one account.
 
@@ -7018,6 +7118,16 @@ async def update_telegram_topic_status(group_id: int, topic_id: int, status: str
         await db.execute(
             "UPDATE telegram_topics SET status = ?, updated_at = datetime('now') WHERE group_id = ? AND topic_id = ?",
             (status, group_id, topic_id),
+        )
+        await db.commit()
+
+
+async def set_telegram_topic_card(group_id: int, topic_id: int, message_id: int | None, card_hash: str | None):
+    """The pinned deal card of a topic: its message id + a hash of what it says."""
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE telegram_topics SET card_message_id = ?, card_hash = ? WHERE group_id = ? AND topic_id = ?",
+            (message_id, card_hash, group_id, topic_id),
         )
         await db.commit()
 
@@ -8149,6 +8259,7 @@ async def get_supported_kols() -> list[dict]:
             LEFT JOIN accounts a ON a.id = c.account_id
             LEFT JOIN kol_profiles p ON p.account_id = c.account_id AND p.user_id = c.user_id
             WHERE COALESCE(NULLIF(c.kol_step, ''), 'prospect') IN ({ph})
+              AND COALESCE(c.status, '') != 'bot_ignored'
             ORDER BY CASE WHEN c.kol_step = 'dormant' THEN 1 ELSE 0 END,
                      COALESCE(c.kol_step_updated_at, c.updated_at) DESC
         """, SUPPORTED_KOL_STEPS)

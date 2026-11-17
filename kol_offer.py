@@ -59,7 +59,7 @@ DEFAULT_LADDER: dict = {
                          "volume on WEEX is lower, the tier is adjusted at the quarterly review.",
         "downgrade": "Downgrades happen only at the quarterly review, if volume stays below the tier threshold.",
         "threshold_basis": "Tier thresholds use TOTAL monthly volume (maker + taker).",
-        "bonus_basis": "The per-1M bonus is computed on TAKER volume only.",
+        "bonus_basis": "The per-1M bonus is computed on TOTAL futures volume (maker + taker).",
         "commission_payout": "Commission (revshare) is paid DAILY.",
         "bonus_payout": "The volume bonus is paid on the 10th of the following month.",
         "exclusions": "Self-trading and wash volume are excluded from valid volume.",
@@ -96,6 +96,8 @@ _TIER_KEYS = ("tier", "min_volume_m", "revshare_pct", "bonus_per_1m_taker_usd")
 # Rule texts replaced by the owner's deal rules (2026-11-10). A saved ladder that still
 # carries the old default wording gets the new one; an admin-written text is kept.
 _LEGACY_RULE_TEXT = {
+    # Owner, 2026-11-18: the volume bonus counts ALL futures volume, no longer taker only.
+    "bonus_basis": "The per-1M bonus is computed on TAKER volume only.",
     "upgrade": "Tiers are reviewed per calendar month. Reaching a threshold this month unlocks the new tier "
                "from NEXT month. The first month is always the starting tier.",
 }
@@ -280,7 +282,7 @@ def _first_pitch_rule(ladder: dict) -> str:
     return (
         "FIRST PITCH (the first time the KOL agrees to hear the offer, or asks what you offer): ONE message, 3-5 short lines, "
         f"covering: the headline; that they start at {_fmt_num(t0['revshare_pct'])}% revshare + "
-        f"${_fmt_num(t0['bonus_per_1m_taker_usd'])} per 1M taker volume — or directly at a higher tier when they prove "
+        f"${_fmt_num(t0['bonus_per_1m_taker_usd'])} per 1M futures volume — or directly at a higher tier when they prove "
         "their current monthly volume — and move up the ladder as volume grows; "
         "commission is paid daily; " + (f"one reason to choose us ({why}); " if why else "")
         + "then recommend ONE currently running campaign that fits their community and ask if they want to go ahead "
@@ -319,6 +321,13 @@ def render_starting_tier_rule(ladder: dict) -> str:
     )
 
 
+# Figures outside the ladder the AI may still quote: the knowledge base's own concession ladder.
+_KB_LADDER_EXCEPTION = (
+    "the marketing fee bonus / trial-fund amounts written in your knowledge base's MARKETING FEE & UPFRONT LADDER "
+    "(only in its order, when the UPFRONT rule applies)"
+)
+
+
 def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, volume_stated=None) -> str:
     """Build the prompt block the AI receives every turn.
 
@@ -333,7 +342,7 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, 
         f"Headline you may use: \"{ladder.get('headline') or 'up to 80% revshare'}\". When the KOL asks for details, use EXACTLY this ladder. "
         "It is the SAME for every KOL, every region and every language (KOLs outside Vietnam, Korea and the China market get their own region offer block instead) — there is no other offer.",
         _first_pitch_rule(ladder),
-        "| Tier | Condition (monthly) | RevShare | Bonus per 1M TAKER volume |",
+        "| Tier | Condition (monthly) | RevShare | Bonus per 1M FUTURES volume |",
         "|---|---|---|---|",
         *_tier_rows(ladder),
         "RULES:",
@@ -351,19 +360,21 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, 
         render_starting_tier_rule(ladder),
         CURRENT_DEAL_RULE,
         UPFRONT_REVIEW_RULE,
-        "NEVER quote any % or $ figure that is not in this ladder (no internal estimates, no 'total payout' maths, no ranges like 50-60%).",
+        "NEVER quote any % or $ figure that is not in this ladder (no internal estimates, no 'total payout' maths, "
+        "no ranges like 50-60%), EXCEPT " + _KB_LADDER_EXCEPTION + ".",
     ]
     pred = predicted_tier(ladder, volume_claimed or volume_stated)
     est = value_estimate(ladder, volume_claimed)
     if est is not None:
         lines[-1] = ("NEVER quote any % or $ figure that is not in this ladder, EXCEPT the pre-computed figures in the "
-                     "VALUE ESTIMATE block below (copy them exactly; never compute new totals yourself).")
+                     "VALUE ESTIMATE block below (copy them exactly; never compute new totals yourself) and "
+                     + _KB_LADDER_EXCEPTION + ".")
         lines.append(render_value_estimate(est))
     if pred is not None:
         lines.append(
             f"TIER PREDICTION ALLOWED: the KOL stated about {_fmt_num(pred['volume_m'])}M monthly volume on their current "
             f"exchange → with a verified last-3-months dashboard recording they LIKELY start at Tier {pred['tier']} "
-            f"({_fmt_num(pred['revshare_pct'])}% revshare + ${_fmt_num(pred['bonus_per_1m_taker_usd'])} per 1M taker) "
+            f"({_fmt_num(pred['revshare_pct'])}% revshare + ${_fmt_num(pred['bonus_per_1m_taker_usd'])} per 1M futures volume) "
             "instead of Tier 1. Tell them it applies once our team verifies the recording; never confirm it as final."
         )
     else:
@@ -378,10 +389,10 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, 
 
 # ── Value estimate (what the KOL earns with WEEX at their current volume) ───
 
-# Blended fee rate implied by WEEX's SABC table (100,000 USDT fees ≈ 166.67M volume).
-EST_FEE_RATE = 0.0006
-# Taker share assumed for the per-1M taker bonus (stated as an assumption to the KOL).
-EST_TAKER_SHARE = 0.5
+# Fee rate implied by WEEX's SABC table (100,000 USDT fees ≈ 166.67M volume): SABC tier only.
+SABC_FEE_RATE = 0.0006
+# Earnings estimate: futures fees are 0.02% maker / 0.08% taker, assumed half and half (owner, 2026-11-18).
+EST_FEE_RATE = 0.0005
 # SABC channel tiers by monthly fees (USDT), highest first.
 # Monthly marketing-fee bonus cap (owner-set, 2026-11-07).
 MARKETING_FEE_MAX = 200
@@ -409,17 +420,16 @@ def value_estimate(ladder: dict | None, volume_claimed) -> dict | None:
         return None
     vol = vol_m * 1_000_000
     fees = vol * EST_FEE_RATE
-    taker_m = vol_m * EST_TAKER_SHARE
 
     def _at(t: dict) -> dict:
         com = _round_money(fees * float(t["revshare_pct"]) / 100)
-        bonus = _round_money(taker_m * float(t["bonus_per_1m_taker_usd"]))
+        bonus = _round_money(vol_m * float(t["bonus_per_1m_taker_usd"]))  # all futures volume
         return {"tier": t["tier"], "revshare_pct": t["revshare_pct"], "commission": com,
                 "bonus": bonus, "total": com + bonus}
 
     first = ladder["tiers"][0]
     target = tier_for_volume(ladder, vol_m) or first
-    return {"volume_m": vol_m, "fees": _round_money(fees), "sabc": sabc_tier(fees),
+    return {"volume_m": vol_m, "fees": _round_money(fees), "sabc": sabc_tier(vol * SABC_FEE_RATE),
             "month1": _at(first), "steady": _at(target)}
 
 
@@ -439,15 +449,15 @@ def render_value_estimate(est: dict) -> str:
     return "\n".join([
         "--- VALUE ESTIMATE FOR THIS KOL (pre-computed by the system; use these exact figures) ---",
         f"Stated volume ≈ {_fmt_num(est['volume_m'])}M/month → trading fees ≈ {fmt(est['fees'])}/month "
-        "(estimate at their current volume, assuming ~half taker volume).",
+        "(rough estimate at their current volume, assuming about half maker and half taker orders).",
         f"SABC channel tier: {sabc or 'below C (no tier yet)'}"
         + (f" — pitch the tier-{sabc} benefits from the knowledge base and send [[BANNER:tier_{sabc.lower()}]]." if sabc else "."),
         f"PERFORMANCE SYNC: once our team verifies their last-3-months dashboard recording, they likely START at the "
         f"matching ladder tier instead of Tier 1: Tier {st['tier']}, {_fmt_num(st['revshare_pct'])}% revshare → commission ≈ "
-        f"{fmt(st['commission'])} + taker bonus ≈ {fmt(st['bonus'])} = ≈ {fmt(st['total'])}/month EXTRA income "
+        f"{fmt(st['commission'])} + volume bonus ≈ {fmt(st['bonus'])} = ≈ {fmt(st['total'])}/month EXTRA income "
         "if they ADD WEEX alongside what they run now (frame it as additional, not a replacement).",
         "When the KOL has shared their numbers, present the FULL PACKAGE in one message (short lines):",
-        f"1) ≈ {fmt(st['total'])}/month extra from commission + taker bonus (paid daily).",
+        f"1) ≈ {fmt(st['total'])}/month extra from commission + volume bonus (commission paid daily).",
         "2) Marketing campaign support: ONE exclusive campaign for their channel (best fit; rotates every ~2 weeks, never stacked).",
         "3) Marketing accounts provided so they can build consistent WEEX content.",
         "4) Bonus: offline events in the future, and trial-fund bonuses for their community.",
@@ -489,7 +499,7 @@ def allowed_figures(ladder: dict | None = None) -> tuple[set[float], set[float]]
         if vol > 0:
             # '10M' / '$10M' volume thresholds are legitimate dollar figures.
             dollars.add(vol * 1_000_000)
-    dollars.add(1_000_000)  # 'per 1M taker volume'
+    dollars.add(1_000_000)  # 'per 1M futures volume'
     for p in list(only or []) + list(r.get("extra_allowed_percents") or []):
         try:
             pcts.add(float(p))
@@ -671,7 +681,8 @@ def get_safe_offer_fallback_reply(lang: str = "en") -> str:
 
 # ── Storage ─────────────────────────────────────────────────────────────────
 
-# WEEX deal rules 2 + 3 (owner, 2026-11-10): learn the KOL's current deal, never refuse upfront outright.
+# WEEX deal rules 2 + 3 (owner, 2026-11-10; upfront wording 2026-11-18): learn the KOL's current deal, never refuse
+# upfront outright: it is "not yet activated for a first-time partnership" and is reviewed after month one.
 CURRENT_DEAL_RULE = (
     "CURRENT DEAL: when the KOL mentions or compares another exchange, asks for a better deal, or asks for upfront, ask "
     "ONCE in one short message what their CURRENT deal is: revshare/rebate %, any volume bonus, any fixed/upfront fee, "
@@ -680,19 +691,31 @@ CURRENT_DEAL_RULE = (
     "to match or beat their deal: say our team will review it to see what we can do for them."
 )
 UPFRONT_REVIEW_RULE = (
-    "UPFRONT / FIXED-FEE REQUESTS (overrides the handover list above for the FIRST ask): do NOT refuse, never say "
-    "upfront is unavailable, and do NOT hand over yet. Say our team will review their current deal, and that after a "
-    "good first month together an upfront tied to milestones (volume / active traders) and paid in stages is possible. "
-    "In the same message ask ONCE for their current deal (see CURRENT DEAL) and the last-3-months dashboard recording "
-    "(skip what is already in the chat). Never state an upfront amount, a specific milestone or a date. "
-    "Once they have shared their deal or recording — or refuse, insist, or ask for an amount — say the team is "
-    "reviewing their deal and will come back with a proposal, and end your reply with [HANDOVER_REQUIRED]."
+    "UPFRONT / FIXED-FEE REQUESTS (overrides the handover list above for the FIRST ask): do NOT refuse outright, never "
+    "say upfront is unavailable, and do NOT hand over yet. Say that upfront is not yet activated for KOLs on a "
+    "first-time partnership with WEEX, that after the first month of working together our team will review their "
+    "upfront request again based on their community's performance, and that in the meantime the cooperation can go "
+    "the trial-fund / marketing-support route instead (amounts and conditions ONLY as written in the knowledge base, "
+    "in its order). If a pre-computed monthly earnings total for this KOL is given below, add it as what they earn "
+    "EVERY month, not once. "
+    "In the same message ask ONCE for their current deal (see CURRENT DEAL), the last-3-months dashboard recording, "
+    "and how much monthly futures trading volume their referred users are expected to generate in the first month "
+    "(their own trading on the master account does not count) so our team can prepare the marketing-support / trial-fund request "
+    "(skip what is already in the chat). Never state an upfront amount, a milestone or a date for the CASH upfront "
+    "or its review, and never promise the review will approve one; the marketing fee bonus and trial-fund figures and "
+    "conditions of the knowledge base ladder are allowed, exactly as written there. If they still refuse or insist "
+    "after your first answer, follow the knowledge base MARKETING FEE & UPFRONT LADDER step by step (step 1 before "
+    "step 2, each offered once); it decides when to hand over. Once they have shared their deal or recording, ask for "
+    "a cash upfront amount, or that ladder is used up — say the team is reviewing their deal and will come back with "
+    "a proposal, and end your reply with [HANDOVER_REQUIRED]."
 )
 
 # Upfront asks for non-WEEX agents: collect proof first, then answer with the agent's own upfront rule.
 UPFRONT_PROOF_RULE = (
     "UPFRONT / FIXED-FEE REQUESTS (overrides the handover list above for the FIRST ask): do NOT hand over yet. "
-    "First, ONCE (skip if their last-3-months proof is already in the chat), ask the KOL for a screen-recorded VIDEO of their trading/referral performance for the LAST 3 MONTHS "
+    "First, ONCE (skip what is already in the chat), ask how much monthly futures volume their referred users are expected "
+    "to generate in the first month (their own master-account trading does not count) so we can submit a trial-fund request, "
+    "and ask for a screen-recorded VIDEO of their trading/referral performance for the LAST 3 MONTHS "
     "(affiliate dashboard: referred volume, active traders, commission), clearly showing the deal terms of the exchange "
     "they currently partner with (rate, any upfront/fixed fee they receive). They may hide UID, balance and email. "
     "Do not promise anything in return for the video. "

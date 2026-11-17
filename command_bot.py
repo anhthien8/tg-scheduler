@@ -391,6 +391,13 @@ def _register_handlers(client: TelegramClient):
             return
         await _handle_hide(event, hidden=not event.raw_text.startswith("/unhide"))
 
+    # ── /card — post or refresh the pinned deal card of this topic ─────────
+    @client.on(events.NewMessage(pattern=r"/card(@\w+)?$"))
+    async def cmd_card(event):
+        if not _check_admin(event):
+            return
+        await _handle_card(event)
+
     # ── Forum topic admin messages ──────────────────────────────────────────
     # Slash messages are excluded EXCEPT the /ai* control commands, which are
     # handled per-topic by _handle_forum_admin_message.
@@ -430,6 +437,11 @@ def _register_handlers(client: TelegramClient):
                 return
             if data.startswith("fr_no:"):
                 await _handle_forum_cancel(event, data.split(":", 1)[1])
+                return
+
+            # ── WEEX monthly tier-up approvals ──
+            if data.startswith(("wx_ok:", "wx_no:", "wx_all:")):
+                await _handle_weex_tier_button(event, data)
                 return
 
             # ── AI control buttons inside a lead topic ──
@@ -1153,6 +1165,12 @@ class _TelethonForumBot:
     async def send_topic_message(self, group_id: int, topic_id: int, text: str, buttons=None):
         return await self._client.send_message(group_id, text, reply_to=topic_id, buttons=buttons)
 
+    async def edit_topic_message(self, group_id: int, message_id: int, text: str):
+        return await self._client.edit_message(group_id, message_id, text)
+
+    async def pin_topic_message(self, group_id: int, message_id: int):
+        return await self._client.pin_message(group_id, message_id, notify=False)
+
     async def send_topic_file(self, group_id: int, topic_id: int, path: str, caption: str):
         return await self._client.send_file(group_id, path, caption=caption, reply_to=topic_id,
                                             supports_streaming=True)
@@ -1292,6 +1310,24 @@ async def replay_forum_history(days: int = 30, limit: int = 500) -> dict:
     except Exception as e:
         logger.warning("[ForumInbox] replay top-level failed: %s", e)
         return {"replayed": 0, "skipped": 0, "failed": 0, "reason": "error"}
+
+
+async def relay_transfer_to_forum(from_account_id: int, to_account_id: int, user_id: int,
+                                  username: str | None, name: str | None, created: bool = True) -> str:
+    """A lead was handed over to another nick: note it in the old topic, open the new one. Never raises."""
+    try:
+        bot = _forum_bot()
+        if not bot:
+            return "bot_offline"
+        cfg = await _load_forum_config()
+        res = await fx.relay_transfer(db, bot, cfg, from_account_id=from_account_id,
+                                      to_account_id=to_account_id, user_id=user_id,
+                                      username=username, name=name, created=created)
+        return res.get("status", "error")
+    except Exception as e:
+        logger.warning("[ForumInbox] transfer relay failed (acc=%s→%s user=%s): %s: %s",
+                       from_account_id, to_account_id, user_id, type(e).__name__, e)
+        return "error"
 
 
 async def relay_outgoing_to_forum(account_id: int, user_id: int, text: str) -> str:
@@ -1537,6 +1573,21 @@ async def _handle_hide(event, hidden: bool) -> None:
         await event.respond(f"👀 Đã hiện lại {who} và bật AI: tin mới sẽ vào topic này.")
 
 
+async def _handle_card(event) -> None:
+    """Post (and pin) or refresh the deal card of THIS topic right now."""
+    topic_id = _extract_topic_id(event.message)
+    cfg = await _load_forum_config()
+    topic = await db.get_telegram_topic_by_thread(cfg.group_id, topic_id) if topic_id else None
+    bot = _forum_bot()
+    if not topic or not bot:
+        await event.respond("Gõ /card ngay trong topic của lead.")
+        return
+    await db.set_telegram_topic_card(cfg.group_id, topic_id, topic.get("card_message_id"), None)  # force a rewrite
+    res = await fx.refresh_deal_card(db, bot, cfg, topic)
+    if res not in ("posted", "edited"):
+        await event.respond("⚠️ Không tạo được thẻ deal (topic đang ẩn hoặc bot thiếu quyền ghim).")
+
+
 def _lead_label_short(topic: dict) -> str:
     return "@" + topic["username"] if topic.get("username") else (topic.get("name") or str(topic.get("user_id")))
 
@@ -1753,6 +1804,52 @@ async def _handle_forum_confirm(event, token: str) -> None:
 # PUBLIC API: Send handover alert to bot admin
 # ════════════════════════════════════════════════════════════════════════════
 
+async def send_weex_tier_review(text: str, month: str, upgrade_ids: list[int]) -> bool:
+    """Monthly WEEX tier-up list to admins: one approve/skip pair per KOL + approve-all."""
+    if not _bot or not _bot.is_connected() or not _admin_ids:
+        _note_drop("weex_tier_review", f"danh sách nâng bậc WEEX tháng {month} không gửi được tới admin")
+        return False
+    buttons = [[Button.inline(f"✅ #{i}", data=f"wx_ok:{i}"), Button.inline(f"🚫 #{i}", data=f"wx_no:{i}")]
+               for i in upgrade_ids[:40]]
+    buttons.append([Button.inline("✅ Duyệt tất cả", data=f"wx_all:{month}")])
+    sent = False
+    for admin_id in _admin_ids:
+        try:
+            await _bot.send_message(admin_id, text, buttons=buttons, parse_mode="md")
+            sent = True
+        except Exception as e:
+            logger.warning(f"[CommandBot] weex tier review → {admin_id} failed: {e}")
+    return sent
+
+
+async def send_admin_text(text: str) -> bool:
+    """Plain markdown notice to every command-bot admin."""
+    if not _bot or not _bot.is_connected() or not _admin_ids:
+        _note_drop("admin_text", text[:80])
+        return False
+    sent = False
+    for admin_id in _admin_ids:
+        try:
+            await _bot.send_message(admin_id, text, parse_mode="md")
+            sent = True
+        except Exception as e:
+            logger.warning(f"[CommandBot] admin text → {admin_id} failed: {e}")
+    return sent
+
+
+async def _handle_weex_tier_button(event, data: str):
+    import weex_affiliate as wx
+    kind, arg = data.split(":", 1)
+    if kind == "wx_all":
+        ids = await wx.pending_ids(arg)
+        await event.answer(f"Đang nâng {len(ids)} KOL…")
+        results = [await wx.approve(i) for i in ids]
+    else:
+        await event.answer("Đang xử lý…")
+        results = [await (wx.approve if kind == "wx_ok" else wx.reject)(int(arg))]
+    await event.respond("\n".join(results) or "Không còn mục nào chờ duyệt.")
+
+
 async def send_handover_alert(account_name: str, sender_username: str,
                               sender_name: str, reason: str,
                               campaign_name: str = None, ai_message: str = None):
@@ -1916,6 +2013,7 @@ async def _start_command_bot_locked():
                     BotCommand("pause", "⏸ Pause campaign (ID)"),
                     BotCommand("aion", "🤖 Bật AI cho KOL (@username)"),
                     BotCommand("aioff", "🤖 Tắt AI cho KOL (@username)"),
+                    BotCommand("card", "📌 Ghim / làm mới thẻ deal của topic này"),
                     BotCommand("check", "🔍 Check SpamBot account (@name)"),
                 ]
             ))

@@ -13,7 +13,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TG Scheduler">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/css/style.css?v=495">
+  <link rel="stylesheet" href="/static/css/style.css?v=496">
   <link rel="stylesheet" href="/static/css/themes.css?v=503">
   <script src="/static/js/theme.js?v=492"></script>
   <!-- ?diag: paint JS errors, failed files and a heartbeat on screen (phones have no console). -->
@@ -594,6 +594,24 @@
       <div id="view-settings" class="hidden">
         <h2 class="page-title">⚙️ Cài đặt AI Remix</h2>
         <div style="max-width:680px">
+
+          <!-- WEEX affiliate portal connection -->
+          <div class="card" id="weex-connect-card" style="margin-bottom:20px;padding:20px">
+            <label class="form-label" style="font-size:15px;font-weight:600">🔗 Kết nối WEEX Affiliate
+              <span class="info-i" tabindex="0" data-tip="Cho app quyền đọc volume và đặt tỷ lệ hoa hồng sub-affiliate trên line CSS. Token portal sống 3 ngày — hết hạn thì đăng nhập portal và bấm bookmark lại.">i</span></label>
+            <p id="weex-connect-status" style="font-size:13px;color:var(--text2);margin:6px 0 12px">Đang kiểm tra…</p>
+            <ol style="font-size:13px;color:var(--text2);margin:0 0 12px 18px;line-height:1.7">
+              <li>Kéo nút này lên thanh bookmark (làm 1 lần):
+                <a id="weex-bookmarklet" class="btn btn-sm btn-primary" href="#" onclick="event.preventDefault();App.toast('Kéo nút này lên thanh bookmark, đừng bấm ở đây','info')">🔗 Kết nối WEEX</a></li>
+              <li>Mở <a href="https://affiliates.weex.com/" target="_blank" rel="noopener">affiliates.weex.com</a>, đăng nhập.</li>
+              <li>Bấm bookmark <b>Kết nối WEEX</b> → app tự lấy token.</li>
+            </ol>
+            <label style="display:flex;gap:8px;align-items:center;font-size:13px">
+              <input type="checkbox" id="weex-auto-enabled" onchange="App.setWeexEnabled(this.checked)">
+              Tự onboard KOL theo UID + nâng bậc hằng tháng
+              <span class="info-i" tabindex="0" data-tip="Khi có UID: KOL khai ≥20M/tháng được tạo thẳng trên line CSS ở Tier 1; KOL nhỏ hơn → báo team submit xin KOL + camp. Ngày 1 hằng tháng gửi danh sách nâng bậc theo volume thật để admin duyệt.">i</span>
+            </label>
+          </div>
 
           <!-- Provider selector -->
           <div class="card" style="margin-bottom:20px;padding:20px">
@@ -2256,11 +2274,11 @@
   <script defer src="/static/js/members.js?v=511"></script>
   <script defer src="/static/js/analytics.js?v=492"></script>
   <script defer src="/static/js/ai_agents.js?v=492"></script>
-  <script defer src="/static/js/ai_followup.js?v=508"></script>
+  <script defer src="/static/js/ai_followup.js?v=510"></script>
   <script defer src="/static/js/changelog.js?v=493"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=506"></script>
-  <script defer src="/static/js/app.js?v=525"></script>
+  <script defer src="/static/js/app.js?v=527"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">

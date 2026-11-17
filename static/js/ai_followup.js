@@ -1035,7 +1035,9 @@ const AIFollowUp = {
         }
         const req = f.required ? ' required aria-required="true"' : '';
         const ph = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
-        const input = f.type === 'textarea'
+        const input = f.type === 'select'
+          ? `<select class="form-input" id="${id}" data-key="${esc(f.key)}"${req}${aria} style="width:100%">${(f.options || []).map(o => `<option value="${esc(o.value)}"${String(o.value) === String(f.value ?? '') ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`
+          : f.type === 'textarea'
           ? `<textarea class="form-input form-textarea" id="${id}" data-key="${esc(f.key)}" rows="${f.rows || 5}"${ph}${req}${aria} style="width:100%;resize:vertical">${esc(f.value || '')}</textarea>`
           : `<input class="form-input" type="text" id="${id}" data-key="${esc(f.key)}" value="${esc(f.value || '')}" autocomplete="off"${ph}${req}${aria} style="width:100%">`;
         return `<div style="${span}min-width:0"><label class="form-label" for="${id}" style="display:flex;align-items:center;gap:6px">${esc(f.label)}${f.required ? ' <span style="color:var(--red)" aria-hidden="true">*</span>' : ''}${tip}</label>${input}${hint}</div>`;
@@ -1085,7 +1087,7 @@ const AIFollowUp = {
         if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); return; }
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.tagName === 'TEXTAREA') { e.preventDefault(); submit(); return; }
         if (e.key === 'Tab') {   // keep focus inside the dialog
-          const f = [...ov.querySelectorAll('input,textarea,button,[tabindex="0"]')].filter(x => !x.disabled);
+          const f = [...ov.querySelectorAll('input,select,textarea,button,[tabindex="0"]')].filter(x => !x.disabled);
           if (!f.length) return;
           const first = f[0], last = f[f.length - 1];
           if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
@@ -1219,6 +1221,39 @@ const AIFollowUp = {
     } catch (e) { App.toast(e.message, 'error'); }
   },
 
+  // Hand the lead to another of our nicks (the KOL blocked this one, the nick is limited…).
+  async transferLead(accountId, userId) {
+    if (this._transferring) { App.toast('Đang chuyển lead, vui lòng đợi…', 'info'); return; }
+    try {
+      const chat = this._chats.find(x => x.account_id === accountId && x.user_id === userId);
+      API.clearAccountsCache();   // a nick connected or dropped since the tab loaded
+      const accounts = ((await API.getAccounts()).accounts || []).filter(a => a.id !== accountId && a.is_logged_in && !a.session_error);
+      if (!accounts.length) { App.toast('Không có nick nào khác đang kết nối để chuyển', 'info'); return; }
+      const v = await this.formDialog({
+        title: '🔀 Chuyển lead sang nick khác' + (chat ? ` — ${this._leadNames([chat])}` : ''),
+        intro: 'Dùng khi KOL đã chặn nick hiện tại hoặc nick bị hạn chế. App chuyển hồ sơ, tóm tắt và bước sang nick mới, <strong>tắt AI</strong> ở đó, ẩn cuộc chat cũ, rồi mở topic mới trên forum kèm lịch sử của nick cũ. Cuộc chat mới bắt đầu trống. <strong>Không tin nào được gửi cho KOL</strong> — bạn tự gõ tin đầu tiên từ nick mới.',
+        submitLabel: 'Chuyển lead',
+        fields: [
+          { key: 'to', type: 'select', label: 'Nick nhận', wide: true, required: true,
+            options: [{ value: '', label: 'Chọn nick…' }, ...accounts.map(a => ({ value: a.id, label: `${accDisplayName(a)}${a.phone ? ` (${a.phone})` : ''}` }))],
+            tip: 'Chỉ liệt kê nick đang kết nối. KOL phải có @username để nick mới tìm được họ trên Telegram. Phân phối bài channel bị tắt ở nick mới — bật lại trong Hồ sơ sau khi đã nhắn tay. Nếu KOL chặn vì không muốn nhận tin, chỉ nên gửi một tin, nói rõ mình là ai.' }
+        ]
+      });
+      if (!v) return;
+      this._transferring = true;
+      App.toast('Đang chuyển lead…', 'info');
+      const res = await fetch(`/api/ai-followup/chats/${accountId}/${userId}/transfer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to_account_id: +v.to }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { this.loadChats(); throw new Error(data.detail || 'Chuyển lead thất bại'); }
+      const forumNote = data.forum === 'relaying' ? ' Topic mới đang được mở trên forum.' : ' Forum không mở topic (bot forum không chạy).';
+      App.toast(`Đã chuyển lead sang nick mới, AI đang tắt.${forumNote}`, 'success');
+      await this.loadChats();
+      if (this._chats.some(x => x.account_id === data.account_id && x.user_id === userId)) this.openChat(data.account_id, userId);
+      else this.closeHistoryModal();
+    } catch (e) { App.toast(e.message, 'error'); }
+    finally { this._transferring = false; }
+  },
+
   // ── 5-step funnel: panel + actions ─────────────────────────────────
   async loadStepPanel(accountId, userId) {
     const panel = document.getElementById('aifu-modal-step-panel');
@@ -1259,7 +1294,7 @@ const AIFollowUp = {
     const pred = st.predicted_tier;
     const predTip = 'Bậc khởi điểm theo volume TRUNG BÌNH/THÁNG của 3 tháng gần nhất ở sàn KOL đang làm (video quay màn hình dashboard), đối chiếu bảng bậc (VD 10–20M → Tier 2). Không có bằng chứng → Tier 1. AI chỉ nói “nhiều khả năng”; team xem video xác minh rồi mới áp dụng. Nếu volume thật ở WEEX thấp hơn thì điều chỉnh ở kỳ review quý.';
     const predTxt = (pred
-      ? `Bậc khởi điểm dự kiến: Tier ${pred.tier} (${Number(pred.revshare_pct)}% + $${Number(pred.bonus_per_1m_taker_usd)}/1M taker) với ~${Number(pred.volume_m)}M/tháng khai — chờ team xác minh dashboard 3 tháng`
+      ? `Bậc khởi điểm dự kiến: Tier ${pred.tier} (${Number(pred.revshare_pct)}% + $${Number(pred.bonus_per_1m_taker_usd)}/1M volume futures) với ~${Number(pred.volume_m)}M/tháng khai — chờ team xác minh dashboard 3 tháng`
       : 'Bậc khởi điểm: chưa có volume → bắt đầu Tier 1')
       + ` <span class="info-i" tabindex="0" data-tip="${esc(predTip)}">i</span>`;
     const deal = st.current_deal || {};
@@ -1464,8 +1499,30 @@ const AIFollowUp = {
       && !!document.getElementById('aifu-history-modal')?.classList.contains('open');
   },
 
+  // The order Prev / Next walks is frozen while the chat window is open: a reload puts
+  // the lead just answered back on top (the server sorts by last update), and "Next"
+  // would then land on leads already handled. Leads that left the filter drop out,
+  // new ones join at the end; a filter or search change takes a fresh order.
+  _navList() {
+    const cur = this._filtered();
+    const key = x => x.account_id + ':' + x.user_id;
+    const sig = [this._statusFilter, this._stepFilter, this._search].join('|');
+    if (!this._navKeys || this._navSig !== sig) {
+      this._navKeys = cur.map(key);
+      this._navSig = sig;
+      return cur;
+    }
+    const byKey = new Map(cur.map(x => [key(x), x]));
+    const list = this._navKeys.map(k => byKey.get(k)).filter(Boolean);
+    if (list.length < cur.length) {
+      const known = new Set(this._navKeys);
+      for (const x of cur) if (!known.has(key(x))) { list.push(x); this._navKeys.push(key(x)); }
+    }
+    return list;
+  },
+
   _navState() {
-    const list = this._filtered();
+    const list = this._navList();
     const c = this._modalChat;
     const i = c ? list.findIndex(x => x.account_id === c.account_id && x.user_id === c.user_id) : -1;
     if (i >= 0) this._modalIdx = i;
@@ -1703,7 +1760,7 @@ const AIFollowUp = {
       `<option value="${s}" ${s === cur ? 'disabled' : ''}>${i < this.STEPS.length ? i + '. ' : ''}${this.stepLabel(s)}${s === cur ? ' (hiện tại)' : ''}</option>`).join('');
     const stepSel = `<select class="form-input" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:12px" title="Admin đặt bước bất kỳ (tiến/lùi)" onchange="AIFollowUp.stepSelectChanged(this,${c.account_id},${c.user_id})"><option value="">Đặt bước…</option>${opts}</select>`;
     el.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center';
-    el.innerHTML = `${toggle}${blkBtn}${vsBtn}<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.editProfile(${c.account_id},${c.user_id})">📍 Hồ sơ & phân công</button>${nextBtn}${stepSel}<button class="btn btn-primary btn-sm" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>`;
+    el.innerHTML = `${toggle}${blkBtn}${vsBtn}<button class="btn btn-ghost btn-sm" onclick="AIFollowUp.editProfile(${c.account_id},${c.user_id})">📍 Hồ sơ & phân công</button><button class="btn btn-ghost btn-sm" onclick="AIFollowUp.transferLead(${c.account_id},${c.user_id})" title="KOL chặn nick này? Chuyển lead sang nick khác: chép lịch sử + hồ sơ, tắt AI, không gửi tin nào">🔀 Chuyển nick</button>${nextBtn}${stepSel}<button class="btn btn-primary btn-sm" onclick="AIFollowUp.closeHistoryModal()">Đóng</button>`;
   },
 
   async cycleVerification(accountId, userId) {
@@ -1861,6 +1918,7 @@ const AIFollowUp = {
     document.getElementById('aifu-history-modal')?.classList.remove('open');
     this._modalChat = null;
     this._modalStep = null;
+    this._navKeys = null; // next open walks the table's current order
   }
 };
 

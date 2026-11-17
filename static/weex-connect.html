@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Kết nối WEEX</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#0f1115;color:#e6e6e6;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+  .box{text-align:center;max-width:380px;padding:24px}
+  .big{font-size:40px}
+  .err{color:#ff7b7b}
+</style>
+</head>
+<body>
+<div class="box"><div class="big" id="icon">⏳</div><p id="msg">Đang nhận token từ WEEX…</p></div>
+<script>
+// Opened by the "Kết nối WEEX" bookmarklet from affiliates.weex.com; the token arrives by postMessage
+// (never in the URL) and is saved with this dashboard's own login key.
+const PORTAL = 'https://affiliates.weex.com';
+const show = (icon, text, err) => {
+  document.getElementById('icon').textContent = icon;
+  const m = document.getElementById('msg'); m.textContent = text; m.className = err ? 'err' : '';
+};
+const key = localStorage.getItem('tgs_api_key') || '';
+if (!window.opener) show('⚠️', 'Hãy mở trang này bằng bookmark "Kết nối WEEX" trên affiliates.weex.com.', true);
+else if (!key) show('⚠️', 'Bạn chưa đăng nhập dashboard TG Scheduler trên trình duyệt này.', true);
+else {
+  addEventListener('message', async (e) => {
+    if (e.origin !== PORTAL || !e.data || typeof e.data.wxToken !== 'string') return;
+    try {
+      const r = await fetch('/api/weex/token', {method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-API-Key': key},
+        body: JSON.stringify({token: e.data.wxToken})});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || r.status);
+      const until = d.expires_at ? new Date(d.expires_at * 1000).toLocaleString('vi-VN') : '?';
+      show('✅', `Đã kết nối WEEX. Token dùng được tới ${until}. Có thể đóng cửa sổ này.`);
+      try { localStorage.setItem('tgs_weex_connected', String(Date.now())); } catch (_) {}
+      setTimeout(() => window.close(), 4000);
+    } catch (err) { show('❌', 'Lỗi: ' + err.message, true); }
+  });
+  window.opener.postMessage('wx-ready', PORTAL);
+  setTimeout(() => { if (document.getElementById('icon').textContent === '⏳')
+    show('⚠️', 'Không nhận được token. Đăng nhập affiliates.weex.com rồi bấm lại bookmark.', true); }, 8000);
+}
+</script>
+</body>
+</html>

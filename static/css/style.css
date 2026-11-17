@@ -2137,3 +2137,10 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 
 .copy-chip{cursor:pointer;transition:filter .15s}
 .copy-chip:hover{filter:brightness(1.35);outline:1px solid currentColor}
+
+/* Lead chat window: one scrollbar only. The messages take the free height, so the
+   reply box and the action buttons always stay on screen. */
+#aifu-history-modal .modal { display: flex; flex-direction: column; overflow: hidden; }
+#aifu-history-modal .modal > * { flex: none; }
+#aifu-history-modal #aifu-modal-step-panel { max-height: 28vh; overflow-y: auto; }
+#aifu-history-modal #aifu-modal-chat-box { flex: 1 1 auto; min-height: 120px; max-height: none !important; }

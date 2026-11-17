@@ -356,7 +356,7 @@ if(page==='ai-followup'){
           </div>
           <div class="table-wrap">
             <table class="data-table" style="font-size:13px">
-              <thead><tr><th style="width:50px">Bậc</th><th>Mốc tổng volume / tháng (M USD)</th><th>RevShare %</th><th>Bonus / 1M taker ($)</th><th>Ghi chú</th><th style="width:40px"></th></tr></thead>
+              <thead><tr><th style="width:50px">Bậc</th><th>Mốc tổng volume / tháng (M USD)</th><th>RevShare %</th><th>Bonus / 1M volume futures ($)</th><th>Ghi chú</th><th style="width:40px"></th></tr></thead>
               <tbody id="aifu-ladder-tiers"><tr><td colspan="6" style="text-align:center;color:var(--text2);padding:12px">Đang tải...</td></tr></tbody>
             </table>
           </div>
@@ -477,7 +477,7 @@ if(page==='ai-followup'){
 
       <!-- Chat History Modal -->
       <div id="aifu-history-modal" class="modal-overlay">
-        <div class="modal" style="max-width:650px">
+        <div class="modal" style="width:760px;max-width:95vw">
           <div class="modal-header">
             <h3 id="aifu-modal-title" style="margin:0;font-size:15px">Lịch sử trò chuyện</h3>
             <button class="modal-close" onclick="AIFollowUp.closeHistoryModal()" aria-label="Đóng">&times;</button>
@@ -6166,3 +6166,39 @@ document.addEventListener('click', e => {
     .then(() => App.toast(`Đã copy ${chip.textContent.trim()}`, 'success'))
     .catch(() => App.toast('Không copy được', 'error'));
 });
+
+// ── WEEX affiliate connect (Settings) ──
+App.loadWeexConnect = async function() {
+  const st = document.getElementById('weex-connect-status');
+  const bm = document.getElementById('weex-bookmarklet');
+  if (!st || !bm) return;
+  const A = location.origin;
+  bm.href = "javascript:(()=>{const A='" + A + "';const t=localStorage.getItem('accessToken');"
+    + "if(location.host!=='affiliates.weex.com'||!t){alert('Mở affiliates.weex.com và đăng nhập trước');return}"
+    + "const w=window.open(A+'/static/weex-connect.html','wxc','width=460,height=320');"
+    + "const h=e=>{if(e.origin===A&&e.data==='wx-ready'){w.postMessage({wxToken:t.replace(/^\"|\"$/g,'')},A);removeEventListener('message',h)}};"
+    + "addEventListener('message',h)})()";
+  try {
+    const d = await (await fetch('/api/weex/status')).json();
+    const until = d.expires_at ? new Date(d.expires_at * 1000).toLocaleString('vi-VN') : '';
+    st.innerHTML = d.connected ? `✅ Đã kết nối — token dùng được tới <b>${until}</b>`
+      : (d.expires_at ? `⚠️ Token hết hạn lúc ${until} — đăng nhập portal và bấm bookmark lại` : '⚪ Chưa kết nối');
+    document.getElementById('weex-auto-enabled').checked = !!d.enabled;
+  } catch (e) { st.textContent = 'Không đọc được trạng thái WEEX'; }
+};
+
+App.setWeexEnabled = async function(on) {
+  try {
+    const r = await fetch('/api/weex/enable', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: on})});
+    if (!r.ok) throw new Error(r.status);
+    App.toast(on ? 'Đã bật tự onboard + nâng bậc WEEX' : 'Đã tắt tự onboard WEEX', 'success');
+  } catch (e) { App.toast('Lưu không được: ' + e.message, 'error'); }
+};
+
+(function() {
+  const orig = App.loadSettings;
+  App.loadSettings = async function() { App.loadWeexConnect(); return orig.apply(this, arguments); };
+  // Popup saved a token → refresh the card.
+  addEventListener('storage', (e) => { if (e.key === 'tgs_weex_connected') App.loadWeexConnect(); });
+})();
