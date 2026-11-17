@@ -4,7 +4,7 @@
    version, effective date); saving a new ladder bumps the version, records
    history and changes the prompt.
 2. Guard: an AI reply quoting a figure outside the ladder ("75%", "$200 upfront",
-   "B-book") is replaced by the safe fallback + needs_human; a reply that only
+   "B-book") is blocked (nothing sent) + needs_human; a reply that only
    uses ladder figures goes through untouched.
 """
 import copy
@@ -218,13 +218,13 @@ async def test_off_ladder_reply_is_replaced_and_escalated(mock_send, mock_chat):
         mock_notify.assert_called_once()
         assert "off-ladder" in mock_notify.call_args.kwargs.get("reason", "")
 
-    assert res is True
-    sent_text = mock_send.call_args[0][2]
-    assert "75%" not in sent_text and "$200" not in sent_text
-    assert sent_text == kol_offer.get_safe_offer_fallback_reply("en")
+    # Nothing is sent: no wrong figure and no canned "let me check with the team" line.
+    assert res is False
+    mock_send.assert_not_called()
 
     chat = await db.get_followup_chat(1, 202)
     assert chat["status"] == "needs_human"
+    assert all(m["role"] != "assistant" or "double-check" not in m["content"] for m in chat["history"])
 
 
 @patch("ai_remix.generate_chat_response", new_callable=AsyncMock)

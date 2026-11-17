@@ -157,33 +157,6 @@ def _last_assistant_is_fallback(history: list) -> bool:
         "check lại con số chính xác", "check lại thông tin mới nhất"))
 
 
-def get_safe_fallback_reply(bad_reply: str) -> str:
-    """Generate a natural human reply when AI disclosure is blocked."""
-    is_vn = bool(re.search(r"[àáảãạăằắẳẵặâầấẩẫậđèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]", bad_reply or "", re.IGNORECASE))
-    if contains_source_leak(bad_reply) and not _AI_DISCLOSURE_RE.search(bad_reply or ""):
-        return (
-            "Để mình check lại thông tin mới nhất với team rồi báo bạn chính xác nhé 🙏"
-            if is_vn
-            else "Let me double-check the latest details with the team and get back to you with the exact info 🙏"
-        )
-    if _LINK_LIMITATION_RE.search(bad_reply or ""):
-        return (
-            "Mạng bên mình load link này hơi chậm xíu bro. Cho mình xin nhanh 3 thông tin để tính deal chuẩn nhé: "
-            "số member, volume futures tháng của cộng đồng, và khu vực chính của mem nhé 👍"
-            if is_vn
-            else "Network's loading that link a bit slow on mobile bro. Could you drop me 3 quick details so I can quote real numbers: "
-                 "member count, monthly futures volume, and main region/language of your audience 👍"
-        )
-    return (
-        "Haha dạo này ai cũng hỏi vậy 😅 bot scam nhiều quá mà. "
-        "Để mình nhờ đội partnership check kỹ lại case của bạn nhé!"
-        if is_vn
-        else "Haha been getting that a lot lately 😅 too many scam bots around. "
-             "Let me loop in the partnership team on your case!"
-    )
-
-
-
 # ── In-memory state ────────────────────────────────────────────────────────────
 # handler_removers: account_id → (client, handler_fn)
 _handler_removers: dict[int, tuple[Any, Any]] = {}
@@ -1117,6 +1090,26 @@ def is_bot_account(username: str | None, name: str | None = None, message_text: 
     return bool(is_bot) or "_bot" in (username or "").lower()
 
 
+# A real person whose account answers by itself: the message says so in plain words.
+_AUTO_REPLY_RE = re.compile(
+    r"автоответчик|автоответ\b|автоматическ\w+\s+(?:ответ|сообщени)"
+    r"|\bauto[\s-]?repl(?:y|ies)\b|\bauto[\s-]?respon[ds]\w*|\bautomat(?:ic|ed)\s+(?:reply|response|message)\b"
+    r"|\banswering\s+machine\b|trả lời tự động|tin nhắn tự động|自动回复|自動回覆",
+    re.IGNORECASE)
+
+
+def is_auto_reply(message, text: str | None) -> bool:
+    """True for a message nobody typed: a Telegram Business away / greeting message
+    (`offline`), one sent by the account's connected business bot, or a self-declared
+    autoresponder. The sender is still a real lead, so the chat is kept; only the AI
+    stays silent — answering a machine wastes a reply and leaves a false promise open."""
+    if getattr(message, "offline", None) is True:
+        return True
+    if isinstance(getattr(message, "via_business_bot_id", None), int):
+        return True
+    return bool(_AUTO_REPLY_RE.search(text or ""))
+
+
 def sanitize_telegram_html(text: str) -> str:
     """Sanitize and convert raw AI output into clean Telegram-compatible HTML."""
     if not text:
@@ -1749,9 +1742,12 @@ async def generate_and_send_ai_reply_for_chat(
                                "Raw reply: %r", sender_username or "?", user_id, raw_ai_reply[:300])
                 return False
 
+        # A blocked reply is never swapped for a canned line ("let me check with the
+        # team"): that reads as a bot. The AI stays silent and the owner answers.
+        blocked = False
         if contains_ai_disclosure(ai_reply):
-            logger.warning("[AIFollowUp] 🚫 Blocked AI-disclosure reply for user %d — using safe fallback", user_id)
-            ai_reply = get_safe_fallback_reply(ai_reply)
+            logger.warning("[AIFollowUp] 🚫 Blocked AI-disclosure reply for user %d — nothing sent, holding for human", user_id)
+            blocked = True
             new_status = "needs_human"
             _spawn_background(_notify_main_account_handover(
                 account_id, user_id, sender_username,
@@ -1759,7 +1755,7 @@ async def generate_and_send_ai_reply_for_chat(
             ))
         else:
             # Off-ladder guard (spec A2): any % / $ figure not in the official
-            # ladder is replaced by a safe fallback and escalated to a human.
+            # ladder blocks the reply and escalates to a human.
             off_ladder = kol_offer.find_off_offer_figures(ai_reply, exchange, agent_config, offer_ladder)
             if off_ladder and not step_result.get("declined"):
                 # One retry before giving up: most slips are an echoed figure (e.g. an
@@ -1771,20 +1767,25 @@ async def generate_and_send_ai_reply_for_chat(
                                 off_ladder, user_id)
                     ai_reply, off_ladder = rewritten, []
             if off_ladder:
-                logger.warning("[AIFollowUp] 🚫 Blocked off-ladder figures %s for user %d — using safe fallback",
-                               off_ladder, user_id)
-                # A decline gets the polite closing, not a "let me check the numbers"
-                # promise the KOL never asked for.
-                ai_reply = (get_decline_closing_reply(full_history, exchange) if step_result.get("declined")
-                            else kol_offer.get_safe_offer_fallback_reply(_detect_reply_lang(full_history)))
+                logger.warning("[AIFollowUp] 🚫 Blocked off-ladder figures %s for user %d — %s",
+                               off_ladder, user_id,
+                               "sending the closing" if step_result.get("declined") else "nothing sent, holding for human")
+                # A decline still gets the polite closing; anything else waits for the owner.
+                if step_result.get("declined"):
+                    ai_reply = get_decline_closing_reply(full_history, exchange)
+                else:
+                    blocked = True
                 new_status = "needs_human"
                 _spawn_background(_notify_main_account_handover(
                     account_id, user_id, sender_username,
                     reason=f"AI reply blocked: off-ladder figures {', '.join(off_ladder)}"
                 ))
 
-        # A safe fallback ("let me check with the team") is a promise, not an
-        # answer: sending it twice reads as a bot. If it was already sent in this
+        if blocked:
+            await db.update_followup_chat_status(account_id, user_id, "needs_human")
+            return False
+
+        # A closing line sent twice reads as a bot. If it was already sent in this
         # chat, stay silent and leave the chat with the human.
         if new_status == "needs_human" and _already_said(full_history, ai_reply):
             logger.warning("[AIFollowUp] 🔁 Fallback already sent to user %d — not repeating, holding for human",
@@ -2251,6 +2252,10 @@ def _make_handler(account_id: int):
                                              event.message, (chat.get("history") or [{}])[-1].get("timestamp"))
                     except Exception as _pr_err:
                         logger.debug("[Inbox] Proof relay schedule error: %s", _pr_err)
+
+                if is_auto_reply(event.message, message_text):
+                    logger.info("[AIFollowUp] User %d sent an automatic reply — recorded msg, AI silent", sender_id)
+                    return
 
                 if current_status in ("paused_admin", "onboarded", "needs_human", "bot_ignored"):
                     logger.info("[AIFollowUp] User %d status '%s' (<24h since human takeover) — recorded msg, skipping AI reply",

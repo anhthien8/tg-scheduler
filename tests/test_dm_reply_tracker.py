@@ -51,17 +51,6 @@ async def test_contains_ai_disclosure_flags_confessions():
     assert tracker.contains_ai_disclosure("I can't actually open or verify Telegram links — I don't have browsing") is True
 
 
-async def test_link_limitation_fallback_asks_for_data():
-    bad_reply = "I can't actually open or verify Telegram links — I don't have browsing, so I'm just going off what you tell me."
-    safe = tracker.get_safe_fallback_reply(bad_reply)
-    assert "can't" not in safe.lower()
-    assert "brows" not in safe.lower()
-    assert "loading" in safe.lower() or "load" in safe.lower()
-    assert "member count" in safe.lower()
-    assert "monthly futures volume" in safe.lower()
-    assert "region" in safe.lower()
-
-
 async def test_contains_ai_disclosure_allows_normal_replies():
     assert tracker.contains_ai_disclosure("Got your UID bro! Will bind commission now 👍") is False
     assert tracker.contains_ai_disclosure("Bên mình hỗ trợ rút USDT hàng ngày, không KYC nhé") is False
@@ -72,7 +61,7 @@ async def test_contains_ai_disclosure_allows_normal_replies():
 
 @patch("ai_remix.generate_chat_response", new_callable=AsyncMock)
 @patch("telegram_client.send_text_message", new_callable=AsyncMock)
-async def test_ai_disclosure_blocked_and_replaced(mock_send, mock_chat):
+async def test_ai_disclosure_blocked_and_nothing_sent(mock_send, mock_chat):
     agent_id = await db.create_ai_agent({
         "name": "Guard Agent",
         "provider": "gemini",
@@ -99,13 +88,13 @@ async def test_ai_disclosure_blocked_and_replaced(mock_send, mock_chat):
         res = await tracker.generate_and_send_ai_reply_for_chat(1, 202, "lead")
         mock_notify.assert_called_once()
 
-    assert res is True
-    sent_text = mock_send.call_args[0][2]
-    assert "AI assistant" not in sent_text
-    assert tracker.contains_ai_disclosure(sent_text) is False
+    # No canned stand-in line either: the owner answers this one.
+    assert res is False
+    mock_send.assert_not_called()
 
     chat = await db.get_followup_chat(1, 202)
     assert chat["status"] == "needs_human"
+    assert [m["role"] for m in chat["history"]] == ["user"]
 
 
 async def _setup_agent_chat(user_msg: str):
@@ -288,6 +277,52 @@ async def test_incoming_user_message_triggers_reply(mock_ai_reply):
     assert chat["history"][0]["content"] == "Hello!"
     mock_ai_reply.assert_called_once()
 
+
+@pytest.mark.parametrize("text,offline,via_bot,expected", [
+    ("Добрый день, это автоответчик. Вот мои проекты @savin_all", None, None, True),
+    ("This is an automatic reply, I'm away until Monday", None, None, True),
+    ("Auto-reply: back soon", None, None, True),
+    ("Xin chào", True, None, True),                     # Telegram Business away / greeting message
+    ("Hello", None, 777000111, True),                   # sent by the account's connected business bot
+    ("Hello! What commission do you offer?", None, None, False),
+    ("I reply to everyone automatically? no, I'm here", None, None, False),
+    ("check my bot @savin_hub_bot", False, None, False),
+])
+def test_is_auto_reply(text, offline, via_bot, expected):
+    msg = MagicMock()                                   # unset attributes are Mocks, never a real flag
+    if offline is not None:
+        msg.offline = offline
+    if via_bot is not None:
+        msg.via_business_bot_id = via_bot
+    assert tracker.is_auto_reply(msg, text) is expected
+
+
+@patch("dm_reply_tracker.generate_and_send_ai_reply_for_chat", new_callable=AsyncMock)
+async def test_incoming_auto_reply_is_recorded_but_not_answered(mock_ai_reply):
+    agent_id = await db.create_ai_agent({"name": "A", "provider": "gemini", "api_keys_json": ["k"]})
+    await db.create_account({"id": 1, "name": "Acc", "phone": "+8411", "api_id": "a", "api_hash": "h",
+                             "session_name": "s", "ai_agent_id": agent_id})
+    await db.set_account_ai_agent(1, agent_id)
+    await db.set_setting("ai_followup_enabled", "true")
+
+    ev = MagicMock()
+    ev.is_private, ev.out, ev.sender_id = True, False, 998
+    ev.message.id = 4321
+    for attr in ("video", "video_note", "gif", "sticker", "dice", "photo", "document"):
+        setattr(ev.message, attr, None)
+
+    class Sender:
+        username, first_name, last_name = "savin", "Danya", "Savin"
+
+    ev.get_sender = AsyncMock(return_value=Sender())
+    ev.raw_text = "Добрый день, это автоответчик. Вот мои проекты @savin_all"
+    await tracker._make_handler(account_id=1)(ev)
+
+    chat = await db.get_followup_chat(1, 998)
+    assert [m["content"] for m in chat["history"]] == [ev.raw_text]   # kept for the human reader
+    assert chat["status"] == "active" and not chat.get("owed_since")   # still a real lead, nothing promised
+    mock_ai_reply.assert_not_called()
+
 async def test_outgoing_admin_message_interception():
     agent_id = await db.create_ai_agent({"name": "A", "provider": "gemini", "api_keys_json": ["k"]})
     await db.create_account({
@@ -404,7 +439,7 @@ async def test_async_distill_human_rule_success(mock_distill):
 
 
 
-async def test_source_leak_detected_and_replaced():
+async def test_source_leak_detected():
     leaks = [
         "According to the supplied DOCX the campaign ends soon",
         "Source C01 shows the August campaigns",
@@ -420,9 +455,6 @@ async def test_source_leak_detected_and_replaced():
                  "Can you share your PDF deck?",
                  "Thanks for the provided data bro"):
         assert not tracker.contains_source_leak(text), text
-    safe = tracker.get_safe_fallback_reply(leaks[0])
-    assert "check" in safe.lower() and "bot" not in safe.lower()
-    assert "team" in tracker.get_safe_fallback_reply(leaks[2])
 
 
 

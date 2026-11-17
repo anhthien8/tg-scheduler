@@ -103,7 +103,7 @@ async def test_weex_ladder_figure_in_a_blofin_chat_is_blocked(mock_send, mock_ch
         await tracker.generate_and_send_ai_reply_for_chat(A, U, "lead", target_campaign_id=cid)
         assert "off-ladder" in mock_notify.call_args.kwargs.get("reason", "")
 
-    assert mock_send.call_args[0][2] == kol_offer.get_safe_offer_fallback_reply("en")
+    mock_send.assert_not_called()                       # no canned line: the owner answers
     assert (await db.get_followup_chat(A, U))["status"] == "needs_human"
 
 

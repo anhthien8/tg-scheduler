@@ -9,6 +9,11 @@
         "changes": [
             {
                 "type": "improvement",
+                "title": "AI không gửi câu soạn sẵn, không trả lời tin tự động",
+                "desc": "Khi câu trả lời của AI bị chặn (nói sai con số ngoài thang offer, hoặc lộ nguồn nội bộ), AI không còn gửi câu thay thế kiểu “để mình check lại với team”: nó im lặng và chuyển chat cho người thật trả lời. AI cũng không trả lời tin không do người gõ: tin chờ/chào của Telegram Business, tin qua bot business, hoặc tin tự nhận là trả lời tự động. Tin vẫn được lưu để đọc."
+            },
+            {
+                "type": "improvement",
                 "title": "Thưởng volume WEEX tính trên toàn bộ volume futures",
                 "desc": "Thưởng $/1M giờ tính trên toàn bộ volume futures (maker + taker), không còn chỉ taker. Ước tính thu nhập của KOL dùng phí trung bình 0,05% (maker 0,02% / taker 0,08%). Khi KOL đòi upfront, AI nói upfront chưa kích hoạt cho lần đầu hợp tác, team xem lại sau tháng đầu theo kết quả cộng đồng, rồi đi tiếp theo thang marketing fee và trial fund trong knowledge base."
             },
