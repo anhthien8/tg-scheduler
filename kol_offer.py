@@ -645,20 +645,34 @@ async def offer_block_for(exchange: str | None, volume_claimed=None,
     for the region offer (flat revshare + deposit bonus campaign) and its guard figures.
     `volume_stated` (AI-extracted volume from chat) only feeds the ladder's tier prediction."""
     if uses_ladder(exchange):
+        import kol_banners
         ladder = await get_ladder()
+        camp = kol_banners.campaign_prompt_block()
         if region in kol_region_offer.REGIONS:
             # Deal rules 2 + 3 apply to region leads too; rule 1 (starting tier) does not — no ladder here.
-            block = "\n".join([kol_region_offer.render_prompt(region, ladder, volume_claimed),
-                               CURRENT_DEAL_RULE, UPFRONT_REVIEW_RULE])
-            return block, kol_region_offer.guard_ladder(ladder)
-        block = render_offer_ladder_prompt(ladder, volume_claimed, volume_stated)
+            block = "\n".join(filter(None, [kol_region_offer.render_prompt(region, ladder, volume_claimed),
+                                            CURRENT_DEAL_RULE, UPFRONT_REVIEW_RULE, camp]))
+            return block, _allow_campaign_figures(kol_region_offer.guard_ladder(ladder), camp)
+        block = "\n".join(filter(None, [render_offer_ladder_prompt(ladder, volume_claimed, volume_stated), camp]))
         est_d = estimate_dollars(value_estimate(ladder, volume_claimed))
         if est_d:  # let the guard pass the pre-computed estimate figures for this KOL only
             ladder = copy.deepcopy(ladder)
             rules = ladder.setdefault("rules", {})
             rules["extra_allowed_dollars"] = list(rules.get("extra_allowed_dollars") or []) + sorted(est_d)
-        return block, ladder
+        return block, _allow_campaign_figures(ladder, camp)
     return render_agent_offer_prompt(exchange), None
+
+
+def _allow_campaign_figures(ladder: dict, camp_block: str) -> dict:
+    """Let the guard pass the figures printed in the active campaign list (and nothing else new)."""
+    if not camp_block:
+        return ladder
+    pcts, dollars = figures_in(camp_block)
+    ladder = copy.deepcopy(ladder)
+    rules = ladder.setdefault("rules", {})
+    rules["extra_allowed_dollars"] = list(rules.get("extra_allowed_dollars") or []) + sorted(dollars)
+    rules["extra_allowed_percents"] = list(rules.get("extra_allowed_percents") or []) + sorted(pcts)
+    return ladder
 
 
 def get_safe_offer_fallback_reply(lang: str = "en") -> str:

@@ -1234,12 +1234,13 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
                     reason="AI reply blocked: " + lang_why))
             return False
         text = await _mirror_weex_links_for(account_id, user_id, text, chat.get("history"))
-        banner = None
-        for k in banner_keys[:1]:
+        banners = []
+        for k in dict.fromkeys(banner_keys):
             p = kol_banners.banner_path(k)
             if p and not kol_banners.already_sent(chat.get("history"), k):
-                banner = (k, p)
-        if not text and not banner:
+                banners.append((k, p))
+        banners = banners[:kol_banners.MAX_BANNERS_PER_REPLY]
+        if not text and not banners:
             if new_status == "needs_human":
                 # The AI had nothing to say and only asked for a human: send
                 # nothing, hand the chat over so no engine retries it.
@@ -1251,7 +1252,7 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
         try:
             if text and await tg.send_text_message(account_id, user_id, text) is False:
                 return False
-            if banner:
+            for banner in banners:
                 try:
                     if await tg.send_photo_message(account_id, user_id, banner[1]) is not False:
                         text = (text + "\n" + kol_banners.sent_mark(banner[0])).strip()

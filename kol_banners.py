@@ -42,3 +42,54 @@ def already_sent(history: list, key: str) -> bool:
 
 def sent_mark(key: str) -> str:
     return _SENT_MARK.format(key)
+
+
+# ── Campaign catalog (data/kol_banners/campaigns.json) ──────────────────────
+# Operator-editable list of campaigns the AI may pitch when a KOL asks about
+# campaigns / promotions. Re-read only when the file changes (mtime cache).
+CATALOG_PATH = os.path.join(BANNER_DIR, "campaigns.json")
+MAX_BANNERS_PER_REPLY = 2
+_catalog_cache: tuple[float, list] = (-1.0, [])
+
+
+def active_campaigns(today: str | None = None) -> list[dict]:
+    """Active campaigns whose banner file exists and whose end date has not passed."""
+    import json
+    from datetime import date
+    global _catalog_cache
+    try:
+        mtime = os.path.getmtime(CATALOG_PATH)
+    except OSError:
+        return []
+    if mtime != _catalog_cache[0]:
+        try:
+            with open(CATALOG_PATH, encoding="utf-8") as f:
+                items = json.load(f).get("campaigns") or []
+        except (OSError, ValueError):
+            items = []
+        _catalog_cache = (mtime, items)
+    today = today or date.today().isoformat()
+    return [c for c in _catalog_cache[1]
+            if isinstance(c, dict) and c.get("active") and c.get("details")
+            and str(c.get("ends") or "9999-12-31") >= today and banner_path(c.get("key", ""))]
+
+
+def campaign_prompt_block(today: str | None = None) -> str:
+    """Prompt block: answer campaign questions with full details + the banner tag."""
+    camps = active_campaigns(today)
+    if not camps:
+        return ""
+    lines = [
+        "--- CURRENT WEEX CAMPAIGNS (send these when asked) ---",
+        "When the KOL asks about campaigns, promotions, events, deposit bonus, cashback or rewards for their community: "
+        "reply with the FULL details of the campaign(s) that match the question from the list below (who can join, the "
+        "reward table, the key rules), written naturally in their language, and add the tag [[BANNER:<key>]] for each "
+        f"campaign you describe (at most {MAX_BANNERS_PER_REPLY} per reply) — the system sends the official banner image "
+        "right after your text. If they ask generally, pick the 1-2 most relevant (deposit bonus first). Skip a banner "
+        "whose [banner sent: <key>] mark is already in the history. Never invent a campaign, a figure or a date that is "
+        "not below; for anything not covered (caps, exact dates, custom campaigns) say you will confirm with the team.",
+    ]
+    for c in camps:
+        lines.append(f"* [[BANNER:{c['key']}]] {c.get('title', '')} — for: {c.get('for', '')}. {c['details']} "
+                     f"{c.get('rules', '')}".strip())
+    return "\n".join(lines)
