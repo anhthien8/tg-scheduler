@@ -2243,6 +2243,10 @@ def _make_handler(account_id: int):
                 if not (chat.get("history") or []):
                     await _seed_history_from_dialog(account_id, sender_id, event)
 
+                # A lead the 30-day rule put to sleep is awake again the moment they write.
+                if (chat.get("kol_step") or "") == "dormant" and await db.wake_dormant_lead(account_id, sender_id):
+                    logger.info("[StaleQueue] ☀️ Dormant lead %d (acc=%d) wrote again — back in the funnel",
+                                sender_id, account_id)
                 # Always append incoming user message
                 chat = await db.append_followup_chat_message(account_id, sender_id, "user", message_text)
                 # Volume proof → lead's forum topic + inline in the dashboard (background).
@@ -2389,6 +2393,10 @@ async def _followup_periodic_loop():
                 await process_step_reminders()
             except Exception as e_step:
                 logger.error("[StepReminder] Error in step reminder batch: %s", e_step)
+            try:
+                await process_stale_queue_dormant()
+            except Exception as e_stale:
+                logger.error("[StaleQueue] Error in dormant sweep: %s", e_stale)
             try:
                 await process_pinned_uids()
             except Exception as e_pin:
@@ -3077,6 +3085,31 @@ async def backfill_owed_answers(force: bool = False) -> int:
     if found:
         logger.info("[OwedAnswer] Backfill: %d chats are waiting on our answer", found)
     return found
+
+
+STALE_QUEUE_DAYS = 30
+_STALE_SCAN_EVERY = 6 * 3600
+_last_stale_scan = 0.0
+
+
+async def process_stale_queue_dormant(force: bool = False) -> dict:
+    """Every 6h: a lead that has waited on us for 30+ days is no longer a live task —
+    move it to 'dormant' so the reply queue only shows what can still be saved.
+    Sends nothing. The lead wakes up by itself when they write again."""
+    global _last_stale_scan
+    if not force and time.time() - _last_stale_scan < _STALE_SCAN_EVERY:
+        return {"dormant": 0, "skipped": "cooldown"}
+    _last_stale_scan = time.time()
+    moved = 0
+    for r in await db.get_stale_queue_leads(STALE_QUEUE_DAYS):
+        res = await db.set_kol_step(r["account_id"], r["user_id"], "dormant", actor="system",
+                                    reason=db.STALE_DORMANT_REASON)
+        if res.get("changed"):
+            await db.clear_owed_answer(r["account_id"], r["user_id"])
+            moved += 1
+    if moved:
+        logger.info("[StaleQueue] 💤 %d lead(s) waiting 30+ days moved to dormant", moved)
+    return {"dormant": moved}
 
 
 def _owed_age_text(hours: float) -> str:

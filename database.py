@@ -11,7 +11,7 @@ import os
 import re
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import aiosqlite
 
@@ -6080,6 +6080,60 @@ async def clear_owed_answer(account_id: int, user_id: int) -> bool:
             (account_id, user_id))
         await db.commit()
         return cur.rowcount > 0
+
+
+STALE_DORMANT_REASON = "Auto: waiting on us for 30+ days"
+
+
+async def get_stale_queue_leads(days: int = 30) -> list[dict]:
+    """Live leads that have been waiting on OUR side for `days`+ days — the reply queue:
+    an open promise, or a human-owned lead (needs_human / chat tay) nobody answered."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("""
+            SELECT account_id, user_id, username, status, owed_since,
+                   json_extract(history_json, '$[#-1].role') AS last_role,
+                   json_extract(history_json, '$[#-1].content') AS last_text,
+                   json_extract(history_json, '$[#-1].timestamp') AS last_ts
+            FROM ai_followup_chats
+            WHERE status != 'bot_ignored'
+              AND COALESCE(NULLIF(kol_step, ''), 'prospect') NOT IN ('declined', 'dormant', 'media', 'active')
+              AND ((owed_since IS NOT NULL AND datetime(owed_since) <= datetime('now', ?))
+                   OR (status IN ('needs_human', 'paused_admin')
+                       AND json_extract(history_json, '$[#-1].timestamp')
+                           <= strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', ?)))
+        """, (f"-{int(days)} days", f"-{int(days)} days"))
+        rows = [dict(r) for r in await cur.fetchall()]
+    out = []
+    for r in rows:
+        human_last = r["last_role"] == "assistant" and owed_answers.is_human_message(r["last_text"] or "")
+        stale_owed = bool(r["owed_since"]) and not (r["last_ts"] or "") > (
+            datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+        waiting = (r["last_role"] == "user"
+                   or (r["status"] == "needs_human" and r["last_role"] == "assistant" and not human_last))
+        if stale_owed or (not r["owed_since"] and waiting):
+            out.append(r)
+    return out
+
+
+async def wake_dormant_lead(account_id: int, user_id: int) -> str | None:
+    """A lead put to sleep by the 30-day rule wrote again: back to the step it had. Returns that step."""
+    async with get_db() as db:
+        cur = await db.execute(
+            "SELECT to_step, reason, from_step FROM kol_step_events WHERE account_id = ? AND user_id = ? "
+            "ORDER BY id DESC LIMIT 1", (account_id, user_id))
+        last = await cur.fetchone()
+        if not last or last[0] != "dormant" or last[1] != STALE_DORMANT_REASON:
+            return None  # an admin put them to sleep on purpose: leave it
+        back = normalize_kol_step(last[2]) or "prospect"
+        await db.execute(
+            "UPDATE ai_followup_chats SET kol_step = ?, kol_step_updated_at = datetime('now') "
+            "WHERE account_id = ? AND user_id = ?", (back, account_id, user_id))
+        await db.execute(
+            "INSERT INTO kol_step_events (account_id, user_id, from_step, to_step, actor, reason) "
+            "VALUES (?, ?, 'dormant', ?, 'system', 'Auto: KOL wrote again')", (account_id, user_id, back))
+        await db.commit()
+        return back
 
 
 async def update_followup_chat_status(account_id: int, user_id: int, status: str) -> bool:

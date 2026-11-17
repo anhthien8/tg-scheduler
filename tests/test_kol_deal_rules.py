@@ -51,15 +51,24 @@ def test_stated_volume_prefers_admin_value_then_chat_value():
     assert kol_offer.stated_volume(None) is None
 
 
-def test_chat_stated_volume_predicts_tier_but_not_the_value_estimate():
+def test_chat_stated_volume_predicts_tier_and_the_value_estimate():
+    """The volume the KOL states in chat is enough for the $ estimate: nobody has to type it."""
     ladder = kol_offer.DEFAULT_LADDER
     text = kol_offer.render_offer_ladder_prompt(ladder, volume_stated="18-20M")
     assert "TIER PREDICTION ALLOWED" in text and "Tier 2" in text
     assert "once our team verifies" in text
-    assert "PERFORMANCE SYNC" not in text  # value estimate only from the admin-entered volume
+    assert "PERFORMANCE SYNC" in text and "$10,450/month" in text  # 18M (low end of the range) at Tier 2
 
-    with_admin = kol_offer.render_offer_ladder_prompt(ladder, volume_claimed="60M")
-    assert "Tier 4" in with_admin and "PERFORMANCE SYNC" in with_admin
+    with_admin = kol_offer.render_offer_ladder_prompt(ladder, volume_claimed="60M", volume_stated="18M")
+    assert "Tier 4" in with_admin and "$36,600/month" in with_admin  # the admin-entered volume wins
+
+
+async def test_guard_allows_the_estimate_figures_of_a_chat_stated_volume():
+    _, ladder = await kol_offer.offer_block_for("WEEX", None, volume_stated="25M")
+    reply = "That's roughly $13,000 commission + $2,500 volume bonus, about $15,500 a month."
+    assert kol_offer.find_off_offer_figures(reply, "WEEX", None, ladder) == []
+    _, plain = await kol_offer.offer_block_for("WEEX", None)
+    assert kol_offer.find_off_offer_figures(reply, "WEEX", None, plain)
 
 
 # ── rules 2 + 3: current deal + upfront review ───────────────────────────────
@@ -135,3 +144,26 @@ async def test_kol_state_current_deal_empty_without_data():
     await db.get_or_create_followup_chat(account_id=1, user_id=304, username="kol2", name="KOL2")
     state = await db.get_kol_state(1, 304)
     assert state["current_deal"] == {}
+
+
+# ── Volume question closes the first pitch; the recording only locks in a higher tier ──
+
+def test_first_pitch_ends_with_the_volume_question_when_volume_unknown():
+    text = kol_offer.render_offer_ladder_prompt(kol_offer.DEFAULT_LADDER)
+    pitch = next(l for l in text.split("\n") if l.startswith("FIRST PITCH"))
+    assert kol_offer.VOLUME_QUESTION in pitch and "ONLY ask of this message" in pitch and "ONCE per chat" in pitch
+    assert "do not ask for a recording" in pitch
+    assert "Do not run a separate volume interview" not in text
+    assert "ONLY AFTER the KOL has stated a monthly volume of 10M or more" in text
+
+
+def test_known_volume_skips_the_question_and_recording_is_only_for_a_higher_tier():
+    small = kol_offer.render_offer_ladder_prompt(kol_offer.DEFAULT_LADDER, volume_stated="3M")
+    assert kol_offer.VOLUME_QUESTION not in small and "do NOT ask for it again" in small
+    assert "Do NOT ask for a recording" in small and "TIER PREDICTION ALLOWED" not in small
+    assert "no recording needed" in small and "$1,600/month" in small
+
+    big = kol_offer.render_offer_ladder_prompt(kol_offer.DEFAULT_LADDER, volume_stated="25M")
+    assert kol_offer.VOLUME_QUESTION not in big
+    assert "TIER PREDICTION ALLOWED" in big and "ask for it ONCE in that same message" in big
+    assert "$15,500/month" in big

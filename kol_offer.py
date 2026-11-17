@@ -200,7 +200,7 @@ _VOLUME_RANGE_RE = re.compile(
 def stated_volume(profile: dict | None):
     """Monthly volume used to predict the starting tier: the admin-entered volume
     (`volume_claimed`) wins, else the volume the KOL stated in chat (`monthly_volume`,
-    extracted by the AI). The value estimate stays on `volume_claimed` only."""
+    extracted by the AI). The same volume drives the earnings estimate."""
     p = profile or {}
     return p.get("volume_claimed") or p.get("monthly_volume") or None
 
@@ -275,19 +275,35 @@ def _tier_rows(ladder: dict) -> list[str]:
     return rows
 
 
-def _first_pitch_rule(ladder: dict) -> str:
+# Asked at the end of the first pitch: one number is far easier to give than a recording,
+# and it is what unlocks the tier prediction + earnings estimate (owner, 2026-11-18).
+VOLUME_QUESTION = (
+    "May I know how much Futures trading volume you can generate per month? Based on your estimated volume, "
+    "I can discuss with the WEEX team and try to secure a better commission rate and exclusive partnership "
+    "benefits for you."
+)
+
+
+def _first_pitch_rule(ladder: dict, volume_known: bool = False) -> str:
     """The first offer must carry enough substance to close — a bare headline reads like spam."""
     t0 = ladder["tiers"][0]
     why = (ladder["rules"].get("why_us") or [""])[0]
+    if volume_known:
+        close = ("then, as their monthly volume is already known, do NOT ask for it again: follow the TIER PREDICTION "
+                 "and VALUE ESTIMATE blocks below. ")
+    else:
+        close = ("then END the message with the VOLUME QUESTION, in the KOL's language and your own natural tone, "
+                 f"keeping its meaning: \"{VOLUME_QUESTION}\" "
+                 "That question is the ONLY ask of this message: do not ask for a recording, a UID or a campaign "
+                 "choice in the same message. Ask it ONCE per chat — if it is already in the history, never repeat it. ")
     return (
         "FIRST PITCH (the first time the KOL agrees to hear the offer, or asks what you offer): ONE message, 3-5 short lines, "
         f"covering: the headline; that they start at {_fmt_num(t0['revshare_pct'])}% revshare + "
         f"${_fmt_num(t0['bonus_per_1m_taker_usd'])} per 1M futures volume — or directly at a higher tier when they prove "
         "their current monthly volume — and move up the ladder as volume grows; "
         "commission is paid daily; " + (f"one reason to choose us ({why}); " if why else "")
-        + "then recommend ONE currently running campaign that fits their community and ask if they want to go ahead "
-        "(if their last-3-months performance is still unknown, ask for it instead). "
-        "Never send the headline alone, never send two messages in a row."
+        + close
+        + "Never send the headline alone, never send two messages in a row."
     )
 
 
@@ -308,14 +324,22 @@ def _starting_tier_map(ladder: dict) -> str:
     return "; ".join(parts)
 
 
+def _tier2_min(ladder: dict) -> float:
+    tiers = ladder["tiers"]
+    return float(tiers[1]["min_volume_m"]) if len(tiers) > 1 else 0.0
+
+
 def render_starting_tier_rule(ladder: dict) -> str:
     """Rule 1 (owner, 2026-11-10): the starting tier follows the KOL's proven volume elsewhere."""
     return (
         "STARTING TIER (proven volume — replaces 'everyone starts at Tier 1'): the starting tier follows the KOL's PROVEN "
         "volume on the exchange they work with now = the AVERAGE monthly volume of the LAST 3 MONTHS in a screen "
         f"recording of their exchange dashboard. Map it to the table: {_starting_tier_map(ladder)}. "
-        "No recording → Tier 1. Ask for the recording at most ONCE (it is the same ask as their last-3-months "
-        "performance; they may hide UID, balance and email). When they share or state a volume, say it LIKELY qualifies "
+        "No recording → Tier 1. Ask for the recording at most ONCE, and ONLY AFTER the KOL has stated a monthly volume "
+        f"of {_fmt_num(_tier2_min(ladder))}M or more (it is what locks in the higher tier they were just told about; they may "
+        "hide UID, balance and email). A KOL whose stated volume maps to Tier 1, or who does not know their volume, "
+        "is NOT asked for a recording: recommend ONE currently running campaign that fits their community and ask if "
+        "they want to go ahead. When they share or state a volume, say it LIKELY qualifies "
         "them for that tier ONCE OUR TEAM VERIFIES the recording — never confirm a starting tier as final yourself. "
         "If their real volume on WEEX turns out lower, the tier is adjusted at the quarterly review."
     )
@@ -331,9 +355,9 @@ _KB_LADDER_EXCEPTION = (
 def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, volume_stated=None) -> str:
     """Build the prompt block the AI receives every turn.
 
-    `volume_claimed` (admin-entered profile field) drives the tier prediction AND the
-    value estimate; `volume_stated` (volume the KOL stated in chat, AI-extracted) only
-    drives the tier prediction. With neither, the AI is told not to guess a tier.
+    Tier prediction and earnings estimate both use `volume_claimed` (admin-entered
+    profile field) when set, else `volume_stated` (the volume the KOL stated in chat,
+    extracted by the AI — nobody has to type it). With neither, the AI is told not to guess a tier.
     """
     ladder = _normalize_ladder(ladder or DEFAULT_LADDER)
     r = ladder["rules"]
@@ -341,7 +365,7 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, 
         f"--- OFFICIAL WEEX KOL COMMISSION LADDER (v{ladder['version']}, effective {ladder['effective_from']}) ---",
         f"Headline you may use: \"{ladder.get('headline') or 'up to 80% revshare'}\". When the KOL asks for details, use EXACTLY this ladder. "
         "It is the SAME for every KOL, every region and every language (KOLs outside Vietnam, Korea and the China market get their own region offer block instead) — there is no other offer.",
-        _first_pitch_rule(ladder),
+        _first_pitch_rule(ladder, volume_known=bool(parse_volume_m(volume_claimed or volume_stated))),
         "| Tier | Condition (monthly) | RevShare | Bonus per 1M FUTURES volume |",
         "|---|---|---|---|",
         *_tier_rows(ladder),
@@ -364,25 +388,33 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, 
         "no ranges like 50-60%), EXCEPT " + _KB_LADDER_EXCEPTION + ".",
     ]
     pred = predicted_tier(ladder, volume_claimed or volume_stated)
-    est = value_estimate(ladder, volume_claimed)
+    est = value_estimate(ladder, volume_claimed or volume_stated)
     if est is not None:
         lines[-1] = ("NEVER quote any % or $ figure that is not in this ladder, EXCEPT the pre-computed figures in the "
                      "VALUE ESTIMATE block below (copy them exactly; never compute new totals yourself) and "
                      + _KB_LADDER_EXCEPTION + ".")
         lines.append(render_value_estimate(est))
-    if pred is not None:
+    if pred is not None and int(pred["tier"]) > int(ladder["tiers"][0]["tier"]):
         lines.append(
             f"TIER PREDICTION ALLOWED: the KOL stated about {_fmt_num(pred['volume_m'])}M monthly volume on their current "
             f"exchange → with a verified last-3-months dashboard recording they LIKELY start at Tier {pred['tier']} "
             f"({_fmt_num(pred['revshare_pct'])}% revshare + ${_fmt_num(pred['bonus_per_1m_taker_usd'])} per 1M futures volume) "
-            "instead of Tier 1. Tell them it applies once our team verifies the recording; never confirm it as final."
+            "instead of Tier 1. Tell them it applies once our team verifies the recording; never confirm it as final. "
+            "If the recording is not in the chat yet, ask for it ONCE in that same message, as what locks this tier in."
+        )
+    elif pred is not None:
+        lines.append(
+            f"TIER PREDICTION: the KOL stated about {_fmt_num(pred['volume_m'])}M monthly volume → they start at Tier "
+            f"{pred['tier']} and move up as their community trades more. Do NOT ask for a recording (it would not change "
+            "their tier): recommend ONE currently running campaign and ask if they want to go ahead."
         )
     else:
         lines.append(
-            "TIER PREDICTION: the KOL has NOT stated their monthly volume yet — do not guess a tier; without proof they "
-            "start at Tier 1. Do not run a separate volume interview: their last-3-months performance (asked once) is "
-            "enough. If they state a volume in their latest message, map it with the STARTING TIER table above "
-            "(as 'likely, once our team verifies the recording')."
+            "TIER PREDICTION: the KOL has NOT stated their monthly volume yet — do not guess a tier; without a stated "
+            "volume they start at Tier 1. The only volume ask is the VOLUME QUESTION of the first pitch, ONCE: if they "
+            "skip it or do not know, do not ask again and do not ask for a recording — continue with a campaign "
+            "recommendation at Tier 1. If they state a volume in their latest message, map it with the STARTING TIER "
+            "table above (as 'likely, once our team verifies the recording')."
         )
     return "\n".join(lines)
 
@@ -391,8 +423,9 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, 
 
 # Fee rate implied by WEEX's SABC table (100,000 USDT fees ≈ 166.67M volume): SABC tier only.
 SABC_FEE_RATE = 0.0006
-# Earnings estimate: futures fees are 0.02% maker / 0.08% taker, assumed half and half (owner, 2026-11-18).
-EST_FEE_RATE = 0.0005
+# Earnings estimate: futures fees are 0.02% maker / 0.08% taker. The estimate uses the TAKER rate
+# (owner, 2026-11-18: retail communities mostly trade market orders).
+EST_FEE_RATE = 0.0008
 # SABC channel tiers by monthly fees (USDT), highest first.
 # Monthly marketing-fee bonus cap (owner-set, 2026-11-07).
 MARKETING_FEE_MAX = 200
@@ -449,11 +482,13 @@ def render_value_estimate(est: dict) -> str:
     return "\n".join([
         "--- VALUE ESTIMATE FOR THIS KOL (pre-computed by the system; use these exact figures) ---",
         f"Stated volume ≈ {_fmt_num(est['volume_m'])}M/month → trading fees ≈ {fmt(est['fees'])}/month "
-        "(rough estimate at their current volume, assuming about half maker and half taker orders).",
+        "(rough estimate at their current volume, at the 0.08% futures taker fee — most community orders are market orders; say 'roughly' and never present it as guaranteed).",
         f"SABC channel tier: {sabc or 'below C (no tier yet)'}"
         + (f" — pitch the tier-{sabc} benefits from the knowledge base and send [[BANNER:tier_{sabc.lower()}]]." if sabc else "."),
-        f"PERFORMANCE SYNC: once our team verifies their last-3-months dashboard recording, they likely START at the "
-        f"matching ladder tier instead of Tier 1: Tier {st['tier']}, {_fmt_num(st['revshare_pct'])}% revshare → commission ≈ "
+        ("PERFORMANCE SYNC: once our team verifies their last-3-months dashboard recording, they likely START at the "
+         "matching ladder tier instead of Tier 1: " if st["tier"] != est["month1"]["tier"]
+         else "PERFORMANCE SYNC: at this volume they start at the first tier (no recording needed): ")
+        + f"Tier {st['tier']}, {_fmt_num(st['revshare_pct'])}% revshare → commission ≈ "
         f"{fmt(st['commission'])} + volume bonus ≈ {fmt(st['bonus'])} = ≈ {fmt(st['total'])}/month EXTRA income "
         "if they ADD WEEX alongside what they run now (frame it as additional, not a replacement).",
         "When the KOL has shared their numbers, present the FULL PACKAGE in one message (short lines):",
@@ -643,7 +678,7 @@ async def offer_block_for(exchange: str | None, volume_claimed=None,
 
     `region` ('ID' / 'AE', from kol_region_offer.detect_region) swaps the WEEX ladder
     for the region offer (flat revshare + deposit bonus campaign) and its guard figures.
-    `volume_stated` (AI-extracted volume from chat) only feeds the ladder's tier prediction."""
+    `volume_stated` (AI-extracted volume from chat) is used when the admin entered none."""
     if uses_ladder(exchange):
         import kol_banners
         ladder = await get_ladder()
@@ -654,7 +689,7 @@ async def offer_block_for(exchange: str | None, volume_claimed=None,
                                             CURRENT_DEAL_RULE, UPFRONT_REVIEW_RULE, camp]))
             return block, _allow_campaign_figures(kol_region_offer.guard_ladder(ladder), camp)
         block = "\n".join(filter(None, [render_offer_ladder_prompt(ladder, volume_claimed, volume_stated), camp]))
-        est_d = estimate_dollars(value_estimate(ladder, volume_claimed))
+        est_d = estimate_dollars(value_estimate(ladder, volume_claimed or volume_stated))
         if est_d:  # let the guard pass the pre-computed estimate figures for this KOL only
             ladder = copy.deepcopy(ladder)
             rules = ladder.setdefault("rules", {})
