@@ -1642,6 +1642,11 @@ const AIFollowUp = {
               : '📨 Bên mình (tin tự động / không rõ) · ' + esc(accountLabel)));
         this._modalTexts = history.map(msg => (msg._shown || '').trim());
         this._modalLeadTexts = history.filter(m => m.role === 'user').map(m => (m.content || '').trim()).filter(Boolean);
+        this._modalHistory = history;
+        const ops = i => `<div class="aifu-msg-ops" style="display:flex;gap:10px;justify-content:flex-end;margin-top:3px;font-size:11px">`
+          + `<a href="javascript:void 0" onclick="AIFollowUp.editMsg(${i})" title="Sửa tin trên Telegram (lead thấy bản mới, có chữ 'edited')">✏️ Sửa</a>`
+          + `<a href="javascript:void 0" onclick="AIFollowUp.msgOp(${i},'revoke')" title="Thu hồi: xoá tin ở CẢ 2 phía trên Telegram">↩️ Thu hồi</a>`
+          + `<a href="javascript:void 0" onclick="AIFollowUp.msgOp(${i},'delete')" title="Xoá chỉ phía mình: lead vẫn còn thấy tin">🗑 Xoá</a></div>`;
         box.innerHTML = summaryBanner + history.map((msg, i) => {
           const isUser = msg.role === 'user';
           const timeText = msg.timestamp ? new Date(msg.timestamp).toLocaleString('vi-VN', {
@@ -1649,9 +1654,10 @@ const AIFollowUp = {
             hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
           }) : 'Không rõ thời gian';
           return `
-            <div style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-start' : 'flex-end'};margin-bottom:12px">
-              <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${who(msg)} • ${timeText}</div>
-              <div style="background:${isUser ? 'var(--accent-dim)' : (msg._human ? 'var(--green-dim, var(--purple-dim))' : 'var(--purple-dim)')};border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${this._mediaHtml(msg.media)}${esc(msg._shown)}<div class="aifu-tr" data-tr-idx="${i}" hidden style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border-hover);font-size:12px;font-style:italic;color:var(--text2)"></div></div>
+            <div id="aifu-msg-${i}" style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-start' : 'flex-end'};margin-bottom:12px">
+              <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${who(msg)} • ${timeText}${msg.edited ? ' • ✏️ đã sửa' : ''}</div>
+              <div class="aifu-msg-body" style="background:${isUser ? 'var(--accent-dim)' : (msg._human ? 'var(--green-dim, var(--purple-dim))' : 'var(--purple-dim)')};border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${this._mediaHtml(msg.media)}${esc(msg._shown)}<div class="aifu-tr" data-tr-idx="${i}" hidden style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border-hover);font-size:12px;font-style:italic;color:var(--text2)"></div></div>
+              ${isUser || !msg.timestamp ? '' : ops(i)}
             </div>`;
         }).join('');
         box.scrollTop = box.scrollHeight;
@@ -1809,6 +1815,46 @@ const AIFollowUp = {
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = 'Gửi ➤'; }
     }
+  },
+
+  // ── Edit / revoke / delete one of our messages ───────────────────
+  editMsg(i) {
+    const m = this._modalHistory?.[i];
+    const row = document.getElementById(`aifu-msg-${i}`);
+    if (!m || !row || row.querySelector('textarea')) return;
+    const body = row.querySelector('.aifu-msg-body');
+    const ops = row.querySelector('.aifu-msg-ops');
+    body.hidden = true; if (ops) ops.hidden = true;
+    row.insertAdjacentHTML('beforeend', `<div class="aifu-msg-edit" style="width:85%;display:flex;flex-direction:column;gap:6px">
+      <textarea class="form-input" rows="5" style="font-size:13px;line-height:1.5">${esc(m._shown)}</textarea>
+      <div style="display:flex;gap:6px;justify-content:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="AIFollowUp.openChat(${this._modalChat.account_id},${this._modalChat.user_id})">Huỷ</button>
+        <button class="btn btn-primary btn-sm">💾 Lưu & sửa trên Telegram</button></div></div>`);
+    const ta = row.querySelector('textarea');
+    ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+    row.querySelector('.aifu-msg-edit .btn-primary').onclick = () => this.msgOp(i, 'edit', ta.value);
+  },
+
+  async msgOp(i, action, newText = '') {
+    const c = this._modalChat, m = this._modalHistory?.[i];
+    if (!c || !m || this._msgOpBusy) return;
+    if (action === 'edit' && !newText.trim()) return App.toast('Nội dung trống', 'error');
+    if (action === 'edit' && newText.trim() === (m._shown || '').trim()) return this.openChat(c.account_id, c.user_id);
+    const ask = { revoke: 'Thu hồi tin này ở CẢ 2 phía? Lead sẽ không còn thấy nó.',
+                  delete: 'Xoá tin này chỉ phía mình? Lead VẪN còn thấy nó.' }[action];
+    if (ask && !confirm(ask)) return;
+    this._msgOpBusy = true;
+    try {
+      const res = await fetch(`/api/ai-followup/chats/${c.account_id}/${c.user_id}/message-op`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timestamp: m.timestamp, content: m.content, action, new_text: newText })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Thất bại');
+      App.toast({ edit: '✏️ Đã sửa', revoke: '↩️ Đã thu hồi', delete: '🗑 Đã xoá phía mình' }[action], 'success');
+      if (this._sameLead(c)) this.openChat(c.account_id, c.user_id);
+    } catch (e) { App.toast('❌ ' + e.message, 'error'); }
+    finally { this._msgOpBusy = false; }
   },
 
   closeHistoryModal() {

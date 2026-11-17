@@ -6012,6 +6012,33 @@ async def append_followup_chat_message(
         return chat
 
 
+async def edit_followup_history_entry(account_id: int, user_id: int, timestamp: str, content: str,
+                                      new_content: str | None) -> bool:
+    """Rewrite (new_content) or drop (None) the history row with this exact timestamp + content."""
+    async with get_db() as db:
+        await db.execute("BEGIN IMMEDIATE")
+        cur = await db.execute(
+            "SELECT history_json FROM ai_followup_chats WHERE account_id = ? AND user_id = ?",
+            (account_id, user_id))
+        row = await cur.fetchone()
+        history = json.loads((row[0] if row else None) or "[]")
+        idx = next((i for i, m in enumerate(history)
+                    if m.get("timestamp") == timestamp and m.get("content") == content), None)
+        if idx is None:
+            await db.rollback()
+            return False
+        if new_content is None:
+            history.pop(idx)
+        else:
+            history[idx] = {**history[idx], "content": new_content, "edited": True}
+        await db.execute(
+            "UPDATE ai_followup_chats SET history_json = ?, updated_at = datetime('now') "
+            "WHERE account_id = ? AND user_id = ?",
+            (json.dumps(history), account_id, user_id))
+        await db.commit()
+        return True
+
+
 async def set_owed_answer(account_id: int, user_id: int, note: str = "", since: str | None = None) -> bool:
     """Mark the chat as waiting on OUR answer (keeps an older open promise untouched)."""
     async with get_db() as db:

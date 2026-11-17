@@ -586,6 +586,59 @@ async def send_chat_message(account_id: int, user_id: int, req: SendChatMessageR
     return {"ok": True}
 
 
+class MessageOpRequest(BaseModel):
+    timestamp: str
+    content: str
+    action: str             # "edit" | "revoke" (both sides) | "delete" (our side only)
+    new_text: str = ""
+
+
+@router.post("/chats/{account_id}/{user_id}/message-op")
+async def message_op(account_id: int, user_id: int, req: MessageOpRequest):
+    """Edit, revoke or delete one of our own messages to the lead, on Telegram and in the history."""
+    import chat_message_ops as ops
+    if req.action not in ("edit", "revoke", "delete"):
+        raise HTTPException(status_code=400, detail="action phải là edit | revoke | delete")
+    new_text = (req.new_text or "").strip()
+    if req.action == "edit" and not new_text:
+        raise HTTPException(status_code=400, detail="Nội dung mới trống")
+    if len(new_text) > 4000:
+        raise HTTPException(status_code=400, detail="Tin nhắn quá dài (max 4000 ký tự)")
+    chat = await db.get_followup_chat(account_id, user_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
+    entry = next((m for m in chat.get("history") or []
+                  if m.get("timestamp") == req.timestamp and m.get("content") == req.content), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Tin này không còn trong lịch sử — mở lại chat")
+    if entry.get("role") == "user":
+        raise HTTPException(status_code=400, detail="Chỉ sửa/xoá được tin bên mình gửi")
+    client = tg.get_client(account_id)
+    if not client:
+        raise HTTPException(status_code=400, detail="Nick chưa kết nối Telegram")
+    try:
+        msgs = [m async for m in client.iter_messages(user_id, limit=200, from_user="me")]
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Không đọc được tin Telegram: {e}")
+    found = ops.find_matches(entry, msgs)
+    if not found:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tin này trên Telegram (đã bị xoá hoặc quá cũ)")
+    try:
+        if req.action == "edit":
+            await client.edit_message(user_id, found[0].id, new_text, parse_mode=None)
+            if len(found) > 1:  # a reply that went out in parts becomes one message
+                await client.delete_messages(user_id, [m.id for m in found[1:]], revoke=True)
+        else:
+            await client.delete_messages(user_id, [m.id for m in found], revoke=req.action == "revoke")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Telegram từ chối: {e}")
+    new_content = None
+    if req.action == "edit":
+        new_content = (ops.HUMAN_PREFIX + " " + new_text) if entry["content"].startswith(ops.HUMAN_PREFIX) else new_text
+    await db.edit_followup_history_entry(account_id, user_id, req.timestamp, req.content, new_content)
+    return {"ok": True, "telegram_messages": len(found), "content": new_content}
+
+
 @router.get("/chats/{account_id}/{user_id}/history")
 async def get_chat_history(account_id: int, user_id: int, limit: int = Query(200, ge=1, le=5000)):
     """Last `limit` messages of a chat (lazy-loaded by modal)."""
