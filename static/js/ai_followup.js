@@ -1727,6 +1727,7 @@ const AIFollowUp = {
             .then(r => r.json()).then(d => { if (d.added && this._isOpen(accountId, userId)) this.openChat(accountId, userId); }).catch(() => {});
         }
       }
+      this._paintPending(histData.pending_send);
     } catch (e) {
       if (!this._sameLead(c)) return;
       box.innerHTML = summaryBanner + '<div style="text-align:center;color:var(--red);padding:20px">Lỗi tải lịch sử chat</div>';
@@ -1847,6 +1848,13 @@ const AIFollowUp = {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Gửi thất bại');
+      if (data.queued) {
+        // Nick is spam-limited: nothing was sent, the reply waits and goes out by itself.
+        if (this._sameLead(c)) this._paintPending({ text, status: 'waiting', until: data.until });
+        App.toast(`⏳ Nick đang bị Telegram giới hạn — tin sẽ tự gửi khi nick mở khoá${data.replaced ? ' (đã thay tin chờ cũ)' : ''}`, 'info');
+        return;
+      }
+      if (this._sameLead(c)) document.getElementById('aifu-pending')?.remove(); // sent now: an older waiting reply is gone
       // Append bubble vào chat box
       const box = this._sameLead(c) ? document.getElementById('aifu-modal-chat-box') : null;
       if (box) {
@@ -1872,6 +1880,53 @@ const AIFollowUp = {
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = 'Gửi ➤'; }
     }
+  },
+
+  // ── Reply waiting for a spam-limited nick ─────────────────────────
+  // p = {text, status: 'waiting' | 'dropped', reason, until (unix s)} or null.
+  _paintPending(p) {
+    document.getElementById('aifu-pending')?.remove();
+    const box = document.getElementById('aifu-modal-chat-box');
+    if (!box || !p || !p.text) return;
+    const waiting = p.status !== 'dropped';
+    const when = p.until ? new Date(p.until * 1000).toLocaleString('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', hour12: false }) : '';
+    const head = waiting
+      ? `⏳ Chờ gửi — nick đang bị Telegram giới hạn${when ? `, dự kiến mở khoá ${when}` : ' (chưa rõ ngày mở khoá)'}`
+      : `⚠️ Tin này KHÔNG được gửi: ${esc(p.reason || 'không rõ lý do')}`;
+    const tip = 'Telegram đang giới hạn nick này nên tin chưa gửi được. App hỏi @SpamBot và chỉ gửi khi nick đã mở khoá, không thử gửi mò. '
+      + 'Tin sẽ KHÔNG được gửi nếu trong lúc chờ cuộc trò chuyện có tin mới, lead bị bỏ qua / chuyển nick / blacklist, hoặc đã chờ quá 7 ngày.';
+    box.insertAdjacentHTML('beforeend', `
+      <div id="aifu-pending" style="display:flex;flex-direction:column;align-items:flex-end;margin-bottom:12px">
+        <div style="font-size:11px;color:${waiting ? 'var(--orange)' : 'var(--red)'};margin-bottom:3px">${head}
+          <span class="info-i" tabindex="0" data-tip="${esc(tip)}">i</span></div>
+        <div style="border:1px dashed ${waiting ? 'var(--orange)' : 'var(--red)'};padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5;opacity:.85">${esc(p.text)}</div>
+        <div style="display:flex;gap:10px;margin-top:3px;font-size:11px">
+          <a href="javascript:void 0" onclick="AIFollowUp.cancelPending(true)" title="Bỏ tin chờ và đưa nội dung về ô nhập để sửa">${waiting ? '✏️ Huỷ & sửa lại' : '✏️ Dùng lại nội dung'}</a>
+          <a href="javascript:void 0" onclick="AIFollowUp.cancelPending(false)" title="Bỏ hẳn tin này">🗑 ${waiting ? 'Huỷ' : 'Xoá'}</a>
+        </div>
+      </div>`);
+    box.scrollTop = box.scrollHeight;
+  },
+
+  async cancelPending(reuse) {
+    const c = this._modalChat;
+    if (!c) return;
+    try {
+      const res = await fetch(`/api/ai-followup/chats/${c.account_id}/${c.user_id}/pending-send`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && res.status !== 404) throw new Error(data.detail || 'Không huỷ được');
+      if (!this._sameLead(c)) return;
+      document.getElementById('aifu-pending')?.remove();
+      const input = document.getElementById('aifu-chat-input');
+      if (reuse && input && data.text) {  // never lose the text: keep what is already typed below it
+        const typed = input.value.trim();
+        input.value = typed ? data.text + '\n' + typed : data.text;
+        input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px';
+        input.focus();
+      }
+      App.toast(res.status === 404 ? 'Tin chờ này đã được gửi hoặc đã huỷ' : 'Đã huỷ tin chờ', 'info');
+    } catch (e) { App.toast('❌ ' + e.message, 'error'); }
   },
 
   // ── Edit / revoke / delete one of our messages ───────────────────

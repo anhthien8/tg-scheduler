@@ -246,6 +246,12 @@ async def _auto_unpause_flooded_accounts():
 async def _auto_resume_campaigns():
     """Check paused_auto campaigns and restart if any sender account is available."""
     await _auto_unpause_flooded_accounts()
+    try:  # hand-typed replies that waited for a limited nick (own task: it spaces its sends)
+        import asyncio
+        import pending_sends
+        asyncio.create_task(pending_sends.flush())
+    except Exception as e:
+        logger.warning(f"[PendingSend] flush not started: {e}")
     campaigns = await db.get_auto_resume_dm_campaigns()
     if not campaigns:
         return

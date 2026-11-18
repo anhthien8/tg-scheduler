@@ -8,6 +8,11 @@
         "badge": "LATEST",
         "changes": [
             {
+                "type": "feature",
+                "title": "⏳ Tin chat tay tự gửi khi nick mở khoá",
+                "desc": "Bấm Gửi mà nick đang bị Telegram giới hạn (Too many requests)? Tin không mất: nó nằm chờ ngay trong cửa sổ chat và tự gửi khi @SpamBot báo nick đã mở khoá, mỗi tin cách nhau vài phút. Tin sẽ không được gửi nếu trong lúc chờ cuộc trò chuyện có tin mới, lead bị bỏ qua / chuyển nick / blacklist, hoặc đã chờ quá 7 ngày; khi đó app giữ lại nội dung kèm lý do để bạn dùng lại. Bấm Huỷ bất cứ lúc nào. Ngoài ra tin gửi tay từ cửa sổ chat giờ được ghi vào lịch sử và giữ AI tắt ngay ở phía server."
+            },
+            {
                 "type": "improvement",
                 "title": "AI không gửi câu soạn sẵn, không trả lời tin tự động",
                 "desc": "Khi câu trả lời của AI bị chặn (nói sai con số ngoài thang offer, hoặc lộ nguồn nội bộ), AI không còn gửi câu thay thế kiểu “để mình check lại với team”: nó im lặng và chuyển chat cho người thật trả lời. AI cũng không trả lời tin không do người gõ: tin chờ/chào của Telegram Business, tin qua bot business, hoặc tin tự nhận là trả lời tự động. Tin vẫn được lưu để đọc."

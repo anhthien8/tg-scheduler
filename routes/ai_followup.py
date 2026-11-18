@@ -577,17 +577,44 @@ class SendChatMessageRequest(BaseModel):
 
 @router.post("/chats/{account_id}/{user_id}/send")
 async def send_chat_message(account_id: int, user_id: int, req: SendChatMessageRequest):
-    """Gửi tin nhắn tay từ admin tới lead. Interceptor sẽ tự pause AI + ghi history."""
+    """Gửi tin nhắn tay từ admin tới lead. Interceptor sẽ tự pause AI + ghi history.
+
+    When Telegram refuses because the nick is spam-limited (PeerFlood), the message is
+    kept and sent by itself once the nick is usable again: {"ok": false, "queued": true}.
+    """
+    import pending_sends
     text = (req.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Tin nhắn trống")
     if len(text) > 4000:
         raise HTTPException(status_code=400, detail="Tin nhắn quá dài (max 4000 ký tự)")
+    if await pending_sends.account_blocked(account_id):
+        queued = await pending_sends.queue(account_id, user_id, text)  # known limit: do not even try
+        if queued:
+            return queued
     try:
         await tg.send_text_message(account_id, user_id, text, parse_mode=None)
     except Exception as e:
+        if pending_sends.is_peer_flood(e):
+            import alerts
+            await alerts.flood_guard(account_id)
+            queued = await pending_sends.queue(account_id, user_id, text)
+            if queued:
+                return queued
         raise HTTPException(status_code=502, detail=f"Gửi thất bại: {e}")
+    await db.delete_pending_send(account_id, user_id)  # answered now: an older waiting reply is obsolete
+    await pending_sends.record_human_send(account_id, user_id, text)
     return {"ok": True}
+
+
+@router.delete("/chats/{account_id}/{user_id}/pending-send")
+async def cancel_pending_send(account_id: int, user_id: int):
+    """Cancel a waiting reply (or dismiss a dropped one). Returns its text so it can be reused."""
+    row = await db.get_pending_send(account_id, user_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Không có tin nào đang chờ gửi")
+    await db.delete_pending_send(account_id, user_id)
+    return {"ok": True, "text": row["text"]}
 
 
 class MessageOpRequest(BaseModel):
@@ -701,7 +728,9 @@ async def get_chat_history(account_id: int, user_id: int, limit: int = Query(200
     chat = await db.get_followup_chat(account_id, user_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện")
-    return {"history": (chat.get("history") or [])[-limit:], "summary": chat.get("summary", ""), "lead_tier": chat.get("lead_tier", "Tier C"), "intent_score": chat.get("intent_score", 0)}
+    import pending_sends
+    return {"pending_send": await pending_sends.view(account_id, user_id),
+            "history": (chat.get("history") or [])[-limit:], "summary": chat.get("summary", ""), "lead_tier": chat.get("lead_tier", "Tier C"), "intent_score": chat.get("intent_score", 0)}
 
 
 @router.get("/chats/{account_id}/{user_id}/summary")

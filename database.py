@@ -1215,6 +1215,21 @@ async def init_db():
         """)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_kol_step_events_lead ON kol_step_events(account_id, user_id, id)")
 
+        # A hand-typed reply waiting for a spam-limited nick to be usable again (one per chat).
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS pending_sends (
+                account_id      INTEGER NOT NULL,
+                user_id         INTEGER NOT NULL,
+                text            TEXT NOT NULL,
+                chat_marker     TEXT DEFAULT '',
+                status          TEXT DEFAULT 'waiting',
+                reason          TEXT DEFAULT '',
+                attempts        INTEGER DEFAULT 0,
+                created_at      TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (account_id, user_id)
+            )
+        """)
+
         # Monthly WEEX sub-affiliate tier upgrades, one row per (month, agent): pending → applied/rejected/failed.
         await db.execute("""
             CREATE TABLE IF NOT EXISTS weex_tier_upgrades (
@@ -5885,6 +5900,80 @@ async def get_followup_chat(account_id: int, user_id: int) -> dict | None:
         res = dict(row)
         res["history"] = json.loads(res.get("history_json", "[]"))
         return res
+
+
+# ── Pending sends (reply waiting for a spam-limited nick) ─────────────────────
+
+async def set_pending_send(account_id: int, user_id: int, text: str, chat_marker: str) -> None:
+    """Keep one waiting reply for this chat (a newer one replaces it)."""
+    async with get_db() as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO pending_sends (account_id, user_id, text, chat_marker, status, reason, attempts, created_at) "
+            "VALUES (?, ?, ?, ?, 'waiting', '', 0, datetime('now'))",
+            (account_id, user_id, text, chat_marker))
+        await db.commit()
+
+
+async def get_pending_send(account_id: int, user_id: int) -> dict | None:
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT * FROM pending_sends WHERE account_id = ? AND user_id = ?", (account_id, user_id))
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+
+async def list_waiting_pending_sends(account_id: int | None = None) -> list[dict]:
+    """Waiting replies, oldest first (optionally of one account)."""
+    sql = "SELECT * FROM pending_sends WHERE status = 'waiting'"
+    args: tuple = ()
+    if account_id is not None:
+        sql += " AND account_id = ?"
+        args = (account_id,)
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(sql + " ORDER BY created_at, account_id, user_id", args)
+        return [dict(r) for r in await cur.fetchall()]
+
+
+async def drop_pending_send(account_id: int, user_id: int, reason: str, text: str) -> bool:
+    """Not sent: keep the text + why, so the chat window can show it until dismissed.
+
+    Only the still-waiting row holding exactly `text` is dropped (a reply cancelled or
+    replaced meanwhile is left alone). True when a row was marked.
+    """
+    async with get_db() as db:
+        cur = await db.execute(
+            "UPDATE pending_sends SET status = 'dropped', reason = ? "
+            "WHERE account_id = ? AND user_id = ? AND status = 'waiting' AND text = ?",
+            (reason, account_id, user_id, text))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def release_pending_send(account_id: int, user_id: int, text: str, claim_reason: str, bump: bool) -> int:
+    """Undo a claim after a failed send: back to waiting. Returns the attempt count."""
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE pending_sends SET status = 'waiting', reason = '', attempts = attempts + ? "
+            "WHERE account_id = ? AND user_id = ? AND status = 'dropped' AND reason = ? AND text = ?",
+            (1 if bump else 0, account_id, user_id, claim_reason, text))
+        await db.commit()
+        cur = await db.execute("SELECT attempts FROM pending_sends WHERE account_id = ? AND user_id = ?",
+                               (account_id, user_id))
+        row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+
+async def delete_pending_send(account_id: int, user_id: int, text: str | None = None) -> bool:
+    """Remove the chat's pending reply; with `text`, only the row holding exactly that text."""
+    sql, args = "DELETE FROM pending_sends WHERE account_id = ? AND user_id = ?", [account_id, user_id]
+    if text is not None:
+        sql += " AND text = ?"
+        args.append(text)
+    async with get_db() as db:
+        cur = await db.execute(sql, args)
+        await db.commit()
+        return cur.rowcount > 0
 
 
 async def get_or_create_followup_chat(

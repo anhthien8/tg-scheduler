@@ -2333,7 +2333,7 @@ async def get_cached_spam_status(account_id: int, max_age_hours: float = 24) -> 
     return None
 
 
-async def check_spam_status(account_id: int, max_age_hours: float = 0) -> dict:
+async def check_spam_status(account_id: int, max_age_hours: float = 0, auto_unpause: bool = True) -> dict:
     """Check @SpamBot and remember the result so the Accounts page can show it.
 
     max_age_hours > 0 reuses a cached result younger than that instead of
@@ -2353,7 +2353,7 @@ async def check_spam_status(account_id: int, max_age_hours: float = 0) -> dict:
         await _db.set_setting("spam_status_cache", _json.dumps(cache, ensure_ascii=False))
         # PeerFlood auto-pauses the whole account; once SpamBot says it is clean
         # again, turn it back on so DMs and the AI Agent resume by themselves.
-        if result.get("status") == "free":
+        if auto_unpause and result.get("status") == "free":
             acc = await _db.get_account(account_id)
             if acc and acc.get("is_paused") and str(acc.get("pause_reason") or "").startswith("PeerFlood"):
                 await _db.unpause_account(account_id)
