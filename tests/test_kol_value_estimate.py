@@ -34,3 +34,13 @@ def test_weex_guard_accepts_kb_figures():
     agent = {"knowledge_base": "WEEX tiers: earn up to 18.5% APR, 5,000 USDT prize pool"}
     assert k.find_off_offer_figures("18.5% APR and 5,000 USDT", "WEEX", agent) == []
     assert k.find_off_offer_figures("18.5% APR", "WEEX", None) == ["18.5%"]
+
+
+def test_guard_reads_dot_grouped_thousands_like_vietnamese_writers():
+    """'7.490 USDT' is 7,490, not 7.49: a Vietnamese campaign reply must not be blocked for it."""
+    agent = {"knowledge_base": "WEEX campaign prizes: 1,000 USDT, 7,490 USDT and a 3,000 USDT pool. Fee 0.125 USDT."}
+    assert k.find_off_offer_figures("Giải 1.000 USDT, 7.490 USDT, pool 3.000 USDT", "WEEX", agent) == []
+    assert k.find_off_offer_figures("pool $1.000.000", "WEEX", agent) == []      # 'per 1M' is always allowed
+    assert k.find_off_offer_figures("Giải 9.999 USDT", "WEEX", agent) == ["9.999 USDT"]
+    assert k.find_off_offer_figures("phí 0.125 USDT", "WEEX", agent) == []        # a real decimal stays a decimal
+    assert k.find_off_offer_figures("phí 12.5 USDT", "WEEX", agent) == ["12.5 USDT"]

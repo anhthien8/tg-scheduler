@@ -506,13 +506,20 @@ def render_value_estimate(est: dict) -> str:
 
 _PCT_RANGE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:[-–~]|to)\s*(\d+(?:\.\d+)?)\s*(?:%|percent)", re.IGNORECASE)
 _PCT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|percent\b)", re.IGNORECASE)
-_DOLLAR_RE = re.compile(r"\$\s*(\d[\d,]*(?:\.\d+)?)\s*([kKmM]\b)?")
-_USD_SUFFIX_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*([kKmM])?\s*(?:USDT|USD|dollars?|bucks)\b", re.IGNORECASE)
+# A number as people write it: 1,000 / 1000 / 12.5 — and 1.000 / 7.490 / 1.000.000, the
+# Vietnamese / European way of grouping thousands with dots.
+_DOT_THOUSANDS = r"[1-9]\d{0,2}(?:\.\d{3})+(?![\d.])"
+_NUM = r"(?:" + _DOT_THOUSANDS + r"|\d[\d,]*(?:\.\d+)?)"
+_DOT_THOUSANDS_RE = re.compile(_DOT_THOUSANDS)
+_DOLLAR_RE = re.compile(r"\$\s*(" + _NUM + r")\s*([kKmM]\b)?")
+_USD_SUFFIX_RE = re.compile(r"(" + _NUM + r")\s*([kKmM])?\s*(?:USDT|USD|dollars?|bucks)\b", re.IGNORECASE)
 
 _MULT = {"k": 1_000, "m": 1_000_000}
 
 
 def _to_number(num_s: str, unit: str | None) -> float:
+    if _DOT_THOUSANDS_RE.fullmatch(num_s):  # 7.490 USDT = 7490, not 7.49
+        num_s = num_s.replace(".", "")
     n = float(num_s.replace(",", ""))
     if unit:
         n *= _MULT.get(unit.lower().strip(), 1)
