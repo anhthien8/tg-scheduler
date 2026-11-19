@@ -1972,6 +1972,9 @@ def _make_handler(account_id: int):
                 try:
                     import command_bot
                     import proof_relay
+                    import telegram_forum_inbox as _fx
+                    if getattr(event.message, "media", None) and _fx.consume_forum_media_origin(account_id, dest_id):
+                        return  # an attachment an admin sent from the lead's topic: already shown and logged there
                     if proof_relay.media_kind(event.message):
                         # A photo / video / file: the topic gets the file itself, not "[Media]".
                         _spawn_background(command_bot.relay_outgoing_media_to_forum(

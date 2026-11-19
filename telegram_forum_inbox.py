@@ -38,6 +38,8 @@ class ReplyPreview:
     user_id: int
     text: str
     created_at: float
+    media: tuple | None = None   # (chat_id, message_id) of the admin's photo / video / file / voice…
+    label: str = ""              # what that attachment is, e.g. "Ảnh"
 
 
 _PENDING: dict[str, ReplyPreview] = {}
@@ -81,6 +83,14 @@ def parse_int_set(raw: str | None) -> set[int]:
 
 def is_relayable_admin_message(sender_id: int | None, is_bot: bool, is_anonymous: bool) -> bool:
     return bool(sender_id and not is_bot and not is_anonymous)
+
+
+FORUM_MEDIA_ORIGIN = "\x00forum-media"  # loop-guard key for an attachment sent from a topic
+
+
+def consume_forum_media_origin(account_id: int, user_id: int) -> bool:
+    """True when the nick's outgoing attachment is the one an admin just sent from the forum."""
+    return _consume_forum_origin(account_id, user_id, FORUM_MEDIA_ORIGIN)
 
 
 def note_forum_origin(account_id: int, user_id: int, text: str) -> None:
@@ -518,19 +528,21 @@ async def relay_outgoing_media(db, bot, cfg: ForumConfig, *, account_id: int, us
     return "relayed"
 
 
-async def prepare_reply(db, cfg: ForumConfig, admin_id: int, group_id: int, topic_id: int, text: str) -> ReplyPreview | None:
+async def prepare_reply(db, cfg: ForumConfig, admin_id: int, group_id: int, topic_id: int, text: str,
+                        media: tuple | None = None, label: str = "") -> ReplyPreview | None:
     if not cfg.enabled or group_id != cfg.group_id or topic_id == (cfg.general_topic_id or 1):
         return None
     if cfg.admin_ids is not None and admin_id not in cfg.admin_ids:
         return None
     draft = (text or "").strip()
-    if not draft:
+    if not draft and not media:
         return None
     topic = await db.get_telegram_topic_by_thread(group_id, topic_id)
     if not topic:
         return None
     token = secrets.token_urlsafe(12)
-    preview = ReplyPreview(token, admin_id, group_id, topic_id, int(topic["account_id"]), int(topic["user_id"]), draft, time.time())
+    preview = ReplyPreview(token, admin_id, group_id, topic_id, int(topic["account_id"]), int(topic["user_id"]),
+                           draft, time.time(), media, label)
     _PENDING[token] = preview
     return preview
 
@@ -539,7 +551,8 @@ def render_reply_preview(preview: ReplyPreview, account_label: str | None = None
     nick = account_label or f"Nick phụ: #{preview.account_id}"
     return ("🧾 Xác nhận gửi reply\n"
             f"Admin: {preview.admin_id}\nGroup: {preview.group_id}\nTopic: {preview.topic_id}\n"
-            f"Gửi từ: {nick}\nLead user_id: {preview.user_id}\n\nDraft:\n{html.escape(preview.text)}")
+            f"Gửi từ: {nick}\nLead user_id: {preview.user_id}\n\nDraft:\n"
+            + (f"📎 {preview.label or 'File'}\n" if preview.media else "") + html.escape(preview.text))
 
 
 async def _audit_reply(db, preview: ReplyPreview | None, admin_id: int, group_id: int, topic_id: int,
@@ -585,16 +598,19 @@ async def confirm_reply(db, token: str, admin_id: int, group_id: int, topic_id: 
             return "missing_or_used"
         _PENDING.pop(token, None)
         await db.set_human_takeover(preview.account_id, preview.user_id)
-        note_forum_origin(preview.account_id, preview.user_id, preview.text)
+        # The topic already shows the admin's own attachment: the nick's outgoing copy must not be relayed back.
+        origin = FORUM_MEDIA_ORIGIN if preview.media else preview.text
+        note_forum_origin(preview.account_id, preview.user_id, origin)
         try:
             sent = await sender(preview.account_id, preview.user_id, preview.text)
             if sent is False:
                 raise RuntimeError("sender_false")
         except Exception as exc:
-            _FORUM_ORIGIN.pop((preview.account_id, preview.user_id, preview.text), None)
+            _FORUM_ORIGIN.pop((preview.account_id, preview.user_id, origin), None)
             await _audit_reply(db, preview, admin_id, group_id, topic_id, "failure", type(exc).__name__)
             return "send_failed"
-        await db.append_followup_chat_message(preview.account_id, preview.user_id, "assistant", f"[Human Admin via Forum]: {preview.text}")
+        said = f"[Sent {preview.label or 'file'}] {preview.text}".strip() if preview.media else preview.text
+        await db.append_followup_chat_message(preview.account_id, preview.user_id, "assistant", f"[Human Admin via Forum]: {said}")
         await _audit_reply(db, preview, admin_id, group_id, topic_id, "success")
         return "sent"
 

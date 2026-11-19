@@ -1684,6 +1684,60 @@ async def _handle_stage(event) -> None:
                 event.sender_id, account_id, user_id, stage)
 
 
+_FORUM_MEDIA_MAX = 200 * 1024 * 1024
+
+
+def _attachment_size(message) -> int:
+    doc = getattr(message, "document", None)
+    return int(getattr(doc, "size", 0) or 0) if doc is not None else 0
+
+
+def _has_attachment(message) -> bool:
+    """Media that is not just the link preview Telegram adds to a text message."""
+    media = getattr(message, "media", None)
+    return media is not None and type(media).__name__ != "MessageMediaWebPage"
+
+
+def _attachment_label(message) -> str:
+    """What the admin attached; '' for kinds that are not a file (contact, location, poll…)."""
+    for attr, label in (("photo", "Ảnh"), ("video_note", "Video tròn"), ("voice", "Voice"),
+                        ("sticker", "Sticker"), ("gif", "GIF"), ("video", "Video"), ("audio", "Nhạc")):
+        if getattr(message, attr, None):
+            return label
+    return "File" if getattr(message, "document", None) else ""
+
+
+async def _send_forum_attachment(account_id: int, user_id: int, attachment: tuple, caption: str):
+    """Download the admin's attachment from the topic and send it to the lead from the nick,
+    as the same kind (a voice stays a voice, a GIF stays a GIF)."""
+    from telethon.tl.types import DocumentAttributeSticker, InputStickerSetEmpty
+    chat_id, message_id = attachment
+    message = await _bot.get_messages(chat_id, ids=message_id)
+    if not message or not _has_attachment(message):
+        raise RuntimeError("attachment_gone")
+    folder = os.path.join(db.DB_DIR, "forum_out")
+    os.makedirs(folder, exist_ok=True)
+    path = await message.download_media(file=os.path.join(folder, f"{account_id}_{user_id}_{message_id}"))
+    if not path:
+        raise RuntimeError("download_failed")
+    try:
+        doc = getattr(message, "document", None)
+        attrs = None
+        if doc is not None:
+            # A sticker keeps its emoji but not its pack: the nick does not own that pack reference.
+            attrs = [DocumentAttributeSticker(alt=a.alt, stickerset=InputStickerSetEmpty())
+                     if isinstance(a, DocumentAttributeSticker) else a for a in (doc.attributes or [])]
+        return await tg.send_media_message(
+            account_id, user_id, path, caption, attributes=attrs,
+            mime_type=getattr(doc, "mime_type", None) if doc is not None else None,
+            voice_note=bool(getattr(message, "voice", None)), video_note=bool(getattr(message, "video_note", None)))
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 async def _handle_forum_admin_message(event) -> None:
     """Admin typed in a lead topic → show a preview bound to admin/group/topic/draft."""
     cfg = await _load_forum_config()
@@ -1743,17 +1797,23 @@ async def _handle_forum_admin_message(event) -> None:
         logger.info("[ForumInbox] admin=%s disabled AI for acc=%s user=%s", sender_id, acc_id, uid)
         return
 
-    # Media with a caption would otherwise be relayed as a silent text-only reply,
-    # dropping the attachment the admin thinks was sent. V1 is text-only — refuse loudly.
-    if getattr(event.message, "media", None) is not None:
-        if (event.raw_text or "").strip():
+    # An attachment (photo, video, GIF, voice, round video, sticker, audio, any file) is sent to the
+    # lead as it is, with its caption. A link preview is not an attachment: that is a plain text reply.
+    media, label = None, ""
+    if _has_attachment(event.message):
+        label = _attachment_label(event.message)
+        if not label:
             await event.respond(
-                "⚠️ Forum Inbox v1 chỉ hỗ trợ tin nhắn văn bản. Ảnh/video/file kèm caption sẽ "
-                "KHÔNG được gửi cho lead — hãy gửi caption dưới dạng tin nhắn text riêng.",
-                reply_to=topic_id,
-            )
-        return
-    preview = await fx.prepare_reply(db, cfg, sender_id, cfg.group_id, topic_id, event.raw_text or "")
+                "⚠️ Loại tin này (liên hệ, vị trí, poll, game…) chưa gửi được cho lead từ topic. "
+                "Ảnh, video, GIF, voice, sticker, nhạc và mọi loại file thì gửi được.",
+                reply_to=topic_id)
+            return
+        if _attachment_size(event.message) > _FORUM_MEDIA_MAX:
+            await event.respond("⚠️ File lớn hơn 200MB, không gửi được cho lead từ topic.", reply_to=topic_id)
+            return
+        media = (cfg.group_id, int(event.message.id))
+    preview = await fx.prepare_reply(db, cfg, sender_id, cfg.group_id, topic_id, event.raw_text or "",
+                                     media=media, label=label)
     if not preview:
         return
     _acc = await db.get_account(preview.account_id)
@@ -1785,8 +1845,13 @@ async def _handle_forum_confirm(event, token: str) -> None:
         await event.answer("⛔ Không hợp lệ.", alert=True)
         return
 
+    pending = fx._PENDING.get(token)
+    attachment = getattr(pending, "media", None)
+
     async def _send(account_id: int, user_id: int, text: str):
-        return await tg.send_text_message(account_id, user_id, text, parse_mode=None)
+        if not attachment:
+            return await tg.send_text_message(account_id, user_id, text, parse_mode=None)
+        return await _send_forum_attachment(account_id, user_id, attachment, text)
 
     result = await fx.confirm_reply(db, token, event.sender_id, cfg.group_id, topic_id, _send, cfg=cfg)
     messages = {

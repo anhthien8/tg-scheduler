@@ -1155,6 +1155,28 @@ async def send_video_message(account_id: int, chat_id: int, file_path: str, capt
         raise
 
 
+async def send_media_message(account_id: int, chat_id: int, file_path: str, caption: str = "", *,
+                             attributes=None, mime_type: str | None = None,
+                             voice_note: bool = False, video_note: bool = False) -> bool:
+    """Send any attachment as it was (photo, video, GIF, voice, round video, sticker, audio, file).
+    `attributes` / `mime_type` are those of the original document, so it arrives as the same kind."""
+    client = _clients.get(account_id)
+    if not client:
+        raise Exception("Account not connected")
+    caption = outbound_guard.guard_outgoing(caption, f"acc={account_id} chat={chat_id} media caption") or ""
+    try:
+        entity = await _get_entity_safe(client, chat_id)
+        await client.send_file(entity, file_path, caption=caption, parse_mode=None, attributes=attributes,
+                               mime_type=mime_type, voice_note=voice_note, video_note=video_note,
+                               supports_streaming=True)
+        return True
+    except errors.FloodWaitError:
+        raise
+    except Exception as e:
+        logger.error(f"Account {account_id}: send media error to {chat_id}: {e}")
+        raise
+
+
 async def send_document_message(account_id: int, chat_id: int, file_path: str, caption: str = "") -> bool:
     client = _clients.get(account_id)
     if not client:
