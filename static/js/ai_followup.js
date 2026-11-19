@@ -67,7 +67,7 @@ const AIFollowUp = {
     this._settingsTabLoaded = false;
     this.switchTab('leads');
     // First visit in a session opens on the reply queue (the work list), not "all leads".
-    if (!this._defaulted) { this._defaulted = true; this._statusFilter = this.QUEUE_FILTER; }
+    if (!this._defaulted) { this._defaulted = true; this._statusFilter = 'needs_human'; }
     // Cache: chỉ fetch lại 86KB chats nếu quá 30s hoặc bị yêu cầu (nút 🔄 / force).
     const fresh = this._chatsLoadedAt && (Date.now() - this._chatsLoadedAt) < 30000 && this._chats.length;
     // Only the settings read needed for the global on/off switch. The rest of the
@@ -594,13 +594,15 @@ const AIFollowUp = {
     const count = st => this._chats.filter(c => c.status === st).length;
     const noFilter = !f && !this._stepFilter;
 
-    let html = chip(this.QUEUE_FILTER, `📥 Hàng chờ (${queue.length}${late ? ` · ${late} quá hạn` : ''})`,
+    let html = chip('needs_human', `⚠️ Cần người thật — tất cả (${count('needs_human')})`)
+      + tip('Mọi lead đang ở trạng thái “cần người thật”. Xếp theo tin nhắn MỚI NHẤT lên đầu (cột Cập nhật), nên KOL vừa trả lời sẽ nằm trên cùng.')
+      + chip(this.QUEUE_FILTER, `📥 Hàng chờ (${queue.length}${late ? ` · ${late} quá hạn` : ''})`,
         late && f !== this.QUEUE_FILTER ? ' style="color:var(--red);font-weight:700"' : '')
       + tip('Những KOL đang chờ NGƯỜI THẬT trả lời. Gồm: (1) lời hứa “team sẽ báo lại” đã quá 24 giờ, (2) lời hứa chưa quá 24 giờ, (3) lead “cần người thật” hoặc “chat tay” mà KOL là người nhắn sau cùng, (4) lead AI vừa chuyển cho người thật và chưa ai trả lời. Xếp theo mức gấp, rồi Tier A → B → C → Cold, rồi chờ lâu nhất. Không tính lead đã Bỏ qua, Từ chối, Ngủ đông và tài khoản của chính mình. Lead tự rời hàng chờ khi bạn nhắn cho KOL.')
       + chip('__proof', `🧾 Proof (${proof})`)
       + `<button class="btn btn-sm ${noFilter ? 'btn-primary' : 'btn-ghost'}" onclick="AIFollowUp.clearFilters()" title="Bỏ mọi bộ lọc, xem toàn bộ lead">Tất cả (${this._chats.length})</button>`;
 
-    const moreKeys = ['active', this.ANSWERED_FILTER, 'needs_human', 'paused_admin', this.OWED_FILTER, 'bot_ignored', this.CLEANUP_FILTER];
+    const moreKeys = ['active', this.ANSWERED_FILTER, 'paused_admin', this.OWED_FILTER, 'bot_ignored', this.CLEANUP_FILTER];
     const todo = this.TODO.find(t => t.key === f && t.key.startsWith('__') && t.key !== '__proof');
     const open = this._moreOpen || moreKeys.includes(f) || !!todo;
     html += `<button class="btn btn-sm btn-ghost" aria-expanded="${open}" onclick="AIFollowUp.toggleMoreChips()" title="Các bộ lọc ít dùng hơn">Thêm ${open ? '▴' : '▾'}</button>`;
@@ -608,7 +610,6 @@ const AIFollowUp = {
       html += '<span style="flex-basis:100%;height:0"></span>'
         + chip('active', `🤖 AI đang chat (${count('active')})`)
         + chip(this.ANSWERED_FILTER, `↩️ Đã trả lời, chờ KOL (${answered})`)
-        + chip('needs_human', `⚠️ Cần người thật — tất cả (${count('needs_human')})`)
         + chip('paused_admin', `⏸ Chat tay (${count('paused_admin')})`)
         + chip(this.OWED_FILTER, `⏳ Lời hứa (${this._chats.filter(c => this.isOwed(c)).length})`)
         + chip('bot_ignored', `🚫 Ignored (${count('bot_ignored')})`)
@@ -842,7 +843,10 @@ const AIFollowUp = {
       : (todo ? this._todoRows(todo)
         : (s === this.OWED_FILTER
           ? this._chats.filter(c => this.isOwed(c)).sort((a, b) => this.owedHours(b) - this.owedHours(a))
-          : this._chats.filter(c => c.status === s)));
+          : s === 'needs_human'
+            // Newest activity first: a KOL who just wrote back is at the top.
+            ? this._chats.filter(c => c.status === s).sort((a, b) => this._utcHoursAgo(a.updated_at) - this._utcHoursAgo(b.updated_at))
+            : this._chats.filter(c => c.status === s)));
     const st = this._stepFilter;
     if (st) rows = rows.filter(c => this.inFunnel(c));
     if (st === 'link_confirmed+') rows = rows.filter(c => this.stepRank(this.stepOf(c)) >= 3);
