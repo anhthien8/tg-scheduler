@@ -364,6 +364,58 @@ Lúc khởi động, `init_db()` tự kiểm tra 7 bảng / 30+ cột mà phễu
 
 Không dùng Lambda/Vercel/Cloud Functions cho 19 session Telethon + SQLite + APScheduler. Hướng đúng: split runtime `web` + `telegram_worker.py` trên cùng máy/volume (heartbeat 15s, lease 120s), sau đó chuyển lên một VPS always-on. Đọc checklist và bảng trade-off tại `docs/serverless-advisory.md`; bản thân thay đổi này chưa deploy.
 
+### Khi nào AI tự tắt?
+
+AI "tắt" với một lead nghĩa là AI ngừng tự trả lời người đó. Tin của KOL vẫn được lưu và vẫn vào Forum Inbox. Trong app, lead hiện **⚠️ Cần người thật** (hoặc **⏸ Chat tay**, **🚫 Ignored**), và nút trên đầu popup chat hiện **AI tắt**. Bấm nút đó để bật lại.
+
+**1. Bạn (người thật) nhắn cho KOL**
+
+| Trường hợp | AI tắt bao lâu |
+|---|---|
+| Bạn tự nhắn cho KOL từ nick (Telegram app, popup chat, Forum Inbox) | Tạm thời: AI tự bật lại sau 12 giờ nếu KOL nhắn mà chưa ai trả lời, chỉ với lead còn ở bước 0 (chưa chốt) và có tin trong 7 ngày gần nhất |
+| Bấm **AI tắt** trên popup chat, hoặc gõ `/aioff` trong topic | Vĩnh viễn, tới khi bấm **AI bật** / gõ `/aion` |
+| Gõ `/hide` trong topic của lead | Vĩnh viễn, tới khi gõ `/unhide` |
+| Đặt lead **Chat tay**, **Ignored** hoặc **Blacklist** | Tới khi bạn đổi lại |
+
+Đã có tin bạn tự gõ trong lịch sử thì AI **không** tự bật lại sau 12 giờ: lead đó coi như bạn đang giữ.
+
+**2. KOL nói hoặc làm điều cần người thật**
+
+| Trường hợp | Ghi chú |
+|---|---|
+| Tin của KOL chứa **từ khoá bàn giao** của AI Agent | Đặt ở AI Agent → Handover keywords |
+| Đã đạt **số câu tối đa** của AI Agent (mặc định 20) | Đặt ở AI Agent → Max replies |
+| KOL gửi **bằng chứng** (ảnh, video số liệu) cần kiểm tra | AI xác nhận đã nhận rồi chuyển cho bạn |
+| KOL đòi gọi điện / họp / hợp đồng, đòi upfront sau khi đã gửi (hoặc từ chối gửi) video 3 tháng, hỏi pháp lý / tranh chấp thanh toán, hoặc sẵn sàng onboard | AI tự thêm cờ bàn giao vào câu trả lời |
+| KOL hỏi "bạn là bot/AI à?" | AI né nhẹ một câu rồi chuyển cho bạn |
+| KOL từ chối hẳn ("no thanks", "không cần"…) | AI gửi đúng 1 lời cảm ơn kèm lời mời, lead chuyển sang **Từ chối** |
+| KOL là người bán dịch vụ quảng cáo (media seller) | AI từ chối lịch sự một lần rồi im |
+
+**3. Bộ chặn an toàn chặn câu trả lời của AI**
+
+Câu bị chặn **không** được gửi. Lead chuyển sang Cần người thật để bạn trả lời.
+
+| Trường hợp | Ghi chú |
+|---|---|
+| AI nhắc **số % hoặc số tiền ngoài thang** offer / knowledge base | Bị chặn và báo admin. Xem mục *AI trả lời số lạ bị chặn* ở phần Xử lý sự cố |
+| AI tự nhận là **AI / bot** | Câu được thay bằng câu an toàn |
+| AI viết **sai ngôn ngữ** so với ngôn ngữ KOL đang dùng | Chỉ khi KOL đang chờ trả lời |
+| AI chỉ xin bàn giao mà không viết được câu nào | Không gửi gì |
+| Câu thay thế ("để mình check với team…") đã gửi rồi | Không gửi lặp lần hai |
+
+**4. Hệ thống không cho AI trả lời**
+
+| Trường hợp | Ghi chú |
+|---|---|
+| Tin của KOL tới **trễ hơn 3 giờ** (server tắt, mạng mất) | Trả lời muộn trông như bot, nên để người thật xử lý |
+| Người nhắn là **tài khoản nội bộ** của mình | AI không bao giờ chat giữa các nick của mình (Ignored) |
+| Người nhắn là **bot Telegram** | Ignored |
+| Tin là **tin trả lời tự động** của KOL (away message, business bot) | AI im với tin đó, lead vẫn giữ nguyên |
+| Nick hoặc chiến dịch/rule đã gửi tin đầu **không gắn AI Agent** | AI không trả lời |
+| Lead ở bước **Từ chối**, **Ngủ đông** hoặc **Media** | Lead chờ mình quá 30 ngày tự vào Ngủ đông; KOL nhắn lại thì lead tự quay về bước cũ |
+
+Mỗi lần AI tắt vì bàn giao, nick chính hoặc Forum Inbox nhận một tin báo kèm lý do. Muốn biết vì sao một lead cụ thể bị tắt, xem tin báo đó hoặc lịch sử chat trong popup.
+
 ### AI Agents
 
 Tab **Cấu hình AI Agents**.
