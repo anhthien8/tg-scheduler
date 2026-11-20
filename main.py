@@ -67,6 +67,7 @@ from routes import discord as discord_routes
 from routes import help as help_routes
 from routes import ipc as ipc_routes
 from routes import stories as story_routes
+from routes import tasks as task_routes
 
 if TG_RUNTIME_MODE == "combined":
     import dm_reply_tracker as drt
@@ -266,7 +267,7 @@ if TG_RUNTIME_MODE == "web":
         path = request.url.path
         if path.startswith("/api/ipc"):
             return await call_next(request)
-        allowed = ("/api/logs", "/api/analytics", "/api/changelog", "/api/help", "/api/health/telegram-worker")
+        allowed = ("/api/logs", "/api/analytics", "/api/changelog", "/api/help", "/api/health/telegram-worker", "/api/tasks")
         if path.startswith("/api/") and (
             request.method != "GET" or not any(path == p or path.startswith(p + "/") for p in allowed)
         ):
@@ -384,6 +385,7 @@ app.include_router(changelog_routes.router, dependencies=_auth_dep)
 app.include_router(help_routes.router, dependencies=_auth_dep)
 app.include_router(ipc_routes.router, dependencies=_auth_dep)
 app.include_router(story_routes.router, dependencies=_auth_dep)
+app.include_router(task_routes.router, dependencies=_auth_dep)
 
 if TG_RUNTIME_MODE == "combined":
     app.include_router(auth.router, dependencies=_auth_dep)

@@ -243,6 +243,7 @@
         </button>
       </nav>
       <div class="sidebar-footer">
+        <button type="button" class="tc-btn" id="tc-btn" onclick="TaskCenter.toggle()" aria-expanded="false" aria-controls="tc-panel">🔔 Việc đang chạy <span id="tc-run" class="tc-n hidden">0</span><span id="tc-dot" class="tc-dot hidden"></span></button>
         <div class="user-info" id="user-info">
           <strong>TG Scheduler</strong>
           <span>Multi-Account</span>
@@ -2280,6 +2281,7 @@
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=506"></script>
   <script defer src="/static/js/app.js?v=528"></script>
+  <script defer src="/static/js/task_center.js?v=1"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->
   <template id="tpl-inbox-view">
