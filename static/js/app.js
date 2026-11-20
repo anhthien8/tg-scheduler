@@ -945,61 +945,171 @@ if(page==='stories'){
   if(!document.getElementById('view-stories')){
     const html = `<div id="view-stories">
       <style>
-        #view-stories .st-cols{display:grid;grid-template-columns:minmax(320px,420px) 1fr;gap:16px;align-items:start}
-        #view-stories .st-card{border:1px solid var(--border);border-radius:10px;padding:14px}
-        #view-stories .st-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-        #view-stories .st-accs{display:flex;flex-wrap:wrap;gap:6px;max-height:180px;overflow:auto;padding:4px 0}
-        #view-stories .st-acc{display:flex;align-items:center;gap:4px;font-size:.8rem;border:1px solid var(--border);border-radius:14px;padding:2px 8px;cursor:pointer}
-        #view-stories .st-acc.off{opacity:.45;cursor:not-allowed}
-        #view-stories .st-prev{max-width:100%;max-height:160px;border-radius:8px;margin-top:6px;display:block}
-        #view-stories .st-job{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px}
-        #view-stories .st-job-h{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
         #view-stories .st-muted{color:var(--text3);font-size:.78rem}
-        @media(max-width:900px){#view-stories .st-cols{grid-template-columns:1fr}}
+        #view-stories .st-red{color:var(--red)}
+        #view-stories .st-small{font-size:.74rem;margin-top:2px}
+        #view-stories .err{outline:2px solid var(--red);outline-offset:2px;border-radius:8px}
+        #view-stories .st-tl::after{left:auto;right:-8px}
+        #view-stories .st-comp{border:1px solid var(--border);border-radius:10px;background:var(--bg2);margin-bottom:18px}
+        #view-stories .st-comp-h{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)}
+        #view-stories .st-comp-h h3{margin:0;font-size:1rem;white-space:nowrap}
+        #view-stories .st-comp-h .form-input{flex:1;max-width:380px;padding:6px 10px;font-size:.85rem}
+        #view-stories .st-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+        #view-stories .st-grid>section{padding:12px 14px;min-width:0}
+        #view-stories .st-grid>section+section{border-left:1px solid var(--border)}
+        #view-stories .st-sec-t{font-size:.7rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text3);margin-bottom:8px}
+        #view-stories .st-lbl{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);margin-bottom:5px;min-height:18px}
+        #view-stories .st-media{display:grid;grid-template-columns:92px minmax(0,1fr);gap:0 12px}
+        #view-stories .st-drop{position:relative;width:92px;aspect-ratio:9/16;border:1.5px dashed var(--border);border-radius:10px;background:var(--bg3);display:grid;place-items:center;text-align:center;font-size:.7rem;color:var(--text3);cursor:pointer;overflow:hidden}
+        #view-stories .st-drop:hover,#view-stories .st-drop.over,#view-stories .st-drop:focus-visible{border-color:var(--accent);color:var(--accent);outline:none}
+        #view-stories .st-drop-e{display:flex;flex-direction:column;gap:4px;align-items:center;padding:4px;line-height:1.3}
+        #view-stories .st-drop-e big{font-size:1.4rem}
+        #view-stories .st-drop img,#view-stories .st-drop video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+        #view-stories .st-x{position:absolute;top:4px;right:4px;width:20px;height:20px;padding:0;border:0;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:11px;line-height:20px;cursor:pointer}
+        #view-stories .st-chg{position:absolute;left:0;right:0;bottom:0;padding:3px 0;background:rgba(0,0,0,.6);color:#fff;font-size:.68rem;opacity:0;transition:opacity .15s}
+        #view-stories .st-drop:hover .st-chg{opacity:1}
+        #view-stories .st-capb{display:flex;flex-direction:column;min-width:0}
+        #view-stories .st-capb textarea{flex:1;min-height:84px;resize:vertical}
+        #view-stories .st-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;font-size:.8rem}
+        #view-stories .st-tools .form-select{width:auto;padding:3px 6px;font-size:.78rem}
+        #view-stories .st-sep{width:1px;height:18px;background:var(--border);margin:0 4px}
+        #view-stories .st-chk{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+        #view-stories #st-file-info{grid-column:1/-1;margin-top:6px;font-size:.76rem;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #view-stories .st-cnt{font-size:.75rem;color:var(--text3)}
+        #view-stories .st-cnt.on{color:var(--accent);font-weight:600}
+        #view-stories .st-links{margin-left:auto;display:flex;gap:10px;font-size:.75rem}
+        #view-stories .st-links a,#view-stories .st-sum a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+        #view-stories .st-links a:hover{color:var(--accent)}
+        #view-stories .st-accs{display:flex;flex-wrap:wrap;align-content:flex-start;gap:5px;max-height:104px;overflow:auto;padding:2px}
+        #view-stories .st-acc{display:inline-flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text2);border:1px solid var(--border);border-radius:14px;padding:2px 9px 2px 6px;cursor:pointer;user-select:none}
+        #view-stories .st-acc input{margin:0;width:12px;height:12px;accent-color:var(--accent)}
+        #view-stories .st-acc:has(input:checked){border-color:var(--accent);background:var(--accent-dim);color:var(--text)}
+        #view-stories .st-acc:focus-within{outline:1px solid var(--accent)}
+        #view-stories .st-acc.off{opacity:.4;cursor:not-allowed}
+        #view-stories .st-time{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px;margin-top:12px}
+        #view-stories .st-qt{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
+        #view-stories .st-qt button{font-size:.74rem;padding:3px 10px;border-radius:12px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer}
+        #view-stories .st-qt button:hover,#view-stories .st-qt button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+        #view-stories .st-adv{border:1px solid var(--border);border-radius:8px;padding:7px 10px;margin-top:12px}
+        #view-stories .st-adv>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;font-size:.8rem;font-weight:600;min-width:0}
+        #view-stories .st-adv>summary::-webkit-details-marker{display:none}
+        #view-stories .st-adv>summary::after{content:'▾';margin-left:auto;color:var(--text3)}
+        #view-stories .st-adv[open]>summary::after{content:'▴'}
+        #view-stories #st-adv-sum{font-weight:400;font-size:.76rem;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+        #view-stories .st-adv-b{margin-top:10px;display:flex;flex-direction:column;gap:10px}
+        #view-stories .st-adv-g{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+        #view-stories .st-rng{display:flex;align-items:center;gap:4px}
+        #view-stories .st-rng input{min-width:0;padding-left:6px;padding-right:4px}
+        #view-stories .st-dep{transition:opacity .15s}
+        #view-stories .st-dep.dim{opacity:.45}
+        #view-stories .st-foot{position:sticky;bottom:0;z-index:3;display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg2);border-top:1px solid var(--border);border-radius:0 0 10px 10px;box-shadow:0 -8px 16px -8px rgba(0,0,0,.6)}
+        #view-stories .st-sum{flex:1;min-width:0;font-size:.8rem;color:var(--text2);line-height:1.45}
+        #view-stories .st-fn{display:inline-block;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+        #view-stories .st-foot .btn-primary{flex:none;min-width:220px}
+        #view-stories .st-jobs-h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+        #view-stories .st-jobs-h h3{margin:0;font-size:1rem}
+        #view-stories .st-jobs-h .btn{margin-left:auto}
+        #view-stories .st-job{display:grid;grid-template-columns:28px minmax(0,1.3fr) 92px minmax(200px,1.2fr) auto;gap:6px 14px;align-items:center;padding:8px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:6px;background:var(--bg2);transition:box-shadow .6s}
+        #view-stories .st-job.st-new{box-shadow:0 0 0 2px var(--accent)}
+        #view-stories .st-ic{font-size:1.15rem;text-align:center}
+        #view-stories .st-nm{min-width:0}
+        #view-stories .st-nm strong{display:block;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        #view-stories .st-pg{display:flex;flex-direction:column;gap:4px;min-width:0}
+        #view-stories .st-bar{display:grid;grid-template-columns:50px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:.72rem;color:var(--text3)}
+        #view-stories .st-bar i{display:flex;height:5px;border-radius:3px;background:var(--bg3);overflow:hidden}
+        #view-stories .st-bar b{display:block;height:100%}
+        #view-stories .st-bar em{font-style:normal;color:var(--text2);white-space:nowrap;min-width:44px;text-align:right}
+        #view-stories .st-bar.off i{opacity:.4}
+        #view-stories .st-ac{display:flex;gap:4px}
+        #view-stories .st-det{grid-column:1/-1}
+        #view-stories .st-det:empty{display:none}
+        #view-stories .st-det .table-wrap{margin-top:4px}
+        #view-stories .st-dt{font-size:.8rem}
+        #view-stories .st-dt td,#view-stories .st-dt th{padding:5px 8px;vertical-align:top}
+        #view-stories .st-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:360px;white-space:pre-wrap;color:var(--text3)}
+        #view-stories .st-empty{border:1px dashed var(--border);border-radius:10px;padding:16px;text-align:center;color:var(--text3);font-size:.85rem}
+        @media(max-width:1100px){#view-stories .st-grid{grid-template-columns:minmax(0,1fr)}#view-stories .st-grid>section+section{border-left:0;border-top:1px solid var(--border)}}
+        @media(max-width:900px){#view-stories .st-job{grid-template-columns:28px minmax(0,1fr) auto}#view-stories .st-pg,#view-stories .st-ac{grid-column:2/-1}#view-stories .st-time,#view-stories .st-adv-g{grid-template-columns:minmax(0,1fr)}#view-stories .st-foot{flex-wrap:wrap}#view-stories .st-foot .btn-primary{width:100%}}
       </style>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
         <h2 class="page-title" style="margin:0">📸 Story hàng loạt</h2>
         <span class="info-i" tabindex="0" data-tip="Hẹn giờ cho nhiều nick cùng đăng 1 story (ảnh hoặc video kèm caption), mỗi nick cách nhau vài phút. Sau khi đăng, các nick nội bộ khác lần lượt vào xem story của nhau để tăng lượt xem. Chỉ xem, không gửi tin nhắn nào.">i</span>
-        <button class="btn btn-sm" style="margin-left:auto" onclick="Stories.loadJobs(true)">🔄 Làm mới</button>
       </div>
-      <div class="st-cols">
-        <div class="st-card">
-          <h3 style="margin:0 0 10px;font-size:1rem">Tạo lịch đăng</h3>
-          <div class="form-group"><label class="form-label">Tên lịch</label><input id="st-name" class="form-input" placeholder="VD: Story sự kiện tháng 11"></div>
-          <div class="form-group"><label class="form-label">Ảnh / video <span class="info-i" tabindex="0" data-tip="Ảnh jpg/png/webp hoặc video mp4/mov/webm, tối đa 50 MB. Story dọc 9:16 hiển thị đẹp nhất; video nên dưới 60 giây.">i</span></label>
-            <input type="file" id="st-file" class="form-input" accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,.mkv" onchange="Stories.upload(this)">
-            <div id="st-file-info" class="st-muted"></div></div>
-          <div class="form-group"><label class="form-label">Caption <span class="info-i" tabindex="0" data-tip="Chữ hiện dưới story. Nick thường chỉ được 200 ký tự, nick Premium được tới 2048.">i</span> <span id="st-cap-n" class="st-muted"></span></label>
-            <textarea id="st-caption" class="form-textarea" rows="3" placeholder="Gõ ý tưởng (hoặc để trống) rồi bấm ✨ AI viết caption" oninput="Stories.capCount()"></textarea>
-            <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
-              <button type="button" id="st-ai-btn" class="btn btn-sm" onclick="Stories.aiCaption()">✨ AI viết caption</button>
-              <select id="st-cap-lang" class="form-select" style="width:auto;padding:2px 6px;font-size:.8rem"><option value="vi">Tiếng Việt</option><option value="en">English</option><option value="id">Indonesia</option><option value="ru">Русский</option><option value="zh">中文</option><option value="es">Español</option><option value="pt">Português</option></select>
-              <span class="info-i" tabindex="0" data-tip="Bấm 1 lần: AI viết 1 caption ngắn (tối đa 200 ký tự) và điền vào ô trên, bạn sửa thoải mái. Nếu ô đang có chữ, AI coi đó là ý tưởng và viết lại cho hay hơn, giữ nguyên link và @username. Dùng AI đang cài ở phần Cài đặt AI.">i</span>
+      <div class="st-comp" oninput="Stories.sum()" onchange="Stories.sum()">
+        <div class="st-comp-h">
+          <h3>Tạo lịch đăng</h3>
+          <input id="st-name" class="form-input" placeholder="Tên lịch (không bắt buộc), VD: Story sự kiện tháng 11">
+        </div>
+        <div class="st-grid">
+          <section>
+            <div class="st-sec-t">1 · Nội dung</div>
+            <div class="st-media">
+              <div class="st-lbl">Ảnh / video <span class="info-i" tabindex="0" data-tip="Ảnh jpg/png/webp hoặc video mp4/mov/webm, tối đa 50 MB. Story dọc 9:16 hiển thị đẹp nhất; video nên dưới 60 giây.">i</span></div>
+              <div class="st-lbl">Caption <span class="info-i" tabindex="0" data-tip="Chữ hiện dưới story. Nick thường chỉ được 200 ký tự, nick Premium được tới 2048.">i</span> <span id="st-cap-n" class="st-cnt" style="margin-left:auto"></span></div>
+              <label id="st-drop" class="st-drop" for="st-file" tabindex="0" title="Bấm để chọn, hoặc kéo thả file vào đây"
+                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"
+                ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="Stories.drop(event)"><span class="st-drop-e"><big>📤</big><b>Bấm hoặc kéo thả</b>ảnh / video</span></label>
+              <input type="file" id="st-file" hidden accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,.mkv" onchange="Stories.upload(this)">
+              <div class="st-capb">
+                <textarea id="st-caption" class="form-textarea" rows="4" placeholder="Gõ ý tưởng (hoặc để trống) rồi bấm ✨ AI viết caption"></textarea>
+                <div class="st-tools">
+                  <button type="button" id="st-ai-btn" class="btn btn-sm" onclick="Stories.aiCaption()">✨ AI viết caption</button>
+                  <select id="st-cap-lang" class="form-select"><option value="vi">Tiếng Việt</option><option value="en">English</option><option value="id">Indonesia</option><option value="ru">Русский</option><option value="zh">中文</option><option value="es">Español</option><option value="pt">Português</option></select>
+                  <span class="info-i" tabindex="0" data-tip="Bấm 1 lần: AI viết 1 caption ngắn (tối đa 200 ký tự) và điền vào ô trên, bạn sửa thoải mái. Nếu ô đang có chữ, AI coi đó là ý tưởng và viết lại cho hay hơn, giữ nguyên link và @username. Dùng AI đang cài ở phần Cài đặt AI.">i</span>
+                  <span class="st-sep"></span>
+                  <label class="st-chk"><input type="checkbox" id="st-vary"> Mỗi nick 1 caption khác</label>
+                  <span class="info-i" tabindex="0" data-tip="Khi hẹn giờ, nick đầu tiên dùng đúng caption ở trên, các nick còn lại được AI viết lại mỗi nick 1 câu khác nhau (cùng ý, cùng ngôn ngữ đã chọn) để story không bị trùng y hệt. Ô trống thì nick nào cũng nhận caption AI. Xem caption từng nick trong nút Chi tiết.">i</span>
+                </div>
+              </div>
+              <div id="st-file-info">jpg, png, webp, mp4, mov · tối đa 50 MB · dọc 9:16 đẹp nhất</div>
             </div>
-            <label style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:.82rem"><input type="checkbox" id="st-vary"> Mỗi nick 1 caption khác (AI viết lại) <span class="info-i" tabindex="0" data-tip="Khi hẹn giờ, nick đầu tiên dùng đúng caption ở trên, các nick còn lại được AI viết lại mỗi nick 1 câu khác nhau (cùng ý, cùng ngôn ngữ đã chọn) để story không bị trùng y hệt. Ô trống thì nick nào cũng nhận caption AI. Xem caption từng nick trong nút Chi tiết.">i</span></label></div>
-          <div class="form-group"><label class="form-label">Nick đăng <span class="info-i" tabindex="0" data-tip="Nick mờ là nick đang tạm dừng, bị flag, PeerFlood hoặc chưa đăng nhập: không chọn được. Nick nào gặp FloodWait khi chạy sẽ tự tạm dừng và không tự chạy lại.">i</span> <span id="st-acc-n" class="st-muted"></span>
-            <a href="#" style="margin-left:6px;font-size:.78rem" onclick="Stories.pickAll(true);return false">Chọn hết</a> · <a href="#" style="font-size:.78rem" onclick="Stories.pickAll(false);return false">Bỏ hết</a></label>
-            <div id="st-accs" class="st-accs"><span class="st-muted">Đang tải...</span></div></div>
-          <div class="st-row">
-            <div class="form-group"><label class="form-label">Giờ đăng <span class="info-i" tabindex="0" data-tip="Giờ nick đầu tiên đăng (giờ Việt Nam). Để trống = đăng ngay trong 1 phút tới.">i</span></label><input type="datetime-local" id="st-at" class="form-input"></div>
-            <div class="form-group"><label class="form-label">Giãn giờ (phút) <span class="info-i" tabindex="0" data-tip="Mỗi nick đăng sau nick trước khoảng này (cộng thêm vài phút ngẫu nhiên) để không bị coi là đăng hàng loạt. 0 = đăng gần như cùng lúc.">i</span></label><input type="number" id="st-stagger" class="form-input" min="0" max="720" value="5"></div>
-          </div>
-          <div class="form-group"><label class="form-label">Ai được xem <span class="info-i" tabindex="0" data-tip="Mọi người: ai mở profile cũng thấy story. Chỉ danh bạ: chỉ người có trong danh bạ của nick.">i</span></label>
-            <select id="st-privacy" class="form-select"><option value="all">Mọi người</option><option value="contacts">Chỉ danh bạ</option></select></div>
-          <div class="form-group"><label style="display:flex;gap:6px;align-items:center;font-weight:600"><input type="checkbox" id="st-cross" checked> 👀 Nick nội bộ xem story của nhau <span class="info-i" tabindex="0" data-tip="Sau khi 1 nick đăng, các nick nội bộ khác lần lượt mở xem story đó vào các phút ngẫu nhiên. Mỗi phút tối đa vài lượt xem, mỗi nick tối đa 60 story/ngày. Chỉ xem, không nhắn tin.">i</span></label></div>
-          <div class="st-row">
-            <div class="form-group"><label class="form-label">Nick xem <span class="info-i" tabindex="0" data-tip="Nick trong lịch: chỉ các nick đã chọn ở trên xem của nhau. Tất cả nick khỏe: mọi nick đang đăng nhập và không bị tạm dừng đều vào xem.">i</span></label>
-              <select id="st-scope" class="form-select"><option value="job">Nick trong lịch</option><option value="all">Tất cả nick khỏe</option></select></div>
-            <div class="form-group"><label class="form-label">Xem sau (phút) <span class="info-i" tabindex="0" data-tip="Mỗi nick xem vào 1 thời điểm ngẫu nhiên trong khoảng này, tính từ lúc story được đăng.">i</span></label>
-              <div style="display:flex;gap:6px;align-items:center"><input type="number" id="st-vmin" class="form-input" min="1" max="600" value="3"> – <input type="number" id="st-vmax" class="form-input" min="1" max="600" value="45"></div></div>
-          </div>
-          <button class="btn btn-primary" style="width:100%" onclick="Stories.create()">📅 Hẹn giờ đăng</button>
+          </section>
+          <section>
+            <div class="st-sec-t">2 · Nick &amp; giờ đăng</div>
+            <div class="st-lbl">Nick đăng <span class="info-i" tabindex="0" data-tip="Nick mờ là nick đang tạm dừng, bị flag, PeerFlood hoặc chưa đăng nhập: không chọn được. Nick nào gặp FloodWait khi chạy sẽ tự tạm dừng và không tự chạy lại.">i</span>
+              <span id="st-acc-n" class="st-cnt"></span>
+              <span class="st-links"><a href="#" onclick="Stories.pickAll(true);return false">Chọn hết</a><a href="#" title="Chỉ chọn nick Premium (caption được tới 2048 ký tự)" onclick="Stories.pickPremium();return false">⭐ Premium</a><a href="#" onclick="Stories.pickAll(false);return false">Bỏ hết</a></span></div>
+            <div id="st-accs" class="st-accs"><span class="st-muted">Đang tải...</span></div>
+            <div class="st-time">
+              <div><div class="st-lbl">Giờ đăng <span class="info-i" tabindex="0" data-tip="Giờ nick đầu tiên đăng (giờ Việt Nam). Để trống = đăng ngay trong 1 phút tới. Bấm các nút bên dưới để chọn nhanh.">i</span></div>
+                <input type="datetime-local" id="st-at" class="form-input"></div>
+              <div><div class="st-lbl">Giãn giờ (phút) <span class="info-i st-tl" tabindex="0" data-tip="Mỗi nick đăng sau nick trước khoảng này (cộng thêm vài phút ngẫu nhiên) để không bị coi là đăng hàng loạt. 0 = đăng gần như cùng lúc.">i</span></div>
+                <input type="number" id="st-stagger" class="form-input" min="0" max="720" value="5"></div>
+            </div>
+            <div id="st-qt" class="st-qt">
+              <button type="button" data-k="now" title="Đăng trong 1 phút tới" onclick="Stories.at('now')">⚡ Ngay</button>
+              <button type="button" data-k="15" onclick="Stories.at(15)">+15′</button>
+              <button type="button" data-k="60" onclick="Stories.at(60)">+1 giờ</button>
+              <button type="button" data-k="20" title="Nếu đã qua 20:00 thì là 20:00 ngày mai" onclick="Stories.at('20')">20:00 tối nay</button>
+              <button type="button" data-k="t8" onclick="Stories.at('t8')">8:00 sáng mai</button>
+            </div>
+            <details id="st-adv" class="st-adv">
+              <summary>⚙️ Ai xem &amp; lượt xem nội bộ <span id="st-adv-sum"></span></summary>
+              <div class="st-adv-b">
+                <label class="st-chk" style="font-weight:600;font-size:.82rem"><input type="checkbox" id="st-cross" checked> 👀 Nick nội bộ xem story của nhau <span class="info-i" tabindex="0" data-tip="Sau khi 1 nick đăng, các nick nội bộ khác lần lượt mở xem story đó vào các phút ngẫu nhiên. Mỗi phút tối đa vài lượt xem, mỗi nick tối đa 60 story/ngày. Chỉ xem, không nhắn tin.">i</span></label>
+                <div class="st-adv-g">
+                  <div><div class="st-lbl">Ai được xem <span class="info-i" tabindex="0" data-tip="Mọi người: ai mở profile cũng thấy story. Chỉ danh bạ: chỉ người có trong danh bạ của nick.">i</span></div>
+                    <select id="st-privacy" class="form-select"><option value="all">Mọi người</option><option value="contacts">Chỉ danh bạ</option></select></div>
+                  <div class="st-dep"><div class="st-lbl">Nick xem <span class="info-i" tabindex="0" data-tip="Nick trong lịch: chỉ các nick đã chọn ở trên xem của nhau. Tất cả nick khỏe: mọi nick đang đăng nhập và không bị tạm dừng đều vào xem.">i</span></div>
+                    <select id="st-scope" class="form-select"><option value="job">Nick trong lịch</option><option value="all">Tất cả nick khỏe</option></select></div>
+                  <div class="st-dep"><div class="st-lbl">Xem sau (phút) <span class="info-i st-tl" tabindex="0" data-tip="Mỗi nick xem vào 1 thời điểm ngẫu nhiên trong khoảng này, tính từ lúc story được đăng.">i</span></div>
+                    <div class="st-rng"><input type="number" id="st-vmin" class="form-input" min="1" max="600" value="3" onchange="Stories.fixDelay()"> – <input type="number" id="st-vmax" class="form-input" min="1" max="600" value="45" onchange="Stories.fixDelay()"></div></div>
+                </div>
+              </div>
+            </details>
+          </section>
         </div>
-        <div>
-          <h3 style="margin:0 0 10px;font-size:1rem">Lịch đã tạo</h3>
-          <div id="st-jobs"><span class="st-muted">Đang tải...</span></div>
+        <div class="st-foot">
+          <div id="st-sum" class="st-sum"></div>
+          <button id="st-go" class="btn btn-primary" onclick="Stories.create()">⚡ Đăng ngay</button>
         </div>
       </div>
+      <div class="st-jobs-h">
+        <h3>Lịch đã tạo <span id="st-jobs-n" class="st-muted"></span></h3>
+        <span class="info-i" tabindex="0" data-tip="Danh sách không tự cập nhật để app chạy nhẹ. Bấm Làm mới để xem tiến độ đăng và lượt xem mới nhất.">i</span>
+        <button class="btn btn-sm" onclick="Stories.loadJobs(true)">🔄 Làm mới</button>
+      </div>
+      <div id="st-jobs"><span class="st-muted">Đang tải...</span></div>
     </div>`;
     const w = document.createElement('div'); w.innerHTML = html;
     document.querySelector('.main').appendChild(w.firstElementChild);
@@ -5828,51 +5938,177 @@ window.Warmup = Warmup;
 // ── Story hàng loạt (v3.39) — no auto-polling: refresh on open, after actions, or by button ──
 const Stories = {
   _file: null,
+  _fileLbl: '',
+  _url: null,
+  _upTok: 0,
+  _busy: false,
+  _qt: 'now',
+  _qtVal: '',
   _accounts: [],
-  _ST: {pending:['Chờ','badge-blue'],posted:['Đã đăng','badge-green'],failed:['Lỗi','badge-red'],skipped:['Bỏ qua','badge-red'],cancelled:['Đã huỷ','badge-red'],
-        scheduled:['Đã hẹn','badge-blue'],running:['Đang chạy','badge-blue'],done:['Xong','badge-green']},
+  _INFO0: 'jpg, png, webp, mp4, mov · tối đa 50 MB · dọc 9:16 đẹp nhất',
+  _ST: {pending:['Chờ','badge-gray'],posted:['Đã đăng','badge-green'],failed:['Lỗi','badge-red'],skipped:['Bỏ qua','badge-gray'],cancelled:['Đã huỷ','badge-gray'],
+        scheduled:['Đã hẹn','badge-purple'],running:['Đang chạy','badge-blue'],done:['Xong','badge-green']},
 
   async init() {
-    this.capCount();
+    this.sum();
     await Promise.all([this.loadAccounts(), this.loadJobs()]);
   },
 
-  _badge(s) { const b = this._ST[s] || [s, 'badge-blue']; return `<span class="badge ${b[1]}">${esc(b[0])}</span>`; },
+  _badge(s) { const b = this._ST[s] || [s, 'badge-gray']; return `<span class="badge ${b[1]}">${esc(b[0])}</span>`; },
+  _attr(s) { return esc(String(s ?? '')).replace(/"/g, '&quot;'); },
+
+  // Backend reads "YYYY-MM-DDTHH:MM" as Vietnam time (UTC+7, no DST): do all date math in UTC+7, never in the PC's zone.
+  _vn(ms) { return new Date(ms + 7 * 3600e3).toISOString(); },
+  _parseAt(v) { return v ? Date.parse(v.slice(0, 16) + ':00Z') - 7 * 3600e3 : Date.now(); },
+  _hm(ms) {
+    const d = this._vn(ms), day = d.slice(0, 10), now = Date.now();
+    const tail = day === this._vn(now).slice(0, 10) ? 'hôm nay'
+      : day === this._vn(now + 864e5).slice(0, 10) ? 'mai' : `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+    return `${d.slice(11, 16)} ${tail}`;
+  },
+  _rel(ts) {
+    const m = Math.round((ts * 1000 - Date.now()) / 60000), a = Math.abs(m);
+    const s = a < 60 ? a + '′' : a < 1440 ? Math.round(a / 60) + ' giờ' : Math.round(a / 1440) + ' ngày';
+    return m > 0 ? 'còn ' + s : a < 1 ? 'vừa xong' : s + ' trước';
+  },
+
+  // One-click time chips: 'now' | minutes offset | '20' (20:00 today, or tomorrow if past) | 't8' (8:00 tomorrow)
+  at(kind) {
+    let v = '';
+    if (kind !== 'now') {
+      const now = Date.now(); let ms;
+      if (typeof kind === 'number') ms = now + kind * 60e3;
+      else {
+        ms = this._parseAt(`${this._vn(now).slice(0, 10)}T${kind === 't8' ? '08' : '20'}:00`);
+        if (kind === 't8' || ms <= now) ms += 864e5;
+      }
+      v = this._vn(ms).slice(0, 16);
+    }
+    document.getElementById('st-at').value = v;
+    this._qt = String(kind); this._qtVal = v; this.sum();
+  },
+
+  // Live summary + CTA label + advanced summary. Event-driven (delegated oninput/onchange), pure DOM reads.
+  sum() {
+    const $ = id => document.getElementById(id), go = $('st-go');
+    if (!go) return;
+    this.capCount();
+    const n = this.picked().length, okN = this._accounts.filter(a => a.ok).length;
+    const accN = $('st-acc-n'); accN.textContent = `${n}/${okN} đã chọn`; accN.classList.toggle('on', n > 0);
+    const v = $('st-at').value, st = Math.max(0, parseInt($('st-stagger').value) || 0), t0 = this._parseAt(v);
+    document.querySelectorAll('#st-qt button').forEach(b => b.classList.toggle('on', b.dataset.k === this._qt && v === this._qtVal));
+    const cross = $('st-cross').checked;
+    ['st-scope', 'st-vmin', 'st-vmax'].forEach(id => { $(id).disabled = !cross; });
+    document.querySelectorAll('#view-stories .st-dep').forEach(e => e.classList.toggle('dim', !cross));
+    const opt = id => $(id).selectedOptions[0]?.text || '';
+    $('st-adv-sum').textContent = `${opt('st-privacy')} · ` + (cross ? `👀 xem chéo: ${opt('st-scope').toLowerCase()}, ${$('st-vmin').value}–${$('st-vmax').value}′` : '👀 tắt xem chéo');
+    const red = s => `<span class="st-red">${s}</span>`, parts = [];
+    parts.push(this._file ? `<span class="st-fn" title="${this._attr(this._fileLbl)}">${esc(this._fileLbl)}</span>`
+      : red(`<a href="#" onclick="document.getElementById('st-file').click();return false">+ chọn ảnh/video</a>`));
+    parts.push(n ? `<b>${n}</b> nick` : red(`<a href="#" onclick="Stories.flash('st-accs');return false">+ chọn nick</a>`));
+    let when = v ? this._hm(t0) : 'đăng ngay';
+    if (n > 1) {
+      const a = this._hm(t0), b = this._hm(t0 + (n - 1) * st * 60e3);
+      when += st ? ` · cách ${st}′ → nick cuối ~${a.slice(5) === b.slice(5) ? b.slice(0, 5) : b}` : ' · cùng lúc';
+    }
+    parts.push('🕒 ' + when, cross ? '👀 xem chéo' : '👀 không xem chéo');
+    if (n > 50) parts.push(red('tối đa 50 nick/lịch'));
+    if (v && t0 < Date.now() - 300e3) parts.push(red('giờ đăng đã qua'));
+    $('st-sum').innerHTML = parts.join(' · ');
+    if (!this._busy) go.textContent = v ? `📅 Hẹn ${n ? n + ' nick ' : ''}lúc ${this._hm(t0)}` : `⚡ Đăng ngay${n ? ' ' + n + ' nick' : ''}`;
+  },
+
+  flash(id) {
+    const el = document.getElementById(id); if (!el) return;
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    el.classList.add('err'); setTimeout(() => el.classList.remove('err'), 1500);
+  },
 
   capCount() {
     const n = (document.getElementById('st-caption')?.value || '').length;
-    const el = document.getElementById('st-cap-n');
-    if (el) el.textContent = n ? `${n} ký tự${n > 200 ? ' (nick thường chỉ 200)' : ''}` : '';
+    const el = document.getElementById('st-cap-n'); if (!el) return;
+    const ids = this.picked(), prem = new Set(this._accounts.filter(a => a.is_premium).map(a => a.id));
+    const normal = ids.filter(id => !prem.has(id)).length, lim = ids.length && !normal ? 2048 : 200;
+    el.textContent = n ? `${n}/${lim}${n > lim && normal ? ` · ${normal} nick thường chỉ 200` : ''}` : '';
+    el.classList.toggle('st-red', n > lim);
   },
 
   async loadAccounts() {
     const box = document.getElementById('st-accs');
+    const keep = new Set(this.picked());
     try {
       const r = await API.get('/api/stories/accounts');
       this._accounts = r.accounts || [];
-      box.innerHTML = this._accounts.map(a => `<label class="st-acc${a.ok ? '' : ' off'}" title="${esc(a.ok ? (a.is_premium ? 'Premium' : 'Nick thường') : a.why)}"><input type="checkbox" value="${a.id}" ${a.ok ? '' : 'disabled'} onchange="Stories.countPicked()">${esc(a.name)}${a.is_premium ? ' ⭐' : ''}</label>`).join('') || '<span class="st-muted">Chưa có nick nào</span>';
-      this.countPicked();
+      const list = [...this._accounts].sort((a, b) => (+!!b.ok - +!!a.ok) || (+!!b.is_premium - +!!a.is_premium));
+      box.innerHTML = list.map(a => `<label class="st-acc${a.ok ? '' : ' off'}" title="${this._attr(a.ok ? (a.is_premium ? 'Premium: caption tới 2048 ký tự' : 'Nick thường: caption tối đa 200 ký tự') : a.why)}"><input type="checkbox" value="${a.id}" ${a.ok ? '' : 'disabled'} ${a.ok && keep.has(a.id) ? 'checked' : ''}>${esc(a.name)}${a.is_premium ? ' ⭐' : ''}</label>`).join('') || '<span class="st-muted">Chưa có nick nào</span>';
     } catch (e) { box.innerHTML = `<span class="st-muted">${esc(e.message)}</span>`; }
+    this.sum();
   },
 
   picked() { return [...document.querySelectorAll('#st-accs input:checked')].map(i => parseInt(i.value)); },
-  countPicked() { const el = document.getElementById('st-acc-n'); if (el) el.textContent = `(${this.picked().length} đã chọn)`; },
-  pickAll(on) { document.querySelectorAll('#st-accs input:not(:disabled)').forEach(i => { i.checked = on; }); this.countPicked(); },
+  countPicked() { this.sum(); },
+  pickAll(on) { document.querySelectorAll('#st-accs input:not(:disabled)').forEach(i => { i.checked = on; }); this.sum(); },
+  pickPremium() {
+    const prem = new Set(this._accounts.filter(a => a.is_premium).map(a => a.id));
+    document.querySelectorAll('#st-accs input:not(:disabled)').forEach(i => { i.checked = prem.has(parseInt(i.value)); });
+    this.sum();
+  },
+
+  fixDelay() {
+    const a = document.getElementById('st-vmin'), b = document.getElementById('st-vmax');
+    const x = parseInt(a.value) || 3, y = parseInt(b.value) || 45;
+    if (x > y) { a.value = y; b.value = x; }
+  },
+
+  _tile(busy) {
+    const d = document.getElementById('st-drop');
+    if (d) d.innerHTML = busy ? '<span class="st-drop-e"><big>⏳</big>Đang tải lên…</span>'
+      : '<span class="st-drop-e"><big>📤</big><b>Bấm hoặc kéo thả</b>ảnh / video</span>';
+  },
+
+  drop(e) {
+    e.preventDefault(); e.currentTarget.classList.remove('over');
+    const files = e.dataTransfer && e.dataTransfer.files, i = document.getElementById('st-file');
+    if (!files || !files.length || !i) return;
+    i.files = files; this.upload(i);
+  },
+
+  clearMedia() {
+    this._upTok++; this._file = null; this._fileLbl = '';
+    if (this._url) { URL.revokeObjectURL(this._url); this._url = null; }
+    const i = document.getElementById('st-file'), info = document.getElementById('st-file-info');
+    if (i) i.value = '';
+    if (info) info.textContent = this._INFO0;
+    document.getElementById('st-drop')?.classList.remove('err');
+    this._tile(); this.sum();
+  },
 
   async upload(input) {
     const f = input.files && input.files[0];
-    const info = document.getElementById('st-file-info');
-    this._file = null;
-    if (!f) { info.innerHTML = ''; return; }
-    info.textContent = 'Đang tải lên...';
+    if (!f) return;                          // picker cancelled: keep the current media
+    const info = document.getElementById('st-file-info'), drop = document.getElementById('st-drop');
+    const tok = ++this._upTok;
+    this._file = null; this._fileLbl = '';
+    if (this._url) { URL.revokeObjectURL(this._url); this._url = null; }
+    drop.classList.remove('err');
+    this._tile(true); info.textContent = `⏳ Đang tải lên ${f.name}…`; this.sum();
     const fd = new FormData(); fd.append('file', f);
     try {
       const r = await API.post('/api/stories/upload', fd);
-      this._file = r.filename;
-      const url = URL.createObjectURL(f);
-      const prev = r.media_type === 'video' ? `<video class="st-prev" src="${url}" muted controls></video>` : `<img class="st-prev" src="${url}" alt="">`;
-      info.innerHTML = `✅ ${esc(f.name)} (${(r.size / 1048576).toFixed(1)} MB)${prev}`;
-    } catch (e) { info.textContent = '❌ ' + e.message; input.value = ''; }
+      if (tok !== this._upTok) return;       // a newer pick/clear superseded this upload
+      const vid = r.media_type === 'video';
+      this._file = r.filename; this._url = URL.createObjectURL(f);
+      this._fileLbl = `${vid ? '🎬' : '🖼️'} ${f.name}`;
+      // first frame only (no autoplay loop) — keeps the page light
+      drop.innerHTML = (vid ? `<video src="${this._url}#t=0.1" muted preload="metadata"></video>` : `<img src="${this._url}" alt="">`)
+        + `<button type="button" class="st-x" title="Bỏ file này" onclick="event.preventDefault();event.stopPropagation();Stories.clearMedia()">✕</button><span class="st-chg">Đổi file</span>`;
+      info.innerHTML = `✅ <span title="${this._attr(f.name)}">${esc(f.name)}</span> · ${(r.size / 1048576).toFixed(1)} MB`;
+    } catch (e) {
+      if (tok !== this._upTok) return;
+      this._tile(); drop.classList.add('err'); input.value = '';
+      info.innerHTML = `<span class="st-red">❌ ${esc(e.message)}</span>`;
+    }
+    this.sum();
   },
 
   async aiCaption() {
@@ -5883,15 +6119,16 @@ const Stories = {
     try {
       const r = await API.post('/api/stories/caption', { idea: ta.value || '', lang: document.getElementById('st-cap-lang')?.value || 'vi', n: 1 });
       ta.value = (r.captions || [])[0] || ta.value;
-      this.capCount(); ta.focus();
+      this.sum(); ta.focus();
     } catch (e) { App.toast(e.message, 'error'); }
     finally { btn.disabled = false; btn.textContent = old; }
   },
 
   async create() {
+    if (this._busy) return;
     const ids = this.picked();
-    if (!this._file) return App.toast('Chưa tải ảnh/video lên', 'error');
-    if (!ids.length) return App.toast('Chọn ít nhất 1 nick', 'error');
+    if (!this._file) { this.flash('st-drop'); return App.toast('Chưa tải ảnh/video lên', 'error'); }
+    if (!ids.length) { this.flash('st-accs'); return App.toast('Chọn ít nhất 1 nick', 'error'); }
     const v = id => document.getElementById(id)?.value || '';
     const body = {
       name: v('st-name').trim(), account_ids: ids, media_file: this._file, caption: v('st-caption'),
@@ -5900,44 +6137,73 @@ const Stories = {
       viewer_scope: v('st-scope'), view_delay_min: parseInt(v('st-vmin')) || 3, view_delay_max: parseInt(v('st-vmax')) || 45,
       vary_caption: !!document.getElementById('st-vary')?.checked, caption_lang: v('st-cap-lang') || 'vi',
     };
+    const go = document.getElementById('st-go');
+    this._busy = true; go.disabled = true;
+    go.textContent = body.vary_caption ? '⏳ AI đang viết caption từng nick…' : '⏳ Đang hẹn…';
     try {
       const r = await API.post('/api/stories/jobs', body);
       App.toast(`Đã hẹn ${ids.length} nick đăng story từ ${r.scheduled_at_text}${r.ai_captions ? ` · AI viết ${r.ai_captions} caption riêng` : ''}`, 'success');
-      this.loadJobs();
+      // reset per-post fields (avoid re-posting the same story by accident); keep nicks + settings
+      this.clearMedia();
+      document.getElementById('st-name').value = '';
+      document.getElementById('st-caption').value = '';
+      this.at('now');
+      await this.loadJobs();
+      const row = document.querySelector(`#st-jobs .st-job[data-id="${r.id}"]`);
+      if (row) { row.classList.add('st-new'); row.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); setTimeout(() => row.classList.remove('st-new'), 1600); }
     } catch (e) { App.toast(e.message, 'error'); }
+    finally { this._busy = false; go.disabled = false; this.sum(); }
   },
 
   async loadJobs(toast) {
-    const box = document.getElementById('st-jobs');
+    const box = document.getElementById('st-jobs'), cntEl = document.getElementById('st-jobs-n');
     try {
       const r = await API.get('/api/stories/jobs');
       const jobs = r.jobs || [];
-      const cnt = o => Object.values(o || {}).reduce((a, b) => a + b, 0);
-      box.innerHTML = jobs.length ? jobs.map(j => {
-        const p = j.posts || {}, vw = j.views || {};
-        const live = j.status === 'scheduled' || j.status === 'running';
-        return `<div class="st-job"><div class="st-job-h"><strong>${esc(j.name || ('Lịch #' + j.id))}</strong>${this._badge(j.status)}
-          <span class="st-muted">${j.media_type === 'video' ? '🎬' : '🖼️'} ${esc(j.scheduled_at_text)} · ${j.account_ids.length} nick · cách ${j.stagger_min}′</span>
-          <span style="margin-left:auto;display:flex;gap:4px">
-            <button class="btn btn-sm" onclick="Stories.detail(${j.id})">Chi tiết</button>
-            ${live ? `<button class="btn btn-sm" onclick="Stories.cancel(${j.id})">Huỷ</button>` : `<button class="btn btn-sm" onclick="Stories.remove(${j.id})">Xoá</button>`}
-          </span></div>
-          <div class="st-muted" style="margin-top:4px">Đăng: ${p.posted || 0}/${cnt(p)}${p.failed ? ` · lỗi ${p.failed}` : ''}${p.skipped ? ` · bỏ qua ${p.skipped}` : ''}${j.cross_view ? ` · 👀 xem: ${vw.done || 0}/${cnt(vw)}${vw.pending ? ` (chờ ${vw.pending})` : ''}` : ''}</div>
-          <div id="st-detail-${j.id}"></div></div>`;
-      }).join('') : '<div class="empty-state st-muted">Chưa có lịch story nào</div>';
+      if (cntEl) cntEl.textContent = jobs.length ? `(${jobs.length})` : '';
+      box.innerHTML = jobs.length ? jobs.map(j => this._jobRow(j)).join('')
+        : '<div class="st-empty">Chưa có lịch story nào — chọn ảnh/video và nick ở trên rồi bấm <b>Hẹn giờ đăng</b>.</div>';
       if (toast) App.toast('Đã làm mới', 'info');
     } catch (e) { box.innerHTML = `<span class="st-muted">${esc(e.message)}</span>`; }
+  },
+
+  _bar(segs, total) {
+    return `<i>${total ? segs.filter(s => s[0] > 0).map(([n, c]) => `<b style="width:${(n / total * 100).toFixed(1)}%;background:${c}"></b>`).join('') : ''}</i>`;
+  },
+
+  _jobRow(j) {
+    const cnt = o => Object.values(o || {}).reduce((a, b) => a + b, 0);
+    const gray = o => (o.skipped || 0) + (o.cancelled || 0);
+    const p = j.posts || {}, vw = j.views || {}, pt = cnt(p), vt = cnt(vw);
+    const live = j.status === 'scheduled' || j.status === 'running';
+    const err = p.failed ? ` <a href="#" class="st-red" onclick="Stories.detail(${j.id});return false">⚠ ${p.failed} lỗi</a>` : '';
+    const post = `<div class="st-bar" title="Đã đăng ${p.posted || 0} · chờ ${p.pending || 0} · lỗi ${p.failed || 0} · bỏ qua/huỷ ${gray(p)}"><span>Đăng</span>${this._bar([[p.posted, 'var(--green)'], [p.failed, 'var(--red)'], [gray(p), 'var(--text3)']], pt)}<em>${p.posted || 0}/${pt}${err}</em></div>`;
+    const view = !j.cross_view ? '<div class="st-bar off"><span>👀 Xem</span><i></i><em>tắt</em></div>'
+      : !vt ? `<div class="st-bar"><span>👀 Xem</span><i></i><em>${live ? 'sau khi đăng' : '0'}</em></div>`
+      : `<div class="st-bar" title="Đã xem ${vw.done || 0} · chờ ${vw.pending || 0} · lỗi ${vw.failed || 0}"><span>👀 Xem</span>${this._bar([[vw.done, 'var(--purple)'], [vw.failed, 'var(--red)'], [gray(vw), 'var(--text3)']], vt)}<em>${vw.done || 0}/${vt}</em></div>`;
+    const name = j.name || ('Lịch #' + j.id), vid = j.media_type === 'video';
+    return `<div class="st-job" data-id="${j.id}">
+      <div class="st-ic" title="${vid ? 'Video' : 'Ảnh'}">${vid ? '🎬' : '🖼️'}</div>
+      <div class="st-nm"><strong title="${this._attr(name)}">${esc(name)}</strong>
+        <div class="st-muted">🕒 ${esc((j.scheduled_at_text || '').replace(/\/\d{4}$/, ''))} · ${this._rel(j.scheduled_at)} · ${j.account_ids.length} nick · cách ${j.stagger_min}′${j.privacy === 'contacts' ? ' · 🔒 danh bạ' : ''}</div></div>
+      <div>${this._badge(j.status)}</div>
+      <div class="st-pg">${post}${view}</div>
+      <div class="st-ac"><button class="btn btn-sm st-dbtn" onclick="Stories.detail(${j.id})">Chi tiết ▾</button>${live ? `<button class="btn btn-sm" onclick="Stories.cancel(${j.id})">Huỷ</button>` : `<button class="btn btn-sm" onclick="Stories.remove(${j.id})">Xoá</button>`}</div>
+      <div class="st-det" id="st-detail-${j.id}"></div></div>`;
   },
 
   async detail(id) {
     const el = document.getElementById(`st-detail-${id}`);
     if (!el) return;
-    if (el.innerHTML) { el.innerHTML = ''; return; }
+    const btn = document.querySelector(`#st-jobs .st-job[data-id="${id}"] .st-dbtn`);
+    if (el.innerHTML) { el.innerHTML = ''; if (btn) btn.textContent = 'Chi tiết ▾'; return; }
+    el.innerHTML = '<span class="st-muted">Đang tải...</span>';
     try {
       const j = await API.get(`/api/stories/jobs/${id}`);
-      el.innerHTML = `<div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Nick</th><th>Giờ hẹn</th><th>Trạng thái</th><th>Lượt xem nội bộ</th><th>Caption</th><th>Ghi chú</th></tr></thead><tbody>${
-        j.post_rows.map(p => `<tr><td>${esc(p.account_name || '#' + p.account_id)}</td><td>${esc(p.posted_at_text || p.post_at_text)}</td><td>${this._badge(p.status)}</td><td>${p.views_done}${p.views_pending ? ` (+${p.views_pending} chờ)` : ''}</td><td class="st-muted" style="max-width:260px;white-space:pre-wrap">${esc(p.caption || j.caption || '')}</td><td class="st-muted">${esc(p.error || '')}</td></tr>`).join('')
+      el.innerHTML = `<div class="table-wrap"><table class="st-dt"><thead><tr><th>Nick</th><th>Giờ</th><th>Trạng thái</th><th>👀 Xem</th><th>Caption</th></tr></thead><tbody>${
+        j.post_rows.map(p => { const cap = p.caption || j.caption || ''; return `<tr><td>${esc(p.account_name || '#' + p.account_id)}</td><td>${esc(p.posted_at_text || p.post_at_text)}</td><td>${this._badge(p.status)}${p.error ? `<div class="st-red st-small">${esc(p.error)}</div>` : ''}</td><td>${p.views_done}${p.views_pending ? ` <span class="st-muted">(+${p.views_pending} chờ)</span>` : ''}</td><td><div class="st-clamp" title="${this._attr(cap)}">${esc(cap)}</div></td></tr>`; }).join('')
       }</tbody></table></div>`;
+      if (btn) btn.textContent = 'Thu gọn ▴';
     } catch (e) { el.textContent = e.message; }
   },
 
