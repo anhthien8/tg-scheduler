@@ -74,6 +74,11 @@ def active_campaigns(today: str | None = None) -> list[dict]:
             and str(c.get("ends") or "9999-12-31") >= today and banner_path(c.get("key", ""))]
 
 
+# Partner onboarding links (owner, 2026-11-19).
+REGISTER_LINK = "https://www.weex.com/en/register?vipCode=kolglobal"
+AFFILIATE_DASHBOARD_LINK = "https://affiliates.weex.com"
+
+
 def campaign_prompt_block(today: str | None = None) -> str:
     """Prompt block: answer campaign questions with full details + the banner tag."""
     camps = active_campaigns(today)
@@ -81,11 +86,21 @@ def campaign_prompt_block(today: str | None = None) -> str:
         return ""
     lines = [
         "--- CURRENT WEEX CAMPAIGNS (send these when asked) ---",
-        "When the KOL asks about campaigns, promotions, events, deposit bonus, cashback or rewards for their community: "
-        "reply with the FULL details of the campaign(s) that match the question from the list below (who can join, the "
+        "ASK FIRST WHEN WE KNOW NOTHING (owner rule 2026-11-19): if the KOL asks in general what campaigns we have "
+        "while we still have neither their channel/community link nor their trading performance (dashboard video or "
+        "stated volume), do NOT send campaign details or a banner yet. In ONE short message, react to what they told "
+        "you about their community, then ask which kind of campaign fits their members best, naming 2-3 kinds taken "
+        "from the list below in plain words (e.g. a deposit bonus for new members, a trading competition / volume "
+        "rewards, copy trading) — no figures, no banner. That question is the only ask of the message, asked ONCE per "
+        "chat; if it is already in the history, use their answer instead of asking again. When their channel or "
+        "performance is already known, recommend the best-fitting campaign directly as the other rules say.",
+        "ONCE THE KOL CONFIRMS A CAMPAIGN (they picked one, said yes to the one you suggested, or asked about a specific "
+        "campaign and want it): in that reply send the FULL details of the matching campaign(s) from the list below (who can join, the "
         "reward table, the key rules), written naturally in their language, and add the tag [[BANNER:<key>]] for each "
         f"campaign you describe (at most {MAX_BANNERS_PER_REPLY} per reply) — the system sends the official banner image "
-        "right after your text. If they ask generally, pick the 1-2 most relevant (deposit bonus first). Skip a banner "
+        "right after your text — and, if the registration link is not in the history yet, end with it so they can "
+        f"onboard: {REGISTER_LINK} . If they leave the choice to you, pick the 1-2 that best fit what they said about "
+        "their community (deposit bonus first). Skip a banner "
         "whose [banner sent: <key>] mark is already in the history. Never invent a campaign, a figure or a date that is "
         "not below; for anything not covered (caps, exact dates, custom campaigns) say you will confirm with the team.",
     ]

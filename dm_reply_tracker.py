@@ -36,6 +36,7 @@ import kol_offer
 import telegram_client as tg
 import weex_mirror
 import kol_region_offer
+import kol_banners
 import owed_answers
 import lang_guard
 
@@ -420,7 +421,9 @@ _STEP_PROMPT_LABELS = {
 _STEP_GUIDANCE = {
     "prospect": (
         "The KOL has NOT agreed yet. Follow the short closing flow: channel link → last-3-months performance → offer + ONE running campaign "
-        "→ registration link. When the KOL clearly says yes / wants to proceed, send the registration link once and append [DEAL_AGREED] on its own line."
+        "(if their channel and performance are both still unknown, ask which kind of campaign fits their community first) "
+        "→ when they confirm a campaign: its details + banner + registration link. When the KOL clearly says yes / wants "
+        "to proceed, send the registration link once and append [DEAL_AGREED] on its own line."
     ),
     "deal_agreed": (
         "The deal is agreed — do NOT re-pitch or re-explain the ladder unless asked. "
@@ -431,7 +434,10 @@ _STEP_GUIDANCE = {
         "If they ask about status, say the team is on it and will confirm shortly."
     ),
     "link_confirmed": (
-        "Their affiliate link is live. Help them pick one running campaign if not chosen, and when they share the link "
+        "Their affiliate link is live. In your FIRST message at this step, if the affiliate dashboard link is not in the "
+        f"history yet: tell them their account is linked, give them the dashboard ({kol_banners.AFFILIATE_DASHBOARD_LINK}) "
+        "and tell them to open the Event section there to get the exchange's latest campaigns any time (once per chat). "
+        "Help them pick one running campaign if not chosen, and when they share the link "
         "to their first post/video, acknowledge it and append [FIRST_POST] on its own line."
     ),
     "first_post": (

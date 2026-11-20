@@ -32,7 +32,23 @@ def test_campaign_block_lists_only_active_unexpired_with_files(tmp_path, monkeyp
     monkeypatch.setattr(kb, "_catalog_cache", (-1.0, []))
     block = kb.campaign_prompt_block(today="2026-11-18")
     assert "[[BANNER:live]]" in block and "100 USDT" in block
-    assert "old" not in block.split("---")[-1] and "Off" not in block and "NoFile" not in block
+    listed = [ln for ln in block.splitlines() if ln.startswith("* ")]   # the campaign lines, not the rule text
+    assert listed == [ln for ln in listed if "[[BANNER:live]]" in ln] and len(listed) == 1
+
+    # Owner rule 2026-11-19: a general "what campaigns do you have" gets a question about the kind of
+    # campaign first; details and banner only after the KOL picks (overrides "recommend ONE campaign").
+    rule = block.split("ONCE THE KOL CONFIRMS")[0]
+    assert "ASK FIRST WHEN WE KNOW NOTHING" in rule and "neither their channel" in rule
+    assert "do NOT send campaign details or a banner yet" in rule and "ONCE per chat" in rule
+    assert "recommend the best-fitting campaign directly" in rule        # known community: no override
+    after = block.split("ONCE THE KOL CONFIRMS")[1]
+    assert "FULL details" in after and kb.REGISTER_LINK in after          # details + banner + onboarding link
+
+
+def test_link_confirmed_step_sends_dashboard_and_event_guide():
+    import dm_reply_tracker as t, kol_banners as kb
+    g = t._STEP_GUIDANCE["link_confirmed"]
+    assert kb.AFFILIATE_DASHBOARD_LINK in g and "Event section" in g and "once per chat" in g
 
 
 async def test_campaign_figures_pass_the_guard(monkeypatch):
