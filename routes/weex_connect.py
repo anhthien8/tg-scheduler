@@ -1,5 +1,7 @@
-"""Connect the WEEX affiliate portal: receive the portal token (sent by the "Kết nối WEEX" bookmarklet
-via /weex-connect.html), report status, toggle auto tier-up / onboarding."""
+"""Connect the WEEX affiliate portal: the "Kết nối WEEX" bookmarklet (run on affiliates.weex.com) POSTs the
+portal token straight to /api/weex/push with a connect secret that can ONLY set this token.
+No popup: the dashboard is an installed PWA and its windows swallow any 127.0.0.1 page."""
+import secrets
 import time
 
 from fastapi import APIRouter, HTTPException
@@ -10,10 +12,18 @@ import database as db
 import weex_affiliate as wx
 
 router = APIRouter(prefix="/api/weex", tags=["weex"])
+public_router = APIRouter(prefix="/api/weex", tags=["weex"])  # no dashboard auth: guarded by the connect secret
+
+SECRET_KEY = "weex_connect_secret"
 
 
 class TokenPayload(BaseModel):
     token: str
+
+
+class PushPayload(BaseModel):
+    token: str
+    secret: str
 
 
 class EnablePayload(BaseModel):
@@ -33,6 +43,24 @@ async def _status() -> dict:
 @router.get("/status")
 async def status():
     return await _status()
+
+
+@router.get("/connect-secret")
+async def connect_secret():
+    """Secret baked into the bookmarklet; created once."""
+    sec = await db.get_setting(SECRET_KEY, "")
+    if not sec:
+        sec = secrets.token_urlsafe(24)
+        await db.set_setting(SECRET_KEY, sec)
+    return {"secret": sec}
+
+
+@public_router.post("/push")
+async def push_token(payload: PushPayload):
+    sec = await db.get_setting(SECRET_KEY, "") or ""
+    if not sec or not secrets.compare_digest(payload.secret, sec):
+        raise HTTPException(403, "Bookmark cũ hoặc sai — kéo lại nút Kết nối WEEX trong Cài đặt")
+    return await save_token(TokenPayload(token=payload.token))
 
 
 @router.post("/token")

@@ -226,3 +226,53 @@ async def test_connect_saves_valid_token_and_rolls_back_rejected(monkeypatch):
 
     with pytest.raises(HTTPException):
         await wc.save_token(wc.TokenPayload(token=_jwt(int(time.time()) - 10)))  # expired
+
+
+async def test_push_requires_connect_secret(monkeypatch):
+    import time
+    from fastapi import HTTPException
+    from routes import weex_connect as wc
+
+    async def fake_list(uid=""):
+        return []
+
+    monkeypatch.setattr(wx, "list_agents", fake_list)
+    sec = (await wc.connect_secret())["secret"]
+    assert (await wc.connect_secret())["secret"] == sec  # stable
+    tok = _jwt(int(time.time()) + 3600)
+    with pytest.raises(HTTPException):
+        await wc.push_token(wc.PushPayload(token=tok, secret="wrong"))
+    assert (await wc.push_token(wc.PushPayload(token=tok, secret=sec)))["connected"]
+
+
+def test_push_preflight_allows_weex_origin_with_private_network():
+    from fastapi.testclient import TestClient
+    import main
+    r = TestClient(main.app).options("/api/weex/push", headers={
+        "Origin": "https://affiliates.weex.com", "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type", "Access-Control-Request-Private-Network": "true"})
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == "https://affiliates.weex.com"
+    assert r.headers.get("access-control-allow-private-network") == "true"
+    r2 = TestClient(main.app).options("/api/weex/push", headers={
+        "Origin": "https://evil.example", "Access-Control-Request-Method": "POST"})
+    assert r2.headers.get("access-control-allow-origin") is None
+
+
+async def test_lookup_uid_found_and_missing(monkeypatch):
+    row = {"user_id": 5808937626, "agent_name": "Michael", "register_time": "2026-11-18 10:00:00",
+           "first_trade_time": "-", "first_chain_deposit_time": "2026-11-18 11:00:00", "kyc_status": "否",
+           "superior_agent_tree": [{"agentName": "CSS", "agentUserId": 9811555540}, {"agentName": "Michael", "agentUserId": 1}]}
+    seen = {}
+
+    async def fake_request(method, path, *, params=None, json=None):
+        seen.update(params)
+        return {"code": 0, "data": [row] if params["userId"] == "5808937626" else []}
+
+    monkeypatch.setattr(wx, "_request", fake_request)
+    got = await wx.lookup_uid("5808937626")
+    assert seen["userId"] == "5808937626" and "role" not in seen and seen["showType"] == 1
+    text = wx.format_uid("5808937626", got)
+    assert "Michael" in text and "Đã nạp: Có" in text and "Đã trade: Chưa" in text
+    assert "CSS (9811555540) → Michael (1)" in text and "KYC: Chưa" in text
+    assert "không nằm dưới line" in wx.format_uid("1", await wx.lookup_uid("1"))

@@ -277,6 +277,9 @@ if TG_RUNTIME_MODE == "web":
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:8888", "http://localhost:8888"],
+    # WEEX portal bookmarklet → /api/weex/push only (guarded by the connect secret, not the API key)
+    allow_origin_regex=r"https://affiliates\.weex\.com",
+    allow_private_network=True,  # Chrome PNA: https portal → http://127.0.0.1
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -372,6 +375,7 @@ app.include_router(logs.router, dependencies=_auth_dep)
 app.include_router(settings.router, dependencies=_auth_dep)
 from routes import weex_connect as weex_connect_routes  # noqa: E402
 app.include_router(weex_connect_routes.router, dependencies=_auth_dep)
+app.include_router(weex_connect_routes.public_router)
 app.include_router(blacklist.router, dependencies=_auth_dep)
 app.include_router(discord_routes.router, dependencies=_auth_dep)
 app.include_router(analytics.router, dependencies=_auth_dep)

@@ -604,7 +604,8 @@
               <li>Kéo nút này lên thanh bookmark (làm 1 lần):
                 <a id="weex-bookmarklet" class="btn btn-sm btn-primary" href="#" onclick="event.preventDefault();App.toast('Kéo nút này lên thanh bookmark, đừng bấm ở đây','info')">🔗 Kết nối WEEX</a></li>
               <li>Mở <a href="https://affiliates.weex.com/" target="_blank" rel="noopener">affiliates.weex.com</a>, đăng nhập.</li>
-              <li>Bấm bookmark <b>Kết nối WEEX</b> → app tự lấy token.</li>
+              <li>Bấm bookmark <b>Kết nối WEEX</b> → app tự lấy token. Nếu trình duyệt chặn, token được copy sẵn → bấm
+                <button type="button" class="btn btn-sm" onclick="App.pasteWeexToken()">📋 Dán token WEEX</button></li>
             </ol>
             <label style="display:flex;gap:8px;align-items:center;font-size:13px">
               <input type="checkbox" id="weex-auto-enabled" onchange="App.setWeexEnabled(this.checked)">

@@ -6439,11 +6439,17 @@ App.loadWeexConnect = async function() {
   const bm = document.getElementById('weex-bookmarklet');
   if (!st || !bm) return;
   const A = location.origin;
-  bm.href = "javascript:(()=>{const A='" + A + "';const t=localStorage.getItem('accessToken');"
+  let sec = '';
+  try { sec = (await (await fetch('/api/weex/connect-secret')).json()).secret || ''; } catch (_) {}
+  bm.href = "javascript:(()=>{const t=(localStorage.getItem('accessToken')||'').replace(/^\"|\"$/g,'');"
     + "if(location.host!=='affiliates.weex.com'||!t){alert('Mở affiliates.weex.com và đăng nhập trước');return}"
-    + "const w=window.open(A+'/static/weex-connect.html','wxc','width=460,height=320');"
-    + "const h=e=>{if(e.origin===A&&e.data==='wx-ready'){w.postMessage({wxToken:t.replace(/^\"|\"$/g,'')},A);removeEventListener('message',h)}};"
-    + "addEventListener('message',h)})()";
+    + "fetch('" + A + "/api/weex/push',{method:'POST',headers:{'Content-Type':'application/json'},"
+    + "body:JSON.stringify({token:t,secret:'" + sec + "'})}).then(r=>r.json().then(d=>{"
+    + "if(!r.ok)throw new Error(d.detail||r.status);"
+    + "alert('✅ Đã kết nối WEEX với TG Scheduler. Token dùng tới '+new Date(d.expires_at*1000).toLocaleString('vi-VN'))}))"
+    + ".catch(e=>{if(/forbidden|403|Bookmark/i.test(e.message)){alert('❌ '+e.message);return}"
+    + "navigator.clipboard.writeText(t).then(()=>alert('📋 Trình duyệt chặn gửi thẳng, đã COPY token. Sang TG Scheduler → Cài đặt → bấm \"Dán token WEEX\".'),"
+    + "()=>prompt('Copy token này, sang TG Scheduler → Cài đặt → bấm \"Dán token WEEX\":',t))})})()";
   try {
     const d = await (await fetch('/api/weex/status')).json();
     const until = d.expires_at ? new Date(d.expires_at * 1000).toLocaleString('vi-VN') : '';
@@ -6451,6 +6457,21 @@ App.loadWeexConnect = async function() {
       : (d.expires_at ? `⚠️ Token hết hạn lúc ${until} — đăng nhập portal và bấm bookmark lại` : '⚪ Chưa kết nối');
     document.getElementById('weex-auto-enabled').checked = !!d.enabled;
   } catch (e) { st.textContent = 'Không đọc được trạng thái WEEX'; }
+};
+
+App.pasteWeexToken = async function() {
+  let token = '';
+  try { token = (await navigator.clipboard.readText()).trim(); } catch (_) {}
+  if (!token) token = (prompt('Dán token WEEX vào đây:') || '').trim();
+  if (!token) return;
+  try {
+    const r = await fetch('/api/weex/token', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.status);
+    App.toast('✅ Đã kết nối WEEX', 'success');
+    App.loadWeexConnect();
+  } catch (e) { App.toast('Token không dùng được: ' + e.message, 'error'); }
 };
 
 App.setWeexEnabled = async function(on) {

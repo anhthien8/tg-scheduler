@@ -280,6 +280,24 @@ def _register_handlers(client: TelegramClient):
             return
         await _handle_status(event)
 
+    # ── /uid <WEEX UID> — which affiliate on our line owns this UID ────────
+    @client.on(events.NewMessage(pattern=r"/uid(?:@\w+)?(?:\s+(\S+))?$"))
+    async def cmd_uid(event):
+        if not _check_admin(event):
+            return
+        uid = (event.pattern_match.group(1) or "").strip()
+        if not uid.isdigit():
+            await event.respond("Dùng: `/uid 5808937626`", parse_mode="md")
+            return
+        import weex_affiliate as wx
+        try:
+            text = wx.format_uid(uid, await wx.lookup_uid(uid))
+        except wx.WeexAuthError as e:
+            text = f"🔑 {e}\nVào dashboard → Cài đặt → Kết nối WEEX."
+        except Exception as e:
+            text = f"❌ Tra UID lỗi: {e}"
+        await event.respond(text, parse_mode="md")
+
     # ── /send [target] ─────────────────────────────────────────────────────
     @client.on(events.NewMessage(pattern=r"/send(?:\s+(.+))?"))
     async def cmd_send(event):
@@ -2071,6 +2089,7 @@ async def _start_command_bot_locked():
                     BotCommand("start", "🎛 Mở trung tâm điều khiển"),
                     BotCommand("status", "📊 Xem trạng thái hệ thống"),
                     BotCommand("send", "📤 Gửi tin nhắn từ nick phụ"),
+                    BotCommand("uid", "🔍 Tra UID WEEX thuộc affiliate nào"),
                     BotCommand("accounts", "👤 Danh sách accounts"),
                     BotCommand("campaigns", "📋 Danh sách campaigns"),
                     BotCommand("kol", "🔍 Xem thông tin KOL (@username)"),

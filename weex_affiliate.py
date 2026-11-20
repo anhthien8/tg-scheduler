@@ -211,6 +211,41 @@ async def reject(upgrade_id: int) -> str:
     return f"🚫 Bỏ qua {u['agent_name']} ({u['agent_uid']})"
 
 
+# ── UID lookup (/uid in the command bot) ────────────────────────────────────
+
+async def lookup_uid(uid: str) -> dict | None:
+    """Account row for a UID anywhere under our line (portal Accounts list), or None if not ours."""
+    # role/showType: the portal UI sends role="all" but the API rejects it (432); showType=1 = include sub-affiliates
+    body = await _request("GET", "/fuser/list", params={"page": 1, "limit": 10, "userId": uid, "showType": 1})
+    if body.get("code") not in (0, 200):
+        raise RuntimeError(body.get("message") or body.get("msg") or f"WEEX code {body.get('code')}")
+    data = body.get("data")
+    rows = data if isinstance(data, list) else (data or {}).get("data") or []
+    return next((r for r in rows if str(r.get("user_id")) == uid), None)
+
+
+def _v(row: dict, key: str) -> str:
+    val = row.get(key)
+    return "--" if val in (None, "", "-") else str(val)
+
+
+def format_uid(uid: str, row: dict | None) -> str:
+    if not row:
+        return (f"🔍 UID `{uid}`: **không nằm dưới line CSS**.\n"
+                "Có thể khách đăng ký không qua link ref hoặc thuộc line khác → nhờ BD WEEX check.")
+    traded = "Có" if _v(row, "first_trade_time") != "--" else "Chưa"
+    deposited = "Có" if _v(row, "first_chain_deposit_time") != "--" else "Chưa"
+    kyc = {"是": "Có", "否": "Chưa"}.get(_v(row, "kyc_status"), _v(row, "kyc_status"))
+    tree = " → ".join(f"{a.get('agentName')} ({a.get('agentUserId')})" for a in row.get("superior_agent_tree") or [])
+    return (f"🔍 UID `{uid}`\n"
+            f"Lead affiliate: **{_v(row, 'agent_name')}**\n"
+            + (f"Line: {tree}\n" if tree else "")
+            + f"Đăng ký: {_v(row, 'register_time')} (mã ref `{_v(row, 'register_vip_no')}`)\n"
+            f"Đã nạp: {deposited} · Đã trade: {traded} · KYC: {kyc}\n"
+            f"Số dư hiện tại: {float(row.get('total_balance') or 0):,.2f} USDT "
+            f"(futures {float(row.get('contract_balance') or 0):,.2f})")
+
+
 # ── Onboarding on UID ───────────────────────────────────────────────────────
 
 BIG_KOL_MIN_VOLUME_M = 20  # ≥ this stated monthly volume → straight onto our CSS line
