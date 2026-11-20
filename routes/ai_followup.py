@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 import database as db
+import kol_archetype
 import kol_offer
 import telegram_client as tg
 from dm_reply_tracker import contains_weex_link, personalize_weex_links
@@ -61,6 +62,9 @@ class KOLProfileRequest(BaseModel):
     platform: Optional[str] = None
     followers: Optional[str] = None
     first_post_link: Optional[str] = None
+    current_rebate_pct: Optional[str] = None  # their rate at the exchange they work with now
+    birthday: Optional[str] = None  # DD/MM, for the KOL care birthday greeting
+    archetype: Optional[str] = None  # trader | connector | content | signal (admin pick wins over AI)
 
 
 class KOLStepRequest(BaseModel):
@@ -92,6 +96,16 @@ async def update_kol_profile(account_id: int, user_id: int, req: KOLProfileReque
     if not await db.get_account(account_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy account")
     data = req.model_dump(exclude_unset=True)
+    if (data.get("birthday") or "").strip():
+        import kol_care
+        dm = kol_care.parse_birthday(data["birthday"])
+        if not dm:
+            raise HTTPException(status_code=400, detail="Sinh nhật không hợp lệ — nhập ngày/tháng, VD 25/12")
+        data["birthday"] = f"{dm[0]:02d}/{dm[1]:02d}"
+    if "archetype" in data:
+        arch = kol_archetype.normalize(data.pop("archetype"))
+        if arch:
+            data.update(archetype=arch, archetype_source="manual")
     await db.upsert_kol_profile(account_id, user_id, data)
     try:
         # Admin typed the UID by hand → that is a confirmed UID: advance deal_agreed → uid_received.
@@ -156,6 +170,13 @@ async def get_chat_step(account_id: int, user_id: int):
     state["predicted_tier"] = kol_offer.predicted_tier(ladder, kol_offer.stated_volume(state["have"]))
     state["offer_version"] = ladder.get("version")
     state["events"] = await db.get_kol_step_events(account_id, user_id, limit=20)
+    prof = await db.get_kol_profile(account_id, user_id)
+    state["archetype"] = prof.get("archetype") or ""
+    state["archetype_source"] = prof.get("archetype_source") or ""
+    state["current_rebate_pct"] = prof.get("current_rebate_pct") or ""
+    # Show the money: their current rate vs WEEX at their volume (None until both are known).
+    state["money"] = kol_offer.money_comparison(ladder, kol_offer.stated_volume(state["have"]),
+                                                prof.get("current_rebate_pct"))
     return state
 
 

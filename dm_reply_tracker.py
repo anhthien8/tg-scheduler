@@ -36,6 +36,7 @@ import kol_offer
 import telegram_client as tg
 import weex_mirror
 import kol_region_offer
+import kol_archetype
 import kol_banners
 import owed_answers
 import lang_guard
@@ -378,6 +379,8 @@ async def _async_update_kol_profile(account_id: int, user_id: int, history: list
         if not extracted:
             return
         extracted = dict(extracted)
+        if "archetype" in extracted:
+            extracted = kol_archetype.merge_extracted(extracted, await db.get_kol_profile(account_id, user_id))
         llm_uid = _normalize_uid(extracted.pop("weex_uid", None))
         uid_confirmed = bool(llm_uid) and llm_uid in extract_uid_candidates_from_messages(history)
         if llm_uid and uid_confirmed:
@@ -1605,8 +1608,13 @@ async def generate_and_send_ai_reply_for_chat(
                        if kol_offer.uses_ladder(exchange) else None)
         offer_block, offer_ladder = await kol_offer.offer_block_for(exchange, kol_prof.get("volume_claimed"),
                                                                     region=lead_region,
-                                                                    volume_stated=kol_prof.get("monthly_volume"))
+                                                                    volume_stated=kol_prof.get("monthly_volume"),
+                                                                    current_pct=kol_prof.get("current_rebate_pct"))
         combined_prompt += "\n\n" + offer_block
+        if kol_offer.uses_ladder(exchange):
+            _arch_rule = kol_archetype.opening_rule(kol_prof.get("archetype"))
+            if _arch_rule:
+                combined_prompt += "\n\n" + _arch_rule
         if kol_offer.uses_ladder(exchange) and not kol_region_offer.origin_known(kol_prof):
             # Region offer (all markets except Vietnam / Korea / China): ask where the KOL and their community are from.
             combined_prompt += "\n\n" + kol_region_offer.ORIGIN_QUESTION_RULE
@@ -2873,7 +2881,8 @@ async def _process_drip_queue() -> tuple[int, list[str]]:
             offer_block, offer_ladder = await kol_offer.offer_block_for(
                 exchange, drip_prof.get("volume_claimed"),
                 region=kol_region_offer.detect_region(history, drip_prof) if kol_offer.uses_ladder(exchange) else None,
-                volume_stated=drip_prof.get("monthly_volume"))
+                volume_stated=drip_prof.get("monthly_volume"),
+                current_pct=drip_prof.get("current_rebate_pct"))
         except Exception as offer_exc:
             logger.error("[DripEngine] Could not load offer ladder for user %d: %s", user_id, offer_exc)
             await _drip_defer(row_id, 6)

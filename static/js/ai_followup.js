@@ -44,9 +44,17 @@ const AIFollowUp = {
     affiliate_link: 'Link affiliate (ops)', link_confirmation: 'Xác nhận đã gắn link (ops)',
     selected_campaign: 'Chọn campaign', first_post_link: 'Link bài đầu tiên', volume_verified: 'Volume hợp lệ kỳ đầu (ops)'
   },
+  // KOL archetypes (WEEX BD training 2026-11-20): each type gets a different first move.
+  ARCHETYPES: {
+    trader:    { label: 'Trader',          emoji: '📈', tip: 'Trade hằng ngày, thích được tôn trọng. Tặng trial, xin góp ý sản phẩm, đừng chào hàng. Kỳ vọng: volume cao, ít trader mới.' },
+    content:   { label: 'Content KOL',     emoji: '🎬', tip: 'Đăng tin/phân tích, quan tâm thu nhập. Cho xem số tiền thật ở volume của họ. Kỳ vọng: độ phủ lớn, tỉ lệ ra trader thật khó đoán.' },
+    signal:    { label: 'Signal provider', emoji: '📡', tip: 'Gửi kèo cho nhóm theo sát. Giúp họ tăng community, nói thu nhập của nhóm. Kỳ vọng: trader thật và volume ổn định.' },
+    connector: { label: 'Connector',       emoji: '🤝', tip: 'Quen nhiều trader nhưng ít trade. Hẹn call/gặp, nhờ giới thiệu KOL. Kỳ vọng: được giới thiệu KOL chất lượng.' }
+  },
   HAVE_LABELS: {
     channel_link: 'Kênh', platform: 'Nền tảng', followers: 'Followers', volume_claimed: 'Volume khai',
     monthly_volume: 'Volume/tháng (AI ghi từ chat)',
+    archetype: 'Loại KOL', current_rebate_pct: '% rebate deal hiện tại', birthday: 'Sinh nhật',
     offer_version: 'Phiên bản offer', vip_code: 'vipCode', affiliate_link: 'Link affiliate'
   },
 
@@ -769,6 +777,124 @@ const AIFollowUp = {
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">${cards}</div></div>`;
   },
 
+  // ── KOL care (BD training 2026-11-20): due greetings / check-ins / monthly reviews ──
+  CARE_KINDS: {
+    birthday: { icon: '🎂', label: 'Sinh nhật' },
+    greeting: { icon: '🎉', label: 'Chúc lễ' },
+    checkin:  { icon: '👋', label: 'Hỏi thăm' },
+    review:   { icon: '📊', label: 'Review tháng' }
+  },
+
+  async loadCare(force = false) {
+    const body = document.getElementById('aifu-care-body');
+    if (!body) return;
+    if (!force && this._care && Date.now() - this._careAt < 600000) { this.renderCare(); return; }
+    body.innerHTML = '<div style="font-size:12px;color:var(--text2)">Đang tải…</div>';
+    try {
+      const res = await fetch('/api/kol-care/due');
+      if (!res.ok) throw new Error('Không tải được danh sách chăm sóc');
+      this._care = (await res.json()).items || [];
+      this._careAt = Date.now();
+      this.renderCare();
+    } catch (e) { body.innerHTML = `<div style="font-size:12px;color:var(--red)">${esc(e.message)}</div>`; }
+  },
+
+  renderCare() {
+    const body = document.getElementById('aifu-care-body');
+    const cnt = document.getElementById('aifu-care-count');
+    const items = this._care || [];
+    if (cnt) cnt.textContent = items.length ? `(${items.length} việc hôm nay)` : '';
+    if (!body) return;
+    const tools = `<div style="display:flex;gap:6px;justify-content:flex-end;margin-bottom:6px">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="AIFollowUp.refreshCareVolumes()" title="Lấy volume 3 tháng gần nhất từ portal WEEX affiliate để làm thẻ review tháng">⬇️ Cập nhật volume WEEX</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="AIFollowUp.loadCare(true)" aria-label="Tải lại">🔄</button></div>`;
+    if (!items.length) { body.innerHTML = tools + '<div style="font-size:12px;color:var(--text2)">Hôm nay không có KOL nào cần chúc lễ, chúc sinh nhật, hỏi thăm hay review 🎉</div>'; return; }
+    const name = i => i.name || (i.username ? '@' + i.username : 'ID ' + i.user_id);
+    const rows = items.map((i, n) => {
+      const k = this.CARE_KINDS[i.kind];
+      const arch = this.ARCHETYPES[i.archetype];
+      return `<tr>
+        <td>${k.icon} ${k.label}</td>
+        <td><a href="#" onclick="AIFollowUp.openChat(${i.account_id}, ${i.user_id});return false">${esc(name(i))}</a>${arch ? ` <span title="${esc(arch.label)}">${arch.emoji}</span>` : ''}</td>
+        <td style="color:var(--text2)">${esc(i.reason || '')}</td>
+        <td style="white-space:nowrap;text-align:right">
+          <button type="button" class="btn btn-primary btn-sm" onclick="AIFollowUp.careDraft(${n})">✍️ Soạn</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="AIFollowUp.careSkip(${n})" title="Bỏ qua lần này (không hiện lại kỳ này)">Bỏ qua</button>
+        </td></tr>`;
+    }).join('');
+    body.innerHTML = tools + `<div class="table-wrap"><table class="table" style="font-size:12px"><tbody>${rows}</tbody></table></div>`;
+  },
+
+  async refreshCareVolumes() {
+    App.toast('Đang lấy volume WEEX 3 tháng…', 'info');
+    try {
+      const res = await fetch('/api/kol-care/refresh-volumes', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Lỗi lấy volume');
+      App.toast('Đã cập nhật volume: ' + Object.entries(data.saved || {}).map(([m, n]) => `${m} (${n} UID)`).join(', '), 'success');
+      this.loadCare(true);
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  async _careTouch(accountId, userId, kind, note = '') {
+    const res = await fetch('/api/kol-care/touch', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, user_id: userId, kind, note }) });
+    if (!res.ok) throw new Error('Không ghi được lịch sử chăm sóc');
+  },
+
+  async careSkip(n) {
+    const i = (this._care || [])[n];
+    if (!i) return;
+    try {
+      await this._careTouch(i.account_id, i.user_id, 'skip_' + i.kind);
+      this._care.splice(n, 1); this.renderCare();
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  async careDraft(n) {
+    const i = (this._care || [])[n];
+    if (!i) return;
+    const k = this.CARE_KINDS[i.kind];
+    App.toast('AI đang soạn nháp…', 'info');
+    let text = '';
+    try {
+      const res = await fetch('/api/kol-care/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: i.account_id, user_id: i.user_id, kind: i.kind }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'AI không soạn được');
+      text = data.text || '';
+    } catch (e) { App.toast(e.message + ' — bạn có thể tự gõ', 'error'); }
+    const v = await this.formDialog({
+      title: `${k.icon} ${k.label} — ${i.name || i.username || i.user_id}`,
+      intro: `${esc(i.reason || '')}<br>Đây là <strong>bản nháp</strong>. Sửa cho đúng giọng bạn rồi bấm <strong>Gửi</strong>; tin đi từ nick đang giữ lead.`,
+      submitLabel: 'Gửi',
+      fields: [{ key: 'text', type: 'textarea', label: 'Tin nhắn', value: text, required: true, rows: 5 }]
+    });
+    if (!v || !v.text) return;
+    try {
+      const res = await fetch(`/api/ai-followup/chats/${i.account_id}/${i.user_id}/send`, { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: v.text }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Gửi thất bại');
+      await this._careTouch(i.account_id, i.user_id, i.kind, (i.festival && i.festival.name) || '');
+      App.toast(data.queued ? 'Nick đang bị giới hạn — tin sẽ tự gửi khi mở lại' : 'Đã gửi', 'success');
+      this._care.splice(n, 1); this.renderCare();
+    } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  // Log an offline touch from the chat window (counts in the BD scorecard).
+  async logMeeting(accountId, userId, kind) {
+    const labels = { meet: 'gặp trực tiếp', call: 'call', event: 'gặp ở sự kiện' };
+    const v = await this.formDialog({
+      title: `🤝 Ghi nhận ${labels[kind]}`,
+      submitLabel: 'Lưu',
+      fields: [{ key: 'note', type: 'textarea', label: 'Ghi chú (tuỳ chọn)', value: '', rows: 3, placeholder: 'VD: ăn trưa ở Coin Fest, KOL muốn thử trial' }]
+    });
+    if (!v) return;
+    try { await this._careTouch(accountId, userId, kind, v.note || ''); App.toast('Đã ghi nhận', 'success'); }
+    catch (e) { App.toast(e.message, 'error'); }
+  },
+
   clearFilters() {
     this._statusFilter = '';
     this._stepFilter = '';
@@ -1185,7 +1311,7 @@ const AIFollowUp = {
       const cur = {
         weex_uid: p.weex_uid || '', volume_claimed: p.volume_claimed || '', vip_code: p.vip_code || '',
         affiliate_link: p.affiliate_link || '', selected_campaign: p.selected_campaign || '',
-        first_post_link: p.first_post_link || '',
+        first_post_link: p.first_post_link || '', archetype: p.archetype || '', current_rebate_pct: p.current_rebate_pct || '', birthday: p.birthday || '',
         distribution_regions: (p.distribution_regions || []).join(', '),
         distribution_campaigns: (p.distribution_campaigns || []).join(', '),
         distribution_enabled: !!p.distribution_enabled
@@ -1197,6 +1323,13 @@ const AIFollowUp = {
         fields: [
           { key: 'weex_uid', label: `${ex} UID của KOL`, value: cur.weex_uid, placeholder: 'Chưa có',
             tip: `Nhập UID ở đây nghĩa là admin xác nhận UID này đúng. Lead đang ở bước “Đồng ý deal” sẽ tự chuyển sang “Đã nhận UID”.` },
+          { key: 'archetype', type: 'select', label: 'Loại KOL', value: cur.archetype,
+            options: [{ value: '', label: 'Chưa rõ' }].concat(Object.entries(this.ARCHETYPES).map(([k, m]) => ({ value: k, label: `${m.emoji} ${m.label}` }))),
+            tip: 'Phân loại trước khi pitch (training WEEX 20/11). Trader: tặng trial, xin góp ý, đừng chào hàng. Content: cho xem số tiền thật. Signal: giúp tăng community. Connector: hẹn call/gặp, nhờ giới thiệu KOL khác. AI tự đoán từ chat; bạn chọn tay thì AI không đổi nữa.' + (p.archetype_source === 'ai' ? ' (Hiện tại: AI đoán)' : '') },
+          { key: 'birthday', label: 'Sinh nhật KOL (ngày/tháng)', value: cur.birthday, placeholder: 'VD: 25/12',
+            tip: 'Đến gần sinh nhật, mục 🤝 Chăm sóc KOL nhắc bạn gửi lời chúc (AI soạn nháp, bạn bấm Gửi). AI tự ghi khi KOL nhắc tới sinh nhật trong chat.' },
+          { key: 'current_rebate_pct', label: '% rebate ở sàn KOL đang làm', value: cur.current_rebate_pct, placeholder: 'VD: 40',
+            tip: 'Dùng để “show the money”: so sánh số tiền KOL nhận mỗi tháng ở deal hiện tại với WEEX ở cùng volume. AI tự ghi khi KOL nói ra; bạn có thể nhập tay.' },
           { key: 'volume_claimed', label: 'Volume KOL khai (triệu USD/tháng)', value: cur.volume_claimed, placeholder: 'VD: 15 hoặc 15M',
             tip: 'Con số KOL tự khai, dùng để chọn bậc deal khởi điểm. Đây chưa phải volume đã xác minh qua proof.' },
           { key: 'vip_code', label: 'VIP code', value: cur.vip_code, placeholder: 'Chưa cấp',
@@ -1319,8 +1452,74 @@ const AIFollowUp = {
           ${haveTxt ? `<div style="color:var(--text2)"><b>Đã có:</b> ${haveTxt}</div>` : ''}
           ${dealTxt}
           <div style="color:var(--text2)">${predTxt}</div>
+          ${this._archetypeLine(st)}
+          ${this._moneyTable(st)}
         </div>
       </div>`;
+  },
+
+  _archetypeLine(st) {
+    const m = this.ARCHETYPES[st.archetype];
+    const tip = m ? m.tip : 'Chưa rõ loại KOL. AI tự đoán khi KOL kể về mình; hoặc chọn tay ở ✏️ Hồ sơ. Mỗi loại có cách mở đầu khác nhau.';
+    const who = m ? `${m.emoji} ${esc(m.label)}${st.archetype_source === 'ai' ? ' <span style="color:var(--text3)">(AI đoán)</span>' : ''}` : '<span style="color:var(--text3)">chưa rõ</span>';
+    const a = st.account_id, u = st.user_id;
+    const log = `<span style="margin-left:8px;white-space:nowrap">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="AIFollowUp.logMeeting(${a}, ${u}, 'meet')" title="Ghi nhận đã gặp trực tiếp (tính vào bảng điểm BD)">🤝 Đã gặp</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="AIFollowUp.logMeeting(${a}, ${u}, 'call')" title="Ghi nhận đã call (tính vào bảng điểm BD)">📞 Đã call</button></span>`;
+    return `<div style="color:var(--text2);display:flex;align-items:center;flex-wrap:wrap;gap:2px"><b>🧭 Loại KOL:</b>&nbsp;${who} <span class="info-i" tabindex="0" data-tip="${esc(tip)}">i</span>${log}</div>`;
+  },
+
+  // Show the money (BD training 2026-11-20): their current rate vs WEEX at the same volume, in dollars.
+  _moneyTable(st) {
+    const mo = st.money;
+    if (!mo) return '';
+    this._money = mo;
+    const f = v => '$' + Number(v).toLocaleString('en-US');
+    const rows = mo.rows.map(r => `<tr><td>${r.volume_m}M</td><td>${f(r.theirs)}</td><td><b>${f(r.ours)}</b> <span style="color:var(--text3)">T${r.tier} · ${r.revshare_pct}%</span></td></tr>`).join('');
+    const tip = `Hoa hồng/tháng ước tính ở phí taker 0.08%, chỉ tính hoa hồng (chưa cộng bonus volume). Deal hiện tại ${mo.current_pct}%. Bậc trên Tier 1 chỉ áp dụng khi team xác minh dashboard. Tải về rồi gửi cho KOL — số tròn, nói “khoảng”.`;
+    return `<div style="margin-top:6px"><b>💵 Show the money</b> — WEEX ≈ <b>${mo.multiple}x</b> deal hiện tại <span class="info-i" tabindex="0" data-tip="${esc(tip)}">i</span>
+      <table style="width:100%;font-size:12px;margin-top:4px;border-collapse:collapse" class="aifu-money">
+        <thead><tr style="color:var(--text2);text-align:left"><th>Volume/tháng</th><th>Deal hiện tại (${mo.current_pct}%)</th><th>WEEX</th></tr></thead><tbody>${rows}</tbody></table>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="AIFollowUp.downloadMoney('csv')">⬇️ Excel (CSV)</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="AIFollowUp.downloadMoney('png')">🖼️ Ảnh biểu đồ</button>
+      </div></div>`;
+  },
+
+  downloadMoney(kind) {
+    const mo = this._money;
+    if (!mo) return;
+    const save = (blob, name) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
+    if (kind === 'csv') {
+      const lines = ['Monthly volume (USD),Current deal (' + mo.current_pct + '%),WEEX,WEEX tier'].concat(
+        mo.rows.map(r => `${r.volume_m}M,${r.theirs},${r.ours},Tier ${r.tier} (${r.revshare_pct}%)`));
+      lines.push('', 'Estimated monthly commission at 0.08% futures taker fee; volume bonus not included. Rough figures.');
+      save(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv' }), 'weex_vs_current_deal.csv');
+      return;
+    }
+    // Grouped bar chart drawn on a canvas: grey = current deal, accent = WEEX.
+    const W = 720, H = 420, pad = 60, c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+    const max = Math.max(...mo.rows.map(r => r.ours)) * 1.15;
+    const slot = (W - pad * 2) / mo.rows.length, bw = slot * 0.3, base = H - pad;
+    g.fillStyle = '#111'; g.font = 'bold 18px sans-serif';
+    g.fillText(`Monthly commission: your current deal (${mo.current_pct}%) vs WEEX`, pad, 34);
+    mo.rows.forEach((r, i) => {
+      const x = pad + i * slot + slot * 0.18;
+      [[r.theirs, '#9ca3af'], [r.ours, '#2563eb']].forEach(([v, col], j) => {
+        const h = (v / max) * (base - pad);
+        g.fillStyle = col; g.fillRect(x + j * (bw + 6), base - h, bw, h);
+        g.fillStyle = '#111'; g.font = '13px sans-serif';
+        g.fillText('$' + Number(v).toLocaleString('en-US'), x + j * (bw + 6), base - h - 6);
+      });
+      g.fillStyle = '#374151'; g.font = '14px sans-serif';
+      g.fillText(`${r.volume_m}M volume`, x, base + 20);
+    });
+    g.fillStyle = '#6b7280'; g.font = '12px sans-serif';
+    g.fillText('Rough estimate at 0.08% futures taker fee, commission only.', pad, H - 14);
+    c.toBlob(b => save(b, 'weex_vs_current_deal.png'));
   },
 
   async setStep(accountId, userId, step, reason) {

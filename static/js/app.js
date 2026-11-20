@@ -220,6 +220,12 @@ if(page==='ai-followup'){
       <div id="aifu-tab-leads">
         <!-- The old "Việc cần làm" card is replaced by the 📥 Hàng chờ chip (one work list).
              #aifu-todo is left out on purpose; renderTodo() returns early without it. -->
+        <!-- Own the account (BD training 2026-11-20): greetings, check-ins, monthly reviews. Drafts only, a human sends. -->
+        <details id="aifu-care" style="margin-bottom:var(--sp-3)" ontoggle="if(this.open)AIFollowUp.loadCare()">
+        <summary style="cursor:pointer;font-size:13px;color:var(--text2);padding:4px 0;user-select:none">🤝 Chăm sóc KOL <span id="aifu-care-count" style="font-size:12px"></span>
+          <span class="info-i" tabindex="0" data-tip="Việc BD tự làm sau khi KOL đã chốt: chúc lễ theo nước của KOL (Tết, Hari Raya, Diwali, Songkran…) và sinh nhật KOL, hỏi thăm KOL đã gắn link mà 3 tuần chưa nói chuyện (kể cả volume 0), và review số liệu tháng với KOL có UID WEEX. App chỉ soạn nháp — bạn sửa rồi bấm Gửi. Không có gì tự gửi.">i</span></summary>
+        <div id="aifu-care-body" style="margin:var(--sp-2) 0 var(--sp-3)"></div>
+        </details>
         <!-- Numbers and the 5-step funnel: reference only, folded away by default. -->
         <details id="aifu-funnel" style="margin-bottom:var(--sp-3)">
         <summary style="cursor:pointer;font-size:13px;color:var(--text2);padding:4px 0;user-select:none">📊 Phễu deal &amp; số liệu <span style="font-size:12px">(bấm để mở — bấm một ô để lọc bảng)</span></summary>
@@ -594,6 +600,8 @@ if(page==='analytics'){
         <div class="stat-card"><div class="stat-label">Active Campaigns</div><div class="stat-value green" id="an-active-campaigns">–</div></div>
         <div class="stat-card"><div class="stat-label">Reactions</div><div class="stat-value" id="an-total-reactions">–</div></div>
       </div>
+      <h3 style="display:flex;align-items:center;gap:6px">🏆 Bảng điểm BD <span class="info-i" tabindex="0" data-tip="Theo training WEEX 20/11: đo chất lượng reply chứ không đếm số tin đã gửi; KOL còn hoạt động sau 90 ngày; volume mỗi KOL theo tháng; referral và số buổi gặp/call. Gặp/call ghi bằng nút 🤝 Đã gặp / 📞 Đã call trong cửa sổ chat. Volume lấy từ portal WEEX (nút ⬇️ Cập nhật volume ở mục Chăm sóc KOL).">i</span></h3>
+      <div id="an-bd-scorecard" class="stats-grid" style="margin-bottom:24px"></div>
       <div class="card" style="padding:16px;margin-bottom:24px">
         <h3 style="margin:0 0 12px">📈 DM Activity (30 ngày)</h3>
         <canvas id="an-chart"></canvas>

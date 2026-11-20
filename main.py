@@ -400,6 +400,8 @@ if TG_RUNTIME_MODE == "combined":
     app.include_router(ai_followup.router, dependencies=_auth_dep)
     from routes import kol_contacts as kol_contacts_routes
     app.include_router(kol_contacts_routes.router, dependencies=_auth_dep)
+    from routes import kol_care as kol_care_routes
+    app.include_router(kol_care_routes.router, dependencies=_auth_dep)
     app.include_router(engagement_routes.router, dependencies=_auth_dep)
     app.include_router(referral_routes.router, dependencies=_auth_dep)
     from routes import zalo as zalo_routes

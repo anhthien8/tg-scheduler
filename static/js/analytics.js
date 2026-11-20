@@ -25,9 +25,35 @@ const Analytics = {
       this.renderChart();
       this.renderHealth();
       this.renderCampaigns();
+      this.renderScorecard();
     } catch (e) {
       console.error('Analytics load error:', e);
     }
+  },
+
+  // BD scorecard (WEEX BD training 2026-11-20, slide 17): quality over volume of messages.
+  async renderScorecard() {
+    const el = document.getElementById('an-bd-scorecard');
+    if (!el) return;
+    let d;
+    try { d = await API.get('/api/kol-care/scorecard'); } catch (e) { el.innerHTML = ''; return; }
+    const pct = v => v === null || v === undefined ? '–' : v + '%';
+    const m = v => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? Math.round(v / 1e3) + 'k' : String(Math.round(v || 0));
+    const vol = d.volume || {};
+    const last = (vol.by_month || {})[(vol.months || [])[1]] ? vol.months[1] : null;
+    const arch = d.by_archetype || {};
+    const typed = ['trader', 'content', 'signal', 'connector'].reduce((n, k) => n + (arch[k] || 0), 0);
+    const card = (label, value, sub, tip) => `<div class="stat-card" title="${esc(tip)}"><div class="stat-label">${label}</div>
+        <div class="stat-value accent">${value}</div><div style="font-size:11px;color:var(--text2)">${sub}</div></div>`;
+    el.innerHTML = [
+      card('💬 Chất lượng reply (7 ngày)', pct(d.reply_quality_pct), `${d.replies_ab_7d}/${d.replies_7d} lead reply là Tier A/B`, 'Trong các lead đã nhắn lại 7 ngày qua, bao nhiêu là Tier A hoặc B.'),
+      card('🪜 Lead tiến bước (7 ngày)', d.progressed_7d, 'chốt deal, gửi UID, gắn link, đăng bài…', 'Số lead chuyển sang một bước tiếp theo của phễu trong 7 ngày qua.'),
+      card('🟢 KOL đang hoạt động', d.active_kols, `còn hoạt động sau 90 ngày: ${pct(d.retention_90d_pct)} (${d.still_active_90d}/${d.onboarded_90d})`, 'KOL gắn link từ 90+ ngày trước mà nay vẫn ở bước Bài đầu tiên / Hoạt động.'),
+      card('📈 Volume / KOL', last && vol.per_kol ? m(vol.per_kol[last]) : '–', last ? `${last}, so với tháng trước: ${pct(vol.per_kol_change_pct)}` : 'chưa có volume — bấm ⬇️ Cập nhật volume WEEX', 'Volume futures trung bình của mỗi UID KOL có volume, tháng gần nhất so với tháng trước đó.'),
+      card('🤝 Gặp / 📞 Call (30 ngày)', `${d.meetings_30d} / ${d.calls_30d}`, `referral 30 ngày: ${d.referrals_30d}`, 'Số buổi gặp trực tiếp/sự kiện và số cuộc call đã ghi nhận; số người được KOL giới thiệu.'),
+      card('🧭 KOL đã phân loại', typed, `📈${arch.trader || 0} 🎬${arch.content || 0} 📡${arch.signal || 0} 🤝${arch.connector || 0} · chưa rõ ${arch.unknown || 0}`, 'Profile before you pitch: số KOL đã biết loại (trader / content / signal / connector).'),
+      card('💌 Chăm sóc (30 ngày)', Object.values(d.care_30d).reduce((n, v) => n + v, 0), `chúc lễ ${d.care_30d.greeting} · sinh nhật ${d.care_30d.birthday || 0} · hỏi thăm ${d.care_30d.checkin} · review ${d.care_30d.review}`, 'Tin chăm sóc đã gửi từ mục 🤝 Chăm sóc KOL.')
+    ].join('');
   },
 
   renderOverview() {

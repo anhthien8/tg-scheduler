@@ -1197,6 +1197,7 @@ async def init_db():
             ("missing_items", "TEXT"),
             ("last_kol_reply_at", "TEXT"),
             ("last_our_reply_at", "TEXT"),
+            ("archetype", "TEXT"),
         ]:
             await _add_column(db, "kol_profiles", col_name, col_def)
 
@@ -6774,7 +6775,7 @@ async def count_campaigns_by_agent_bulk(agent_ids) -> dict:
 KOL_PROFILE_COLUMNS = (
     "channel_link", "platform", "followers", "weex_uid", "volume_claimed",
     "volume_verified", "offer_version", "selected_campaign", "vip_code",
-    "affiliate_link", "missing_items", "last_kol_reply_at", "last_our_reply_at",
+    "affiliate_link", "missing_items", "last_kol_reply_at", "last_our_reply_at", "archetype",
 )
 
 

@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+import kol_archetype
+
 logger = logging.getLogger("tg-scheduler.ai_remix")
 
 
@@ -1237,7 +1239,11 @@ async def extract_kol_profile(history: list[dict], provider: str, api_keys: list
         " - revshare_request: (e.g. 75% revshare, 5000$/mo, or empty string)\n"
         " - key_demands: (e.g. daily payout, no KYC, offline event support, or empty string)\n"
         " - kol_country: (the country where the KOL THEMSELF lives / is based, e.g. Indonesia, UAE, Brazil, United States, Vietnam, or empty string)\n"
-        " - community_country: (the main country/countries of the KOL's community members / audience, or empty string)\n\n"
+        " - community_country: (the main country/countries of the KOL's community members / audience, or empty string)\n"
+        " - birthday: (the KOL's own birthday as DD/MM, ONLY when they stated it, or empty string)\n"
+        " - current_rebate_pct: (the revshare/rebate PERCENT they get from the exchange they work with now, number only "
+        "like 40, ONLY when they stated it, or empty string)\n"
+        + kol_archetype.EXTRACT_HINT + "\n"
         "Rules:\n"
         "1. Only extract facts EXPLICITLY stated by the user.\n"
         "2. Return ONLY the JSON object, wrapped in ```json ``` or raw JSON."

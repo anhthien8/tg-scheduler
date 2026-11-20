@@ -352,7 +352,8 @@ _KB_LADDER_EXCEPTION = (
 )
 
 
-def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, volume_stated=None) -> str:
+def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, volume_stated=None,
+                               current_pct=None) -> str:
     """Build the prompt block the AI receives every turn.
 
     Tier prediction and earnings estimate both use `volume_claimed` (admin-entered
@@ -394,6 +395,10 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, 
                      "VALUE ESTIMATE block below (copy them exactly; never compute new totals yourself) and "
                      + _KB_LADDER_EXCEPTION + ".")
         lines.append(render_value_estimate(est))
+        cmp = money_comparison(ladder, volume_claimed or volume_stated, current_pct)
+        if cmp:
+            lines[-2] = lines[-2].replace("VALUE ESTIMATE block below", "VALUE ESTIMATE and SHOW THE MONEY blocks below")
+            lines.append(render_money_comparison(cmp))
     if pred is not None and int(pred["tier"]) > int(ladder["tiers"][0]["tier"]):
         lines.append(
             f"TIER PREDICTION ALLOWED: the KOL stated about {_fmt_num(pred['volume_m'])}M monthly volume on their current "
@@ -500,6 +505,74 @@ def render_value_estimate(est: dict) -> str:
         "refuses / objects or asks for upfront (see the UPFRONT rule and the knowledge base).",
         "Then ask ONE question to move forward (e.g. which campaign they prefer or their WEEX UID).",
     ])
+
+
+# ── Show the money (BD training 2026-11-20): their current rebate vs WEEX in dollars ──
+# Percentages mean little to a KOL; the same volume priced at both rates does. Commission vs
+# commission only (we do not know their volume bonus), so the comparison never flatters us.
+GROWTH_STEPS = (1, 1.5, 2)
+
+
+def parse_pct(value) -> float | None:
+    m = re.search(r"\d+(?:\.\d+)?", str(value or ""))
+    if not m:
+        return None
+    v = float(m.group())
+    return v if 0 < v < 100 else None
+
+
+def _nice_volume(v: float) -> float:
+    return round(v, 1) if v < 10 else float(round(v))
+
+
+def money_comparison(ladder: dict | None, volume_claimed, current_pct) -> dict | None:
+    """Monthly commission at their current rate vs the WEEX tier, at 1x / 1.5x / 2x their volume.
+    None when volume or rate is unknown, or WEEX does not pay more at their volume."""
+    ladder = _normalize_ladder(ladder or DEFAULT_LADDER)
+    vol_m = parse_volume_m(volume_claimed)
+    cur = parse_pct(current_pct)
+    if not vol_m or vol_m <= 0 or cur is None:
+        return None
+    rows = []
+    for step in GROWTH_STEPS:
+        v = _nice_volume(vol_m * step)
+        fees = v * 1_000_000 * EST_FEE_RATE
+        t = tier_for_volume(ladder, v) or ladder["tiers"][0]
+        rows.append({"volume_m": v, "theirs": _round_money(fees * cur / 100),
+                     "ours": _round_money(fees * float(t["revshare_pct"]) / 100),
+                     "tier": t["tier"], "revshare_pct": t["revshare_pct"]})
+    if rows[0]["ours"] <= rows[0]["theirs"] or rows[0]["theirs"] <= 0:
+        return None
+    return {"current_pct": cur, "rows": rows,
+            "multiple": round(rows[0]["ours"] / rows[0]["theirs"], 1)}
+
+
+def comparison_dollars(cmp: dict | None) -> set[float]:
+    if not cmp:
+        return set()
+    return {float(r[k]) for r in cmp["rows"] for k in ("theirs", "ours")}
+
+
+def render_money_comparison(cmp: dict) -> str:
+    fmt = lambda v: f"${v:,}"
+    r0 = cmp["rows"][0]
+    lines = [
+        "--- SHOW THE MONEY (pre-computed by the system; copy these exact figures, never compute new ones) ---",
+        f"Their current deal ≈ {_fmt_num(cmp['current_pct'])}% → at {_fmt_num(r0['volume_m'])}M/month that is ≈ "
+        f"{fmt(r0['theirs'])}/month in commission; with WEEX at Tier {r0['tier']} ({_fmt_num(r0['revshare_pct'])}%) "
+        f"the same volume pays ≈ {fmt(r0['ours'])}/month — about {cmp['multiple']:g}x. "
+        "If that tier is above Tier 1 it applies once our team verifies their dashboard recording.",
+        "As their community grows (same rates, WEEX tier moves up with volume):",
+    ]
+    for r in cmp["rows"][1:]:
+        lines.append(f"  {_fmt_num(r['volume_m'])}M/month: ≈ {fmt(r['theirs'])} now vs ≈ {fmt(r['ours'])} with WEEX "
+                     f"(Tier {r['tier']}, {_fmt_num(r['revshare_pct'])}%).")
+    lines.append(
+        "Use it when they compare deals or ask why they should switch: lead with the dollars at THEIR volume in one "
+        "short line, mention the growth line only if they engage. Commission only, at the 0.08% futures taker fee: "
+        "say 'roughly'. Never name their exchange; call it 'your current deal'. The volume bonus comes on top of the "
+        "WEEX figure — do not add it into these numbers.")
+    return "\n".join(lines)
 
 
 # ── Code-side guard ─────────────────────────────────────────────────────────
@@ -680,7 +753,8 @@ def render_agent_offer_prompt(exchange: str) -> str:
 
 
 async def offer_block_for(exchange: str | None, volume_claimed=None,
-                          region: str | None = None, volume_stated=None) -> tuple[str, dict | None]:
+                          region: str | None = None, volume_stated=None,
+                          current_pct=None) -> tuple[str, dict | None]:
     """(prompt block, ladder or None) for the exchange the chat sells.
 
     `region` ('ID' / 'AE', from kol_region_offer.detect_region) swaps the WEEX ladder
@@ -695,12 +769,18 @@ async def offer_block_for(exchange: str | None, volume_claimed=None,
             block = "\n".join(filter(None, [kol_region_offer.render_prompt(region, ladder, volume_claimed),
                                             CURRENT_DEAL_RULE, UPFRONT_REVIEW_RULE, camp]))
             return block, _allow_campaign_figures(kol_region_offer.guard_ladder(ladder), camp)
-        block = "\n".join(filter(None, [render_offer_ladder_prompt(ladder, volume_claimed, volume_stated), camp]))
-        est_d = estimate_dollars(value_estimate(ladder, volume_claimed or volume_stated))
+        block = "\n".join(filter(None, [render_offer_ladder_prompt(ladder, volume_claimed, volume_stated, current_pct),
+                                        camp]))
+        vol = volume_claimed or volume_stated
+        est = value_estimate(ladder, vol)
+        cmp = money_comparison(ladder, vol, current_pct) if est else None
+        est_d = estimate_dollars(est) | comparison_dollars(cmp)
         if est_d:  # let the guard pass the pre-computed estimate figures for this KOL only
             ladder = copy.deepcopy(ladder)
             rules = ladder.setdefault("rules", {})
             rules["extra_allowed_dollars"] = list(rules.get("extra_allowed_dollars") or []) + sorted(est_d)
+            if cmp:  # their own current rate may be quoted back to them
+                rules["extra_allowed_percents"] = list(rules.get("extra_allowed_percents") or []) + [cmp["current_pct"]]
         return block, _allow_campaign_figures(ladder, camp)
     return render_agent_offer_prompt(exchange), None
 

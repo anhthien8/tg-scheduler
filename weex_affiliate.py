@@ -353,6 +353,11 @@ async def run_monthly_review(today: date | None = None) -> list[dict]:
         logger.error("[WeexTier] review %s failed: %s", month, e)
         await alerts.send_alert("weex_tier_review", f"Nâng bậc WEEX tháng {month} lỗi: {e}")
         return []
+    try:  # kept for the KOL monthly review card and the BD scorecard
+        import kol_care
+        await kol_care.save_volumes(month[:7], volumes)
+    except Exception as e:
+        logger.warning("[WeexTier] could not store %s volumes: %s", month, e)
     rows = await save_plans(month, plan_upgrades(agents, volumes, await kol_offer.get_ladder()))
     if rows:
         import command_bot
