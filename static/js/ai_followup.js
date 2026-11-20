@@ -1715,7 +1715,7 @@ const AIFollowUp = {
             hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
           }) : 'Không rõ thời gian';
           return `
-            <div id="aifu-msg-${i}" style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-start' : 'flex-end'};margin-bottom:12px">
+            <div id="aifu-msg-${i}" class="aifu-msg" style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-start' : 'flex-end'};margin-bottom:12px">
               <div style="font-size:11px;color:var(--text2);margin-bottom:3px">${who(msg)} • ${timeText}${msg.edited ? ' • ✏️ đã sửa' : ''}</div>
               <div class="aifu-msg-body" style="background:${isUser ? 'var(--accent-dim)' : (msg._human ? 'var(--green-dim, var(--purple-dim))' : 'var(--purple-dim)')};border:1px solid var(--border-hover);padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13px;line-height:1.5">${this._mediaHtml(msg.media)}${esc(msg._shown)}<div class="aifu-tr" data-tr-idx="${i}" hidden style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border-hover);font-size:12px;font-style:italic;color:var(--text2)"></div></div>
               ${isUser || !msg.timestamp ? '' : ops(i)}

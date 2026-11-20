@@ -2144,3 +2144,8 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 #aifu-history-modal .modal > * { flex: none; }
 #aifu-history-modal #aifu-modal-step-panel { max-height: 28vh; overflow-y: auto; }
 #aifu-history-modal #aifu-modal-chat-box { flex: 1 1 auto; min-height: 120px; max-height: none !important; }
+
+/* Chat modal: Sửa / Thu hồi / Xoá only show when hovering a message */
+.aifu-msg .aifu-msg-ops { opacity: 0; transition: opacity .15s; }
+.aifu-msg:hover .aifu-msg-ops, .aifu-msg:focus-within .aifu-msg-ops { opacity: 1; }
+@media (hover: none) { .aifu-msg .aifu-msg-ops { opacity: 1; } }
