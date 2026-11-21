@@ -37,6 +37,9 @@ _RATE_FIELDS = {
 }
 
 
+SPOT_RATE = 0.5  # spot cashback for every KOL we set up, whatever their futures tier
+
+
 class WeexAuthError(RuntimeError):
     pass
 
@@ -108,10 +111,12 @@ def plan_upgrades(agents: list[dict], volumes: dict[str, float], ladder: dict) -
 
 
 def update_payload(rec: dict, new_rate: float) -> dict:
-    """Body for agent/update, same shape the portal form sends (captured 2026-11-17); futures rate replaced."""
+    """Body for agent/update, same shape the portal form sends (captured 2026-11-17); futures rate replaced,
+    spot set to SPOT_RATE."""
     body = {camel: float(rec.get(snake) or 0) for camel, snake in _RATE_FIELDS.items()}
     body.update({
         "rebateRate": new_rate,
+        "spotRebateRate": SPOT_RATE,
         "agentUserId": int(rec["agent_user_id"]),
         "account": rec.get("account") or "",
         "agentName": (rec.get("agent_name") or "").strip(),
@@ -330,10 +335,10 @@ CHANNEL_KEY = "weex_aff_channel_code"
 
 
 def add_payload(uid: str, name: str, rate: float, channel: str) -> dict:
-    """Body for agent/add: same shape as the edit form, no id, futures rate only."""
+    """Body for agent/add: same shape as the edit form, no id; futures = tier rate, spot = SPOT_RATE."""
     body = {camel: 0.0 for camel in _RATE_FIELDS}
-    body.update({"rebateRate": rate, "agentUserId": int(uid), "account": name, "agentName": name,
-                 "channelCode": channel, "relBdAccountId": "0", "agentType": 1, "agentLevel": 1,
+    body.update({"rebateRate": rate, "spotRebateRate": SPOT_RATE, "agentUserId": int(uid),
+                 "account": name, "agentName": name, "channelCode": channel, "relBdAccountId": "0", "agentType": 1, "agentLevel": 1,
                  "rebateNotice": False})
     return body
 

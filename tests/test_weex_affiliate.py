@@ -37,7 +37,7 @@ def test_plan_upgrades_only_raises_never_lowers():
 def test_update_payload_replaces_only_futures_rate():
     body = wx.update_payload(_agent(8916360467, 0.6, "lexakrm"), 0.65)
     assert body["rebateRate"] == 0.65
-    assert body["spotRebateRate"] == 0.5
+    assert body["spotRebateRate"] == wx.SPOT_RATE == 0.5
     assert body["agentUserId"] == 8916360467 and body["agentName"] == "lexakrm"
     assert body["id"] == 1 and body["rebateNotice"] is True
     # exact key set the portal form posts (captured from a real edit)
@@ -175,7 +175,7 @@ async def test_big_kol_added_to_css_line_at_tier1_and_kol_told(onboard_env):
     onboard_env["profile"] = {"monthly_volume": "50M", "username": "big_whale"}
     await wx.onboard_uid(1, 2, "123456789")
     body = onboard_env["added"][0]
-    assert body["agentUserId"] == 123456789 and body["rebateRate"] == 0.55
+    assert body["agentUserId"] == 123456789 and body["rebateRate"] == 0.55 and body["spotRebateRate"] == 0.5
     assert body["account"] == "bigwhale" and body["channelCode"] == "CSS2026"
     assert "KOL lớn" in onboard_env["admin"][0] and "Đã báo KOL" in onboard_env["admin"][0]
     assert "55%" in onboard_env["kol"][0] and "x1" in onboard_env["kol"][0]  # portal login handed to the KOL
