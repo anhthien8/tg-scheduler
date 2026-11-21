@@ -153,9 +153,10 @@ async def save_plans(month: str, plans: list[dict]) -> list[dict]:
     async with db.get_db() as conn:
         for p in plans:
             cur = await conn.execute(
-                "INSERT OR IGNORE INTO weex_tier_upgrades "
-                "(month, agent_uid, agent_name, volume_usd, old_rate, new_rate, tier) VALUES (?,?,?,?,?,?,?)",
-                (month, p["agent_uid"], p["agent_name"], p["volume_usd"], p["old_rate"], p["new_rate"], p["tier"]))
+                "INSERT OR IGNORE INTO weex_tier_upgrades (month, agent_uid, agent_name, volume_usd, old_rate, "
+                "new_rate, tier, account_id, user_id) VALUES (?,?,?,?,?,?,?,?,?)",
+                (month, p["agent_uid"], p["agent_name"], p["volume_usd"], p["old_rate"], p["new_rate"], p["tier"],
+                 p.get("account_id"), p.get("user_id")))
             if cur.rowcount:
                 inserted.append({**p, "id": cur.lastrowid, "month": month})
         await conn.commit()
@@ -192,15 +193,91 @@ async def approve(upgrade_id: int) -> str:
     if not u or u["status"] != "pending":
         return f"#{upgrade_id}: không còn chờ duyệt"
     label = f"{u['agent_name']} ({u['agent_uid']}) {u['old_rate']:.0%} → {u['new_rate']:.0%}"
+    creds = None
     try:
-        await apply_upgrade(u["agent_uid"], u["old_rate"], u["new_rate"])
+        if u["month"] == "onboard":
+            label, creds = await create_or_raise(u["agent_uid"], u["agent_name"], u["new_rate"], with_creds=True)
+        else:
+            await apply_upgrade(u["agent_uid"], u["old_rate"], u["new_rate"])
     except Exception as e:
         await _set_status(upgrade_id, "failed", str(e)[:300])
         logger.warning("[WeexTier] apply #%s failed: %s", upgrade_id, e)
         return f"❌ {label}: {e}"
     await _set_status(upgrade_id, "applied")
     logger.info("[WeexTier] applied #%s %s", upgrade_id, label)
+    if u.get("account_id") and u.get("user_id"):
+        sent = await notify_kol(u["account_id"], u["user_id"], kol_done_text(
+            await _chat_is_vietnamese(u["account_id"], u["user_id"]), u["agent_uid"], u["new_rate"], creds))
+        label += ("\n📨 Đã báo KOL" if sent
+                  else "\n⚠️ Chưa gửi được cho KOL (chat không active / admin đang nhắn tay) — gửi tay giúp")
     return f"✅ {label}"
+
+
+# ── Messages to the KOL (sent from the chat's own account, through the AI send guards) ─────────
+
+async def _chat_is_vietnamese(account_id: int, user_id: int) -> bool:
+    from dm_reply_tracker import _VN_CHARS_RE
+    chat = await db.get_followup_chat(account_id, user_id) or {}
+    theirs = " ".join(str(m.get("content") or "") for m in (chat.get("history") or []) if m.get("role") == "user")
+    return bool(_VN_CHARS_RE.search(theirs))
+
+
+def kol_done_text(vi: bool, uid: str, rate: float, creds: dict | None) -> str:
+    if vi:
+        text = f"Xong rồi bro, UID {uid} đã lên mức {rate:.0%} hoa hồng bên mình."
+        if creds:
+            text += (f"\nBro vào https://affiliates.weex.com để xem số liệu nhé:\nUser: {creds['account']}\n"
+                     f"Pass: {creds['pwd']}\nĐăng nhập xong bro đổi pass luôn cho an toàn.")
+        return text
+    text = f"Done, your UID {uid} is now set to {rate:.0%} revshare."
+    if creds:
+        text += (f"\nYou can track everything at https://affiliates.weex.com\nLogin: {creds['account']}\n"
+                 f"Password: {creds['pwd']}\nPlease change the password after you log in.")
+    return text
+
+
+def ask_volume_text(vi: bool) -> str:
+    if vi:
+        return ("Bro ơi, cộng đồng bro trade tầm bao nhiêu volume mỗi tháng (khoảng mấy triệu USD)? "
+                "Mình cần con số này để set mức hoa hồng cho đúng.")
+    return ("Quick one: roughly how much monthly trading volume does your community do (in millions USD)? "
+            "I need it to set the right commission tier for you.")
+
+
+async def notify_kol(account_id: int, user_id: int, text: str) -> bool:
+    import dm_reply_tracker
+    try:
+        return bool(await dm_reply_tracker._send_ai_message(account_id, user_id, text))
+    except Exception as e:
+        logger.warning("[WeexOnboard] notify KOL %s failed: %s", user_id, e)
+        return False
+
+
+async def ask_volume(upgrade_id: int) -> str:
+    """Bot button: ask the KOL for monthly volume; the card is re-made once the volume arrives."""
+    u = await get_upgrade(upgrade_id)
+    if not u or u["status"] != "pending" or not u.get("user_id"):
+        return f"#{upgrade_id}: không còn chờ duyệt"
+    ok = await notify_kol(u["account_id"], u["user_id"],
+                          ask_volume_text(await _chat_is_vietnamese(u["account_id"], u["user_id"])))
+    if not ok:
+        return "⚠️ Không gửi được câu hỏi volume (chat không active / admin đang nhắn tay)"
+    await _set_status(upgrade_id, "awaiting_volume")
+    return f"📊 Đã hỏi volume UID {u['agent_uid']} — có volume là bot gửi lại thẻ duyệt"
+
+
+async def on_volume_stated(account_id: int, user_id: int) -> None:
+    """Profile got monthly_volume: re-run onboarding for a UID that was waiting for it."""
+    async with db.get_db() as conn:
+        cur = await conn.execute(
+            "SELECT id, agent_uid FROM weex_tier_upgrades WHERE month='onboard' AND status='awaiting_volume' "
+            "AND account_id=? AND user_id=?", (account_id, user_id))
+        rows = await cur.fetchall()
+        for rid, _ in rows:
+            await conn.execute("DELETE FROM weex_tier_upgrades WHERE id=?", (rid,))
+        await conn.commit()
+    for _, uid in rows:
+        await onboard_uid(account_id, user_id, uid)
 
 
 async def reject(upgrade_id: int) -> str:
@@ -267,27 +344,65 @@ def _portal_name(username: str | None, uid: str) -> str:
     return base or f"kol{uid}"
 
 
-async def create_or_raise(uid: str, username: str | None, rate: float) -> str:
+async def create_or_raise(uid: str, username: str | None, rate: float, with_creds: bool = False):
     """Put UID on our line at `rate`: add if new, raise if already ours at a lower rate. Returns a result line."""
     existing = [r for r in await list_agents(uid) if str(r.get("agent_user_id")) == uid]
     if existing:
         cur = float(existing[0].get("rebate_rate") or 0)
         if cur >= rate - 1e-9:
-            return f"UID {uid} đã ở line CSS với {cur:.0%}, giữ nguyên"
-        await apply_upgrade(uid, cur, rate)
-        return f"UID {uid} nâng {cur:.0%} → {rate:.0%}"
+            msg = f"UID {uid} đã ở line CSS với {cur:.0%}, giữ nguyên"
+        else:
+            await apply_upgrade(uid, cur, rate)
+            msg = f"UID {uid} nâng {cur:.0%} → {rate:.0%}"
+        return (msg, None) if with_creds else msg
     channel = await db.get_setting(CHANNEL_KEY, "CSS2026") or "CSS2026"
     body = await _request("POST", "/agent/add", json=add_payload(uid, _portal_name(username, uid), rate, channel))
     if not body.get("success"):
         raise RuntimeError(body.get("message") or body.get("msg") or "WEEX từ chối tạo sub-affiliate")
     data = body.get("data") or {}
-    # Portal login for the KOL: admins only, never pasted into the KOL chat automatically.
-    return (f"UID {uid} đã tạo sub-affiliate {rate:.0%}"
-            + (f"\nTài khoản portal: `{data.get('account')}` / `{data.get('pwd')}`" if data.get("pwd") else ""))
+    creds = {"account": data["account"], "pwd": data["pwd"]} if data.get("pwd") else None
+    msg = (f"UID {uid} đã tạo sub-affiliate {rate:.0%}"
+           + (f"\nTài khoản portal: `{creds['account']}` / `{creds['pwd']}`" if creds else ""))
+    return (msg, creds) if with_creds else msg
+
+
+def agreed_pct(prof: dict) -> tuple[int | None, str]:
+    """(revshare %, raw text) from the profile's agreed deal, e.g. '80% revshare' → 80."""
+    import re
+    raw = str(prof.get("current_deal") or "")
+    m = re.search(r"(\d{2})\s*%", raw)
+    return (int(m.group(1)) if m else None), raw
+
+
+def _rate(tier: dict) -> float:
+    return round(tier["revshare_pct"] / 100, 3)
+
+
+def propose_tier(ladder: dict, deal_pct: int | None, vol_m: float | None) -> dict:
+    """Ladder tier to propose: the agreed % when it is a tier; an off-ladder % → highest tier not above it;
+    no deal → tier of the stated volume (Tier 1 when unknown)."""
+    tiers = sorted(ladder["tiers"], key=lambda t: t["revshare_pct"])
+    if deal_pct is not None:
+        under = [t for t in tiers if t["revshare_pct"] <= deal_pct]
+        return under[-1] if under else tiers[0]
+    return tier_for_volume((vol_m or 0) * 1_000_000, ladder)
+
+
+async def queue_onboard_approval(uid: str, name: str, rate: float, tier: int,
+                                 account_id: int | None = None, user_id: int | None = None) -> int | None:
+    """Pending row (month='onboard') applied by create_or_raise when an admin taps ✅ in the bot."""
+    rows = await save_plans("onboard", [{"agent_uid": uid, "agent_name": name, "volume_usd": 0,
+                                         "old_rate": 0, "new_rate": rate, "tier": tier,
+                                         "account_id": account_id, "user_id": user_id}])
+    return rows[0]["id"] if rows else None
 
 
 async def onboard_uid(account_id: int, user_id: int, uid: str) -> str | None:
-    """On a confirmed WEEX UID: big KOL → auto add to CSS line at Tier 1; small KOL → card for the team.
+    """On a confirmed WEEX UID.
+
+    * no deal + stated volume ≥ 20M → auto add to our CSS line at Tier 1, KOL told at once;
+    * everything else (agreed deal on/off the ladder, small or unknown volume) → approval card in the bot
+      with ✅ / 🚫, plus 📊 "ask volume" when no volume is known. ✅ writes the rate to WEEX and tells the KOL.
 
     Off unless weex_tier_auto_enabled=1. Never raises (runs as a background task).
     """
@@ -302,21 +417,43 @@ async def onboard_uid(account_id: int, user_id: int, uid: str) -> str | None:
         vol_m = kol_offer.parse_volume_m(prof.get("monthly_volume"))
         who = f"@{prof['username']}" if prof.get("username") else f"user {user_id}"
         vol_txt = f"{vol_m:g}M" if vol_m is not None else "chưa khai"
-        if vol_m is not None and vol_m >= BIG_KOL_MIN_VOLUME_M:
-            ladder = await kol_offer.get_ladder()
-            rate = round(sorted(ladder["tiers"], key=lambda t: t["tier"])[0]["revshare_pct"] / 100, 3)
+        ladder = await kol_offer.get_ladder()
+        deal_pct, deal_raw = agreed_pct(prof)
+
+        if deal_pct is None and vol_m is not None and vol_m >= BIG_KOL_MIN_VOLUME_M:
+            rate = _rate(sorted(ladder["tiers"], key=lambda t: t["tier"])[0])
             try:
-                res = await create_or_raise(uid, prof.get("username"), rate)
-                text = f"🟢 **KOL lớn lên line CSS** — {who}, volume khai {vol_txt}\n{res}"
+                res, creds = await create_or_raise(uid, prof.get("username"), rate, with_creds=True)
+                sent = await notify_kol(account_id, user_id, kol_done_text(
+                    await _chat_is_vietnamese(account_id, user_id), uid, rate, creds))
+                text = (f"🟢 **KOL lớn lên line CSS** — {who}, volume khai {vol_txt}\n{res}\n"
+                        + ("📨 Đã báo KOL" if sent else "⚠️ Chưa gửi được cho KOL — gửi tay giúp"))
             except Exception as e:
                 res = None
                 text = f"❌ **Tạo sub-affiliate lỗi** — {who} UID `{uid}`, volume khai {vol_txt}\n{e}"
+            await command_bot.send_admin_text(text)
+            return res
+
+        tier = propose_tier(ladder, deal_pct, vol_m)
+        rate = _rate(tier)
+        upgrade_id = await queue_onboard_approval(uid, prof.get("username") or "", rate, tier["tier"],
+                                                  account_id, user_id)
+        if upgrade_id is None:
+            return None  # this UID already has a card
+        if deal_pct is not None and deal_pct == tier["revshare_pct"]:
+            head = "🤝 **Deal đã chốt — chờ duyệt hoa hồng**"
+            note = f"Deal: {deal_raw}\n"
+        elif deal_pct is not None:
+            head = "⚠️ **Deal ngoài bảng bậc — chờ duyệt**"
+            note = f"Deal AI đã nói: {deal_raw}\nĐề xuất theo bảng bậc: {rate:.0%} (cao nhất không vượt {deal_pct}%)\n"
         else:
-            res = "team"
-            text = (f"🆕 **KOL nhỏ gửi UID** — {who}\nUID: `{uid}`\nVolume khai: {vol_txt}\n"
-                    "→ Submit lên WEEX xin KOL + camp.")
-        await command_bot.send_admin_text(text)
-        return res
+            head = "🆕 **KOL gửi UID — chờ duyệt hoa hồng**"
+            note = "Chưa có deal. " + ("Đề xuất theo volume khai.\n" if vol_m is not None
+                                       else "Chưa khai volume → đề xuất Tier 1, hoặc bấm 📊 hỏi volume.\n")
+        text = (f"{head} — {who}\nUID: `{uid}`\n{note}Volume khai: {vol_txt}\n"
+                f"→ ✅ tạo/nâng sub-affiliate **{rate:.0%}** (Tier {tier['tier']}) trên line CSS và báo KOL.")
+        await command_bot.send_approval(text, upgrade_id, ask_volume=vol_m is None)
+        return "approval"
     except WeexAuthError as e:
         import alerts
         await alerts.send_alert("weex_aff_token", f"🔑 {e} (onboard UID {uid} chưa xử lý)")

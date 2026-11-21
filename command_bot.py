@@ -458,7 +458,7 @@ def _register_handlers(client: TelegramClient):
                 return
 
             # ── WEEX monthly tier-up approvals ──
-            if data.startswith(("wx_ok:", "wx_no:", "wx_all:")):
+            if data.startswith(("wx_ok:", "wx_no:", "wx_all:", "wx_vol:")):
                 await _handle_weex_tier_button(event, data)
                 return
 
@@ -1905,6 +1905,24 @@ async def send_weex_tier_review(text: str, month: str, upgrade_ids: list[int]) -
     return sent
 
 
+async def send_approval(text: str, upgrade_id: int, ask_volume: bool = False) -> bool:
+    """One WEEX commission decision for admins: ✅ applies it on the portal, 🚫 drops it."""
+    if not _bot or not _bot.is_connected() or not _admin_ids:
+        _note_drop("weex_approval", text[:80])
+        return False
+    buttons = [[Button.inline("✅ Duyệt", data=f"wx_ok:{upgrade_id}"), Button.inline("🚫 Bỏ qua", data=f"wx_no:{upgrade_id}")]]
+    if ask_volume:
+        buttons.append([Button.inline("📊 Hỏi KOL volume", data=f"wx_vol:{upgrade_id}")])
+    sent = False
+    for admin_id in _admin_ids:
+        try:
+            await _bot.send_message(admin_id, text, buttons=buttons, parse_mode="md")
+            sent = True
+        except Exception as e:
+            logger.warning(f"[CommandBot] weex approval → {admin_id} failed: {e}")
+    return sent
+
+
 async def send_admin_text(text: str) -> bool:
     """Plain markdown notice to every command-bot admin."""
     if not _bot or not _bot.is_connected() or not _admin_ids:
@@ -1929,7 +1947,8 @@ async def _handle_weex_tier_button(event, data: str):
         results = [await wx.approve(i) for i in ids]
     else:
         await event.answer("Đang xử lý…")
-        results = [await (wx.approve if kind == "wx_ok" else wx.reject)(int(arg))]
+        fn = {"wx_ok": wx.approve, "wx_no": wx.reject, "wx_vol": wx.ask_volume}[kind]
+        results = [await fn(int(arg))]
     await event.respond("\n".join(results) or "Không còn mục nào chờ duyệt.")
 
 

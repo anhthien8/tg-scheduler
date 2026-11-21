@@ -151,17 +151,34 @@ async def onboard_env(monkeypatch):
     monkeypatch.setattr(db, "get_kol_profile", fake_profile)
     monkeypatch.setattr(db, "get_chat_exchange", fake_exchange)
     monkeypatch.setattr(command_bot, "send_admin_text", fake_admin)
+    st["cards"], st["kol"] = [], []
+
+    async def fake_approval(text, upgrade_id, ask_volume=False):
+        st["cards"].append({"text": text, "id": upgrade_id, "ask_volume": ask_volume})
+        return True
+
+    async def fake_notify(account_id, user_id, text):
+        st["kol"].append(text)
+        return True
+
+    async def fake_vi(account_id, user_id):
+        return True
+
+    monkeypatch.setattr(command_bot, "send_approval", fake_approval)
+    monkeypatch.setattr(wx, "notify_kol", fake_notify)
+    monkeypatch.setattr(wx, "_chat_is_vietnamese", fake_vi)
     await db.set_setting(wx.ENABLED_KEY, "1")
     return st
 
 
-async def test_big_kol_added_to_css_line_at_tier1(onboard_env):
+async def test_big_kol_added_to_css_line_at_tier1_and_kol_told(onboard_env):
     onboard_env["profile"] = {"monthly_volume": "50M", "username": "big_whale"}
     await wx.onboard_uid(1, 2, "123456789")
     body = onboard_env["added"][0]
     assert body["agentUserId"] == 123456789 and body["rebateRate"] == 0.55
     assert body["account"] == "bigwhale" and body["channelCode"] == "CSS2026"
-    assert "KOL lớn" in onboard_env["admin"][0] and "x1" in onboard_env["admin"][0]
+    assert "KOL lớn" in onboard_env["admin"][0] and "Đã báo KOL" in onboard_env["admin"][0]
+    assert "55%" in onboard_env["kol"][0] and "x1" in onboard_env["kol"][0]  # portal login handed to the KOL
 
 
 async def test_big_kol_already_on_line_is_raised_not_duplicated(onboard_env):
@@ -169,18 +186,31 @@ async def test_big_kol_already_on_line_is_raised_not_duplicated(onboard_env):
     onboard_env["agents"] = [_agent(123456789, 0.3)]
     await wx.onboard_uid(1, 2, "123456789")
     assert onboard_env["added"] == [] and onboard_env["updated"][0]["rebateRate"] == 0.55
+    assert "Pass" not in onboard_env["kol"][0]  # existing account: no new login to send
 
 
-async def test_small_kol_goes_to_team_card(onboard_env):
-    onboard_env["profile"] = {"monthly_volume": "5M"}
+async def test_small_kol_gets_approval_at_volume_tier(onboard_env):
+    onboard_env["profile"] = {"monthly_volume": "12M"}
     await wx.onboard_uid(1, 2, "123456789")
-    assert onboard_env["added"] == [] and "KOL nhỏ" in onboard_env["admin"][0]
-    assert "123456789" in onboard_env["admin"][0]
+    card = onboard_env["cards"][0]
+    assert onboard_env["added"] == [] and "60%" in card["text"] and not card["ask_volume"]
 
 
-async def test_unknown_volume_counts_as_small(onboard_env):
+async def test_unknown_volume_gets_tier1_approval_plus_ask_volume(onboard_env):
     await wx.onboard_uid(1, 2, "123456789")
-    assert onboard_env["added"] == [] and "chưa khai" in onboard_env["admin"][0]
+    card = onboard_env["cards"][0]
+    assert "55%" in card["text"] and card["ask_volume"] and onboard_env["added"] == []
+
+
+async def test_ask_volume_then_volume_remakes_card(onboard_env):
+    await wx.onboard_uid(1, 2, "123456789")
+    first = onboard_env["cards"][0]["id"]
+    assert "📊" in await wx.ask_volume(first)
+    assert "volume" in onboard_env["kol"][0]
+    assert (await wx.get_upgrade(first))["status"] == "awaiting_volume"
+    onboard_env["profile"] = {"monthly_volume": "25M"}
+    await wx.on_volume_stated(1, 2)  # big now → normal path: auto create + tell KOL
+    assert onboard_env["added"][0]["rebateRate"] == 0.55 and await wx.get_upgrade(first) is None
 
 
 async def test_onboard_skips_other_exchanges_and_when_disabled(onboard_env):
@@ -190,7 +220,7 @@ async def test_onboard_skips_other_exchanges_and_when_disabled(onboard_env):
     onboard_env["exchange"] = "WEEX"
     await db.set_setting(wx.ENABLED_KEY, "0")
     await wx.onboard_uid(1, 2, "123456789")
-    assert onboard_env["added"] == [] and onboard_env["admin"] == []
+    assert onboard_env["added"] == [] and onboard_env["admin"] == [] and onboard_env["cards"] == []
 
 
 # ── Connect route ───────────────────────────────────────────────────────────
@@ -276,3 +306,24 @@ async def test_lookup_uid_found_and_missing(monkeypatch):
     assert "Michael" in text and "Đã nạp: Có" in text and "Đã trade: Chưa" in text
     assert "CSS (9811555540) → Michael (1)" in text and "KYC: Chưa" in text
     assert "không nằm dưới line" in wx.format_uid("1", await wx.lookup_uid("1"))
+
+
+async def test_agreed_deal_waits_for_admin_approval_then_creates_and_tells_kol(onboard_env):
+    onboard_env["profile"] = {"current_deal": "80% revshare (base fee 0.02% Maker)", "username": "Facific9x"}
+    await wx.onboard_uid(3, 1336533511, "2249716719")
+    cards = onboard_env["cards"]
+    assert onboard_env["added"] == [] and len(cards) == 1       # nothing written before the tap
+    assert "80%" in cards[0]["text"] and "Tier 5" in cards[0]["text"]
+    await wx.onboard_uid(3, 1336533511, "2249716719")
+    assert len(cards) == 1                                       # re-trigger: no duplicate card
+    msg = await wx.approve(cards[0]["id"])
+    assert msg.startswith("✅") and "Đã báo KOL" in msg
+    assert onboard_env["added"][0]["rebateRate"] == 0.8
+    assert "80%" in onboard_env["kol"][0] and "User: Facific9x" in onboard_env["kol"][0]
+
+
+async def test_off_ladder_deal_proposes_highest_tier_below(onboard_env):
+    onboard_env["profile"] = {"current_deal": "85% revshare"}
+    await wx.onboard_uid(3, 9, "123")
+    card = onboard_env["cards"][0]["text"]
+    assert "ngoài bảng bậc" in card and "80%" in card and onboard_env["added"] == []

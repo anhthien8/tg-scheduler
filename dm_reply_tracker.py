@@ -393,6 +393,9 @@ async def _async_update_kol_profile(account_id: int, user_id: int, history: list
         if extracted:
             await db.upsert_kol_profile(account_id, user_id, extracted)
             logger.info("🧠 [KOL Memory] Updated profile for user %d (acc=%d): %s", user_id, account_id, extracted)
+            if extracted.get("monthly_volume"):
+                import weex_affiliate  # a UID card waiting for the KOL's volume is re-made now
+                _spawn_background(weex_affiliate.on_volume_stated(account_id, user_id))
         if uid_confirmed:
             await maybe_advance_uid_received(account_id, user_id, llm_uid)
         else:

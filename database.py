@@ -79,6 +79,8 @@ SCHEMA_COLUMN_DEFS: dict[tuple[str, str], str] = {
     ("kol_profiles", "platform"): "TEXT",
     ("kol_profiles", "followers"): "TEXT",
     ("kol_profiles", "weex_uid"): "TEXT",
+    ("weex_tier_upgrades", "account_id"): "INTEGER",
+    ("weex_tier_upgrades", "user_id"): "INTEGER",
     ("kol_profiles", "volume_claimed"): "TEXT",
     ("kol_profiles", "volume_verified"): "TEXT",
     ("kol_profiles", "offer_version"): "INTEGER",
@@ -1248,9 +1250,17 @@ async def init_db():
                 error       TEXT DEFAULT '',
                 created_at  TEXT DEFAULT (datetime('now')),
                 decided_at  TEXT,
+                account_id  INTEGER,
+                user_id     INTEGER,
                 UNIQUE(month, agent_uid)
             )
         """)
+        # Older DBs created the table before these columns (column migrations run before this CREATE).
+        for col in ("account_id", "user_id"):
+            try:
+                await db.execute(f"ALTER TABLE weex_tier_upgrades ADD COLUMN {col} INTEGER")
+            except Exception:
+                pass  # already there
 
         # Version history of the pre-approved commission ladder (spec §A1).
         await db.execute("""
