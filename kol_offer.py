@@ -297,13 +297,13 @@ def _first_pitch_rule(ladder: dict, volume_known: bool = False) -> str:
                  "That question is the ONLY ask of this message: do not ask for a recording, a UID or a campaign "
                  "choice in the same message. Ask it ONCE per chat — if it is already in the history, never repeat it. ")
     return (
-        "FIRST PITCH (the first time the KOL agrees to hear the offer, or asks what you offer): ONE message, 3-5 short lines, "
-        f"covering: the headline; that they start at {_fmt_num(t0['revshare_pct'])}% revshare + "
-        f"${_fmt_num(t0['bonus_per_1m_taker_usd'])} per 1M futures volume — or directly at a higher tier when they prove "
-        "their current monthly volume — and move up the ladder as volume grows; "
-        "commission is paid daily; " + (f"one reason to choose us ({why}); " if why else "")
+        "FIRST PITCH (the first time the KOL agrees to hear the offer, or asks what you offer): ONE message, 2-3 short "
+        "lines, like a person typing in chat, not a brochure: the headline with commission paid daily, and that the "
+        f"rate starts at {_fmt_num(t0['revshare_pct'])}% and grows with their volume (a bigger community likely starts "
+        "higher once our team checks their numbers); " + (f"at most one reason to choose us, only if it fits ({why}); " if why else "")
         + close
-        + "Never send the headline alone, never send two messages in a row."
+        + "Do NOT list tiers, volume bonuses, campaigns, marketing accounts, events or trial funds in this message: "
+        "they come later, when the KOL asks. Never send the headline alone, never send two messages in a row."
     )
 
 
@@ -329,6 +329,15 @@ def _tier2_min(ladder: dict) -> float:
     return float(tiers[1]["min_volume_m"]) if len(tiers) > 1 else 0.0
 
 
+# Review 2026-11-21: the AI wrote "chốt mức 70%" / "vào thẳng mức cao hơn" — a promise the team may not keep.
+TIER_HEDGE_RULE = (
+    "TIER WORDING: every sentence about a tier or rate above the first tier says it is LIKELY and depends on our "
+    "team's check (Vietnamese: \"nhiều khả năng ... sau khi team bên em xác minh\"; English: \"likely ... once our team "
+    "verifies\"). Never write it as certain: no \"chốt\", \"vào thẳng\", \"đảm bảo\", \"locks in\", \"guaranteed\", "
+    "\"you get\" for a higher tier."
+)
+
+
 def render_starting_tier_rule(ladder: dict) -> str:
     """Rule 1 (owner, 2026-11-10): the starting tier follows the KOL's proven volume elsewhere."""
     return (
@@ -336,7 +345,7 @@ def render_starting_tier_rule(ladder: dict) -> str:
         "volume on the exchange they work with now = the AVERAGE monthly volume of the LAST 3 MONTHS in a screen "
         f"recording of their exchange dashboard. Map it to the table: {_starting_tier_map(ladder)}. "
         "No recording → Tier 1. Ask for the recording at most ONCE, and ONLY AFTER the KOL has stated a monthly volume "
-        f"of {_fmt_num(_tier2_min(ladder))}M or more (it is what locks in the higher tier they were just told about; they may "
+        f"of {_fmt_num(_tier2_min(ladder))}M or more (it is what our team checks the higher tier against; they may "
         "hide UID, balance and email). A KOL whose stated volume maps to Tier 1, or who does not know their volume, "
         "is NOT asked for a recording: recommend ONE currently running campaign that fits their community and ask if "
         "they want to go ahead. When they share or state a volume, say it LIKELY qualifies "
@@ -383,6 +392,7 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, 
         "YOU MAY SETTLE ON YOUR OWN: " + "; ".join(ladder.get("ai_may_close") or []) + ".",
         "YOU MUST END YOUR REPLY WITH [HANDOVER_REQUIRED] FOR: " + "; ".join(ladder.get("must_handover") or []) + ".",
         render_starting_tier_rule(ladder),
+        TIER_HEDGE_RULE,
         CURRENT_DEAL_RULE,
         UPFRONT_REVIEW_RULE,
         "NEVER quote any % or $ figure that is not in this ladder (no internal estimates, no 'total payout' maths, "
@@ -394,8 +404,8 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, 
         lines[-1] = ("NEVER quote any % or $ figure that is not in this ladder, EXCEPT the pre-computed figures in the "
                      "VALUE ESTIMATE block below (copy them exactly; never compute new totals yourself) and "
                      + _KB_LADDER_EXCEPTION + ".")
-        lines.append(render_value_estimate(est))
         cmp = money_comparison(ladder, volume_claimed or volume_stated, current_pct)
+        lines.append(render_value_estimate(est, compared=bool(cmp)))
         if cmp:
             lines[-2] = lines[-2].replace("VALUE ESTIMATE block below", "VALUE ESTIMATE and SHOW THE MONEY blocks below")
             lines.append(render_money_comparison(cmp))
@@ -405,7 +415,8 @@ def render_offer_ladder_prompt(ladder: dict | None = None, volume_claimed=None, 
             f"exchange → with a verified last-3-months dashboard recording they LIKELY start at Tier {pred['tier']} "
             f"({_fmt_num(pred['revshare_pct'])}% revshare + ${_fmt_num(pred['bonus_per_1m_taker_usd'])} per 1M futures volume) "
             "instead of Tier 1. Tell them it applies once our team verifies the recording; never confirm it as final. "
-            "If the recording is not in the chat yet, ask for it ONCE in that same message, as what locks this tier in."
+            "If the recording is not in the chat yet, ask for it ONCE in that same message, as what our team checks the "
+            "tier against."
         )
     elif pred is not None:
         lines.append(
@@ -480,10 +491,15 @@ def estimate_dollars(est: dict | None) -> set[float]:
     return out
 
 
-def render_value_estimate(est: dict) -> str:
+def render_value_estimate(est: dict, compared: bool = False) -> str:
+    """`compared`: a SHOW THE MONEY block follows, so the money is framed against their current deal
+    (same volume), not as extra income on top — saying both contradicts itself."""
     st = est["steady"]
     sabc = est["sabc"]
     fmt = lambda v: f"${v:,}"
+    framing = ("Frame it against their current deal at the SAME volume (see SHOW THE MONEY), NOT as extra income on "
+               "top or 'running both in parallel'." if compared else
+               "EXTRA income if they ADD WEEX alongside what they run now (frame it as additional, not a replacement).")
     return "\n".join([
         "--- VALUE ESTIMATE FOR THIS KOL (pre-computed by the system; use these exact figures) ---",
         f"Stated volume ≈ {_fmt_num(est['volume_m'])}M/month → trading fees ≈ {fmt(est['fees'])}/month "
@@ -494,16 +510,14 @@ def render_value_estimate(est: dict) -> str:
          "matching ladder tier instead of Tier 1: " if st["tier"] != est["month1"]["tier"]
          else "PERFORMANCE SYNC: at this volume they start at the first tier (no recording needed): ")
         + f"Tier {st['tier']}, {_fmt_num(st['revshare_pct'])}% revshare → commission ≈ "
-        f"{fmt(st['commission'])} + volume bonus ≈ {fmt(st['bonus'])} = ≈ {fmt(st['total'])}/month EXTRA income "
-        "if they ADD WEEX alongside what they run now (frame it as additional, not a replacement).",
-        "When the KOL has shared their numbers, present the FULL PACKAGE in one message (short lines):",
-        f"1) ≈ {fmt(st['total'])}/month extra from commission + volume bonus (commission paid daily).",
-        "2) Marketing campaign support: ONE exclusive campaign for their channel (best fit; rotates every ~2 weeks, never stacked).",
-        "3) Marketing accounts provided so they can build consistent WEEX content.",
-        "4) Bonus: offline events in the future, and trial-fund bonuses for their community.",
-        "Do NOT mention the marketing fee bonus in this package: it is a RETENTION CARD, used only when the KOL "
+        f"{fmt(st['commission'])} + volume bonus ≈ {fmt(st['bonus'])} = ≈ {fmt(st['total'])}/month. " + framing,
+        "When the KOL has shared their numbers, reply in 2-3 short lines: the money at THEIR volume (≈ "
+        f"{fmt(st['total'])}/month, commission paid daily), then ONE question to move forward. No list of perks.",
+        "PERKS (only when the KOL asks what else they get, or after they agree — at most ONE per message, the one that "
+        "fits them): ONE exclusive marketing campaign for their channel (rotates every ~2 weeks, never stacked); "
+        "marketing accounts for WEEX content; offline events later; trial-fund bonuses for their community.",
+        "Do NOT mention the marketing fee bonus as a perk: it is a RETENTION CARD, used only when the KOL "
         "refuses / objects or asks for upfront (see the UPFRONT rule and the knowledge base).",
-        "Then ask ONE question to move forward (e.g. which campaign they prefer or their WEEX UID).",
     ])
 
 

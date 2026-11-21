@@ -257,3 +257,28 @@ async def test_every_offer_block_has_plain_terms_rule(monkeypatch):
         block, _ = await k.offer_block_for(*args)
         assert "never write \"revshare\"" in block and "phí giao dịch" in block, args
 
+
+# ── Review 2026-11-21: short first pitch, perks only on ask, hedged higher tier ──
+
+def test_first_pitch_is_short_and_lists_no_perks():
+    text = k.render_offer_ladder_prompt(k.DEFAULT_LADDER)
+    pitch = next(l for l in text.split("\n") if l.startswith("FIRST PITCH"))
+    assert "2-3 short lines" in pitch and "3-5" not in pitch
+    assert "Do NOT list tiers" in pitch and "directly at a higher tier" not in pitch
+
+
+def test_value_estimate_has_no_full_package_and_no_parallel_when_compared():
+    est = k.value_estimate(None, "50M")
+    plain = k.render_value_estimate(est)
+    assert "FULL PACKAGE" not in plain and "No list of perks" in plain and "only when the KOL asks" in plain
+    assert "alongside" in plain
+    compared = k.render_value_estimate(est, compared=True)
+    assert "alongside" not in compared and "SAME volume" in compared
+    full = k.render_offer_ladder_prompt(k.DEFAULT_LADDER, volume_stated="50M", current_pct="40")
+    assert "SHOW THE MONEY" in full and "ADD WEEX alongside" not in full
+
+
+def test_higher_tier_is_always_hedged():
+    text = k.render_offer_ladder_prompt(k.DEFAULT_LADDER, volume_stated="50M")
+    assert k.TIER_HEDGE_RULE in text and "nhiều khả năng" in text
+    assert "locks in the higher tier" not in text and "what locks this tier in" not in text
