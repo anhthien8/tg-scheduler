@@ -612,6 +612,11 @@ async def confirm_reply(db, token: str, admin_id: int, group_id: int, topic_id: 
         said = f"[Sent {preview.label or 'file'}] {preview.text}".strip() if preview.media else preview.text
         await db.append_followup_chat_message(preview.account_id, preview.user_id, "assistant", f"[Human Admin via Forum]: {said}")
         await _audit_reply(db, preview, admin_id, group_id, topic_id, "success")
+        try:
+            import dm_reply_tracker
+            dm_reply_tracker.note_admin_message(preview.account_id, preview.user_id, preview.text)
+        except Exception:
+            pass
         return "sent"
 
 

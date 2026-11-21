@@ -1096,6 +1096,8 @@ async def init_db():
             ("owed_note", "TEXT"),
             ("owed_reminders_sent", "INTEGER DEFAULT 0"),
             ("owed_last_reminder_at", "TEXT"),
+            # Affiliate Portal guide (affiliate_guide.py): sent once, after our side shares the login.
+            ("dashboard_guide_sent_at", "TEXT"),
         ]:
             await _add_column(db, "ai_followup_chats", col_name, col_def)
         # @username / invite link so a schedule can auto-join a group before posting.
@@ -8470,6 +8472,14 @@ async def get_kol_state(account_id: int, user_id: int) -> dict:
         "step_reminders_sent": (chat or {}).get("step_reminders_sent") or 0,
         "kol_step_updated_at": (chat or {}).get("kol_step_updated_at"),
     }
+
+
+async def mark_dashboard_guide_sent(account_id: int, user_id: int) -> None:
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE ai_followup_chats SET dashboard_guide_sent_at = datetime('now') WHERE account_id = ? AND user_id = ?",
+            (account_id, user_id))
+        await db.commit()
 
 
 async def mark_step_reminder_sent(account_id: int, user_id: int) -> None:

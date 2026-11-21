@@ -77,6 +77,8 @@ async def record_human_send(account_id: int, user_id: int, text: str) -> None:
             return  # already recorded
         await db.set_human_takeover(account_id, user_id)
         await db.append_followup_chat_message(account_id, user_id, "assistant", content)
+        import dm_reply_tracker
+        dm_reply_tracker.note_admin_message(account_id, user_id, text)  # portal login → dashboard guide
     except Exception as e:
         logger.warning("[PendingSend] Sent, but could not record it for user %d on account %d: %s", user_id, account_id, e)
 

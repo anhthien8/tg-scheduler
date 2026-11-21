@@ -48,7 +48,8 @@ def test_campaign_block_lists_only_active_unexpired_with_files(tmp_path, monkeyp
 def test_link_confirmed_step_sends_dashboard_and_event_guide():
     import dm_reply_tracker as t, kol_banners as kb
     g = t._STEP_GUIDANCE["link_confirmed"]
-    assert kb.AFFILIATE_DASHBOARD_LINK in g and "Event section" in g and "once per chat" in g
+    assert kb.AFFILIATE_DASHBOARD_LINK in g and "Event center" in g and "once per chat" in g
+    assert "Change password" in g and "Commission stats" in g and "Do not resend the portal guide" in g
 
 
 async def test_campaign_figures_pass_the_guard(monkeypatch):

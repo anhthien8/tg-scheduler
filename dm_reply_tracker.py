@@ -30,6 +30,7 @@ from telethon.tl.functions.messages import SendReactionRequest
 from telethon.tl.types import ReactionEmoji
 
 import ai_remix as ai_rmx
+import affiliate_guide
 import kb_select
 import database as db
 import kol_offer
@@ -439,7 +440,11 @@ _STEP_GUIDANCE = {
     "link_confirmed": (
         "Their affiliate link is live. In your FIRST message at this step, if the affiliate dashboard link is not in the "
         f"history yet: tell them their account is linked, give them the dashboard ({kol_banners.AFFILIATE_DASHBOARD_LINK}) "
-        "and tell them to open the Event section there to get the exchange's latest campaigns any time (once per chat). "
+        "and tell them to open the Event center there to get the exchange's latest campaigns any time (once per chat). "
+        "When they ask how the portal works, use its real menu names: referral link + code on the Dashboard "
+        "(\"Referral link\"), one link per channel and member cashback in \"Campaigns\", daily commission in "
+        "Commissions → Commission stats, sign-ups in Users → User list, events in \"Event center\", password in the "
+        "avatar menu → Change password. Do not resend the portal guide if it is already in the history. "
         "Help them pick one running campaign if not chosen, and when they share the link "
         "to their first post/video, acknowledge it and append [FIRST_POST] on its own line."
     ),
@@ -1283,6 +1288,91 @@ async def _send_ai_message(account_id: int, user_id: int, text: str,
             _spawn_background(_remove_ai_send_after_delay(account_id, user_id, lock_gen))
 
 
+# ── Affiliate Portal guide after our side shares the portal login ─────────────
+
+def note_admin_message(account_id: int, user_id: int, text: str) -> None:
+    """Hook for every message our side typed by hand (Telegram app, the app's chat
+    box, the lead's forum topic). Portal login details get the dashboard guide."""
+    if affiliate_guide.login_kind(text):
+        _spawn_background(_after_portal_login(account_id, user_id, text))
+
+
+async def _after_portal_login(account_id: int, user_id: int, text: str) -> None:
+    try:
+        if await is_internal_account_user(user_id):
+            return
+        if affiliate_guide.login_kind(text) == "generic":
+            # Account / Password without the portal link: only trust it in an open WEEX funnel.
+            if await db.get_chat_exchange(account_id, user_id) != db.DEFAULT_EXCHANGE:
+                return
+            chat = await db.get_followup_chat(account_id, user_id) or {}
+            if (db.normalize_kol_step(chat.get("kol_step")) or "prospect") in db.KOL_STEP_TERMINAL:
+                return
+        await asyncio.sleep(affiliate_guide.SEND_DELAY_SECS)
+        await _advance_to_link_confirmed(account_id, user_id)
+        await _send_dashboard_guide(account_id, user_id)
+    except Exception as e:
+        logger.error("[DashboardGuide] Failed for user %d (acc=%d): %s", user_id, account_id, e)
+
+
+async def _advance_to_link_confirmed(account_id: int, user_id: int) -> None:
+    """Sharing the portal login means the KOL's affiliate account exists: funnel → 'Đã gắn link'."""
+    chat = await db.get_followup_chat(account_id, user_id)
+    if not chat:
+        return
+    current = db.normalize_kol_step(chat.get("kol_step")) or "prospect"
+    if current in ("link_confirmed", "first_post", "active"):
+        return
+    res = await db.set_kol_step(account_id, user_id, "link_confirmed", actor="admin_portal_login",
+                                reason="Our side sent the Affiliate Portal login")
+    if res.get("changed"):
+        logger.info("[DashboardGuide] user %d (acc=%d): %s → link_confirmed", user_id, account_id, current)
+
+
+async def _send_dashboard_guide(account_id: int, user_id: int) -> bool:
+    """Send the portal how-to once per chat, in the KOL's language. Same guards as
+    any automatic message, except the takeover hold: it follows the admin's own message."""
+    from telegram_forum_inbox import get_send_lock
+    async with get_send_lock(account_id, user_id):
+        if await is_internal_account_user(user_id):
+            return False
+        chat = await db.get_followup_chat(account_id, user_id)
+        if not chat or chat.get("dashboard_guide_sent_at"):
+            return False
+        if chat.get("status") in ("bot_ignored", "paused_admin") or chat.get("stage") == "paused":
+            return False  # bot / AI switched off for this chat (/aioff sets stage 'paused')
+        if await db.is_user_blacklisted(user_id=user_id, username=chat.get("username") or ""):
+            return False
+        if not await _proactive_agent(account_id, chat):
+            logger.info("[DashboardGuide] AI is off for account %d: guide not sent to user %d", account_id, user_id)
+            return False
+        history = chat.get("history") or []
+        lang = affiliate_guide.guide_lang(history)
+        if not lang:
+            logger.warning("[DashboardGuide] No guide template the KOL reads (%s) — not sent to user %d",
+                           lang_guard.conversation_script(history), user_id)
+            return False
+        text = affiliate_guide.render(lang)
+        why = lang_guard.wrong_language(text, lang_guard.conversation_scripts(history), strict=True)
+        if why:
+            logger.warning("[DashboardGuide] Blocked for user %d: %s", user_id, why)
+            return False
+        text = await _mirror_weex_links_for(account_id, user_id, text, history)
+        # No _lock_ai_send: Telegram does not echo the app's own sends, and the lock would
+        # make the BD's next hand-typed messages look like AI echoes for 30 s.
+        if await tg.send_text_message(account_id, user_id, text) is False:
+            return False
+        await db.mark_dashboard_guide_sent(account_id, user_id)
+        await db.append_followup_chat_message(account_id, user_id, "assistant", text)
+    logger.info("[DashboardGuide] 📘 Portal guide (%s) sent to user %d (acc=%d)", lang, user_id, account_id)
+    try:
+        import command_bot
+        _spawn_background(command_bot.relay_outgoing_to_forum(account_id, user_id, text))
+    except Exception:
+        pass
+    return True
+
+
 def _human_wrote(chat: dict | None) -> bool:
     """A real person typed in this chat ("[Human Admin..." entry): never hand it back to the AI."""
     chat = chat or {}
@@ -1975,6 +2065,9 @@ def _make_handler(account_id: int):
                     else:
                         return
 
+                # Before the AI-echo skip: an AI reply never carries login details, and a
+                # BD pasting the portal login right after an AI reply must still count.
+                note_admin_message(account_id, dest_id, msg_content)
                 # If AI is currently sending, this outgoing msg IS the AI message — skip
                 if (account_id, dest_id) in _pending_ai_sends:
                     return
