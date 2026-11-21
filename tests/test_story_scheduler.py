@@ -356,3 +356,54 @@ async def test_tick_posts_per_nick_caption(fake_tg, media_file, monkeypatch):
                         captions={ids[1]: "riêng nick 2"})
     await se.tick()
     assert sent == {ids[0]: "base", ids[1]: "riêng nick 2"}
+
+
+# ── A job where posts failed is reported as failed, and can be retried ───────
+
+async def test_failed_job_is_failed_not_done_and_retry_requeues_it(fake_tg, media_file):
+    from telethon.errors import BadRequestError
+    ids = await _make_accounts(2)
+    for a in ids:
+        fake_tg[a] = FakeClient(a, fail={"SendStoryRequest": BadRequestError(request=None, message="MEDIA_FILE_INVALID")})
+    jid = await se.create_job(name="", account_ids=ids, media_file=media_file, caption="hi",
+                              scheduled_at=time.time() - 60, stagger_min=0, cross_view=False)
+    await se.tick()
+    assert (await _rows("SELECT status FROM story_jobs WHERE id=?", jid))[0][0] == "failed"
+    assert [j for j in await se.list_jobs() if j["id"] == jid][0]["status"] == "failed"
+
+    assert await se.retry_job(jid) == 2
+    rows = await _rows("SELECT status, error, post_at FROM story_posts WHERE job_id=?", jid)
+    assert all(r[0] == "pending" and r[1] is None and r[2] > time.time() for r in rows)
+    assert (await _rows("SELECT status FROM story_jobs WHERE id=?", jid))[0][0] == "running"
+    assert await se.retry_job(jid) == 0   # still running: nothing to retry
+
+    for a in ids:
+        fake_tg[a] = FakeClient(a)
+    async with db.get_db() as conn:
+        await conn.execute("UPDATE story_posts SET post_at=? WHERE job_id=?", (time.time() - 1, jid))
+        await conn.commit()
+    await se.tick()
+    assert (await _rows("SELECT status FROM story_jobs WHERE id=?", jid))[0][0] == "done"
+
+
+def test_final_status():
+    assert se.final_status({"failed": 13}) == "failed"
+    assert se.final_status({"skipped": 2}) == "failed"
+    assert se.final_status({"posted": 3, "failed": 1}) == "partial"
+    assert se.final_status({"posted": 3}) == "done"
+    assert se.final_status({"cancelled": 2}) == "done"
+
+
+def test_cut_off_ai_array_gives_clean_captions_and_saved_arrays_are_repaired():
+    # The AI's JSON array was cut off at the token limit: keep the complete items, decode their escapes.
+    raw = r'["WWFC starts Nov 26 🏆\nMain event Dec 3", "Mark Nov 26: WWFC goes live", "cut o'
+    assert se._parse_captions(raw, 5) == ["WWFC starts Nov 26 🏆\nMain event Dec 3", "Mark Nov 26: WWFC goes live"]
+    saved = '["one line", "two line", "thr'
+    assert se.repair_caption(saved, 0) == "one line" and se.repair_caption(saved, 1) == "two line"
+    assert se.repair_caption(saved, 2) == "one line"
+    assert se.repair_caption("plain caption", 0) == "plain caption" and se.repair_caption(None) is None
+
+
+def test_retry_endpoint_refuses_when_nothing_failed(client):
+    r = client.post("/api/stories/jobs/999999/retry")
+    assert r.status_code == 400

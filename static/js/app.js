@@ -5955,7 +5955,8 @@ const Stories = {
   _accounts: [],
   _INFO0: 'jpg, png, webp, mp4, mov · tối đa 50 MB · dọc 9:16 đẹp nhất',
   _ST: {pending:['Chờ','badge-gray'],posted:['Đã đăng','badge-green'],failed:['Lỗi','badge-red'],skipped:['Bỏ qua','badge-gray'],cancelled:['Đã huỷ','badge-gray'],
-        scheduled:['Đã hẹn','badge-purple'],running:['Đang chạy','badge-blue'],done:['Xong','badge-green']},
+        scheduled:['Đã hẹn','badge-purple'],running:['Đang chạy','badge-blue'],done:['Xong','badge-green'],
+        partial:['Lỗi một phần','badge-red'],failed:['Lỗi','badge-red']},
 
   async init() {
     this.sum();
@@ -6190,13 +6191,14 @@ const Stories = {
       : !vt ? `<div class="st-bar"><span>👀 Xem</span><i></i><em>${live ? 'sau khi đăng' : '0'}</em></div>`
       : `<div class="st-bar" title="Đã xem ${vw.done || 0} · chờ ${vw.pending || 0} · lỗi ${vw.failed || 0}"><span>👀 Xem</span>${this._bar([[vw.done, 'var(--purple)'], [vw.failed, 'var(--red)'], [gray(vw), 'var(--text3)']], vt)}<em>${vw.done || 0}/${vt}</em></div>`;
     const name = j.name || ('Lịch #' + j.id), vid = j.media_type === 'video';
+    const redo = (p.failed || 0) + (p.skipped || 0);
     return `<div class="st-job" data-id="${j.id}">
       <div class="st-ic" title="${vid ? 'Video' : 'Ảnh'}">${vid ? '🎬' : '🖼️'}</div>
       <div class="st-nm"><strong title="${this._attr(name)}">${esc(name)}</strong>
         <div class="st-muted">🕒 ${esc((j.scheduled_at_text || '').replace(/\/\d{4}$/, ''))} · ${this._rel(j.scheduled_at)} · ${j.account_ids.length} nick · cách ${j.stagger_min}′${j.privacy === 'contacts' ? ' · 🔒 danh bạ' : ''}</div></div>
       <div>${this._badge(j.status)}</div>
       <div class="st-pg">${post}${view}</div>
-      <div class="st-ac"><button class="btn btn-sm st-dbtn" onclick="Stories.detail(${j.id})">Chi tiết ▾</button>${live ? `<button class="btn btn-sm" onclick="Stories.cancel(${j.id})">Huỷ</button>` : `<button class="btn btn-sm" onclick="Stories.remove(${j.id})">Xoá</button>`}</div>
+      <div class="st-ac"><button class="btn btn-sm st-dbtn" onclick="Stories.detail(${j.id})">Chi tiết ▾</button>${!live && redo ? `<button class="btn btn-sm btn-primary" onclick="Stories.retry(${j.id}, ${redo})" title="Đăng lại ${redo} lượt bị lỗi / bỏ qua, bắt đầu sau 1 phút, giữ khoảng cách ${j.stagger_min}′ giữa các nick">↻ Thử lại (${redo})</button>` : ''}${live ? `<button class="btn btn-sm" onclick="Stories.cancel(${j.id})">Huỷ</button>` : `<button class="btn btn-sm" onclick="Stories.remove(${j.id})">Xoá</button>`}</div>
       <div class="st-det" id="st-detail-${j.id}"></div></div>`;
   },
 
@@ -6213,6 +6215,15 @@ const Stories = {
       }</tbody></table></div>`;
       if (btn) btn.textContent = 'Thu gọn ▴';
     } catch (e) { el.textContent = e.message; }
+  },
+
+  async retry(id, n) {
+    if (!confirm(`Đăng lại ${n} lượt bị lỗi / bỏ qua của lịch này? Lượt đầu chạy sau khoảng 1 phút.`)) return;
+    try {
+      const r = await API.post(`/api/stories/jobs/${id}/retry`, {});
+      App.toast(`Đã xếp lại ${r.retried} lượt đăng`, 'success');
+      this.loadJobs();
+    } catch (e) { App.toast(e.message, 'error'); }
   },
 
   async cancel(id) {

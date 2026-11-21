@@ -172,6 +172,15 @@ async def cancel_story_job(job_id: int):
     return {"success": True}
 
 
+@router.post("/jobs/{job_id}/retry")
+async def retry_story_job(job_id: int):
+    """↻ Thử lại: queue the failed / skipped posts of a finished job again, from now on."""
+    n = await se.retry_job(job_id)
+    if not n:
+        raise HTTPException(400, "Không có lượt đăng lỗi nào để thử lại (hoặc lịch vẫn đang chạy)")
+    return {"success": True, "retried": n}
+
+
 @router.delete("/jobs/{job_id}")
 async def delete_story_job(job_id: int):
     if not await se.delete_job(job_id):

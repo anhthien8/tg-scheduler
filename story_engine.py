@@ -148,6 +148,30 @@ def _clean_caption(text: str) -> str:
     return t.strip()
 
 
+_QUOTED_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+def _quoted_strings(raw: str) -> list[str]:
+    """Complete "..." items of a JSON array the AI did not finish (cut off at the token limit):
+    without this the whole raw array became one caption, brackets and "\\n" included."""
+    out = []
+    for m in _QUOTED_RE.finditer(raw or ""):
+        try:
+            out.append(json.loads(f'"{m.group(1)}"', strict=False))
+        except Exception:
+            continue
+    return out
+
+
+def repair_caption(caption: str | None, index: int = 0) -> str | None:
+    """A caption saved as a raw JSON array ('["a", "b"…') becomes item ``index`` of it."""
+    c = (caption or "").strip()
+    if not c.startswith('["'):
+        return caption
+    items = [x for x in (_clean_caption(t) for t in _quoted_strings(c)) if x]
+    return items[index % len(items)] if items else ""
+
+
 def _parse_captions(raw: str, n: int) -> list[str]:
     raw = (raw or "").strip()
     raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.MULTILINE).strip()
@@ -159,6 +183,8 @@ def _parse_captions(raw: str, n: int) -> list[str]:
         except Exception:
             items = None
     if not isinstance(items, list):
+        items = _quoted_strings(raw)
+    if not items:
         items = [ln for ln in raw.splitlines() if ln.strip()]
     out = []
     for it in items:
@@ -263,6 +289,8 @@ async def list_jobs(limit: int = 50) -> list[dict]:
         j["account_ids"] = json.loads(j.get("account_ids") or "[]")
         j["posts"] = pc.get(j["id"], {})
         j["views"] = vc.get(j["id"], {})
+        if j.get("status") == "done":  # rows finished before 'failed' / 'partial' existed
+            j["status"] = final_status(j["posts"])
     return jobs
 
 
@@ -389,12 +417,63 @@ def _video_attributes(path: str):
     return [DocumentAttributeVideo(duration=duration, w=w, h=h, supports_streaming=True)]
 
 
+# Telegram only takes VERTICAL story media, at most 30 MB (core.telegram.org/api/stories):
+# a landscape file gets MEDIA_FILE_INVALID. Media is fitted into a 9:16 frame over a blurred
+# copy of itself, the way the Telegram apps post a landscape video.
+_STORY_W, _STORY_H = 720, 1280
+_VERTICAL_FRAME = (
+    "[0:v]split=2[bg][fg];"
+    "[bg]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur=20:2[b];"
+    "[fg]scale={w}:{h}:force_original_aspect_ratio=decrease[f];"
+    "[b][f]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[v]"
+)
+
+
+def _ffmpeg_story(path: str, out: str, args: list[str]) -> str:
+    """Run ffmpeg once; return ``out`` (cached while newer than the source) or ``path`` on failure."""
+    if os.path.isfile(out) and os.path.getmtime(out) >= os.path.getmtime(path):
+        return out
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return path
+    try:
+        r = subprocess.run([ffmpeg, "-y", "-v", "error", "-i", path, *args, out],
+                           capture_output=True, text=True, timeout=600)
+        if r.returncode == 0 and os.path.isfile(out) and os.path.getsize(out) > 0:
+            return out
+        logger.warning("[Story] ffmpeg could not prepare %s: %s", os.path.basename(path), (r.stderr or "")[-300:])
+    except Exception as e:
+        logger.warning("[Story] ffmpeg could not prepare %s: %s", os.path.basename(path), e)
+    try:
+        os.remove(out)
+    except OSError:
+        pass
+    return path
+
+
+def story_video(path: str) -> str:
+    """A vertical 720x1280 H.264 + AAC MP4 of at most 60 s, index at the start (faststart)."""
+    frame = _VERTICAL_FRAME.format(w=_STORY_W, h=_STORY_H)
+    return _ffmpeg_story(path, os.path.splitext(path)[0] + ".story.mp4", [
+        "-t", "60", "-filter_complex", frame, "-map", "[v]", "-map", "0:a?",
+        "-c:v", "libx264", "-profile:v", "main", "-preset", "veryfast", "-crf", "24", "-maxrate", "3M",
+        "-bufsize", "6M", "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-movflags", "+faststart"])
+
+
+def story_photo(path: str) -> str:
+    """A vertical 1080x1920 JPEG of the photo (landscape / square photos get the blurred frame)."""
+    frame = _VERTICAL_FRAME.format(w=1080, h=1920)
+    return _ffmpeg_story(path, os.path.splitext(path)[0] + ".story.jpg",
+                         ["-filter_complex", frame, "-map", "[v]", "-frames:v", "1", "-q:v", "3"])
+
+
 async def _send_story(client, path: str, media_type: str, caption: str, privacy: str) -> int:
     """Upload + stories.SendStory as the client's own user. Returns the story id."""
     from telethon.tl.functions.stories import SendStoryRequest
     from telethon.tl.types import (InputMediaUploadedDocument, InputMediaUploadedPhoto,
                                    InputPeerSelf, InputPrivacyValueAllowAll,
                                    InputPrivacyValueAllowContacts)
+    path = await asyncio.to_thread(story_video if media_type == "video" else story_photo, path)
     uploaded = await client.upload_file(path)
     if media_type == "video":
         mime = "video/mp4" if path.lower().endswith(".mp4") else "video/quicktime" if path.lower().endswith(".mov") else "video/webm" if path.lower().endswith(".webm") else "video/x-matroska"
@@ -460,6 +539,39 @@ async def _viewer_pool(job: dict, accounts: dict[int, dict]) -> list[int]:
     return [aid for aid in pool if not unsafe_reason(accounts.get(aid))]
 
 
+def final_status(posts: dict) -> str:
+    """A finished job: 'done' when every post went out, 'partial' when some failed or were
+    skipped, 'failed' when none was posted. Never 'done' for a job where nothing was posted."""
+    posted = int(posts.get("posted") or 0)
+    bad = int(posts.get("failed") or 0) + int(posts.get("skipped") or 0)
+    if posted == 0 and bad:
+        return "failed"
+    return "partial" if bad else "done"
+
+
+async def retry_job(job_id: int) -> int:
+    """Put the failed / skipped posts of a finished job back in the queue, from now on with
+    the job's spacing. Repairs captions saved as a raw JSON array. Returns how many."""
+    async with get_db() as conn:
+        job = await (await conn.execute("SELECT status, stagger_min FROM story_jobs WHERE id=?", (job_id,))).fetchone()
+        if not job or job[0] in ("scheduled", "running"):
+            return 0
+        rows = await (await conn.execute(
+            "SELECT id, account_id, caption FROM story_posts WHERE job_id=? AND status IN ('failed','skipped') "
+            "ORDER BY post_at, id", (job_id,))).fetchall()
+        if not rows:
+            return 0
+        start = time.time() + 60
+        for i, ((pid, aid, cap), (_, ts)) in enumerate(zip(rows, plan_post_times(start, [r[1] for r in rows],
+                                                                                  int(job[1] or 0)))):
+            await conn.execute(
+                "UPDATE story_posts SET status='pending', error=NULL, post_at=?, caption=? WHERE id=?",
+                (ts, repair_caption(cap, i), pid))
+        await conn.execute("UPDATE story_jobs SET status='running' WHERE id=?", (job_id,))
+        await conn.commit()
+    return len(rows)
+
+
 async def _refresh_job_status(job_id: int):
     async with get_db() as conn:
         job = await (await conn.execute("SELECT status FROM story_jobs WHERE id=?", (job_id,))).fetchone()
@@ -469,7 +581,12 @@ async def _refresh_job_status(job_id: int):
             "SELECT COUNT(*) FROM story_posts WHERE job_id=? AND status='pending'", (job_id,))).fetchone()
         v = await (await conn.execute(
             "SELECT COUNT(*) FROM story_views WHERE job_id=? AND status='pending'", (job_id,))).fetchone()
-        status = "running" if (p[0] or v[0]) else "done"
+        if p[0] or v[0]:
+            status = "running"
+        else:
+            counts = dict(await (await conn.execute(
+                "SELECT status, COUNT(*) FROM story_posts WHERE job_id=? GROUP BY status", (job_id,))).fetchall())
+            status = final_status(counts)
         await conn.execute("UPDATE story_jobs SET status=? WHERE id=?", (status, job_id))
         await conn.commit()
 
