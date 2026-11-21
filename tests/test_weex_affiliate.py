@@ -319,7 +319,7 @@ async def test_agreed_deal_waits_for_admin_approval_then_creates_and_tells_kol(o
     msg = await wx.approve(cards[0]["id"])
     assert msg.startswith("✅") and "Đã báo KOL" in msg
     assert onboard_env["added"][0]["rebateRate"] == 0.8
-    assert "80%" in onboard_env["kol"][0] and "User: Facific9x" in onboard_env["kol"][0]
+    assert "80%" in onboard_env["kol"][0] and "User: Facificx" in onboard_env["kol"][0]
 
 
 async def test_off_ladder_deal_proposes_highest_tier_below(onboard_env):
@@ -327,3 +327,14 @@ async def test_off_ladder_deal_proposes_highest_tier_below(onboard_env):
     await wx.onboard_uid(3, 9, "123")
     card = onboard_env["cards"][0]["text"]
     assert "ngoài bảng bậc" in card and "80%" in card and onboard_env["added"] == []
+
+
+def test_portal_names_follow_weex_form_rules():
+    import re
+    assert wx.portal_account("Facific9x", "2249716719") == "Facificx"
+    assert wx.portal_account("big_whale_2024", "1") == "bigwhale"
+    acc = wx.portal_account("9x", "2249716719")       # too few letters → derived from the UID
+    assert acc == "kolccejhbghbj" and re.fullmatch(r"[A-Za-z]{2,15}", acc)
+    assert wx.portal_name("Facific9x", "1") == "Facific9x"
+    assert wx.portal_name(None, "2249716719") == "KOL 2249716719"
+    assert len(wx.portal_name("x" * 40, "1")) == 18

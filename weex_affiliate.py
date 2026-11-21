@@ -334,19 +334,30 @@ BIG_KOL_MIN_VOLUME_M = 20  # ≥ this stated monthly volume → straight onto ou
 CHANNEL_KEY = "weex_aff_channel_code"
 
 
-def add_payload(uid: str, name: str, rate: float, channel: str) -> dict:
+def add_payload(uid: str, username: str | None, rate: float, channel: str) -> dict:
     """Body for agent/add: same shape as the edit form, no id; futures = tier rate, spot = SPOT_RATE."""
     body = {camel: 0.0 for camel in _RATE_FIELDS}
     body.update({"rebateRate": rate, "spotRebateRate": SPOT_RATE, "agentUserId": int(uid),
-                 "account": name, "agentName": name, "channelCode": channel, "relBdAccountId": "0", "agentType": 1, "agentLevel": 1,
+                 "account": portal_account(username, uid), "agentName": portal_name(username, uid),
+                 "channelCode": channel, "relBdAccountId": "0", "agentType": 1, "agentLevel": 1,
                  "rebateNotice": False})
     return body
 
 
-def _portal_name(username: str | None, uid: str) -> str:
+# Portal form rules (affiliates.weex.com edit dialog): account = Latin letters only, 2-15 chars
+# (no digits — "Facific9x" is rejected); agentName = 2-18 chars.
+def portal_account(username: str | None, uid: str) -> str:
     import re
-    base = re.sub(r"[^A-Za-z0-9]", "", username or "")[:20]
-    return base or f"kol{uid}"
+    base = re.sub(r"[^A-Za-z]", "", username or "")[:15]
+    if len(base) >= 2:
+        return base
+    return "kol" + "".join(chr(ord("a") + int(d)) for d in str(uid)[-10:])  # digits → letters, stays unique
+
+
+def portal_name(username: str | None, uid: str) -> str:
+    import re
+    base = re.sub(r"[^A-Za-z0-9 ._-]", "", username or "").strip()[:18]
+    return base if len(base) >= 2 else f"KOL {uid}"[:18]
 
 
 async def create_or_raise(uid: str, username: str | None, rate: float, with_creds: bool = False):
@@ -361,7 +372,7 @@ async def create_or_raise(uid: str, username: str | None, rate: float, with_cred
             msg = f"UID {uid} nâng {cur:.0%} → {rate:.0%}"
         return (msg, None) if with_creds else msg
     channel = await db.get_setting(CHANNEL_KEY, "CSS2026") or "CSS2026"
-    body = await _request("POST", "/agent/add", json=add_payload(uid, _portal_name(username, uid), rate, channel))
+    body = await _request("POST", "/agent/add", json=add_payload(uid, username, rate, channel))
     if not body.get("success"):
         raise RuntimeError(body.get("message") or body.get("msg") or "WEEX từ chối tạo sub-affiliate")
     data = body.get("data") or {}
