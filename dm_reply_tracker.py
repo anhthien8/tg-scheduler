@@ -1705,8 +1705,9 @@ async def generate_and_send_ai_reply_for_chat(
             _arch_rule = kol_archetype.opening_rule(kol_prof.get("archetype"))
             if _arch_rule:
                 combined_prompt += "\n\n" + _arch_rule
-        if kol_offer.uses_ladder(exchange) and not kol_region_offer.origin_known(kol_prof):
+        if kol_offer.uses_ladder(exchange) and kol_region_offer.needs_origin_question(full_history, kol_prof):
             # Region offer (all markets except Vietnam / Korea / China): ask where the KOL and their community are from.
+            # Not asked of leads writing Vietnamese / Chinese / Korean: they get the ladder whatever the answer.
             combined_prompt += "\n\n" + kol_region_offer.ORIGIN_QUESTION_RULE
     except Exception as _ladder_err:
         logger.error("[AIFollowUp] Could not render offer ladder: %s", _ladder_err)

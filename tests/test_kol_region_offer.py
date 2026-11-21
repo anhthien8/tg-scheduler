@@ -168,3 +168,16 @@ def test_russia_keeps_the_ladder_like_vietnam():
     assert region.detect_region(_user("Kyiv, Ukraine")) == "UA"
     assert region.detect_region([], {"kol_country": "Kazakhstan"}) == "KZ"
     assert region.detect_region(_user("CIS traders")) == "CIS"
+
+
+def test_origin_question_skipped_for_ladder_languages():
+    vi = [{"role": "assistant", "content": "Chào anh"}, {"role": "user", "content": "ok em, nói thử xem"}]
+    vi_plain = [{"role": "user", "content": "ok minh dang lam ben khac roi, ben ban co gi"}]
+    zh = [{"role": "user", "content": "你好，你们的返佣是多少？"}]
+    ko = [{"role": "user", "content": "안녕하세요 커미션 얼마예요?"}]
+    en = [{"role": "user", "content": "Maybe. What campaigns do you have for communities right now?"}]
+    for h in (vi, vi_plain, zh, ko):
+        assert not region.needs_origin_question(h, {})
+    assert region.needs_origin_question(en, {})
+    assert region.needs_origin_question([{"role": "user", "content": "ok"}], {})  # no evidence: still ask
+    assert not region.needs_origin_question(en, {"kol_country": "Indonesia"})

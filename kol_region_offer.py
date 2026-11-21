@@ -289,6 +289,22 @@ def origin_known(profile: dict | None) -> bool:
     return bool(_country_field(profile, "kol_country") or _country_field(profile, "community_country"))
 
 
+# Leads writing these get the tiered ladder whatever their country (China / Korea / Vietnam market).
+_LADDER_SCRIPTS = ("vi", "zh", "ko")
+
+
+def needs_origin_question(history: list[dict] | None, profile: dict | None) -> bool:
+    """Ask where the KOL is based only when the answer can change the offer.
+
+    A lead writing Vietnamese, Chinese or Korean gets the ladder anyway, so the
+    question would only delay the first pitch, the volume question and the
+    show-the-money comparison."""
+    import lang_guard
+    if origin_known(profile) or _excluded_language(history):
+        return False
+    return lang_guard.conversation_script(history) not in _LADDER_SCRIPTS
+
+
 def _excluded_language(history: list[dict] | None) -> bool:
     """The lead writes in Chinese, Korean or Vietnamese (China / Korea / Vietnam market)."""
     user = [str(m.get("content") or "") for m in (history or [])[-30:] if m.get("role") == "user"]
