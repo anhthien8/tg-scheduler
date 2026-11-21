@@ -752,6 +752,16 @@ def render_agent_offer_prompt(exchange: str) -> str:
     ])
 
 
+# Owner, 2026-11-21: many KOLs (Vietnamese ones especially) do not know the word "revshare".
+PLAIN_TERMS_RULE = (
+    "PLAIN WORDS FOR COMMISSION: never write \"revshare\", \"rev share\", \"revenue share\" or \"RS\" to the KOL, "
+    "even though this prompt and the knowledge base use it: many KOLs do not know the term. Say what it is: they earn "
+    "X% of the trading fees paid by the members they refer. Vietnamese: \"X% phí giao dịch\" or \"hoa hồng X% từ phí "
+    "giao dịch của member anh/chị giới thiệu\"; English: \"X% of the trading fees\"; other languages: the same idea "
+    "in their words. The figures stay exactly as given."
+)
+
+
 async def offer_block_for(exchange: str | None, volume_claimed=None,
                           region: str | None = None, volume_stated=None,
                           current_pct=None) -> tuple[str, dict | None]:
@@ -767,10 +777,10 @@ async def offer_block_for(exchange: str | None, volume_claimed=None,
         if region in kol_region_offer.REGIONS:
             # Deal rules 2 + 3 apply to region leads too; rule 1 (starting tier) does not — no ladder here.
             block = "\n".join(filter(None, [kol_region_offer.render_prompt(region, ladder, volume_claimed),
-                                            CURRENT_DEAL_RULE, UPFRONT_REVIEW_RULE, camp]))
+                                            CURRENT_DEAL_RULE, UPFRONT_REVIEW_RULE, PLAIN_TERMS_RULE, camp]))
             return block, _allow_campaign_figures(kol_region_offer.guard_ladder(ladder), camp)
         block = "\n".join(filter(None, [render_offer_ladder_prompt(ladder, volume_claimed, volume_stated, current_pct),
-                                        camp]))
+                                        PLAIN_TERMS_RULE, camp]))
         vol = volume_claimed or volume_stated
         est = value_estimate(ladder, vol)
         cmp = money_comparison(ladder, vol, current_pct) if est else None
@@ -782,7 +792,7 @@ async def offer_block_for(exchange: str | None, volume_claimed=None,
             if cmp:  # their own current rate may be quoted back to them
                 rules["extra_allowed_percents"] = list(rules.get("extra_allowed_percents") or []) + [cmp["current_pct"]]
         return block, _allow_campaign_figures(ladder, camp)
-    return render_agent_offer_prompt(exchange), None
+    return render_agent_offer_prompt(exchange) + "\n" + PLAIN_TERMS_RULE, None
 
 
 def _allow_campaign_figures(ladder: dict, camp_block: str) -> dict:

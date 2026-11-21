@@ -229,3 +229,31 @@ async def test_profile_form_normalizes_birthday(client):
     assert client.post(f"/api/ai-followup/chats/{acc}/6/profile", json={"birthday": "5.7"}).status_code == 200
     assert (await db.get_kol_profile(acc, 6))["birthday"] == "05/07"
     assert client.post(f"/api/ai-followup/chats/{acc}/6/profile", json={"birthday": "32/13"}).status_code == 400
+
+
+# ── Plain words: no "revshare" jargon to KOLs (owner, 2026-11-21) ───────────
+
+def test_vietnamese_ai_text_says_trading_fees():
+    import outbound_guard as og
+    cases = {
+        "Anh vào thẳng Tier 4, 70% revshare, trả hằng ngày.": "Anh vào thẳng Tier 4, 70% phí giao dịch, trả hằng ngày.",
+        "Hoa hồng lên đến 80% revshare anh ạ.": "Hoa hồng lên đến 80% phí giao dịch anh ạ.",
+        "Bên em trả hoa hồng revshare hằng ngày nhé anh.": "Bên em trả hoa hồng phí giao dịch hằng ngày nhé anh.",
+        "Commission (revshare) bên em trả mỗi ngày anh nhé.": "Commission bên em trả mỗi ngày anh nhé.",
+        "Mức Rev Share 65% áp dụng từ tháng sau anh nhé.": "Mức 65% phí giao dịch áp dụng từ tháng sau anh nhé.",
+    }
+    for src, want in cases.items():
+        assert og.plain_terms(src) == want, src
+        assert og.clean_ai(src)[0] == want
+    en = "You start at 55% revshare, paid daily."
+    assert og.plain_terms(en) == en  # other languages: the prompt rule handles the wording
+
+
+async def test_every_offer_block_has_plain_terms_rule(monkeypatch):
+    async def ladder():
+        return k.DEFAULT_LADDER
+    monkeypatch.setattr(k, "get_ladder", ladder)
+    for args in (("WEEX", "50M"), ("WEEX", None, "ID"), ("BloFin",)):
+        block, _ = await k.offer_block_for(*args)
+        assert "never write \"revshare\"" in block and "phí giao dịch" in block, args
+

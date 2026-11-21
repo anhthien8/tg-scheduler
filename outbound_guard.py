@@ -52,6 +52,29 @@ def scrub(text):
     return _tidy(out)
 
 
+_RS = r"(?:rev(?:enue)?[\s\-]?share)"
+_VI_PLAIN_TERMS = (
+    (re.compile(r"\s*\(\s*" + _RS + r"\s*\)", re.IGNORECASE), ""),                         # "hoa hồng (revshare)"
+    (re.compile(r"hoa hồng\s+" + _RS + r"\b", re.IGNORECASE), "hoa hồng phí giao dịch"),
+    (re.compile(r"(\d+(?:[.,]\d+)?\s*%)\s*" + _RS + r"\b", re.IGNORECASE), r"\1 phí giao dịch"),  # "70% revshare"
+    (re.compile(_RS + r"\s*(\d+(?:[.,]\d+)?\s*%)", re.IGNORECASE), r"\1 phí giao dịch"),          # "revshare 70%"
+    (re.compile(r"\b" + _RS + r"\b", re.IGNORECASE), "hoa hồng phí giao dịch"),
+)
+
+
+def plain_terms(text: str) -> str:
+    """Vietnamese AI text: 'revshare' -> 'phí giao dịch' (owner, 2026-11-21: most KOLs do not know the word).
+    Other languages are left to the prompt rule (kol_offer.PLAIN_TERMS_RULE)."""
+    if not text or not re.search(_RS, text, re.IGNORECASE):
+        return text
+    import lang_guard
+    if lang_guard.text_script(text) != "vi":
+        return text
+    for pat, rep in _VI_PLAIN_TERMS:
+        text = pat.sub(rep, text)
+    return text
+
+
 def clean_ai(text) -> tuple[str, bool]:
     """Clean an AI-written message. Returns (text, ai_asked_for_a_human)."""
     raw = str(text or "")
@@ -59,6 +82,7 @@ def clean_ai(text) -> tuple[str, bool]:
     out = raw
     for pat in _SYSTEM + _AI_ONLY:
         out = pat.sub("", out)
+    out = plain_terms(out)
     if out == raw:
         return raw.strip(), handover
     out = _tidy(out)
