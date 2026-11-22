@@ -165,6 +165,8 @@ async def start_engines() -> asyncio.Task:
     try:
         import story_engine
         story_engine.register_job(sch.get_scheduler())
+        import story_library  # daily autopilot planner (Saved Messages photo library)
+        story_library.register_job(sch.get_scheduler())
     except Exception as e:
         logger.warning("Story scheduler startup error: %s", e)
 

@@ -186,3 +186,75 @@ async def delete_story_job(job_id: int):
     if not await se.delete_job(job_id):
         raise HTTPException(404, "Không tìm thấy lịch story")
     return {"success": True}
+
+
+# ── Photo library (Saved Messages) + autopilot ────────────────────────────────
+
+class LibrarySync(BaseModel):
+    account_id: int
+    limit: int = 300
+
+
+class AutopilotPayload(BaseModel):
+    enabled: bool = False
+    categories: list[str] = []
+    account_ids: list[int] = []
+    per_day: int = 1
+    start_hour: int = 8
+    end_hour: int = 22
+    lang: str = "vi"
+    cross_view: bool = True
+
+
+@router.get("/library")
+async def story_library():
+    import story_library as sl
+    return {**await sl.library(), "autopilot": await sl.get_autopilot()}
+
+
+@router.post("/library/sync")
+async def story_library_sync(body: LibrarySync):
+    """Import new photos from the nick's Saved Messages, then AI-classify them (background)."""
+    import story_library as sl
+    if os.getenv("TG_RUNTIME_MODE", "combined").strip().lower() != "combined":
+        raise HTTPException(503, "Cần chạy app ở chế độ combined để đọc Saved Messages")
+    if not sl.start_sync(body.account_id, body.limit):
+        raise HTTPException(409, "Đang đồng bộ, đợi xong rồi thử lại")
+    return {"success": True}
+
+
+@router.post("/library/classify")
+async def story_library_classify():
+    """Retry photos the AI could not read."""
+    import story_library as sl
+    if not sl.start_classify():
+        raise HTTPException(409, "Đang đồng bộ, đợi xong rồi thử lại")
+    return {"success": True}
+
+
+@router.get("/library/status")
+async def story_library_status():
+    import story_library as sl
+    return sl.status()
+
+
+@router.get("/library/file/{name}")
+async def story_library_file(name: str):
+    from fastapi.responses import FileResponse
+    import story_library as sl
+    path = sl.media_path(name) if name.startswith("saved_") else None
+    if not path:
+        raise HTTPException(404, "Không tìm thấy ảnh")
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=604800, immutable"})
+
+
+@router.put("/autopilot")
+async def story_autopilot_save(body: AutopilotPayload):
+    import story_library as sl
+    try:
+        await sl.save_autopilot(**body.model_dump())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not body.enabled:
+        return {"success": True, "planned": 0, "cancelled": await sl.cancel_pending_auto()}
+    return {"success": True, "planned": await sl.plan_today()}

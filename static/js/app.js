@@ -1112,6 +1112,7 @@ if(page==='stories'){
           <button id="st-go" class="btn btn-primary" onclick="Stories.create()">⚡ Đăng ngay</button>
         </div>
       </div>
+      <div id="st-library"></div>
       <div class="st-jobs-h">
         <h3>Lịch đã tạo <span id="st-jobs-n" class="st-muted"></span></h3>
         <span class="info-i" tabindex="0" data-tip="Danh sách không tự cập nhật để app chạy nhẹ. Bấm Làm mới để xem tiến độ đăng và lượt xem mới nhất.">i</span>
@@ -1125,6 +1126,7 @@ if(page==='stories'){
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
   (document.getElementById('view-stories')?.classList || {add:()=>{},remove:()=>{},toggle:()=>{}}).remove('hidden');
   Stories.init();
+  if(window.StoryLib)StoryLib.init();
   return;
 }
 
