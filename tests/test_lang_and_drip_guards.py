@@ -203,3 +203,16 @@ async def test_drip_still_reaches_a_fresh_lead(mock_send, mock_gen):
     res = await _run_drip(mock_gen)
     assert res["sent"] == 1
     mock_send.assert_called_once()
+
+
+def test_app_list_label_does_not_make_a_list_vietnamese():
+    """2026-11-21: a list saved as 'globalrashidfamily · Tất cả có contact (10/11)' sent ~105 Indian /
+    English KOLs a Vietnamese opener: the app's own Vietnamese tab label was read as the group's language."""
+    pick = lambda g: ai_remix.detect_user_language({"community_hint": g, "first_name": "@x"}, with_source=True)
+    assert pick("globalrashidfamily · Tất cả có contact (10/11)") == ("en", "default")
+    assert pick("Crypto_Owen111 · Tất cả có contact (09/11)") == ("en", "default")
+    assert pick("H2Capital · Cộng đồng Crypto (06/11)") == ("en", "default")
+    assert pick("Hội Trader Sài Gòn") == ("vi", "group")          # a real Vietnamese group still counts
+    assert pick("Binance Vietnam · Tiềm năng BD (01/11)") == ("vi", "group")
+    # The member's own profile still wins over everything.
+    assert ai_remix.detect_user_language({"community_hint": "x · Tất cả (10/11)", "bio": "مرحبا"}) == "ar"

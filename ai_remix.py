@@ -536,6 +536,12 @@ def _text_lang(text: str) -> str:
     return ""
 
 
+# "<source> · <tab label> (dd/mm)" — the name the Members page gives a saved lead list.
+_APP_LIST_SUFFIX = __import__("re").compile(r"\s*·\s*[^·]*\(\d{1,2}/\d{1,2}\)\s*$")
+# Tab labels of that page (static/js/members.js _SIM_TAB_TAGS), Vietnamese ones included.
+_APP_LIST_LABELS = ("Tất cả có contact", "Cộng đồng Crypto", "Tiềm năng BD", "Chưa có contact", "Tin tức", "Tất cả")
+
+
 def detect_user_language(member_info: dict | None, with_source: bool = False):
     """Pick the recipient's language from their own profile. Falls back to English.
 
@@ -556,9 +562,14 @@ def detect_user_language(member_info: dict | None, with_source: bool = False):
             if phone.startswith(pre):
                 return done(code, "phone")
     name = f"{mi.get('first_name') or ''} {mi.get('last_name') or ''}".strip()
-    # Our own list labels ("(lọc)", "(đã lọc)") are Vietnamese; they say nothing about the member.
+    # Our own list labels are Vietnamese and say nothing about the member: "(lọc)", "(đã lọc)" and
+    # the "<source> · Tất cả có contact (10/11)" suffix the Members page adds to a saved list —
+    # that suffix once sent a whole list of Indian KOLs a Vietnamese opener.
     import re as _re
     group = _re.sub(r"\((?:đã\s*)?lọc\)", "", str(mi.get("community_hint") or ""), flags=_re.I)
+    group = _APP_LIST_SUFFIX.sub("", group)
+    for label in _APP_LIST_LABELS:
+        group = group.replace(label, "")
     for field, val in (("location", mi.get("location")), ("bio", mi.get("bio")), ("name", name),
                        ("channel", mi.get("channel_title")), ("group", group)):
         code = _text_lang(val or "")
