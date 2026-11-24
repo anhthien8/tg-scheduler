@@ -40,6 +40,23 @@ def is_human_message(text) -> bool:
     return str(text or "").lstrip().startswith(HUMAN_PREFIX)
 
 
+_HUMAN_TYPED_RE = re.compile(r"^\s*\[Human Admin[^\]]*\]:")   # also "[Human Admin via Forum]:"
+
+
+def lead_waiting_on_us(row: dict) -> bool:
+    """A person on our side owes this lead an answer — the 💬 Hàng chờ trả lời rule
+    (ai_followup.js _queueGroup > 0): an open promise, the KOL spoke last on a
+    human-owned lead, or the AI handed over and its own message is still the last one.
+    `row` needs status, owed_since, last_role, last_text (closed leads are the caller's call)."""
+    if row.get("owed_since"):
+        return True
+    status, last_role = row.get("status"), row.get("last_role")
+    if status in ("needs_human", "paused_admin") and last_role == "user":
+        return True
+    return (status == "needs_human" and last_role == "assistant"
+            and not _HUMAN_TYPED_RE.match(row.get("last_text") or ""))
+
+
 def detect_promise(text) -> str | None:
     """Short note (the sentence carrying the promise) when `text` promises a later answer."""
     clean = _TAG_RE.sub(" ", str(text or ""))

@@ -1193,6 +1193,28 @@ class _TelethonForumBot:
         return await self._client.send_file(group_id, path, caption=caption, reply_to=topic_id,
                                             supports_streaming=True)
 
+    async def edit_topic(self, group_id: int, topic_id: int, title: str | None = None,
+                         closed: bool | None = None):
+        from telethon.tl.functions.messages import EditForumTopicRequest
+        peer = await self._client.get_input_entity(group_id)
+        # Telegram refuses a rename and an open/close in one request (TOPIC_CLOSE_SEPARATELY).
+        for change in ({"title": title}, {"closed": closed}):
+            if next(iter(change.values())) is None:
+                continue
+            try:
+                await self._client(EditForumTopicRequest(peer=peer, topic_id=topic_id, **change))
+            except Exception as e:
+                if "NOT_MODIFIED" not in str(e).upper():   # already like that: nothing to do
+                    raise
+
+    async def send_html(self, group_id: int, topic_id: int, text: str):
+        return await self._client.send_message(group_id, text, reply_to=topic_id, parse_mode="html",
+                                               link_preview=False)
+
+    async def edit_html(self, group_id: int, message_id: int, text: str):
+        return await self._client.edit_message(group_id, message_id, text, parse_mode="html",
+                                               link_preview=False)
+
 
 def _forum_bot() -> "_TelethonForumBot | None":
     return _TelethonForumBot(_bot) if (_bot and _bot.is_connected()) else None
@@ -1400,6 +1422,46 @@ async def relay_outgoing_media_to_forum(account_id: int, user_id: int, message, 
         logger.info("[ForumInbox] outgoing media shown as text (acc=%s user=%s): %s", account_id, user_id, result)
         await relay_outgoing_to_forum(account_id, user_id, ((text or "").strip() + "\n\n[Media]").strip())
     return result
+
+
+TIDY_INTERVAL = 180  # seconds between forum tidy runs
+
+
+async def tidy_forum_topics() -> dict:
+    """Scheduler job: status titles, 🔒 dead topics, pinned "📋 Việc cần làm". Never raises."""
+    try:
+        bot = _forum_bot()
+        if not bot:
+            return {"status": "bot_offline"}
+        report = await fx.tidy_forum(db, bot, await _load_forum_config())
+        if report.get("edited") or report.get("board") not in (None, "unchanged"):
+            logger.info("[ForumInbox] tidy: %s", report)
+        return report
+    except Exception as e:
+        logger.warning("[ForumInbox] tidy failed: %s: %s", type(e).__name__, e)
+        return {"status": "error"}
+
+
+async def send_handover_to_topic(account_id: int, user_id: int, username: str | None, reason: str) -> str:
+    """AI handed a lead over: post it in that lead's topic with 🟢/🔴 AI buttons. Never raises."""
+    try:
+        bot = _forum_bot()
+        if not bot:
+            return "bot_offline"
+        cfg = await _load_forum_config()
+        chat = await db.get_followup_chat(account_id, user_id) or {}
+        result = await fx.relay_handover(
+            db, bot, cfg, account_id=account_id, user_id=user_id,
+            username=username or chat.get("username"), name=chat.get("name"), reason=reason,
+            buttons=_ai_status_buttons(account_id, user_id, chat.get("status") or "needs_human"))
+        if result != "relayed":
+            logger.info("[ForumInbox] handover not posted in a topic (acc=%s user=%s): %s",
+                        account_id, user_id, result)
+        return result
+    except Exception as e:
+        logger.warning("[ForumInbox] handover topic alert failed (acc=%s user=%s): %s: %s",
+                       account_id, user_id, type(e).__name__, e)
+        return "error"
 
 
 async def send_forum_general_alert(text: str) -> bool:

@@ -11,7 +11,7 @@ class _DB:
     async def find_telegram_topic_for_user(self, g, a, u):
         return self.topic
 
-    async def get_telegram_outreach_proof(self, a, u):
+    async def get_telegram_outreach_proof(self, a, u, username=None):
         return {"name": "c"}
 
     async def update_telegram_topic_last_message(self, *a):

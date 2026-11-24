@@ -158,6 +158,16 @@ async def start_engines() -> asyncio.Task:
             max_instances=1,
             coalesce=True,
         )
+        # Forum topics read at a glance: status emoji titles, dead ones closed, pinned to-do board.
+        sch.get_scheduler().add_job(
+            command_bot.tidy_forum_topics,
+            trigger=_BotCheckTrigger(seconds=command_bot.TIDY_INTERVAL),
+            id="forum_tidy",
+            name="Forum topic tidy",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
     except Exception as e:
         logger.warning("Command bot startup error: %s", e)
 

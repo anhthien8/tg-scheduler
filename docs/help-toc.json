@@ -204,6 +204,12 @@
     "anchor": "tinh-nang-v1"
   },
   {
+    "id": "h3-forum-list",
+    "title": "Đọc danh sách topic",
+    "level": 3,
+    "anchor": "doc-danh-sach-topic"
+  },
+  {
     "id": "h2-34",
     "title": "12. Proxy manager + Blacklist",
     "level": 2,

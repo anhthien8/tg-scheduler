@@ -384,6 +384,9 @@ def clean_database():
                 await conn.commit()
         await db.init_db()
     asyncio.run(_do_clean())
+    # Account names cached from the previous test's database would leak into this one.
+    import telegram_forum_inbox
+    telegram_forum_inbox._ACCOUNT_NAME_CACHE.clear()
     yield
     asyncio.run(db.close_db())
 

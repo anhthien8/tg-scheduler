@@ -18,6 +18,7 @@ import pytz
 from fastapi import APIRouter
 
 import database as db
+import owed_answers
 
 logger = logging.getLogger("tg-scheduler.tasks")
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -42,6 +43,7 @@ KINDS = {
     "schedule": ("📅", "Lịch gửi", "schedules"),
     "watcher":  ("🎯", "Keyword DM", "watchers"),
     "engage":   ("🌐", "Cộng đồng", "engagement"),
+    "kolq":     ("💬", "Hàng chờ trả lời", "ai-followup"),
 }
 
 
@@ -399,11 +401,35 @@ async def _alerts() -> list[dict]:
     return out
 
 
+async def _reply_queue() -> list[dict]:
+    """KOLs waiting on a person (AI handed over, a promise, chat tay): one row, newest first."""
+    rows = await _rows("""
+        SELECT c.username, c.name, c.status, c.owed_since,
+               CASE WHEN json_valid(c.history_json) THEN json_extract(c.history_json, '$[#-1].role') END AS last_role,
+               CASE WHEN json_valid(c.history_json)
+                    THEN substr(json_extract(c.history_json, '$[#-1].content'), 1, 40) END AS last_text,
+               CAST(strftime('%s', COALESCE(c.last_user_message_at, c.updated_at)) AS INTEGER) AS ts
+        FROM ai_followup_chats c
+        WHERE c.status <> 'bot_ignored'
+          AND (c.owed_since IS NOT NULL OR c.status IN ('needs_human', 'paused_admin'))
+          AND COALESCE(NULLIF(c.kol_step, ''), 'prospect') NOT IN ('declined', 'dormant', 'media')
+          AND c.user_id NOT IN (SELECT telegram_user_id FROM accounts WHERE telegram_user_id IS NOT NULL)""")
+    waiting = sorted((r for r in rows if owed_answers.lead_waiting_on_us(r)), key=lambda r: r["ts"] or 0, reverse=True)
+    if not waiting:
+        return []
+    who = [f"@{r['username']}" if r["username"] else (r["name"] or "?") for r in waiting[:5]]
+    newest = waiting[0]["ts"] or 0
+    head = {"id": "queue", "name": f"{len(waiting)} KOL chờ người trả lời"}
+    # status = newest wait: a KOL newly handed over re-raises the toast and the red dot.
+    return [_row("kolq", head, f"w{newest}", "warn", f"mới nhất {who[0]}", ts=newest,
+                 note="Bấm để mở hàng chờ: " + ", ".join(who) + (" …" if len(waiting) > 5 else ""))]
+
+
 async def _collect() -> dict:
     since = int(time.time()) - DAY
-    jobs = [("dm", _dm()), ("story", _story(since)), ("warmup", _warmup(since)), ("scrape", _scrape()),
-            ("batch", _batch()), ("crawl", _crawl()), ("invite", _invite()), ("zalo", _zalo()),
-            ("schedule", _schedule(since)), ("alerts", _alerts())]
+    jobs = [("kolq", _reply_queue()), ("dm", _dm()), ("story", _story(since)), ("warmup", _warmup(since)),
+            ("scrape", _scrape()), ("batch", _batch()), ("crawl", _crawl()), ("invite", _invite()),
+            ("zalo", _zalo()), ("schedule", _schedule(since)), ("alerts", _alerts())]
     tasks, errors = [], []
     for name, coro in jobs:     # sequential: the DB pool is small and every query is tiny
         try:

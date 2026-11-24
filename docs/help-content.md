@@ -414,7 +414,7 @@ Câu bị chặn **không** được gửi. Lead chuyển sang Cần người th
 | Nick hoặc chiến dịch/rule đã gửi tin đầu **không gắn AI Agent** | AI không trả lời |
 | Lead ở bước **Từ chối**, **Ngủ đông** hoặc **Media** | Lead chờ mình quá 30 ngày tự vào Ngủ đông; KOL nhắn lại thì lead tự quay về bước cũ |
 
-Mỗi lần AI tắt vì bàn giao, nick chính hoặc Forum Inbox nhận một tin báo kèm lý do. Muốn biết vì sao một lead cụ thể bị tắt, xem tin báo đó hoặc lịch sử chat trong popup.
+Mỗi lần AI tắt vì bàn giao, tin báo **🙋 AI đã dừng, chờ bạn quyết** vào thẳng topic của lead trong Forum Inbox. Tin báo có lý do (tin KOL vừa gửi, và cảnh báo nếu AI vừa hỏi KOL một câu rồi mới dừng) cùng nút **🟢 Bật AI** / **🔴 Tắt AI**. Bản tóm tắt cũng vào General và tin nhắn riêng của Command Bot. Ở app, nút **🔔 Việc đang chạy** có dòng **⚠️ N KOL chờ người trả lời**; bấm vào để mở Hàng chờ trả lời.
 
 ### AI Agents
 
@@ -458,6 +458,34 @@ Tab **Cài đặt AI** → phần **Forum Inbox**.
 - Command Bot hiển thị tên account; nếu chưa có tên thì dùng nhãn `Acc #id`.
 - Header topic và Command Bot `/status`, `/pipeline` hiển thị thanh bước KOL (`🪜 Bước: ●●○○○ 2/5 · Còn thiếu: ...`). Reply AI bị guard số lạ chặn cũng báo vào đây kèm lý do.
 - Cảnh báo **KOL CAMPAIGN PENDING** vẫn gửi tới Command Bot và Forum Inbox, nhưng mặc định không gửi vào Saved Messages. Admin bật lại bằng setting `kol_pending_saved_msg_enabled` = `1`.
+
+### Đọc danh sách topic
+
+Bot tự dọn danh sách topic 3 phút một lần.
+
+**Tên topic = việc cần làm.** Tên có dạng `🙋 @armalku · Will - SEA Weex` (emoji · KOL · nick đang chat):
+
+| Emoji | Nghĩa |
+|---|---|
+| 🙋 | KOL đang chờ bạn trả lời (AI đã dừng, KOL nhắn cuối, hoặc còn lời hứa chưa trả) |
+| 🔗 | KOL đã gửi UID, chờ bên mình gắn link |
+| 🤖 | AI đang lo |
+| 💬 | Bạn đã trả lời, đang chờ KOL |
+| ✅ | Đã ký (đã gắn link / đã đăng bài) |
+| 💤 | Đã đóng 🔒: lead từ chối, ngủ đông, media, ignored, nick nhà hoặc đã `/hide` |
+
+- Gõ `🙋` vào ô tìm topic để ra đúng danh sách cần trả lời.
+- Telegram xếp topic theo tin mới nhất, nên topic 💤 tự chìm xuống cuối. KOL nhắn lại thì bot tự mở lại và đổi tên.
+- Bot chỉ đổi tên khi lead đổi nhóm. Mỗi lần đổi, Telegram để một dòng "đã đổi tên" trong topic.
+- Topic không bị xoá: lịch sử vẫn còn trong nhóm và trong app.
+
+**Topic 📋 Việc cần làm.** Bot tạo một topic chỉ có một tin, tự sửa khi danh sách đổi. Ghim nó lên đầu nhóm **một lần bằng tay** (giữ vào topic → **Ghim**): Telegram không cho bot ghim topic.
+
+- 🙋 **Chờ bạn trả lời**: mới nhất ở trên, kèm thời gian đã chờ và ⭐ Tier A.
+- ⏳ **Lời hứa quá hạn 24 giờ**: lâu nhất ở trên.
+- 🔗 **Có UID, chờ gắn link**.
+
+Bấm tên KOL để mở topic của họ. Topic này khoá chat, chỉ bot viết. Danh sách chỉ gồm lead đã có topic; danh sách đầy đủ ở 💬 **Hàng chờ trả lời** trong app.
 
 **Nguồn:** `routes/settings.py:504-702`, `static/index.html:729-805`, `command_bot.py`, `telegram_forum_inbox.py`, `README.md:61-75`.
 

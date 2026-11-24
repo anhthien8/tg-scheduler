@@ -119,7 +119,7 @@ async def test_forum_notes_old_topic_and_opens_new_one_with_history():
     res = await fx.relay_transfer(db, bot, cfg, from_account_id=A, to_account_id=B, user_id=U,
                                   username="kol_lead", name="KOL")
     assert res == {"status": "relayed", "topic_id": 500}
-    assert bot.created == [f"a{B} · kol_lead · {U}"]
+    assert len(bot.created) == 1 and "@kol_lead" in bot.created[0] and str(U) not in bot.created[0]
     assert (await db.find_telegram_topic_for_user(cfg.group_id, B, U))["topic_id"] == 500
     old_topic = [t for tid, t in bot.sent if tid == 400]
     assert len(old_topic) == 1 and "Nauy" in old_topic[0]

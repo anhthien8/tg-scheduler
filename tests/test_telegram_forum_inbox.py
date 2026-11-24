@@ -14,7 +14,7 @@ class FakeDB:
         self.status = []
         self.audit = []
 
-    async def get_telegram_outreach_proof(self, account_id, user_id):
+    async def get_telegram_outreach_proof(self, account_id, user_id, username=None):
         return self.proof
 
     async def find_telegram_topic_for_user(self, group_id, account_id, user_id):

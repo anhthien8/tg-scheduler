@@ -1525,6 +1525,10 @@ async def init_db():
         """)
         await _add_column(db, "telegram_topics", "card_message_id", "INTEGER")  # pinned deal card
         await _add_column(db, "telegram_topics", "card_hash", "TEXT")
+        # What the topic list shows right now (title with status emoji, closed 🔒),
+        # so the tidy job only edits a topic when its status actually changed.
+        await _add_column(db, "telegram_topics", "shown_title", "TEXT")
+        await _add_column(db, "telegram_topics", "shown_closed", "INTEGER")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_telegram_topics_lookup ON telegram_topics(group_id, account_id, user_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_telegram_topics_thread ON telegram_topics(group_id, topic_id)")
 
@@ -7119,25 +7123,36 @@ async def delete_learned_knowledge(rule_id: int) -> bool:
 # Telegram Forum Sub-Topics (Sales War Room)
 # ═══════════════════════════════════════════════════════════════════════════
 
-async def get_telegram_outreach_proof(account_id: int, user_id: int) -> dict | None:
+async def get_telegram_outreach_proof(account_id: int, user_id: int,
+                                      username: str | None = None) -> dict | None:
     """Prove the lead was actually reachable by this nick before opening a topic.
 
     Order matters: most authoritative evidence first. Campaign logs record the
     *target* id, which for scrape jobs is the group/channel id and NOT the human
     user id — so a campaign "success" row alone is NOT proof. Requiring it made
     the topic gate almost never match, silently dropping real conversations.
+    Those rows still carry the @username we sent to, so a match on it is proof.
     """
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        # Only trust campaign/watcher rows whose target is a real user id (> 0).
+        uname = (username or "").strip().lstrip("@")
+        if not uname:
+            u_cur = await db.execute(
+                "SELECT username FROM ai_followup_chats WHERE account_id = ? AND user_id = ? "
+                "AND COALESCE(username, '') <> '' LIMIT 1", (account_id, user_id))
+            u_row = await u_cur.fetchone()
+            uname = (u_row["username"] if u_row else "") or ""
+        # Trust campaign/watcher rows whose target is the real user id (> 0),
+        # or whose @username is this lead's (target id there is the group's).
         c_cur = await db.execute(
             """SELECT 'campaign' AS source, c.name, l.sent_at
                FROM dm_campaign_logs l
                LEFT JOIN dm_campaigns c ON c.id = l.campaign_id
-               WHERE l.account_id = ? AND l.target_user_id = ? AND l.status = 'success'
-                 AND l.target_user_id > 0
+               WHERE l.account_id = ? AND l.status = 'success'
+                 AND ((l.target_user_id = ? AND l.target_user_id > 0)
+                      OR (? <> '' AND lower(COALESCE(l.target_username, '')) = lower(?)))
                ORDER BY l.sent_at DESC LIMIT 1""",
-            (account_id, user_id),
+            (account_id, user_id, uname, uname),
         )
         row = await c_cur.fetchone()
         if row:
@@ -7146,15 +7161,17 @@ async def get_telegram_outreach_proof(account_id: int, user_id: int) -> dict | N
         w_cur = await db.execute(
             """SELECT 'watcher' AS source, group_title AS name, sent_at
                FROM watcher_dm_logs
-               WHERE account_id = ? AND target_user_id = ? AND status = 'success'
-                 AND target_user_id > 0
+               WHERE account_id = ? AND status = 'success'
+                 AND ((target_user_id = ? AND target_user_id > 0)
+                      OR (? <> '' AND lower(COALESCE(target_username, '')) = lower(?)))
                ORDER BY sent_at DESC LIMIT 1""",
-            (account_id, user_id),
+            (account_id, user_id, uname, uname),
         )
         row2 = await w_cur.fetchone()
         if row2:
             return dict(row2)
 
+        # Chat linked to one of our campaigns / keyword rules: we reached out.
         # Inbound chat (we never DM'd them): only KOL-relevant once the lead
         # moved past "prospect" in the funnel. Strangers asking random things
         # (KYC, support, chit-chat) stay out of the forum group.
@@ -7162,7 +7179,8 @@ async def get_telegram_outreach_proof(account_id: int, user_id: int) -> dict | N
             """SELECT 'followup' AS source, name, updated_at AS sent_at
                FROM ai_followup_chats
                WHERE account_id = ? AND user_id = ?
-                 AND COALESCE(NULLIF(kol_step, ''), 'prospect') != 'prospect'
+                 AND (campaign_id IS NOT NULL OR watcher_id IS NOT NULL
+                      OR COALESCE(NULLIF(kol_step, ''), 'prospect') != 'prospect')
                ORDER BY updated_at DESC LIMIT 1""",
             (account_id, user_id),
         )
@@ -7250,10 +7268,16 @@ async def upsert_telegram_topic(data: dict) -> int:
     """Insert or update a topic mapping. Returns row id."""
     async with get_db() as db:
         cursor = await db.execute("""
-            INSERT INTO telegram_topics (group_id, topic_id, account_id, user_id, username, name, campaign_name, status, last_lead_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO telegram_topics (group_id, topic_id, account_id, user_id, username, name, campaign_name,
+                                         status, last_lead_message, shown_title, shown_closed)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ON CONFLICT(group_id, account_id, user_id)
-            DO UPDATE SET topic_id = excluded.topic_id,
+            DO UPDATE SET shown_title = CASE WHEN excluded.topic_id = telegram_topics.topic_id
+                                             THEN COALESCE(excluded.shown_title, shown_title)
+                                             ELSE excluded.shown_title END,
+                          shown_closed = CASE WHEN excluded.topic_id = telegram_topics.topic_id
+                                              THEN shown_closed ELSE 0 END,
+                          topic_id = excluded.topic_id,
                           username = excluded.username,
                           name     = excluded.name,
                           campaign_name = COALESCE(excluded.campaign_name, campaign_name),
@@ -7263,7 +7287,7 @@ async def upsert_telegram_topic(data: dict) -> int:
         """, (
             data["group_id"], data["topic_id"], data["account_id"], data["user_id"],
             data.get("username"), data.get("name"), data.get("campaign_name"),
-            data.get("status", "active"), data.get("last_lead_message"),
+            data.get("status", "active"), data.get("last_lead_message"), data.get("shown_title"),
         ))
         await db.commit()
         return cursor.lastrowid
@@ -7286,6 +7310,38 @@ async def set_telegram_topic_card(group_id: int, topic_id: int, message_id: int 
             (message_id, card_hash, group_id, topic_id),
         )
         await db.commit()
+
+
+async def set_telegram_topic_shown(group_id: int, topic_id: int, title: str, closed: bool):
+    """Record what the topic list now shows for this topic (after a successful edit)."""
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE telegram_topics SET shown_title = ?, shown_closed = ? WHERE group_id = ? AND topic_id = ?",
+            (title, 1 if closed else 0, group_id, topic_id),
+        )
+        await db.commit()
+
+
+async def get_forum_topic_states(group_id: int) -> list[dict]:
+    """Every lead topic of the group with what decides its status: one query, no history shipped."""
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("""
+            SELECT t.topic_id, t.account_id, t.user_id, t.status AS topic_status,
+                   COALESCE(NULLIF(t.username, ''), f.username) AS username, COALESCE(t.name, f.name) AS name,
+                   t.shown_title, t.shown_closed, a.name AS account_name,
+                   f.status, COALESCE(NULLIF(f.kol_step, ''), 'prospect') AS kol_step, f.owed_since,
+                   f.lead_tier, f.last_user_message_at, f.updated_at,
+                   CASE WHEN json_valid(f.history_json) THEN json_extract(f.history_json, '$[#-1].role') END AS last_role,
+                   CASE WHEN json_valid(f.history_json)
+                        THEN substr(json_extract(f.history_json, '$[#-1].content'), 1, 40) END AS last_text,
+                   (t.user_id IN (SELECT telegram_user_id FROM accounts
+                                  WHERE telegram_user_id IS NOT NULL)) AS is_own
+            FROM telegram_topics t
+            LEFT JOIN ai_followup_chats f ON f.account_id = t.account_id AND f.user_id = t.user_id
+            LEFT JOIN accounts a ON a.id = t.account_id
+            WHERE t.group_id = ?""", (group_id,))
+        return [dict(r) for r in await cur.fetchall()]
 
 
 async def update_telegram_topic_last_message(group_id: int, topic_id: int, message: str):
