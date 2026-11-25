@@ -154,6 +154,14 @@ if(page==='zalo'){
   return;
 }
 
+// WhatsApp Outreach Page
+if(page==='whatsapp'){
+  document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('view-whatsapp')?.classList.remove('hidden');
+  if(window.WA) WA.init();
+  return;
+}
+
 // Community Engagement Page
 if(page==='engagement'){
   document.querySelectorAll('[id^="view-"]').forEach(el=>el.classList.add('hidden'));

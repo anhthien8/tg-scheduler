@@ -1,11 +1,40 @@
 [
     {
+        "version": "3.45.0",
+        "date": "24/11/2026",
+        "title": "💚 WhatsApp Outreach: cào thành viên nhóm, nhắn tin mở đầu, tự gửi tin 2 khi họ trả lời",
+        "summary": "Tab mới “💚 WhatsApp”: kết nối nhiều số bằng quét QR, vào nhóm bằng link mời, lấy toàn bộ thành viên nhóm rồi chạy chiến dịch nhắn tin. WhatsApp không có “kết bạn”, nên mỗi người nhận 1 tin mở đầu ngắn; khi họ trả lời, app tự gửi tin thứ hai.",
+        "is_latest": true,
+        "badge": "LATEST",
+        "changes": [
+            {
+                "type": "feature",
+                "title": "Nhiều số, có làm ấm và tự nghỉ",
+                "desc": "Mỗi người chỉ nhận tin từ 1 số. Số mới bắt đầu 5 tin/ngày, mỗi ngày +2 tới giới hạn riêng. Số lỗi 3 lần liên tiếp, hoặc bị WhatsApp từ chối tin, tự nghỉ 24h. Nên dùng số phụ: nhắn người lạ rất dễ bị khoá số."
+            },
+            {
+                "type": "feature",
+                "title": "Quét thành viên, vào nhóm bằng link",
+                "desc": "“Quét thành viên” lấy cả nhóm, đã loại quản trị viên và số của chính bạn. Dán link chat.whatsapp.com để xem trước rồi vào nhóm (tối đa 3 nhóm/ngày mỗi số). Người ẩn số điện thoại vẫn nhắn được."
+            },
+            {
+                "type": "feature",
+                "title": "Theo dõi người mới và người đang active",
+                "desc": "Bật “👁 Theo dõi” ở một nhóm: người mới vào được xếp lên đầu hàng chờ của chiến dịch. “🔥 Ghi nhận active” gom những ai nhắn trong nhóm kể từ lúc bật (WhatsApp không cho đọc lại tin cũ)."
+            },
+            {
+                "type": "improvement",
+                "title": "Không chen vào khi bạn đã tự trả lời",
+                "desc": "Nếu bạn trả lời người đó bằng điện thoại trước, app không gửi tin thứ hai nữa. Câu trả lời cũ hơn 48 giờ cũng không được tự trả lời. Có thể giới hạn chiến dịch theo đầu số quốc gia để tin đúng ngôn ngữ người nhận."
+            }
+        ]
+    },
+    {
         "version": "3.42.0",
         "date": "15/11/2026",
         "title": "📥 Hàng chờ trả lời: một danh sách việc, cửa sổ chat không tự đóng",
         "summary": "Mục 3 “Trò chuyện & chốt deal” gọn lại: mở ra là thấy ngay Hàng chờ — những KOL đang chờ người thật, ai chờ lâu nhất và Tier cao nhất nằm trên cùng. Trả lời xong cửa sổ chat vẫn mở, bấm Tiếp ▶ để sang lead kế. Số trên thanh bên giờ là số KOL đang chờ.",
-        "is_latest": true,
-        "badge": "LATEST",
+        "is_latest": false,
         "changes": [
             {
                 "type": "feature",

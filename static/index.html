@@ -227,6 +227,9 @@
         <button type="button" class="nav-item" data-page="zalo" onclick="App.navigate('zalo')">
           💙 Zalo Outreach
         </button>
+        <button type="button" class="nav-item" data-page="whatsapp" onclick="App.navigate('whatsapp')" title="Cào thành viên nhóm WhatsApp và nhắn tin tự động">
+          💚 WhatsApp
+        </button>
 
         <div class="nav-section" title="Nhật ký, cài đặt, cập nhật và hướng dẫn">Hệ thống</div>
         <button type="button" class="nav-item" data-page="logs" onclick="App.navigate('logs')">
@@ -1189,6 +1192,87 @@
             </div>
           </div>
           <div id="zalo-contacts"><div class="empty-state">Đang tải...</div></div>
+        </div>
+      </div>
+
+      <div id="view-whatsapp" class="hidden" data-page="whatsapp">
+        <div class="toolbar">
+          <h2 class="page-title" style="margin-bottom:0">💚 WhatsApp Outreach</h2>
+          <button class="btn btn-ghost btn-sm" onclick="WA.init()" title="Tải lại">🔄 Làm mới</button>
+        </div>
+        <p style="color:var(--text2);margin-bottom:1rem;font-size:.9rem">
+          Vào nhóm WhatsApp, lấy danh sách thành viên, gửi một tin mở đầu và tự gửi tin thứ hai khi họ trả lời.
+          WhatsApp khoá số nhắn người lạ rất nhanh — hãy dùng số phụ và giữ giới hạn thấp.
+        </p>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+            <h3 style="margin:0;font-size:1rem;color:var(--accent)">📱 Số WhatsApp
+              <span class="info-i" tabindex="0" data-tip="Nhiều số chia nhau gửi: mỗi người chỉ nhận tin từ 1 số. Số mới tự 'làm ấm' — ngày đầu 5 tin, mỗi ngày +2 cho tới giới hạn riêng của số. Số lỗi 3 lần liên tiếp hoặc bị WhatsApp từ chối tin sẽ tự nghỉ 24h. Mỗi số vào tối đa 3 nhóm/ngày. App kết nối như một 'thiết bị đã liên kết', điện thoại vẫn dùng bình thường.">i</span></h3>
+            <button class="btn btn-primary btn-sm" onclick="WA.addAccount()">+ Thêm số WhatsApp</button>
+          </div>
+          <div id="wa-account"><div class="empty-state">Đang tải...</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;gap:8px;flex-wrap:wrap">
+            <h3 style="margin:0;font-size:1rem;color:var(--accent)">👥 Nhóm
+              <span class="info-i" tabindex="0" data-tip="Quét thành viên: lấy toàn bộ người trong nhóm (đã loại quản trị viên). 👁 Theo dõi: tự nhắn người mới vào nhóm và/hoặc ghi nhận ai đang nhắn trong nhóm. Dán link mời để vào một nhóm mới bằng số đang chọn.">i</span></h3>
+            <div style="display:flex;gap:6px;align-items:center">
+              <select class="form-input" id="wa-group-account" style="width:210px" title="Số dùng để đọc nhóm" onchange="WA.loadGroups()"></select>
+              <button class="btn btn-secondary btn-sm" onclick="WA.loadGroups(true)">Tải danh sách nhóm</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;margin-bottom:6px">
+            <input class="form-input" id="wa-invite" placeholder="Dán link mời nhóm: https://chat.whatsapp.com/…" style="flex:1" onkeydown="if(event.key==='Enter')WA.previewInvite()">
+            <button class="btn btn-secondary btn-sm" onclick="WA.previewInvite()">Xem nhóm</button>
+          </div>
+          <div id="wa-invite-box" style="font-size:.9rem;margin-bottom:6px"></div>
+          <div id="wa-groups"><div class="empty-state">Bấm "Tải danh sách nhóm" sau khi kết nối một số.</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+            <h3 style="margin:0;font-size:1rem;color:var(--accent)">👁 Nhóm đang theo dõi
+              <span class="info-i" tabindex="0" data-tip="Giống 'Thành viên mới join' bên Telegram: người mới vào nhóm được xếp lên đầu hàng chờ của chiến dịch đã chọn. 'Active' là những người đã nhắn trong nhóm kể từ lúc bật ghi nhận.">i</span></h3>
+            <button class="btn btn-ghost btn-sm" onclick="WA.loadWatches()">↻</button>
+          </div>
+          <div id="wa-watches"><div class="empty-state">Đang tải...</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <h3 style="margin:0 0 .75rem;font-size:1rem;color:var(--accent)">📥 Nguồn đã quét</h3>
+          <div id="wa-sources"><div class="empty-state">Chưa quét nhóm nào.</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:1.25rem">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+            <h3 style="margin:0;font-size:1rem;color:var(--accent)">🚀 Chiến dịch nhắn tin
+              <span class="info-i" tabindex="0" data-tip="WhatsApp không có 'kết bạn': chiến dịch gửi 1 tin mở đầu ngắn cho mỗi người, rồi tự gửi tin thứ hai khi họ trả lời. Nếu bạn tự trả lời bằng điện thoại trước, app sẽ không gửi tin thứ hai nữa.">i</span></h3>
+            <button class="btn btn-primary btn-sm" onclick="WA.openCampaign()">+ Tạo chiến dịch</button>
+          </div>
+          <div id="wa-campaign-form" class="hidden"></div>
+          <div id="wa-campaigns"><div class="empty-state">Chưa có chiến dịch.</div></div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;gap:8px;flex-wrap:wrap">
+            <h3 style="margin:0;font-size:1rem;color:var(--accent)">📇 Danh bạ</h3>
+            <div style="display:flex;gap:6px">
+              <input class="form-input" id="wa-contact-q" placeholder="Tìm tên / số..." style="width:160px" onkeydown="if(event.key==='Enter')WA.loadContacts()">
+              <select class="form-input" id="wa-contact-status" style="width:170px" onchange="WA.loadContacts()">
+                <option value="">Tất cả trạng thái</option>
+                <option value="new">Chưa liên hệ</option>
+                <option value="sent">Đã gửi tin mở đầu</option>
+                <option value="replied">Đã trả lời</option>
+                <option value="followed">Đã gửi tin 2</option>
+                <option value="handled">Bạn tự xử lý</option>
+                <option value="failed">Lỗi</option>
+                <option value="blocked">Đã chặn</option>
+              </select>
+            </div>
+          </div>
+          <div id="wa-contacts"><div class="empty-state">Đang tải...</div></div>
         </div>
       </div>
 
@@ -2273,6 +2357,7 @@
   <script defer src="/static/js/api.js?v=492"></script>
   <script defer src="/static/js/discord.js?v=492"></script>
   <script defer src="/static/js/zalo.js?v=495"></script>
+  <script defer src="/static/js/whatsapp.js?v=2"></script>
   <script defer src="/static/js/story_library.js?v=1"></script>
   <script defer src="/static/js/members.js?v=511"></script>
   <script defer src="/static/js/analytics.js?v=493"></script>
@@ -2281,7 +2366,7 @@
   <script defer src="/static/js/changelog.js?v=493"></script>
   <script defer src="/static/js/help.js?v=492"></script>
   <script defer src="/static/js/engagement.js?v=506"></script>
-  <script defer src="/static/js/app.js?v=530"></script>
+  <script defer src="/static/js/app.js?v=531"></script>
   <script defer src="/static/js/task_center.js?v=1"></script>
 
   <!-- ══ Inbox View (injected into main by JS navigate) ══ -->

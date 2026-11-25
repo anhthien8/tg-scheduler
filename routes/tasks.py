@@ -40,6 +40,7 @@ KINDS = {
     "crawl":    ("🔍", "Deep Crawl", "members"),
     "invite":   ("➕", "Mời vào nhóm", "members"),
     "zalo":     ("💙", "Chiến dịch Zalo", "zalo"),
+    "whatsapp": ("💚", "Chiến dịch WhatsApp", "whatsapp"),
     "schedule": ("📅", "Lịch gửi", "schedules"),
     "watcher":  ("🎯", "Keyword DM", "watchers"),
     "engage":   ("🌐", "Cộng đồng", "engagement"),
@@ -355,6 +356,30 @@ async def _zalo() -> list[dict]:
     return out
 
 
+async def _whatsapp() -> list[dict]:
+    rows = await _rows("""
+        SELECT c.id, c.name, c.status, c.last_error AS note, COALESCE(c.daily_limit,0) AS total,
+               (SELECT COUNT(*) FROM wa_campaign_logs l
+                 WHERE l.campaign_id = c.id AND l.action = 'open' AND l.ok = 1
+                   AND l.created_at >= date('now','localtime')) AS done,
+               CAST(strftime('%s', (SELECT MAX(l.created_at) FROM wa_campaign_logs l WHERE l.campaign_id = c.id), 'utc') AS INTEGER) AS ts
+        FROM wa_campaigns c
+        WHERE c.status = 'running'
+           OR (c.status IN ('done','paused') AND EXISTS (
+                 SELECT 1 FROM wa_campaign_logs l
+                  WHERE l.campaign_id = c.id AND l.created_at >= datetime('now','localtime','-1 day')))
+        ORDER BY c.id DESC LIMIT 20""")
+    out = []
+    for r in rows:
+        st = r["status"]
+        kw = dict(done=r["done"], total=r["total"], ts=r["ts"], note=r["note"])
+        if st == "running":
+            out.append(_row("whatsapp", r, st, "run", f"Đang chạy · {r['done']}/{r['total']} tin mở đầu hôm nay", **kw))
+        else:
+            out.append(_row("whatsapp", r, st, "done", "Hết danh sách" if st == "done" else "Tạm dừng", **kw))
+    return out
+
+
 async def _schedule(since: int) -> list[dict]:
     # Only one-shot schedules: recurring ones are standing rules, always "on", not tasks.
     rows = await _rows("""
@@ -429,7 +454,7 @@ async def _collect() -> dict:
     since = int(time.time()) - DAY
     jobs = [("kolq", _reply_queue()), ("dm", _dm()), ("story", _story(since)), ("warmup", _warmup(since)),
             ("scrape", _scrape()), ("batch", _batch()), ("crawl", _crawl()), ("invite", _invite()),
-            ("zalo", _zalo()), ("schedule", _schedule(since)), ("alerts", _alerts())]
+            ("zalo", _zalo()), ("whatsapp", _whatsapp()), ("schedule", _schedule(since)), ("alerts", _alerts())]
     tasks, errors = [], []
     for name, coro in jobs:     # sequential: the DB pool is small and every query is tiny
         try:
